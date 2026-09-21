@@ -604,7 +604,7 @@ async fn identical_context_overlay_routes_to_the_context_provider() {
     let before = registry.export_state();
 
     let composed = registry
-        .compose_session_catalog(true, vec![Arc::new(RoutedProvider { result: "context" })])
+        .compose_session_catalog(vec![Arc::new(RoutedProvider { result: "context" })])
         .expect("identical context overlay");
 
     assert_eq!(composed.generation(), before.generation());
@@ -937,7 +937,7 @@ fn every_mutator_advances_the_write_fence_once_per_write() {
     // Pinning copies the fence position and the overlay upsert commits once
     // on the pinned registry.
     let pinned = registry
-        .pin_session_surface(true, vec![])
+        .pin_session_surface(vec![])
         .expect("pinned session surface");
     assert_eq!(write_revision(&pinned), write_revision(&registry) + 1);
 }

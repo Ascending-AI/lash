@@ -207,8 +207,6 @@ pub struct SessionCreateRequest {
     pub tool_access: SessionToolAccess,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SubagentSessionContext>,
-    #[serde(skip)]
-    pub context_overlay: SessionContextOverlay,
     /// Plugin-owned options that configure plugin behavior at session
     /// creation time. Each plugin decodes only the entry keyed by its id.
     #[serde(default)]
@@ -233,7 +231,6 @@ impl SessionCreateRequest {
             observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
             subagent: None,
-            context_overlay: SessionContextOverlay::default(),
             plugin_options,
             plugin_init: None,
         }
@@ -257,7 +254,6 @@ impl SessionCreateRequest {
             observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
             subagent: None,
-            context_overlay: SessionContextOverlay::default(),
             plugin_options,
             plugin_init: None,
         }
@@ -282,7 +278,6 @@ impl SessionCreateRequest {
             observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
             subagent: None,
-            context_overlay: SessionContextOverlay::default(),
             plugin_options,
             plugin_init: None,
         }
@@ -333,11 +328,9 @@ impl SessionCreateRequest {
         self
     }
 
-    pub fn with_context_overlay(mut self, context_overlay: SessionContextOverlay) -> Self {
-        self.context_overlay = context_overlay;
-        self
-    }
-
+    /// Attaches the spawn-time plugin init capture carried by a
+    /// `SessionCreateRequest` for store and process-engine implementors while
+    /// preparing or materializing a forked session.
     pub fn with_plugin_init(mut self, plugin_init: SessionPluginInit) -> Self {
         self.plugin_init = Some(plugin_init);
         self
@@ -557,24 +550,5 @@ mod observer_intent_relation_cutover_tests {
                 .to_string()
                 .contains("unknown variant `observer_intent`")
         );
-    }
-}
-
-#[derive(Clone)]
-pub struct SessionContextOverlay {
-    pub include_base_tools: bool,
-}
-impl Default for SessionContextOverlay {
-    fn default() -> Self {
-        Self {
-            include_base_tools: true,
-        }
-    }
-}
-impl std::fmt::Debug for SessionContextOverlay {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionContextOverlay")
-            .field("include_base_tools", &self.include_base_tools)
-            .finish()
     }
 }

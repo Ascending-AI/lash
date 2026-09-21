@@ -236,14 +236,9 @@ impl ToolRegistry {
 
     pub(crate) fn compose_session_catalog(
         &self,
-        include_base_tools: bool,
         context_providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
-        let registry = if include_base_tools {
-            self.refresh_and_pin_sources()?
-        } else {
-            Self::empty().refresh_and_pin_sources()?
-        };
+        let registry = self.refresh_and_pin_sources()?;
         registry.upsert_overlay_source(Arc::new(ToolProviderSource::new(
             "context",
             context_providers,
@@ -255,10 +250,9 @@ impl ToolRegistry {
     /// the resulting surface for one model request.
     pub(crate) fn pin_session_surface(
         &self,
-        include_base_tools: bool,
         context_providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
-        self.compose_session_catalog(include_base_tools, context_providers)
+        self.compose_session_catalog(context_providers)
     }
 
     pub(crate) fn upsert_source(

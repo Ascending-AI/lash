@@ -164,9 +164,8 @@ mod tests {
     /// A cell of a process-backed session turn is opened by its process.
     ///
     /// This is the production shape every `agents.spawn` child takes: the
-    /// subagent row is a `ProcessInput::SessionTurn`, and
-    /// `SessionTurnRequest::new_process_backed` requires the child turn to run
-    /// under `ExecutionScope::Process`. Refusing that scope took every subagent
+    /// subagent row is a `ProcessInput::SessionTurn`, and the child turn must
+    /// run under `ExecutionScope::Process`. Refusing that scope took every subagent
     /// cell's first tool call out at the knees — `task.fail(...)` came back as
     /// "has no logical opener", the child's driver re-asked the provider until
     /// its cap, and the parent read `Stopped(MaxTurns)` instead of the child's

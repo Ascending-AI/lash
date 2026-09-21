@@ -366,7 +366,6 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 #[cfg(test)]
 mod tests {
     use super::{EmbedError, SelectedQueuedWorkDrainRefusalCause};
-    use crate::runtime::{QueuedWorkRunError, QueuedWorkRunErrorClass};
     use lash_core::{
         PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
         RuntimeErrorCode, SessionError, StoreError,
@@ -375,20 +374,6 @@ mod tests {
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))
-    }
-
-    #[test]
-    fn managed_turn_cap_denial_stays_retryable_across_plugin_host_boundaries() {
-        let plugin_error = PluginError::Runtime(RuntimeError::new(
-            RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded,
-            "test cap reached",
-        ));
-        let embed_error = EmbedError::from(plugin_error.clone());
-        assert!(embed_error.is_retryable());
-        assert!(!embed_error.is_terminal());
-
-        let queued_error = QueuedWorkRunError::from(plugin_error);
-        assert_eq!(queued_error.class, QueuedWorkRunErrorClass::Transient);
     }
 
     #[test]

@@ -1,6 +1,9 @@
 use super::*;
 
 impl RuntimeSessionServices {
+    /// Run a `ProcessInput::SessionTurn`: initialize the recorded child
+    /// session and drive its first turn through the shared session-turn path.
+    ///
     /// Cancellation never tears the session down. The process token is the
     /// turn's own cancellation token inside the port, so a cancelled process
     /// leaves an ordinary cancelled turn inside a retained, reusable child
@@ -28,9 +31,7 @@ impl RuntimeSessionServices {
         // Keep that execution authority through the child turn; session and
         // turn ids remain the turn's foreground routing and attribution.
         let child_turn_id = crate::TurnId::from(registration.id.as_str());
-        match Box::pin(self.managed.initialize_session_and_run_turn(
-            &self.current,
-            &self.usage,
+        match Box::pin(self.initialize_session_and_run_turn(
             create_request,
             &registration.id,
             child_turn_id,
@@ -60,14 +61,14 @@ impl RuntimeSessionServices {
                     // settled (or never accepted) this turn's child input, so
                     // the substrate's cancelled terminal cannot strand a
                     // claimable input inside the retained session.
-                    turns::SessionTurnInitError::CancelledBeforeCreate
-                    | turns::SessionTurnInitError::CancelledAfterCreate { .. } => {
+                    session_init::SessionTurnInitError::CancelledBeforeCreate
+                    | session_init::SessionTurnInitError::CancelledAfterCreate { .. } => {
                         Ok(cancelled_session_turn_output())
                     }
                     // Authority validation is deterministic: retrying the
                     // attempt cannot change it, so it stays an ordinary
                     // terminal failure.
-                    turns::SessionTurnInitError::Request { source, .. } => {
+                    session_init::SessionTurnInitError::Request { source, .. } => {
                         Ok(crate::ProcessAwaitOutput::from_tool_output(
                             crate::ToolCallOutput::failure(crate::ToolFailure::tool(
                                 crate::ToolFailureClass::Execution,
@@ -81,9 +82,9 @@ impl RuntimeSessionServices {
                     // uncommitted or unsettled state. The process must stay
                     // recoverable so a later attempt can resume or settle the
                     // child rather than recording a terminal over it.
-                    turns::SessionTurnInitError::Create { source, .. }
-                    | turns::SessionTurnInitError::Turn { source, .. }
-                    | turns::SessionTurnInitError::Reconcile { source, .. } => {
+                    session_init::SessionTurnInitError::Create { source, .. }
+                    | session_init::SessionTurnInitError::Turn { source, .. }
+                    | session_init::SessionTurnInitError::Reconcile { source, .. } => {
                         Err(crate::ProcessInfraError::new(*source))
                     }
                 }
@@ -484,7 +485,7 @@ mod tests {
     }
     use crate::llm::types::LlmStreamEvent;
     use crate::runtime::tests::helpers::{
-        MockCall, mock_provider, native_process_scope, native_scope,
+        EmptyTools, MockCall, mock_provider, named_turn_scope, native_process_scope,
         runtime_with_plugins_and_tools_and_host,
     };
     use std::sync::Arc;
@@ -732,22 +733,37 @@ mod tests {
         );
 
         // The retained session is reusable: an ordinary follow-up turn runs.
-        let lifecycle = runtime
-            .session_lifecycle_service()
-            .expect("session lifecycle");
+        // The reopen replays the process-stamped relation the run recorded.
+        let plan = crate::runtime::session_manager::session_init::resolve_session_init(
+            &services.current,
+            create_request
+                .clone()
+                .with_caused_by(crate::CausalRef::Process {
+                    process_id: process_id.clone(),
+                }),
+        )
+        .await
+        .expect("resolve the retained child's init plan");
+        let reopened = crate::runtime::session_manager::session_init::reopen_initialized_session(
+            &services.current,
+            &plan,
+            child_store,
+        )
+        .await
+        .expect("reopen the retained child through the ordinary path");
         let follow_up_turn_id = format!("{case}-follow-up-turn");
-        lifecycle
-            .start_turn(
-                crate::SessionTurnRequest::new(
+        reopened
+            .handle
+            .runtime
+            .lock()
+            .await
+            .run_turn_assembled(
+                crate::TurnInput::text("follow up after cancellation"),
+                tokio_util::sync::CancellationToken::new(),
+                named_turn_scope(
                     &child_session_id,
-                    &follow_up_turn_id,
-                    crate::TurnInput::text("follow up after cancellation"),
-                    native_scope(crate::AdmittedScope::turn(
-                        &child_session_id,
-                        &follow_up_turn_id,
-                    )),
-                )
-                .expect("follow-up turn request"),
+                    &crate::TurnId::from(follow_up_turn_id.as_str()),
+                ),
             )
             .await
             .expect("the retained child session runs an ordinary follow-up turn");
@@ -791,8 +807,8 @@ mod tests {
     /// regressions need. The host runs with a short session-execution-lease
     /// TTL so a crashed attempt's claim dies quickly.
     struct ParkedSessionTurn {
-        // The parent runtime owns the managed registry holding the child
-        // runtime; it must stay alive for the fixture's whole span.
+        // The parent runtime whose services run the child process; it must
+        // stay alive for the fixture's whole span.
         _runtime: crate::runtime::LashRuntime,
         services: Arc<crate::runtime::RuntimeSessionServices>,
         factory: crate::InMemorySessionStoreFactory,
@@ -1057,6 +1073,309 @@ mod tests {
             .is_empty(),
             "no claimable child input remains once the process may terminalize"
         );
+    }
+
+    /// A panicking child turn is typed at the run boundary: the spawned child
+    /// task's panic surfaces as `child_turn_panicked`, the process stays
+    /// recoverable, and the parent runtime keeps running turns.
+    #[tokio::test]
+    async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
+        let previous = crate::panic_containment::set_loud(false);
+        let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let panic_plugin: Arc<dyn crate::PluginFactory> =
+            Arc::new(crate::plugin::StaticPluginFactory::new(
+                "child-panic-test",
+                crate::PluginSpec::new().with_prompt_contributor(Arc::new(move |_context| {
+                    let panic_once = Arc::clone(&panic_once);
+                    Box::pin(async move {
+                        if panic_once.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                            panic!("child turn payload only");
+                        }
+                        Ok(Vec::new())
+                    })
+                })),
+            ));
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ))
+        .with_session_store_factory(Arc::new(factory.clone()));
+        let transport = mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(crate::LlmResponse {
+                parts: vec![crate::LlmOutputPart::Text {
+                    text: "parent still alive".to_string(),
+                    response_meta: None,
+                }],
+                ..Default::default()
+            }),
+        }]);
+        let mut runtime = runtime_with_plugins_and_tools_and_host(
+            vec![panic_plugin],
+            Arc::new(EmptyTools),
+            transport,
+            host,
+        )
+        .await;
+        let services = runtime
+            .runtime_session_services()
+            .expect("runtime session services");
+        let plugin_init = runtime
+            .session_state_service()
+            .expect("session state")
+            .session_plugin_init(&SessionId::from(runtime.session_id()))
+            .await
+            .expect("plugin init");
+        let child_session_id = SessionId::from("panicking-child");
+        let process_id = ProcessId::from("process:subagent:panicking-child");
+        let create_request = crate::SessionCreateRequest::child_session(
+            runtime.session_id(),
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        )
+        .with_session_id(&child_session_id)
+        .with_plugin_source(crate::SessionPluginSource::ParentFork)
+        .with_plugin_init(plugin_init);
+        let registration = crate::ProcessRegistration::new(
+            &process_id,
+            crate::ProcessInput::SessionTurn {
+                definition_key: "lash-subagent-session-turn:v1".to_string(),
+                create_request: Box::new(create_request.clone()),
+                turn_input: Box::new(crate::TurnInput::text("panic")),
+                output_contract: crate::ToolOutputContract::Static,
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        let outcome = services
+            .run_process_session_turn(
+                registration,
+                create_request,
+                crate::TurnInput::text("panic"),
+                native_process_scope(&process_id),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+        crate::panic_containment::set_loud(previous);
+        let err = outcome.expect_err("the panicking child turn must surface as a failure");
+        assert!(
+            err.to_string()
+                .contains("child_turn_panicked: child turn payload only"),
+            "got {err}"
+        );
+
+        let parent = runtime
+            .run_turn_assembled(
+                crate::TurnInput::text("continue parent"),
+                tokio_util::sync::CancellationToken::new(),
+                named_turn_scope(
+                    &SessionId::from(runtime.session_id()),
+                    &crate::TurnId::from("parent-after-child-panic"),
+                ),
+            )
+            .await
+            .expect("parent survives child panic");
+        assert_eq!(parent.assistant_output.safe_text, "parent still alive");
+    }
+
+    /// FIG-3424 run-scoped residency: the process run owns the child runtime
+    /// for the run's duration only. Once `run_process_session_turn` returns —
+    /// here on the success path — the `Weak` captured at initialisation no
+    /// longer upgrades; the durable row remains and reopens through the
+    /// ordinary store open.
+    #[tokio::test]
+    async fn spawned_child_runtime_does_not_outlive_the_process_run() {
+        let child_session_id = SessionId::from("run-scoped-child");
+        let process_id = ProcessId::from("process:subagent:run-scoped-child");
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ))
+        .with_session_store_factory(Arc::new(factory.clone()));
+        let transport = mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(crate::LlmResponse {
+                parts: vec![crate::LlmOutputPart::Text {
+                    text: "child answered".to_string(),
+                    response_meta: None,
+                }],
+                ..Default::default()
+            }),
+        }]);
+        let runtime = runtime_with_plugins_and_tools_and_host(
+            Vec::new(),
+            Arc::new(EmptyTools),
+            transport,
+            host,
+        )
+        .await;
+        let services = runtime
+            .runtime_session_services()
+            .expect("runtime session services");
+        let plugin_init = runtime
+            .session_state_service()
+            .expect("session state")
+            .session_plugin_init(&SessionId::from(runtime.session_id()))
+            .await
+            .expect("plugin init");
+        let create_request = crate::SessionCreateRequest::child_session(
+            runtime.session_id(),
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        )
+        .with_session_id(&child_session_id)
+        .with_plugin_source(crate::SessionPluginSource::ParentFork)
+        .with_plugin_init(plugin_init);
+        let registration = crate::ProcessRegistration::new(
+            &process_id,
+            crate::ProcessInput::SessionTurn {
+                definition_key: "lash-subagent-session-turn:v1".to_string(),
+                create_request: Box::new(create_request.clone()),
+                turn_input: Box::new(crate::TurnInput::text("run")),
+                output_contract: crate::ToolOutputContract::Static,
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        let _ = crate::runtime::session_manager::take_spawned_child_runtimes();
+        let output = services
+            .run_process_session_turn(
+                registration,
+                create_request,
+                crate::TurnInput::text("run"),
+                native_process_scope(&process_id),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("child session turn completes");
+        assert!(matches!(
+            output.into_tool_output().outcome,
+            crate::ToolCallOutcome::Success(_)
+        ));
+
+        let spawned: Vec<_> = crate::runtime::session_manager::take_spawned_child_runtimes()
+            .into_iter()
+            .filter(|(session_id, _)| *session_id == child_session_id)
+            .collect();
+        assert_eq!(spawned.len(), 1, "the run minted exactly one child runtime");
+        assert!(
+            spawned.iter().all(|(_, weak)| weak.upgrade().is_none()),
+            "the child runtime must be dropped when the process run ends"
+        );
+        assert!(
+            factory
+                .open_existing_store_by_id(&child_session_id)
+                .await
+                .expect("inspect child store")
+                .is_some(),
+            "the durable child row remains and reopens through the ordinary open"
+        );
+    }
+
+    /// FIG-3424 crash point: a redelivery in a new run after the create commit
+    /// but before turn admission reopens the durable child through the
+    /// ordinary path — it never trips the "session already exists" create
+    /// refusal, and the turn runs on the reopened runtime.
+    #[tokio::test]
+    async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
+        let child_session_id = SessionId::from("redelivered-child");
+        let process_id = ProcessId::from("process:subagent:redelivered-child");
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ))
+        .with_session_store_factory(Arc::new(factory.clone()));
+        let transport = mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(crate::LlmResponse {
+                parts: vec![crate::LlmOutputPart::Text {
+                    text: "redelivered turn answered".to_string(),
+                    response_meta: None,
+                }],
+                ..Default::default()
+            }),
+        }]);
+        let runtime = runtime_with_plugins_and_tools_and_host(
+            Vec::new(),
+            Arc::new(EmptyTools),
+            transport,
+            host,
+        )
+        .await;
+        let services = runtime
+            .runtime_session_services()
+            .expect("runtime session services");
+        let plugin_init = runtime
+            .session_state_service()
+            .expect("session state")
+            .session_plugin_init(&SessionId::from(runtime.session_id()))
+            .await
+            .expect("plugin init");
+        let create_request = crate::SessionCreateRequest::child_session(
+            runtime.session_id(),
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        )
+        .with_session_id(&child_session_id)
+        .with_plugin_source(crate::SessionPluginSource::ParentFork)
+        .with_plugin_init(plugin_init);
+
+        // Leave the durable state a crashed first attempt would: the session
+        // row is committed under the process-stamped relation the runner
+        // records, and no turn input was ever accepted.
+        runtime
+            .session_lifecycle_service()
+            .expect("session lifecycle")
+            .create_session(
+                create_request
+                    .clone()
+                    .with_caused_by(crate::CausalRef::Process {
+                        process_id: process_id.clone(),
+                    }),
+            )
+            .await
+            .expect("durable child row, as a crashed attempt left it");
+
+        let registration = crate::ProcessRegistration::new(
+            &process_id,
+            crate::ProcessInput::SessionTurn {
+                definition_key: "lash-subagent-session-turn:v1".to_string(),
+                create_request: Box::new(create_request.clone()),
+                turn_input: Box::new(crate::TurnInput::text("run on redelivery")),
+                output_contract: crate::ToolOutputContract::Static,
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        let output = services
+            .run_process_session_turn(
+                registration,
+                create_request,
+                crate::TurnInput::text("run on redelivery"),
+                native_process_scope(&process_id),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("redelivery reopens the committed child instead of failing create");
+        assert!(matches!(
+            output.into_tool_output().outcome,
+            crate::ToolCallOutcome::Success(_)
+        ));
     }
 
     struct PermitSlots(Arc<tokio::sync::Semaphore>);

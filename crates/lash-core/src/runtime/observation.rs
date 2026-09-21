@@ -713,26 +713,6 @@ impl RuntimeHandle {
         let (ops, store) = self.durable_queue()?;
         ops.cancel_queued_work_batch(&store, batch_id).await
     }
-
-    /// How many live references share this handle's runtime, including this
-    /// one. `try_into_runtime` can only succeed at `1`; activation traces this
-    /// count so a refused promotion is explainable from the trace.
-    pub(in crate::runtime) fn runtime_reference_count(&self) -> usize {
-        Arc::strong_count(&self.runtime)
-    }
-
-    pub fn try_into_runtime(self) -> Result<LashRuntime, Self> {
-        match Arc::try_unwrap(self.runtime) {
-            Ok(mutex) => Ok(mutex.into_inner()),
-            Err(runtime) => Err(Self {
-                runtime,
-                observation: self.observation,
-                live_replay_store: self.live_replay_store,
-                process_env_store: self.process_env_store,
-                process_engines: self.process_engines,
-            }),
-        }
-    }
 }
 
 #[expect(

@@ -341,13 +341,6 @@ mod tests {
                 "not used".to_string(),
             ))
         }
-
-        async fn close_session(
-            &self,
-            _session_id: &SessionId,
-        ) -> Result<(), lash_core::plugin::PluginError> {
-            Ok(())
-        }
     }
 
     #[async_trait::async_trait]

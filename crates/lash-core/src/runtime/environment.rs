@@ -54,6 +54,8 @@ pub struct RuntimeEnvironment {
     // (FIG-2995). Defaults to the in-memory registry at build time.
     pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
 
+    // Store factory used by child sessions created from runtimes built with
+    // this environment.
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
 
     pub(crate) work: RuntimeWork,

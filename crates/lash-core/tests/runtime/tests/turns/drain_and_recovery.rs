@@ -1018,147 +1018,6 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
 }
 
 #[tokio::test]
-pub(super) async fn external_invoke_can_create_session_from_current_snapshot() {
-    let plugin = Arc::new(RuntimeTestPluginFactory {
-        build: Arc::new(|_| {
-            Ok(Arc::new(RuntimeTestPlugin {
-                before_turn: None,
-                checkpoint: None,
-                tool_result_projector: None,
-                runtime_event: None,
-                external_registrar: Some(Arc::new(|reg| {
-                    reg.operations().command(
-                        lash_core::plugin::PluginOperationSpec {
-                            name: "test.spawn".to_string(),
-                            description: "spawn".to_string(),
-                            session_param: lash_core::facade_support::SessionParam::Optional,
-                            input_schema: json!({}),
-                            output_schema: json!({}),
-                        },
-                        Arc::new(|ctx, _args| {
-                            Box::pin(async move {
-                                let source_id = SessionId::from("root");
-                                let source_snapshot = ctx
-                                    .sessions
-                                    .snapshot_session(&source_id)
-                                    .await
-                                    .map_err(|err| {
-                                        lash_core::test_support::PluginOperationFailure::new(err.to_string())
-                                    });
-                                let plugin_init = ctx
-                                    .sessions
-                                    .session_plugin_init(&source_id)
-                                    .await
-                                    .map_err(|err| {
-                                        lash_core::test_support::PluginOperationFailure::new(err.to_string())
-                                    });
-                                let (source_snapshot, plugin_init) = match (source_snapshot, plugin_init) {
-                                    (Ok(snapshot), Ok(init)) => (snapshot, init),
-                                    (Err(err), _) | (_, Err(err)) => return Err(err),
-                                };
-                                let handle = ctx
-                                    .session_lifecycle
-                                    .create_session(
-                                        lash_core::SessionCreateRequest::root(
-                                            lash_core::SessionStartPoint::Snapshot {
-                                                snapshot: Box::new(source_snapshot),
-                                            },
-                                            lash_core::PluginOptions::default(),
-                                        )
-                                        .with_session_id("branched")
-                                        .with_plugin_source(
-                                            lash_core::SessionPluginSource::ParentFork,
-                                        )
-                                        .with_plugin_init(plugin_init)
-                                        .with_initial_nodes(vec![lash_core::SessionAppendNode::message(
-                                            lash_core::PluginMessage::text(
-                                                lash_core::MessageRole::User,
-                                                "branch seed",
-                                            ),
-                                        )]),
-                                    )
-                                    .await
-                                    .map_err(|err| {
-                                        lash_core::test_support::PluginOperationFailure::new(err.to_string())
-                                    });
-                                match handle {
-                                    Ok(handle) => {
-                                        let snapshot = ctx
-                                            .sessions
-                                            .snapshot_session(&handle.session_id)
-                                            .await
-                                            .map_err(|err| {
-                                                lash_core::test_support::PluginOperationFailure::new(err.to_string())
-                                            });
-                                        match snapshot {
-                                            Ok(snapshot) => Ok(lash_core::plugin::ErasedPluginOperationOutcome {
-                                                output: json!({
-                                                "session_id": handle.session_id,
-                                                "message_count": snapshot
-                                                    .read_model()
-                                                    .expect("test snapshot frame scope resolves")
-                                                    .messages
-                                                    .len(),
-                                                }),
-                                                events: Vec::new(),
-                                                directives: Vec::new(),
-                                            }),
-                                            Err(err) => Err(err),
-                                        }
-                                    }
-                                    Err(err) => Err(err),
-                                }
-                            })
-                        }),
-                    )
-                })),
-            }))
-        }),
-    });
-    let transport = mock_provider(Vec::new());
-    let mut runtime = runtime_with_plugins(vec![plugin], transport).await;
-
-    append_message(
-        &mut runtime.state,
-        Message {
-            id: "m0".to_string(),
-            role: MessageRole::User,
-            parts: vec![Part::text(
-                "m0.p0".to_string(),
-                "root msg".to_string(),
-                None,
-            )]
-            .into(),
-            origin: None,
-        },
-    );
-
-    let result = runtime
-        .run_plugin_command(
-            "test.spawn",
-            json!({}),
-            None,
-            lash_core::ExecutionScope::runtime_operation("root:plugin-command:test-spawn"),
-        )
-        .await
-        .expect("invoke");
-    assert_eq!(
-        result
-            .output
-            .get("session_id")
-            .and_then(|value| value.as_str()),
-        Some("branched")
-    );
-    assert_eq!(
-        result
-            .output
-            .get("message_count")
-            .and_then(|value| value.as_u64()),
-        Some(2)
-    );
-}
-
-#[tokio::test]
 pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
     let plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(RuntimeTestPluginFactory {
@@ -1285,28 +1144,24 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
         )
         .await
         .expect("child session");
+    let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
     let turn_id = "child-lifecycle-turn";
-    let scoped_effect_controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::AdmittedScope::turn(&handle.session_id, turn_id),
-    )
-    .expect("scoped child turn");
-    let request = lash_core::facade_support::SessionTurnRequest::new(
-        &handle.session_id,
-        turn_id,
-        TurnInput {
-            items: vec![InputItem::Text {
-                text: "hello".to_string(),
-            }],
-            protocol_turn_options: None,
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        },
-        scoped_effect_controller,
-    )
-    .expect("child turn request");
-    let assembled = lifecycle.start_turn(request).await.expect("child turn");
+    let assembled = child
+        .run_turn_assembled(
+            TurnInput {
+                items: vec![InputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                protocol_turn_options: None,
+                trace_turn_id: None,
+                protocol_extension: None,
+                turn_context: lash_core::TurnContext::default(),
+            },
+            CancellationToken::new(),
+            named_turn_scope(&handle.session_id, &TurnId::from(turn_id)),
+        )
+        .await
+        .expect("child turn");
     assert_eq!(handle.session_id, "child");
     assert_eq!(handle.policy.model.id, "mock-model");
     assert_eq!(assembled.state.session_id, "child");
@@ -1368,32 +1223,20 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
         .acquired()
         .expect("child session execution lease");
     let turn_id = "busy-child-turn";
-    let controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::AdmittedScope::turn(&handle.session_id, turn_id),
-    )
-    .expect("child turn controller");
+    let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
 
-    let error = lifecycle
-        .start_turn(
-            lash_core::facade_support::SessionTurnRequest::new(
-                &handle.session_id,
-                turn_id,
-                TurnInput::text("preserve the runtime error"),
-                controller,
-            )
-            .expect("child turn request"),
+    let error = child
+        .run_turn_assembled(
+            TurnInput::text("preserve the runtime error"),
+            CancellationToken::new(),
+            named_turn_scope(&handle.session_id, &TurnId::from(turn_id)),
         )
         .await
         .expect_err("the held child session lane must refuse the turn");
 
     assert!(
-        matches!(
-            error,
-            lash_core::PluginError::Runtime(ref runtime_error)
-                if runtime_error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
-        ),
-        "managed turn boundary must preserve the typed runtime error, got {error:?}"
+        error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy,
+        "the ordinary turn boundary must preserve the typed runtime error, got {error:?}"
     );
     lash_core::store::SessionExecutionLeaseStore::release_session_execution_lease(
         store.as_ref(),
@@ -1407,34 +1250,14 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
 pub(super) async fn session_manager_persists_child_sessions_in_separate_store() {
     let factory = RecordingSessionStoreFactory::default();
     let host = test_host_config().with_session_store_factory(Arc::new(factory.clone()));
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
+    let runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         host,
     )
     .await;
-    append_message(
-        &mut runtime.state,
-        Message {
-            id: "u1".to_string(),
-            role: MessageRole::User,
-            parts: vec![Part::text(
-                "u1.p0".to_string(),
-                "parent hello".to_string(),
-                None,
-            )]
-            .into(),
-            origin: None,
-        },
-    );
-    runtime.state.turn_index = 3;
-
     let manager = runtime.session_state_service().expect("session state");
-    let root_snapshot = manager
-        .snapshot_session(&SessionId::from("root"))
-        .await
-        .expect("root snapshot");
     let plugin_init = manager
         .session_plugin_init(&SessionId::from("root"))
         .await
@@ -1446,9 +1269,7 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
         .create_session(
             lash_core::SessionCreateRequest::child_session(
                 "root",
-                lash_core::SessionStartPoint::Snapshot {
-                    snapshot: Box::new(root_snapshot),
-                },
+                lash_core::SessionStartPoint::Empty,
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child-store")
@@ -1500,12 +1321,12 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
         "child history must not retain the parent frame root"
     );
     let read_model = graph.read_model(None).unwrap();
-    let messages = read_model.messages.as_slice();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].parts[0].content(), "parent hello");
+    assert!(
+        read_model.messages.is_empty(),
+        "an empty-start child initializes with no inherited messages"
+    );
     let checkpoint = read.checkpoint.expect("checkpoint");
-    let turn_state = checkpoint.turn_state;
-    assert_eq!(turn_state.turn_index, 3);
+    assert_eq!(checkpoint.turn_state.turn_index, 0);
 }
 
 #[tokio::test]
@@ -1597,122 +1418,6 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
         .await
         .expect_err("duplicate child session should fail");
     assert!(err.to_string().contains("already exists"));
-}
-
-#[tokio::test]
-pub(super) async fn runtime_can_activate_managed_child_session() {
-    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-    let plugin_init = runtime
-        .session_state_service()
-        .expect("session state")
-        .session_plugin_init(&SessionId::from(runtime.session_id()))
-        .await
-        .expect("plugin init");
-    lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::child(
-                runtime.session_id(),
-                lash_core::SessionStartPoint::Empty,
-                runtime.state.effective_policy().clone(),
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init.clone()),
-        )
-        .await
-        .expect("child session");
-
-    runtime
-        .activate_managed_session(&SessionId::from("child"))
-        .await
-        .expect("activate child");
-
-    assert_eq!(runtime.session_id(), "child");
-    let activated_child_request = lash_core::facade_support::SessionTurnRequest::new(
-        "child",
-        "activated-child-turn",
-        TurnInput {
-            items: vec![InputItem::Text {
-                text: "old manager should not own activated child".to_string(),
-            }],
-            protocol_turn_options: None,
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        },
-        lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::AdmittedScope::turn("child", "activated-child-turn"),
-        )
-        .expect("scoped activated child turn"),
-    )
-    .expect("activated child request");
-    assert!(
-        lifecycle.start_turn(activated_child_request).await.is_err(),
-        "activated child runtime should leave the parent manager registry"
-    );
-}
-
-/// A failed activation must not consume the managed-session handle.
-/// `try_into_runtime` returns the intact handle in `Err`; discarding it removed
-/// the child from the registry for good, so it could never be activated again
-/// without a cold reopen.
-#[tokio::test]
-pub(super) async fn failed_managed_session_activation_leaves_the_child_activatable() {
-    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-    let plugin_init = runtime
-        .session_state_service()
-        .expect("session state")
-        .session_plugin_init(&SessionId::from(runtime.session_id()))
-        .await
-        .expect("plugin init");
-    lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::child(
-                runtime.session_id(),
-                lash_core::SessionStartPoint::Empty,
-                runtime.state.effective_policy().clone(),
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init.clone()),
-        )
-        .await
-        .expect("child session");
-
-    // A second reference to the child runtime — what an in-flight observation or
-    // child turn holds — makes the extraction fail.
-    let in_use = runtime
-        .managed_sessions
-        .lock()
-        .await
-        .get("child")
-        .cloned()
-        .expect("managed child handle");
-    let err = runtime
-        .activate_managed_session(&SessionId::from("child"))
-        .await
-        .expect_err("activation of an in-use child must fail");
-    assert!(err.to_string().contains("still in use"));
-    assert!(
-        runtime.managed_sessions.lock().await.contains_key("child"),
-        "a failed activation must leave the child in the registry"
-    );
-
-    drop(in_use);
-    runtime
-        .activate_managed_session(&SessionId::from("child"))
-        .await
-        .expect("activation is retryable once the child is no longer in use");
-    assert_eq!(runtime.session_id(), "child");
 }
 
 #[test]

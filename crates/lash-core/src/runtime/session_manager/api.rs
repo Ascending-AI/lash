@@ -11,40 +11,28 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
         &self,
         session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
-        self.services
-            .current
-            .snapshot_session(&self.services.managed, session_id)
-            .await
+        self.services.current.snapshot_session(session_id).await
     }
 
     async fn tool_catalog(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
-        self.services
-            .current
-            .tool_catalog(&self.services.managed, session_id)
-            .await
+        self.services.current.tool_catalog(session_id).await
     }
 
     async fn shared_tool_catalog(
         &self,
         session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
-        self.services
-            .current
-            .shared_tool_catalog(&self.services.managed, session_id)
-            .await
+        self.services.current.shared_tool_catalog(session_id).await
     }
 
     async fn tool_state(
         &self,
         session_id: &SessionId,
     ) -> Result<crate::ToolState, crate::PluginError> {
-        self.services
-            .current
-            .tool_state(&self.services.managed, session_id)
-            .await
+        self.services.current.tool_state(session_id).await
     }
 }
 
@@ -57,7 +45,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
     ) -> Result<crate::ExecutionScope, crate::PluginError> {
         self.services
             .current
-            .turn_scope_by_id(&self.services.managed, session_id, turn_id)
+            .turn_scope_by_id(session_id, turn_id)
             .await
     }
 
@@ -69,40 +57,28 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
         &self,
         session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
-        self.services
-            .current
-            .snapshot_session(&self.services.managed, session_id)
-            .await
+        self.services.current.snapshot_session(session_id).await
     }
 
     async fn tool_catalog(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
-        self.services
-            .current
-            .tool_catalog(&self.services.managed, session_id)
-            .await
+        self.services.current.tool_catalog(session_id).await
     }
 
     async fn shared_tool_catalog(
         &self,
         session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
-        self.services
-            .current
-            .shared_tool_catalog(&self.services.managed, session_id)
-            .await
+        self.services.current.shared_tool_catalog(session_id).await
     }
 
     async fn tool_state(
         &self,
         session_id: &SessionId,
     ) -> Result<crate::ToolState, crate::PluginError> {
-        self.services
-            .current
-            .tool_state(&self.services.managed, session_id)
-            .await
+        self.services.current.tool_state(session_id).await
     }
 
     async fn apply_tool_state(
@@ -112,7 +88,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
     ) -> Result<u64, crate::PluginError> {
         self.services
             .current
-            .apply_tool_state(&self.services.managed, session_id, snapshot)
+            .apply_tool_state(session_id, snapshot)
             .await
     }
 
@@ -120,10 +96,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
         &self,
         session_id: &SessionId,
     ) -> Result<crate::SessionPluginInit, crate::PluginError> {
-        self.services
-            .current
-            .plugin_init_by_id(&self.services.managed, session_id)
-            .await
+        self.services.current.plugin_init_by_id(session_id).await
     }
 }
 
@@ -133,28 +106,8 @@ impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
         &self,
         request: SessionCreateRequest,
     ) -> Result<SessionHandle, crate::PluginError> {
-        Box::pin(
-            self.services
-                .managed
-                .create_session(&self.services.current, request),
-        )
-        .await
-    }
-
-    async fn close_session(&self, session_id: &SessionId) -> Result<(), crate::PluginError> {
-        self.services
-            .managed
-            .close_session(&self.services.current, session_id)
-            .await
-    }
-
-    async fn start_turn(
-        &self,
-        request: crate::SessionTurnRequest<'_>,
-    ) -> Result<AssembledTurn, crate::PluginError> {
-        Box::pin(self.services.managed.start_turn(
+        Box::pin(super::session_init::create_session(
             &self.services.current,
-            &self.services.usage,
             request,
         ))
         .await
@@ -169,7 +122,6 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         Box::pin(self.services.current.append_session_nodes(
-            &self.services.managed,
             &self.services.usage,
             &self.services.processes,
             session_id,
@@ -192,7 +144,7 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
     ) -> Result<crate::OpenAgentFrameResult, crate::PluginError> {
         self.services
             .current
-            .switch_agent_frame(&self.services.managed, session_id, &request)
+            .switch_agent_frame(session_id, &request)
             .await
     }
 }
@@ -308,7 +260,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .processes
             .start_process(
                 &self.services.current,
-                &self.services.managed,
                 session_id,
                 registration,
                 options,
@@ -427,7 +378,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 .processes
                 .validate_process_handles_observed(
                     &self.services.current,
-                    &self.services.managed,
                     session_id,
                     handle_ids,
                     scope,
@@ -470,13 +420,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.services
             .processes
-            .cancel_process(
-                &self.services.current,
-                &self.services.managed,
-                session_id,
-                process_id,
-                scope,
-            )
+            .cancel_process(&self.services.current, session_id, process_id, scope)
             .await
     }
 
@@ -594,7 +538,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .processes
             .transfer_process_handles(
                 &self.services.current,
-                &self.services.managed,
                 from_session_id,
                 to_session_id,
                 process_ids,

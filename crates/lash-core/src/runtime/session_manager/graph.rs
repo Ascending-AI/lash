@@ -4,7 +4,6 @@ use std::sync::atomic::Ordering;
 impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn append_session_nodes(
         &self,
-        managed: &ManagedSessionCapability,
         usage: &UsageCapability,
         background: &ProcessCapability,
         session_id: &SessionId,
@@ -15,18 +14,6 @@ impl CurrentSessionCapability {
                 "session graph append requires a non-empty stable operation_id".to_string(),
             ));
         }
-        if let Some(runtime) = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        } {
-            let mut writer = runtime.runtime.lock().await;
-            let result = Box::pin(writer.append_session_nodes(request))
-                .await
-                .map_err(plugin_error_from_session_append)?;
-            runtime.publish_from(&writer);
-            return Ok(result);
-        }
-
         if session_id != self.session_id {
             return Err(crate::PluginError::Session(format!(
                 "unknown session `{session_id}`"
@@ -172,28 +159,13 @@ impl CurrentSessionCapability {
     }
     pub(in crate::runtime::session_manager) async fn switch_agent_frame(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
         request: &crate::SwitchAgentFrameRequest,
     ) -> Result<crate::OpenAgentFrameResult, crate::PluginError> {
-        // A registered idle runtime keeps its own writer and can open a frame the
-        // lane-less way; a running session (no registry entry) must match the
-        // turn-scoped draft tier below.
-        if let Some(runtime) = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        } {
-            let mut writer = runtime.runtime.lock().await;
-            return writer
-                .open_agent_frame(
-                    crate::OpenAgentFrameRequest::new(
-                        request.frame_key.clone(),
-                        request.reason.clone(),
-                    )
-                    .with_initial_nodes(request.initial_nodes.clone()),
-                )
-                .await
-                .map_err(|error| crate::PluginError::Session(error.to_string()));
+        if session_id != self.session_id {
+            return Err(crate::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )));
         }
         match &self.snapshot {
             // A turn-scoped service never commits on its own: the switch rides the
@@ -211,64 +183,5 @@ impl CurrentSessionCapability {
                 "agent-frame switch requires the running session's turn scope; session `{session_id}` has no live turn draft"
             ))),
         }
-    }
-}
-
-fn plugin_error_from_session_append(error: crate::SessionError) -> crate::PluginError {
-    match error {
-        crate::SessionError::Store {
-            source:
-                crate::StoreError::AppendOperationIdentityConflict {
-                    session_id,
-                    operation_key,
-                },
-            ..
-        } => crate::PluginError::AppendOperationIdentityConflict {
-            session_id,
-            operation_key,
-        },
-        crate::SessionError::Store {
-            source:
-                crate::StoreError::AppendReceiptRequestedNodeCountCorrupt {
-                    session_id,
-                    operation_key,
-                    stored,
-                    attempted,
-                },
-            ..
-        } => crate::PluginError::AppendReceiptRequestedNodeCountCorrupt {
-            session_id,
-            operation_key,
-            stored,
-            attempted,
-        },
-        error => crate::PluginError::Session(error.to_string()),
-    }
-}
-
-#[cfg(test)]
-mod error_mapping_tests {
-    use super::*;
-
-    #[test]
-    fn append_receipt_count_corruption_remains_typed_at_plugin_boundary() {
-        let error = plugin_error_from_session_append(crate::SessionError::Store {
-            context: "append receipt".to_string(),
-            source: crate::StoreError::AppendReceiptRequestedNodeCountCorrupt {
-                session_id: SessionId::from("root"),
-                operation_key: "append-operation".to_string(),
-                stored: 1,
-                attempted: 2,
-            },
-        });
-        assert!(matches!(
-            error,
-            crate::PluginError::AppendReceiptRequestedNodeCountCorrupt {
-                ref session_id,
-                ref operation_key,
-                stored: 1,
-                attempted: 2,
-            } if session_id == "root" && operation_key == "append-operation"
-        ));
     }
 }

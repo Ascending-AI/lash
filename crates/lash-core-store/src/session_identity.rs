@@ -688,11 +688,16 @@ impl SessionSnapshot {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 }
+/// Where session initialisation starts the new session.
+///
+/// `Empty` is the only admitted start point: a new session begins with no
+/// inherited history. A session that needs prior content gets it from its
+/// durable store (open, resume, catalog `fork_at`), never from the create
+/// request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionStartPoint {
     Empty,
-    Snapshot { snapshot: Box<SessionSnapshot> },
 }
 
 #[derive(Clone)]

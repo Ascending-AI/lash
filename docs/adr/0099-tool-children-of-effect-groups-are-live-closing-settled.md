@@ -146,11 +146,12 @@ FIG-3396 validates it during recovery.**
 
 **A process-backed session turn runs its cells under the process opener.** A
 `ProcessInput::SessionTurn` row — what every `agents.spawn` child is — creates a
-child session and runs one turn of it under the *process's* scope:
-`SessionTurnRequest::new_process_backed`
-(`crates/lash-core-execution/src/plugin/runtime_host.rs`) refuses any other
-scope, and the managed turn that rescopes a turn scope passes a process scope
-through untouched (`crates/lash-core/src/runtime/session_manager/turns.rs`). So
+child session and runs one turn of it under the *process's* scope: the process
+session runner
+(`crates/lash-core/src/runtime/session_manager/process_runners/session.rs`)
+stamps the create request `caused_by` the process and admits the child's first
+turn only under the process scope, which session initialisation passes through
+untouched (`crates/lash-core/src/runtime/session_manager/session_init.rs`). So
 that child turn's cells are opened by the process and not by the child turn: a
 worker retry keeps the incarnation and reuses the journal, while a
 re-registration under the same name is a different opener. The incarnation

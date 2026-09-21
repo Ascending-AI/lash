@@ -1123,8 +1123,8 @@ async fn saturated_depth_three_chain_completes() {
 }
 
 #[tokio::test]
-async fn managed_child_turn_process_wait_releases_outer_run_permit() {
-    // Managed child turns cross a fresh Tokio task stack through the same
+async fn process_session_turn_wait_releases_outer_run_permit() {
+    // Process session turns cross a fresh Tokio task stack through the same
     // inherited permit scope used here. The wait must park the outer process's
     // only slot so its production-started child can execute.
     run_production_chain(1, 1, 2, true).await;

@@ -29,7 +29,6 @@ pub use tool_execution::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolCatalogCacheKey {
-    include_base_tools: bool,
     context_overlay_revision: u64,
     tool_generation: u64,
     plugin_generations: std::collections::BTreeMap<String, u64>,
@@ -194,7 +193,6 @@ pub struct ExecRequest {
 pub struct Session {
     session_id: SessionId,
     services: RuntimeServices,
-    include_base_tools: bool,
     context_overlay_revision: u64,
     context_tools: Vec<Arc<dyn ToolProvider>>,
     tool_registry: Arc<crate::ToolRegistry>,
@@ -221,7 +219,6 @@ impl Session {
         let mut session = Self {
             session_id: SessionId::from(session_id.to_string()),
             services,
-            include_base_tools: true,
             context_overlay_revision: 0,
             context_tools: Vec::new(),
             tool_registry,
@@ -247,7 +244,6 @@ impl Session {
         Self {
             session_id: self.session_id.clone(),
             services: self.services.clone(),
-            include_base_tools: self.include_base_tools,
             context_overlay_revision: self.context_overlay_revision,
             context_tools: self.context_tools.clone(),
             tool_registry: Arc::clone(&self.tool_registry),
@@ -293,7 +289,6 @@ impl Session {
         &mut self,
         tool_providers: Vec<Arc<dyn ToolProvider>>,
         prompt_contributions: Vec<PromptContribution>,
-        include_base_tools: bool,
     ) -> Result<(), crate::PluginError> {
         let tool_providers_unchanged = self.context_tools.len() == tool_providers.len()
             && self
@@ -301,19 +296,17 @@ impl Session {
                 .iter()
                 .zip(&tool_providers)
                 .all(|(current, next)| Arc::ptr_eq(current, next));
-        let overlay_unchanged = self.include_base_tools == include_base_tools
-            && self.context_prompt_contributions == prompt_contributions
-            && tool_providers_unchanged;
+        let overlay_unchanged =
+            self.context_prompt_contributions == prompt_contributions && tool_providers_unchanged;
         let registry = self
             .services
             .plugins
             .tool_registry()
-            .compose_session_catalog(include_base_tools, tool_providers.clone())
+            .compose_session_catalog(tool_providers.clone())
             .map(Arc::new)
             .map_err(|err| {
                 crate::PluginError::Session(format!("failed to build session tool registry: {err}"))
             })?;
-        self.include_base_tools = include_base_tools;
         if !overlay_unchanged {
             self.context_overlay_revision = self.context_overlay_revision.wrapping_add(1);
         }
@@ -342,7 +335,6 @@ impl Session {
         tool_generation: u64,
     ) -> ToolCatalogCacheKey {
         ToolCatalogCacheKey {
-            include_base_tools: self.include_base_tools,
             context_overlay_revision: self.context_overlay_revision,
             tool_generation,
             plugin_generations: self.plugins().state_generations(),
@@ -470,7 +462,7 @@ impl Session {
     fn pin_live_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
         self.plugins()
             .tool_registry()
-            .pin_session_surface(self.include_base_tools, self.context_tools.clone())
+            .pin_session_surface(self.context_tools.clone())
             .map(Arc::new)
             .map_err(|err| {
                 crate::PluginError::Session(format!("failed to pin session tool surface: {err}"))
@@ -596,7 +588,7 @@ impl Session {
             .services
             .plugins
             .tool_registry()
-            .compose_session_catalog(self.include_base_tools, self.context_tools.clone())
+            .compose_session_catalog(self.context_tools.clone())
             .map(Arc::new)
             .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
         *self.tool_catalog_cache.lock_recover() = None;

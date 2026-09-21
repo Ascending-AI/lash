@@ -316,8 +316,8 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             .expect("run the context transform turn");
 
         // The transform ran against the context the runtime actually
-        // assembled: one prepared message for a first turn, base tools on,
-        // and nothing committed yet when the prompt was built.
+        // assembled: one prepared message for a first turn and nothing
+        // committed yet when the prompt was built.
         let observation = context_budget
             .observation()
             .expect("the registered transform must have run for this turn");
@@ -327,7 +327,6 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
         );
         assert_eq!(observation.message_count, 1);
         assert_eq!(observation.committed_message_count, 0);
-        assert!(observation.include_base_tools);
         // `tool_providers` is the transform's own contribution channel, not a
         // view of the plugin-registered catalog: the runtime hands it empty
         // and a transform pushes turn-scoped providers into it.

@@ -1704,10 +1704,8 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
 
 /// Configurable mock for host capability traits. Tests override
 /// the snapshot, tool catalog, and turn outcome via the builder
-/// methods; mutations (`create_session`, `close_session`)
-/// are recorded so tests can assert against them.
-pub type RecordedSessionTurn = (String, TurnId, Option<TurnId>, crate::ExecutionScope);
-
+/// methods; `create_session` mutations are recorded so tests can
+/// assert against them.
 pub struct MockSessionManager {
     pub snapshot: SessionSnapshot,
     pub tool_catalog: Vec<serde_json::Value>,
@@ -1715,8 +1713,6 @@ pub struct MockSessionManager {
     pub tool_registry: Option<crate::ToolRegistry>,
     pub process_registry: Arc<crate::TestLocalProcessRegistry>,
     pub created: Mutex<Vec<SessionCreateRequest>>,
-    pub closed: Mutex<Vec<String>>,
-    pub turns: Mutex<Vec<RecordedSessionTurn>>,
     /// Process terminals armed through
     /// [`ProcessService::attach_process_terminal`](crate::ProcessService::attach_process_terminal),
     /// in arming order.
@@ -1740,8 +1736,6 @@ impl Default for MockSessionManager {
             tool_registry: None,
             process_registry: Arc::new(crate::TestLocalProcessRegistry::default()),
             created: Mutex::new(Vec::new()),
-            closed: Mutex::new(Vec::new()),
-            turns: Mutex::new(Vec::new()),
             terminal_attachments: Mutex::new(Vec::new()),
         }
     }
@@ -1848,24 +1842,6 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
             policy: request.policy.unwrap_or_else(mock_session_policy),
             observed_processes: Vec::new(),
         })
-    }
-
-    async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
-        self.closed.lock_recover().push(session_id.to_string());
-        Ok(())
-    }
-    async fn start_turn(
-        &self,
-        request: crate::SessionTurnRequest<'_>,
-    ) -> Result<AssembledTurn, PluginError> {
-        let (turn, scoped_effect_controller) = request.into_parts();
-        self.turns.lock_recover().push((
-            turn.session_id.to_string(),
-            turn.turn_id.clone(),
-            turn.input.trace_turn_id,
-            scoped_effect_controller.execution_scope().clone(),
-        ));
-        Ok(self.turn.clone())
     }
 }
 

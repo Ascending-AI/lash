@@ -33,9 +33,9 @@ use lash::plugins::{
     PromptFingerprint, ProtocolBeforeLlmCallContext, ProtocolBuildInput, ProtocolDriverHandle,
     ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
     ProtocolSessionMaterialization, ProtocolSessionPlugin, ProtocolTurnOptionsError,
-    RuntimeExecutionContext, SegmentHandover, SessionAuthorityContext, SessionContextOverlay,
-    SessionPluginSource, ToolCatalog, TurnDriverConfig, TurnDriverPreamble, TurnFinalization,
-    TurnHookReport, TurnPreparation,
+    RuntimeExecutionContext, SegmentHandover, SessionAuthorityContext, SessionPluginSource,
+    ToolCatalog, TurnDriverConfig, TurnDriverPreamble, TurnFinalization, TurnHookReport,
+    TurnPreparation,
 };
 use lash::process::{
     ObserverInheritance, ParentEndPlan, ProcessChange, ProcessCompletionOutcome,

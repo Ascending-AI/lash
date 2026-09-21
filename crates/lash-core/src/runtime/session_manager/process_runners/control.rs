@@ -394,13 +394,12 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn start_process(
         &self,
         current: &CurrentSessionCapability,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.ensure_known_process_session(current, managed, session_id)
+        self.ensure_known_process_session(current, session_id)
             .await?;
         self.mark_current_process_sync_needed(current, session_id);
         let creator_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
@@ -777,13 +776,12 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn cancel_process(
         &self,
         current: &CurrentSessionCapability,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        let _ = (managed, session_id);
+        let _ = session_id;
         runner
             .cancel_named(
                 process_id,
@@ -914,7 +912,6 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn validate_process_handles_observed(
         &self,
         current: &CurrentSessionCapability,
-        _managed: &ManagedSessionCapability,
         session_id: &SessionId,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
@@ -939,7 +936,6 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn transfer_process_handles(
         &self,
         current: &CurrentSessionCapability,
-        _managed: &ManagedSessionCapability,
         from_session_id: &SessionId,
         to_session_id: &SessionId,
         process_ids: Vec<ProcessId>,
@@ -960,12 +956,9 @@ impl ProcessCapability {
     async fn ensure_known_process_session(
         &self,
         current: &CurrentSessionCapability,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<(), crate::PluginError> {
-        if session_id == current.session_id
-            || managed.registry.lock().await.contains_key(session_id)
-        {
+        if session_id == current.session_id {
             return Ok(());
         }
         Err(crate::PluginError::Session(format!(

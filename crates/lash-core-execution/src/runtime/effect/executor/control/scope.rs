@@ -319,7 +319,7 @@ mod admitted_scope_tests {
         ));
     }
 
-    /// The managed child turn a process backs is spawned onto its own task, so
+    /// The child session turn a process backs is spawned onto its own task, so
     /// the binding has to survive the `'static` conversion that spawn requires.
     #[test]
     fn the_admitted_incarnation_survives_the_static_conversion() {

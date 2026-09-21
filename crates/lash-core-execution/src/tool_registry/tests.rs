@@ -978,7 +978,7 @@ async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_fli
         }))
         .expect("register blocking live provider");
     let captured = Arc::new(
-        root.compose_session_catalog(true, Vec::new())
+        root.compose_session_catalog(Vec::new())
             .expect("compose pre-removal session snapshot"),
     );
     let executing = crate::task::spawn({
@@ -1003,7 +1003,7 @@ async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_fli
     root.remove_source(&handle)
         .expect("remove provider from root registry");
     let refreshed = root
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("compose post-removal session snapshot");
     assert!(
         refreshed.resolve_contract("blocking_live").is_none(),
@@ -1339,7 +1339,7 @@ async fn composed_catalog_adds_newly_advertised_base_tools() {
     names.lock_recover().push("dynamic_two".to_string());
 
     let composed = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("composed live catalog");
     assert!(
         composed
@@ -1443,7 +1443,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         )))
         .expect("source registered");
     let registry = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("resident catalog with live grant sources");
 
     assert!(!registry.export_state().contains(&tool_id("host_only")));
@@ -1648,7 +1648,7 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
     ])
     .expect("registry");
     let registry = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("resident snapshot keeps hidden providers out of its admitted source");
     let grant = crate::ToolExecutionGrant::from_definition(ToolDefinition::raw(
         "tool:hidden_zeta",
@@ -1716,7 +1716,7 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
 
     let registry = ToolRegistry::from_tool_provider(Arc::new(IntentProvider))
         .expect("intent provider registry")
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("pinned intent provider registry");
     let id = tool_id("intent_route");
     let args = json!({});
@@ -1792,7 +1792,7 @@ async fn pinned_source_retains_exactly_known_nonadvertised_resident_id() {
         .expect("the exact-id resolver restores the resident binding");
 
     let pinned = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("known resident survives request refresh");
     let entry = pinned
         .export_state()
@@ -1884,7 +1884,7 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
     let before = serde_json::to_value(registry.export_state()).expect("serialize state");
 
     mismatched.store(true, Ordering::SeqCst);
-    let pin = registry.compose_session_catalog(true, Vec::new());
+    let pin = registry.compose_session_catalog(Vec::new());
     let error = pin.err().map(|error| error.to_string());
     let after = serde_json::to_value(registry.export_state()).expect("serialize state");
     let advertised = execute_leaf_by_id(

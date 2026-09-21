@@ -3,47 +3,27 @@ use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl CurrentSessionCapability {
+    /// Resolve the durable-state projection for `session_id`. Only the current
+    /// session resolves: there is no runtime registry for other sessions, so a
+    /// foreign id is simply unknown to these services.
     pub(in crate::runtime::session_manager) async fn resident_state_by_id(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
-    ) -> Result<Option<RuntimeSessionState>, crate::PluginError> {
-        if session_id == self.session_id {
-            return Ok(Some(self.snapshot.to_runtime_state()));
-        }
-        let runtime = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        };
-        let Some(runtime) = runtime else {
-            return Ok(None);
-        };
-        // Session creation is the one path that still wants a full resident
-        // state: ask the runtime for it under the writer gate rather than
-        // reading a published observation.
-        let mut writer = runtime.runtime.lock().await;
-        writer
-            .export_persisted_state()
-            .await
-            .map(Some)
-            .map_err(|err| crate::PluginError::Session(err.to_string()))
+    ) -> Option<RuntimeSessionState> {
+        (session_id == self.session_id).then(|| self.snapshot.to_runtime_state())
     }
 
     pub(in crate::runtime::session_manager) async fn turn_scope_by_id(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, crate::PluginError> {
-        if session_id == self.session_id {
-            return Ok(self.snapshot.to_runtime_state().turn_scope(turn_id));
+        if session_id != self.session_id {
+            return Err(crate::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )));
         }
-        let runtime = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        }
-        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        Ok(runtime.observe().turn_scope(turn_id))
+        Ok(self.snapshot.to_runtime_state().turn_scope(turn_id))
     }
 
     pub(in crate::runtime) async fn current_snapshot_for_store_write(
@@ -64,22 +44,20 @@ impl CurrentSessionCapability {
 
     pub(in crate::runtime::session_manager) async fn snapshot_by_id(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
-        self.resident_state_by_id(managed, session_id)
-            .await?
+        self.resident_state_by_id(session_id)
+            .await
             .map(|state| state.to_snapshot())
             .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))
     }
 
     pub(in crate::runtime::session_manager) async fn tool_catalog_by_id(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         Ok(self
-            .shared_tool_catalog_by_id(managed, session_id)
+            .shared_tool_catalog_by_id(session_id)
             .await?
             .as_ref()
             .clone())
@@ -87,26 +65,14 @@ impl CurrentSessionCapability {
 
     pub(in crate::runtime::session_manager) async fn shared_tool_catalog_by_id(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
-        if session_id == self.session_id {
-            if let Some(runtime) = managed.registry.lock().await.get(session_id).cloned() {
-                let runtime = runtime.runtime.lock().await;
-                return runtime.active_tool_catalog_shared();
-            }
-            return Ok(Arc::new(self.plugins.tool_catalog(session_id)?));
+        if session_id != self.session_id {
+            return Err(crate::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )));
         }
-        let runtime = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        }
-        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        let observation = runtime.observe();
-        observation
-            .tool_catalog
-            .clone()
-            .map_err(crate::PluginError::Session)
+        Ok(Arc::new(self.plugins.tool_catalog(session_id)?))
     }
 
     pub(in crate::runtime::session_manager) fn current_tool_registry(
@@ -124,113 +90,68 @@ impl CurrentSessionCapability {
 
     pub(in crate::runtime::session_manager) async fn snapshot_session(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
-        self.snapshot_by_id(managed, session_id).await
+        self.snapshot_by_id(session_id).await
     }
 
     pub(in crate::runtime::session_manager) async fn tool_catalog(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
-        self.tool_catalog_by_id(managed, session_id).await
+        self.tool_catalog_by_id(session_id).await
     }
 
     pub(in crate::runtime::session_manager) async fn shared_tool_catalog(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
-        self.shared_tool_catalog_by_id(managed, session_id).await
+        self.shared_tool_catalog_by_id(session_id).await
     }
 
     pub(in crate::runtime::session_manager) async fn tool_state(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<crate::ToolState, crate::PluginError> {
-        if session_id == self.session_id {
-            if let Some(runtime) = managed.registry.lock().await.get(session_id).cloned() {
-                return runtime.observe().tool_state.clone().ok_or_else(|| {
-                    crate::PluginError::Session("runtime session not available".to_string())
-                });
-            }
-            return Ok(self.current_tool_registry()?.export_state());
+        if session_id != self.session_id {
+            return Err(crate::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )));
         }
-
-        let runtime = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        }
-        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        runtime
-            .observe()
-            .tool_state
-            .clone()
-            .ok_or_else(|| crate::PluginError::Session("runtime session not available".to_string()))
+        Ok(self.current_tool_registry()?.export_state())
     }
 
     pub(in crate::runtime::session_manager) async fn apply_tool_state(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
         snapshot: crate::ToolState,
     ) -> Result<u64, crate::PluginError> {
-        if session_id == self.session_id {
-            if let Some(runtime) = managed.registry.lock().await.get(session_id).cloned() {
-                let mut writer = runtime.runtime.lock().await;
-                let generation = writer
-                    .apply_tool_state(snapshot)
-                    .await
-                    .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-                runtime.publish_from(&writer);
-                return Ok(generation);
-            }
-            let tool_registry = self.current_tool_registry()?;
-            return tool_registry
-                .apply_state(snapshot)
-                .map_err(|err| crate::PluginError::Session(err.to_string()));
+        if session_id != self.session_id {
+            return Err(crate::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )));
         }
-
-        let runtime = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        }
-        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        let mut writer = runtime.runtime.lock().await;
-        let generation = writer
-            .apply_tool_state(snapshot)
-            .await
-            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-        runtime.publish_from(&writer);
-        Ok(generation)
+        let tool_registry = self.current_tool_registry()?;
+        tool_registry
+            .apply_state(snapshot)
+            .map_err(|err| crate::PluginError::Session(err.to_string()))
     }
 
     /// Capture the spawn-time [`crate::SessionPluginInit`] for a peer fork of
-    /// the named resident session. This is the only read of the source
-    /// session a fork performs — the payload it returns is what the journaled
-    /// creation request carries, so materialization never touches the live
-    /// session again.
+    /// the current session. This is the only read of the source session a
+    /// fork performs — the payload it returns is what the journaled creation
+    /// request carries, so materialization never touches the live session
+    /// again.
     pub(in crate::runtime::session_manager) async fn plugin_init_by_id(
         &self,
-        managed: &ManagedSessionCapability,
         session_id: &SessionId,
     ) -> Result<crate::SessionPluginInit, crate::PluginError> {
-        if session_id == self.session_id {
-            return self.plugins.capture_fork_init();
+        if session_id != self.session_id {
+            return Err(crate::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )));
         }
-        let runtime = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        }
-        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        let runtime = runtime.runtime.lock().await;
-        let session = runtime.session.as_ref().ok_or_else(|| {
-            crate::PluginError::Session(format!("session `{session_id}` has no plugin session"))
-        })?;
-        session.plugins().capture_fork_init()
+        self.plugins.capture_fork_init()
     }
 
     pub(in crate::runtime::session_manager) async fn emit_trace_event(

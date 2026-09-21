@@ -38,9 +38,6 @@ pub enum RuntimeErrorCode {
     /// the caller must admit the scope through the authority that owns the
     /// process incarnation.
     ExecutionScopeAdmissionRefused,
-    /// The managed-turn registry's admission cap is full. Retrying the
-    /// same request after another managed turn finishes is safe.
-    ManagedTurnConcurrencyLimitExceeded,
     SessionExecutionLeaseLost,
     /// A durable workflow controller's queued-work drain could not take the
     /// session execution lane: a live foreign executor holds it. Retrying the
@@ -438,7 +435,6 @@ impl RuntimeErrorCode {
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
             Self::ExecutionScopeAdmissionRefused => "execution_scope_admission_refused",
-            Self::ManagedTurnConcurrencyLimitExceeded => "managed_turn_concurrency_limit_exceeded",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
@@ -695,7 +691,6 @@ impl RuntimeErrorCode {
             // (FIG-1276).
             Self::RuntimeEffectAssistantResponseHook
             | Self::RuntimeEffectGroupDrainDeferred
-            | Self::ManagedTurnConcurrencyLimitExceeded
             | Self::SessionExecutionLaneBusy
             | Self::TurnInputSettlementSuperseded
             | Self::StoreCommitContended
@@ -910,7 +905,6 @@ impl RuntimeErrorCode {
         Self::MissingExecutionScopeId,
         Self::ExecutionScopeTurnIdMismatch,
         Self::ExecutionScopeAdmissionRefused,
-        Self::ManagedTurnConcurrencyLimitExceeded,
         Self::SessionExecutionLeaseLost,
         Self::SessionExecutionLaneBusy,
         Self::TurnInputSettlementSuperseded,
@@ -1107,7 +1101,6 @@ impl RuntimeErrorCode {
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
             "execution_scope_admission_refused" => Self::ExecutionScopeAdmissionRefused,
-            "managed_turn_concurrency_limit_exceeded" => Self::ManagedTurnConcurrencyLimitExceeded,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,

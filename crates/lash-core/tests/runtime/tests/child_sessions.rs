@@ -162,7 +162,10 @@ async fn inherited_child_session_carries_parent_tool_state() {
         .await
         .expect("child session");
 
-    let catalog = manager
+    let child = reopen_session_runtime(&runtime, &handle.session_id).await;
+    let catalog = child
+        .session_state_service()
+        .expect("child session state")
         .tool_catalog(&handle.session_id)
         .await
         .expect("tool catalog");
@@ -260,7 +263,10 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
         .await
         .expect("child session");
 
-    let catalog = manager
+    let child = reopen_session_runtime(&runtime, &handle.session_id).await;
+    let catalog = child
+        .session_state_service()
+        .expect("child session state")
         .tool_catalog(&handle.session_id)
         .await
         .expect("tool catalog");
@@ -275,86 +281,7 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
 }
 
 #[tokio::test]
-async fn snapshot_start_propagates_unknown_checkpoint_component_into_child_first_root() {
-    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let host = test_host_config().with_session_store_factory(factory.clone());
-    let runtime = TestRuntime::new(mock_provider(Vec::new()))
-        .host(host)
-        .build()
-        .await;
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-    let source = lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::root(
-                lash_core::SessionStartPoint::Empty,
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("checkpoint-source")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentHostFresh),
-        )
-        .await
-        .expect("source session");
-    let source_handle = runtime
-        .managed_sessions
-        .lock()
-        .await
-        .get(&source.session_id)
-        .cloned()
-        .expect("managed source runtime");
-    let unknown_ref = factory.seed_checkpoint_blob_for_testing(b"future component".to_vec());
-    {
-        let mut source_runtime = source_handle.runtime.lock().await;
-        source_runtime.state.checkpoint_components =
-            lash_core::runtime::state::RuntimeCheckpointComponents::complete_refs_for_testing([(
-                "extension/future-component".to_string(),
-                unknown_ref.clone(),
-            )]);
-        source_handle.publish_from(&source_runtime);
-    }
-
-    let manager = runtime.session_state_service().expect("session state");
-    let source_snapshot = manager
-        .snapshot_session(&source.session_id)
-        .await
-        .expect("source snapshot");
-    let child = lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::root(
-                lash_core::SessionStartPoint::Snapshot {
-                    snapshot: Box::new(source_snapshot),
-                },
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("checkpoint-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentHostFresh),
-        )
-        .await
-        .expect("child inherits the complete snapshot component set");
-    let child_handle = runtime
-        .managed_sessions
-        .lock()
-        .await
-        .get(&child.session_id)
-        .cloned()
-        .expect("managed child runtime");
-    let child_state = child_handle.runtime.lock().await.export_persistence_state();
-    let first_root = child_state
-        .checkpoint_components
-        .build_checkpoint(lash_core::PersistedTurnState::default())
-        .expect("child first checkpoint root");
-    let carried = first_root
-        .components
-        .get("extension/future-component")
-        .expect("unknown component survives Snapshot inheritance");
-
-    assert_eq!(carried.blob_ref(), Some(&unknown_ref));
-    assert_eq!(carried.body(), None, "unknown component remains ref-only");
-}
-
-#[tokio::test]
-async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
+async fn durable_child_writes_to_its_own_attachment_namespace() {
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Part(LlmOutputPart::ToolCall {
@@ -399,7 +326,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let mut runtime = LashRuntime::from_persistent_embedded_state(
+    let runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         host,
         lash_core::facade_support::PersistentRuntimeServices::new(
@@ -411,7 +338,6 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     )
     .await
     .expect("durable root runtime");
-    set_runtime_provider(&mut runtime, transport.into_handle());
 
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -435,20 +361,17 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         )
         .await
         .expect("durable child session");
+    let mut child_runtime = reopen_session_runtime(&runtime, &child.session_id).await;
+    set_runtime_provider(&mut child_runtime, transport.into_handle());
     let turn_id = "attachment-child-turn";
-    let controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::AdmittedScope::turn(&child.session_id, turn_id),
-    )
-    .expect("child effect controller");
-    let request = lash_core::facade_support::SessionTurnRequest::new(
-        &child.session_id,
-        turn_id,
-        TurnInput::text("write the attachment"),
-        controller,
-    )
-    .expect("child turn request");
-    lifecycle.start_turn(request).await.expect("child turn");
+    child_runtime
+        .run_turn_assembled(
+            TurnInput::text("write the attachment"),
+            CancellationToken::new(),
+            named_turn_scope(&child.session_id, &TurnId::from(turn_id)),
+        )
+        .await
+        .expect("child turn");
 
     let id = lash_core::attachments::content_id(&[4, 2, 4, 2]);
     // The blob lives exactly once in the shared, flat backend...
@@ -525,7 +448,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         lash_core::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
         Arc::new(lash_core::NoQueuedWork::new()),
     );
-    let mut runtime = LashRuntime::from_persistent_background_state(
+    let runtime = LashRuntime::from_persistent_background_state(
         standard_test_policy(),
         host,
         lash_core::facade_support::PersistentRuntimeServices::new(
@@ -545,7 +468,6 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     )
     .await
     .expect("durable root runtime");
-    set_runtime_provider(&mut runtime, transport.into_handle());
 
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -576,33 +498,20 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             .as_ref()
             .is_some_and(|meta| meta.session_id == child.session_id)
     });
-    assert!(child_is_bound, "managed child must bind its store");
+    assert!(child_is_bound, "initialized child must bind its store");
+    let mut child_runtime = reopen_session_runtime(&runtime, &child.session_id).await;
+    set_runtime_provider(&mut child_runtime, transport.into_handle());
     let turn_id = "process-child-first-turn";
-    let controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::AdmittedScope::turn(&child.session_id, turn_id),
-    )
-    .expect("child effect controller");
-    lifecycle
-        .start_turn(
-            lash_core::facade_support::SessionTurnRequest::new(
-                &child.session_id,
-                turn_id,
-                TurnInput::text("register the process"),
-                controller,
-            )
-            .expect("child turn request"),
+    child_runtime
+        .run_turn_assembled(
+            TurnInput::text("register the process"),
+            CancellationToken::new(),
+            named_turn_scope(&child.session_id, &TurnId::from(turn_id)),
         )
         .await
         .expect("first child turn");
 
-    let child_handle = runtime
-        .managed_sessions
-        .lock()
-        .await
-        .get(&child.session_id)
-        .cloned()
-        .expect("managed child runtime");
+    let child_handle = RuntimeHandle::new(child_runtime);
     let handles = child_handle.observe().list_all_process_handles().await;
     assert!(
         handles
@@ -694,22 +603,13 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
         .await
         .expect("hidden tool policy should survive fork");
 
-    let child_handle = runtime
-        .managed_sessions
-        .lock()
-        .await
-        .get(&handle.session_id)
-        .cloned()
-        .expect("managed child runtime");
-    let registry = {
-        let child = child_handle.runtime.lock().await;
-        child
-            .session
-            .as_ref()
-            .expect("child session")
-            .plugins()
-            .tool_registry()
-    };
+    let mut child_runtime = reopen_session_runtime(&runtime, &handle.session_id).await;
+    let registry = child_runtime
+        .session
+        .as_ref()
+        .expect("child session")
+        .plugins()
+        .tool_registry();
     assert!(
         registry
             .export_state()
@@ -719,7 +619,10 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
         "fork authority must not latch into the child's membership bit"
     );
 
-    let catalog = manager
+    let child_manager = child_runtime
+        .session_state_service()
+        .expect("child session state");
+    let catalog = child_manager
         .tool_catalog(&handle.session_id)
         .await
         .expect("tool catalog");
@@ -729,15 +632,11 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
         .collect::<Vec<_>>();
     assert!(!tool_names.contains(&"memory_probe"));
 
-    {
-        let mut child = child_handle.runtime.lock().await;
-        child
-            .refresh_session_tool_catalog()
-            .await
-            .expect("rebuild child catalog from live sources");
-        child_handle.publish_from(&child);
-    }
-    let rebuilt_catalog = manager
+    child_runtime
+        .refresh_session_tool_catalog()
+        .await
+        .expect("rebuild child catalog from live sources");
+    let rebuilt_catalog = child_manager
         .tool_catalog(&handle.session_id)
         .await
         .expect("rebuilt tool catalog");
@@ -775,7 +674,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
                 ..LlmResponse::default()
             }),
         },
-        // The managed child turn reports usage on the child's own session.
+        // The child turn reports usage on the child's own session.
         MockCall {
             stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
                 input_tokens: 7,
@@ -857,15 +756,12 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .expect("child session");
     let child_session_id = SessionId::from("subagent-child");
     let child_turn_id = TurnId::from("subagent-child-turn");
-    let child_turn = lifecycle
-        .start_turn(
-            lash_core::facade_support::SessionTurnRequest::new(
-                &child_session_id,
-                &child_turn_id,
-                TurnInput::text("run the child turn"),
-                named_turn_scope(&child_session_id, &child_turn_id),
-            )
-            .expect("child turn request"),
+    let mut child_runtime = reopen_session_runtime(&runtime, &child_session_id).await;
+    let child_turn = child_runtime
+        .run_turn_assembled(
+            TurnInput::text("run the child turn"),
+            CancellationToken::new(),
+            named_turn_scope(&child_session_id, &child_turn_id),
         )
         .await
         .expect("child turn");
@@ -873,10 +769,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         &child_turn.outcome,
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ));
-    lifecycle
-        .close_session(&child_session_id)
-        .await
-        .expect("close child session");
+    drop(child_runtime);
 
     let second_parent = runtime
         .stream_turn(
@@ -1046,22 +939,16 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         .expect("child session");
     let child_session_id = SessionId::from("subagent-child");
     let child_turn_id = TurnId::from("subagent-child-turn");
-    lifecycle
-        .start_turn(
-            lash_core::facade_support::SessionTurnRequest::new(
-                &child_session_id,
-                &child_turn_id,
-                TurnInput::text("run the child turn"),
-                named_turn_scope(&child_session_id, &child_turn_id),
-            )
-            .expect("child turn request"),
+    let mut child_runtime = reopen_session_runtime(&runtime, &child_session_id).await;
+    child_runtime
+        .run_turn_assembled(
+            TurnInput::text("run the child turn"),
+            CancellationToken::new(),
+            named_turn_scope(&child_session_id, &child_turn_id),
         )
         .await
         .expect("child turn");
-    lifecycle
-        .close_session(&child_session_id)
-        .await
-        .expect("close child session");
+    drop(child_runtime);
 
     let usage = runtime.usage_report();
     assert_eq!(usage.by_source["turn"].usage.input_tokens, 5);
@@ -1087,7 +974,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
 }
 
 /// Tool that parks the turn that calls it: it reports that it started, then
-/// never returns. It is the controlled await a cancelled managed child turn is
+/// never returns. It is the controlled await a dropped child turn is
 /// dropped at.
 struct ParkedTool {
     started: tokio::sync::mpsc::Sender<()>,
@@ -1129,18 +1016,8 @@ fn child_turn_usage_event() -> LlmStreamEvent {
     })
 }
 
-async fn managed_session_input_tokens(runtime: &LashRuntime, session_id: &str) -> i64 {
-    let handle = runtime
-        .managed_sessions
-        .lock()
-        .await
-        .get(&SessionId::from(session_id))
-        .cloned()
-        .expect("managed session runtime");
-    handle
-        .runtime
-        .lock()
-        .await
+fn session_input_tokens(runtime: &LashRuntime) -> i64 {
+    runtime
         .usage_report()
         .by_source
         .values()
@@ -1148,13 +1025,12 @@ async fn managed_session_input_tokens(runtime: &LashRuntime, session_id: &str) -
         .sum()
 }
 
-/// Cancelling the process that drives a managed child turn drops the
-/// `start_turn` future at whichever await it is parked on. That must release
-/// the turn's registration: a ghost registration would refuse `close_session`
-/// for the session's whole lifetime and reject every later turn on it as
-/// "already has a running turn".
+/// Dropping a parked child-turn future mid-await — what a cancelled process
+/// does to the run that owns the child — must leave the ordinary session
+/// reusable: no turn registration outlives the future, so a later turn on the
+/// same child runs to completion and reports its own usage.
 #[tokio::test]
-async fn cancelled_managed_child_turn_releases_its_registration() {
+async fn dropped_child_turn_leaves_the_session_reusable() {
     let transport = mock_provider(vec![
         // Gated child turn: one provider round-trip reports usage, then the
         // tool call parks the turn.
@@ -1223,42 +1099,26 @@ async fn cancelled_managed_child_turn_releases_its_registration() {
         .await
         .expect("child session");
 
-    let turn_id = "cancelled-child-turn";
-    let request = |session_id: &SessionId, turn_id: &TurnId| {
-        lash_core::facade_support::SessionTurnRequest::new(
-            session_id,
-            turn_id,
-            TurnInput::text("park the child turn"),
-            named_turn_scope(session_id, turn_id),
-        )
-        .expect("child turn request")
-    };
     let cancelled_child_session_id = SessionId::from("cancelled-child");
-    let cancelled_child_turn_id = TurnId::from(turn_id);
-    let mut turn = Box::pin(lifecycle.start_turn(request(
-        &cancelled_child_session_id,
-        &cancelled_child_turn_id,
-    )));
+    let cancelled_child_turn_id = TurnId::from("cancelled-child-turn");
+    let mut child = reopen_session_runtime(&runtime, &cancelled_child_session_id).await;
+    let mut turn = Box::pin(child.run_turn_assembled(
+        TurnInput::text("park the child turn"),
+        CancellationToken::new(),
+        named_turn_scope(&cancelled_child_session_id, &cancelled_child_turn_id),
+    ));
     tokio::select! {
         _ = started_rx.recv() => {}
         outcome = turn.as_mut() => panic!("parked child turn must not complete: {outcome:?}"),
     }
-    assert!(
-        runtime.managed_turns.lock_recover().contains_key(turn_id),
-        "the parked child turn must be registered while it runs"
-    );
 
     // The cancellation: the owning process drops the child-turn future.
     drop(turn);
 
     assert_eq!(
-        managed_session_input_tokens(&runtime, "cancelled-child").await,
+        session_input_tokens(&child),
         0,
         "usage lands at turn finish, so a dropped child turn reports nothing"
-    );
-    assert!(
-        runtime.managed_turns.lock_recover().is_empty(),
-        "a cancelled child turn must not leave a ghost registration behind"
     );
     let plugin_init = runtime
         .session_state_service()
@@ -1280,9 +1140,14 @@ async fn cancelled_managed_child_turn_releases_its_registration() {
         .await
         .expect("retry child session");
     let retry_child_session_id = SessionId::from("retry-child");
-    let retry_child_turn_id = TurnId::from(turn_id);
-    let retried = lifecycle
-        .start_turn(request(&retry_child_session_id, &retry_child_turn_id))
+    let retry_child_turn_id = TurnId::from("cancelled-child-turn");
+    let mut retry_child = reopen_session_runtime(&runtime, &retry_child_session_id).await;
+    let retried = retry_child
+        .run_turn_assembled(
+            TurnInput::text("park the child turn"),
+            CancellationToken::new(),
+            named_turn_scope(&retry_child_session_id, &retry_child_turn_id),
+        )
         .await
         .expect("retried child turn");
     assert!(matches!(
@@ -1290,34 +1155,32 @@ async fn cancelled_managed_child_turn_releases_its_registration() {
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ));
     assert_eq!(
-        managed_session_input_tokens(&runtime, "retry-child").await,
+        session_input_tokens(&retry_child),
         5,
         "the retried turn's usage lands on its own session's ledger"
     );
     assert_eq!(
-        managed_session_input_tokens(&runtime, "cancelled-child").await,
+        session_input_tokens(&child),
         0,
         "a different session's turn must not leak usage into the cancelled child's ledger"
     );
 
-    let recovered_session_id = SessionId::from("cancelled-child");
     let recovered_turn_id = TurnId::from("cancelled-child-turn-2");
-    let recovered = lifecycle
-        .start_turn(request(&recovered_session_id, &recovered_turn_id))
+    let recovered = child
+        .run_turn_assembled(
+            TurnInput::text("park the child turn"),
+            CancellationToken::new(),
+            named_turn_scope(&cancelled_child_session_id, &recovered_turn_id),
+        )
         .await
-        .expect("the dropped turn future returns the child runtime's session loan");
+        .expect("the dropped turn future leaves the child session reusable");
     assert_eq!(
         recovered.assistant_output.safe_text,
         "cancelled child recovered"
     );
     assert_eq!(
-        managed_session_input_tokens(&runtime, "cancelled-child").await,
+        session_input_tokens(&child),
         5,
         "the recovered child's turn must report usage normally"
     );
-
-    lifecycle
-        .close_session(&SessionId::from("cancelled-child"))
-        .await
-        .expect("a cancelled child turn must not keep its session open forever");
 }
