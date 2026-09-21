@@ -1013,8 +1013,11 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
             measured.len()
         );
-        assert_eq!(minimum, 94_352);
-        assert_eq!(maximum, 94_354);
+        // FIG-3394: same +278 as the single-binding case — the two
+        // deferred-resolution link identities ride in the root once, not per
+        // binding.
+        assert_eq!(minimum, 94_630);
+        assert_eq!(maximum, 94_632);
     });
 }
 
