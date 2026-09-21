@@ -122,7 +122,9 @@ fn profile_b() -> OpenerProfile {
         binding: "binding-b",
         env: "env-b",
         process: Some(("process-b", 7)),
-        routing: ToolChildCompletionRouting::ProcessLifetime,
+        routing: ToolChildCompletionRouting::ProcessLifetime {
+            issuer: TurnControlBindingId::new("binding-b").expect("a valid binding id"),
+        },
         granted: true,
     }
 }
@@ -197,7 +199,7 @@ fn request(profile: &OpenerProfile) -> ToolChildRequest {
             agent_frame_id: FrameNodeId::new(profile.frame).expect("a valid frame id"),
         },
         ProcessExecutionEnvRef::new(profile.env),
-        profile.routing,
+        profile.routing.clone(),
     )
     .with_cancellation_authority(
         TurnControlBindingId::new(profile.binding).expect("a valid binding id"),
