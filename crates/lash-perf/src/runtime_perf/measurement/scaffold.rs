@@ -1,4 +1,12 @@
+use std::pin::Pin;
+
 use super::*;
+
+// The measured spans wrap caller futures that can be tens of kilobytes
+// (whole `run_once*` bodies). Returning boxed futures keeps that weight out
+// of the caller's own future instead of nesting it inside — the call sites
+// stay pointer-sized.
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// One closed span boundary: wall clock since the meter opened, the
 /// allocation delta across it, and the memory sampled at both ends.
@@ -148,59 +156,88 @@ impl RunRecorder {
 
     /// Records one named run-level stage span (`build_runtime`,
     /// `seed_state`, `export_state`, ...).
-    pub(crate) async fn stage<T, F>(&mut self, name: &'static str, f: F) -> anyhow::Result<T>
+    pub(crate) fn stage<'a, T, F>(
+        &'a mut self,
+        name: &'static str,
+        f: F,
+    ) -> BoxFuture<'a, anyhow::Result<T>>
     where
-        F: Future<Output = anyhow::Result<T>>,
+        F: Future<Output = anyhow::Result<T>> + Send + 'a,
+        T: Send + 'a,
     {
-        let (value, span) = self.measured_span(f).await?;
-        self.stage_entries.push((name, span.stage_result()));
-        Ok(value)
+        Box::pin(async move {
+            let (value, span) = self.measured_span(f).await?;
+            self.stage_entries.push((name, span.stage_result()));
+            Ok(value)
+        })
     }
 
-    pub(crate) async fn build<T, F>(&mut self, f: F) -> anyhow::Result<T>
+    pub(crate) fn build<'a, T, F>(&'a mut self, f: F) -> BoxFuture<'a, anyhow::Result<T>>
     where
-        F: Future<Output = anyhow::Result<T>>,
+        F: Future<Output = anyhow::Result<T>> + Send + 'a,
+        T: Send + 'a,
     {
-        self.stage(stage::BUILD_RUNTIME, f).await
+        self.stage(stage::BUILD_RUNTIME, f)
     }
 
-    pub(crate) async fn seed<T, F>(&mut self, f: F) -> anyhow::Result<T>
+    pub(crate) fn seed<'a, T, F>(&'a mut self, f: F) -> BoxFuture<'a, anyhow::Result<T>>
     where
-        F: Future<Output = anyhow::Result<T>>,
+        F: Future<Output = anyhow::Result<T>> + Send + 'a,
+        T: Send + 'a,
     {
-        self.stage(stage::SEED_STATE, f).await
+        self.stage(stage::SEED_STATE, f)
     }
 
-    pub(crate) async fn export<T, F>(&mut self, f: F) -> anyhow::Result<T>
+    pub(crate) fn export<'a, T, F>(&'a mut self, f: F) -> BoxFuture<'a, anyhow::Result<T>>
     where
-        F: Future<Output = anyhow::Result<T>>,
+        F: Future<Output = anyhow::Result<T>> + Send + 'a,
+        T: Send + 'a,
     {
-        self.stage(stage::EXPORT_STATE, f).await
+        self.stage(stage::EXPORT_STATE, f)
     }
 
     /// Measures one turn as a `run` span followed by an
     /// `await_background_work` span, then pushes the folded
     /// `RuntimePerfTurnResult`. The `run` closure returns the produced
     /// value together with the `TurnTail` fields known inside the span.
-    pub(crate) async fn turn<T, R, A>(
-        &mut self,
+    pub(crate) fn turn<'a, T, R, A>(
+        &'a mut self,
         turn_index: usize,
         run: R,
         await_background_work: A,
-    ) -> anyhow::Result<T>
+    ) -> BoxFuture<'a, anyhow::Result<T>>
     where
-        R: Future<Output = anyhow::Result<TurnRun<T>>>,
-        A: Future<Output = anyhow::Result<()>>,
+        R: Future<Output = anyhow::Result<TurnRun<T>>> + Send + 'a,
+        A: Future<Output = anyhow::Result<()>> + Send + 'a,
+        T: Send + 'a,
     {
         self.turn_then(turn_index, run, await_background_work, |_, _, _| Ok(()))
-            .await
     }
 
     /// [`RunRecorder::turn`] with a `post` hook that runs after the await
     /// span closed and may still patch the [`TurnTail`] — for the fields a
     /// site can only know once the drain finished (usage reports, probe
     /// drains, phase entries derived from the turn span itself).
-    pub(crate) async fn turn_then<T, R, A, P>(
+    pub(crate) fn turn_then<'a, T, R, A, P>(
+        &'a mut self,
+        turn_index: usize,
+        run: R,
+        await_background_work: A,
+        post: P,
+    ) -> BoxFuture<'a, anyhow::Result<T>>
+    where
+        R: Future<Output = anyhow::Result<TurnRun<T>>> + Send + 'a,
+        A: Future<Output = anyhow::Result<()>> + Send + 'a,
+        P: FnOnce(&T, &TurnSpans, &mut TurnTail) -> anyhow::Result<()> + Send + 'a,
+        T: Send + 'a,
+    {
+        Box::pin(async move {
+            self.turn_inner(turn_index, run, await_background_work, post)
+                .await
+        })
+    }
+
+    async fn turn_inner<T, R, A, P>(
         &mut self,
         turn_index: usize,
         run: R,

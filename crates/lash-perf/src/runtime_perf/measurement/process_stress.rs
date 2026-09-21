@@ -190,7 +190,7 @@ pub(super) async fn run_once_process_list_stress(
                                 lash_core::facade_support::process_signal_wait_key(
                                     &ProcessId::from(signal_process_id),
                                     "stress",
-                                    format_args!("{turn_index}:{signal_index}"),
+                                    format!("{turn_index}:{signal_index}"),
                                 ),
                             ),
                         )

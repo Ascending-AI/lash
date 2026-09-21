@@ -457,8 +457,8 @@ async fn run_once_inner(
     }
 
     // Both the run and the await closures insert counters while their span
-    // is open, so the map is shared through a RefCell rather than borrowed.
-    let extra_counters = std::cell::RefCell::new(BTreeMap::new());
+    // is open, so the map is shared through a Mutex rather than borrowed.
+    let extra_counters = std::sync::Mutex::new(BTreeMap::new());
     for turn_index in 0..chat_turns {
         let mut extra_phase_profile = BTreeMap::new();
         if matches!(scenario, RuntimePerfScenario::StoreReopen) && turn_index > 0 {
@@ -577,11 +577,11 @@ async fn run_once_inner(
         let before_turn_usage = runtime.usage_report();
         if let Some(variant) = catalog_variant {
             let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics()?;
-            extra_counters.borrow_mut().insert(
+            extra_counters.lock_recover().insert(
                 format!("tool_catalog.{variant}.registry_manifest_count"),
                 manifest_count as u64,
             );
-            extra_counters.borrow_mut().insert(
+            extra_counters.lock_recover().insert(
                 format!("tool_catalog.{variant}.registry_rendered_bytes"),
                 rendered_bytes as u64,
             );
@@ -595,8 +595,8 @@ async fn run_once_inner(
 
         // The run closure moves the turn input in, so pre-bind shared
         // references for everything else it touches; the delivery
-        // observation crosses into the await span through the RefCell.
-        let trigger_delivery_observation = std::cell::RefCell::new(None);
+        // observation crosses into the await span through the Mutex.
+        let trigger_delivery_observation = std::sync::Mutex::new(None);
         let runtime_ref = &runtime;
         let counters_ref = &extra_counters;
         let observation_ref = &trigger_delivery_observation;
@@ -706,7 +706,7 @@ async fn run_once_inner(
                         runtime.observe_trigger_delivery_terminals(),
                     );
                     phase_probe.close_deferred_named("trigger.occurrence_to_delivery");
-                    *trigger_delivery_observation.borrow_mut() = Some(observation?);
+                    *trigger_delivery_observation.lock_recover() = Some(observation?);
                     turn
                 } else {
                     runtime_perf_timed(
@@ -740,15 +740,15 @@ async fn run_once_inner(
                 }
                 if let Some(variant) = catalog_variant {
                     let observation = runtime.finish_tool_catalog_observation();
-                    extra_counters.borrow_mut().insert(
+                    extra_counters.lock_recover().insert(
                         format!("tool_catalog.{variant}.cache_state"),
                         observation.cache_state,
                     );
-                    extra_counters.borrow_mut().insert(
+                    extra_counters.lock_recover().insert(
                         format!("tool_catalog.{variant}.setup_recomposition_count"),
                         observation.setup_recomposition_count,
                     );
-                    extra_counters.borrow_mut().insert(
+                    extra_counters.lock_recover().insert(
                         format!("tool_catalog.{variant}.recomposition_count"),
                         observation.recomposition_count,
                     );
@@ -780,18 +780,18 @@ async fn run_once_inner(
                 })?;
                 if trigger_end_to_end {
                     let observation = trigger_delivery_observation
-                        .borrow_mut()
+                        .lock_recover()
                         .take()
                         .context("trigger delivery observation was not collected")?;
-                    extra_counters.borrow_mut().insert(
+                    extra_counters.lock_recover().insert(
                         "trigger.delivery_process_count".to_string(),
                         observation.process_count,
                     );
-                    extra_counters.borrow_mut().insert(
+                    extra_counters.lock_recover().insert(
                         "trigger.delivery_durable_claim_count".to_string(),
                         observation.durable_claim_count,
                     );
-                    extra_counters.borrow_mut().insert(
+                    extra_counters.lock_recover().insert(
                         "trigger.delivery_terminal_count".to_string(),
                         observation.terminal_count,
                     );
@@ -834,24 +834,26 @@ async fn run_once_inner(
             ("runtime_work.body_copy_passes", work.body_copy_passes),
             ("runtime_work.copied_bytes", work.copied_bytes),
         ] {
-            extra_counters.borrow_mut().insert(name.to_string(), value);
+            extra_counters
+                .lock_recover()
+                .insert(name.to_string(), value);
         }
         // Only SQLite carries the statement witness today; emitting a zero for
         // PostgreSQL would read as "no statements" rather than "not observed".
         if !scenario.uses_postgres() {
-            extra_counters.borrow_mut().insert(
+            extra_counters.lock_recover().insert(
                 "runtime_work.sql_statements".to_string(),
                 work.sql_statements,
             );
             for (verb, count) in work.sql_statements_by_verb {
                 extra_counters
-                    .borrow_mut()
+                    .lock_recover()
                     .insert(format!("runtime_work.sql_statements.{verb}"), count);
             }
         }
     }
     extra_counters
-        .borrow_mut()
+        .lock_recover()
         .extend(store_metrics.call_counters());
     let metric_samples = store_metrics.observed_latency_samples();
     let mut metric_samples_ms = BTreeMap::new();
@@ -863,21 +865,21 @@ async fn run_once_inner(
         );
     }
     if let Some(commit) = store_metrics.commit_measurements().last() {
-        extra_counters.borrow_mut().insert(
+        extra_counters.lock_recover().insert(
             "durable_commit.logical_bytes".to_string(),
             commit.total_bytes,
         );
-        extra_counters.borrow_mut().insert(
+        extra_counters.lock_recover().insert(
             "durable_commit.checkpoint_bytes".to_string(),
             commit.checkpoint_bytes,
         );
         extra_counters
-            .borrow_mut()
+            .lock_recover()
             .insert("durable_commit.logical_rows".to_string(), commit.total_rows);
         extra_counters
-            .borrow_mut()
+            .lock_recover()
             .insert("durable_commit.graph_rows".to_string(), commit.graph_rows);
-        extra_counters.borrow_mut().insert(
+        extra_counters.lock_recover().insert(
             "durable_commit.checkpoint_components".to_string(),
             commit.checkpoint_components,
         );
@@ -894,7 +896,7 @@ async fn run_once_inner(
             .expect("runtime frame scope resolves")
             .messages()
             .len(),
-        extra_counters: extra_counters.into_inner(),
+        extra_counters: std::mem::take(&mut extra_counters.lock_recover()),
         metric_samples,
         metric_samples_ms,
         cumulative_usage,
