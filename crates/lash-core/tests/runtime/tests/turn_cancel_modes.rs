@@ -195,7 +195,7 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = native_harness(Arc::new(tool.clone()), transport).await;
+    } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
     let turn_id = "after-step-mid-model";
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -268,7 +268,7 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = native_harness(Arc::new(tool.clone()), transport).await;
+    } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
     let turn_id = "after-step-mid-tool";
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -330,7 +330,7 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = native_harness(Arc::new(tool.clone()), transport).await;
+    } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
     let turn_id = "escalate-to-abort";
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -423,7 +423,7 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
         let ModeHarness {
             mut runtime,
             driver,
-        } = native_harness(Arc::new(tool.clone()), transport).await;
+        } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
         let turn_id = "refused-before-start";
         let receipt = driver
             .request_cancel(request(&TurnId::from(turn_id), "before-start", mode))
