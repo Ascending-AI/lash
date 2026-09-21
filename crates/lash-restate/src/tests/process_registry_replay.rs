@@ -1190,7 +1190,10 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
 }
 
 #[tokio::test]
-pub(super) async fn cancellation_cleanup_failure_does_not_write_a_false_terminal() {
+pub(super) async fn session_turn_cancel_writes_the_cancelled_terminal_on_runner_failure() {
+    // Session processes settle like every other input: a runner failure after
+    // the committed cancellation is masked by the cancelled terminal — there
+    // is no cleanup step left to fail, and the child session stays retained.
     let runner = Arc::new(CancellationAwareRunner {
         failure_after_cancel: Some("simulated durable child cleanup failure"),
         ..CancellationAwareRunner::default()
@@ -1248,27 +1251,22 @@ pub(super) async fn cancellation_cleanup_failure_does_not_write_a_false_terminal
         .expect("append cancel request");
     signal.send(()).expect("resolve cancellation signal");
 
-    let error = tokio::time::timeout(Duration::from_secs(2), run)
+    let outcome = tokio::time::timeout(Duration::from_secs(2), run)
         .await
-        .expect("cleanup failure settles")
+        .expect("cancelled session turn settles")
         .expect("join running process")
-        .expect_err("cleanup failure must stay retryable");
-    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
-    assert!(
-        source
-            .to_string()
-            .contains("simulated durable child cleanup failure"),
-        "unexpected handler error: {error:?}"
-    );
+        .expect("runner failure is masked by the committed cancellation");
+    assert!(matches!(
+        outcome,
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
+            if is_process_cancellation(output.as_ref())
+    ));
     let record = registry
         .get_process(&ProcessId::from("cancel-cleanup-failure"))
         .await
-        .expect("read process after cleanup failure")
+        .expect("read process after cancellation")
         .expect("process remains registered");
-    assert!(
-        !record.is_terminal(),
-        "a cancelled SessionTurn cleanup failure must not write a false terminal"
-    );
+    assert_eq!(record.status, lash_core::ProcessStatus::Cancelled);
 }
 
 #[tokio::test]

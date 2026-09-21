@@ -72,6 +72,11 @@ pub struct SessionListFilter {
     pub relation: Option<SessionRelationKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted: Option<bool>,
+    /// Restrict to sessions whose recorded `caused_by` equals this reference —
+    /// for example `CausalRef::Process` selects the sessions a process caused.
+    /// Tombstones carry no durable relation, so they never match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caused_by: Option<crate::CausalRef>,
 }
 
 impl SessionListFilter {
@@ -81,5 +86,14 @@ impl SessionListFilter {
             && self
                 .deleted
                 .is_none_or(|deleted| deleted == summary.deleted)
+            && self.caused_by.as_ref().is_none_or(|caused_by| {
+                matches!(
+                    &summary.durable_relation,
+                    Some(SessionRelation::Child {
+                        caused_by: recorded,
+                        ..
+                    }) if recorded.as_ref() == Some(caused_by)
+                )
+            })
     }
 }

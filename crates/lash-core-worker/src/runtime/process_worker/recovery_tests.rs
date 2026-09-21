@@ -230,35 +230,18 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     // advances this race after the durable cancellation commit.
     provider_release.add_permits(1);
 
-    // A runnable yield loop prevents Tokio's paused clock from auto-advancing.
-    // Bound it with wall time so a fence regression fails inside this test.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "fenced recovery attempt releases its lease"
-        );
-        let record = registry
-            .get_process(&ProcessId::from(process_id))
-            .await
-            .expect("read SessionTurn fence fixture")
-            .expect("SessionTurn fence fixture remains retained");
-        let lease = registry
-            .get_process_lease(&ProcessId::from(process_id))
-            .await
-            .expect("read SessionTurn fence lease");
-        if record.first_started.is_some() && lease.is_none() {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    // The runner settles its child turn and returns a successful output, but
+    // the committed cancellation outranks it: the recorded terminal is
+    // `Cancelled`, and the child session stays retained.
+    await_terminal(&registry, &ProcessId::from(process_id)).await;
     let record = registry
         .get_process(&ProcessId::from(process_id))
         .await
         .expect("read fenced SessionTurn")
         .expect("fenced SessionTurn remains retained");
-    assert!(
-        !record.is_terminal(),
+    assert_eq!(
+        record.status,
+        ProcessStatus::Cancelled,
         "a committed SessionTurn cancellation must not write the runner's successful terminal"
     );
 }

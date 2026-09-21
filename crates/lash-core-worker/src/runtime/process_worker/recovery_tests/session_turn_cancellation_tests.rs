@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_abandoned() {
+async fn cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone() {
     let raw_registry = Arc::new(TestLocalProcessRegistry::default());
     let raw_registry_port: Arc<dyn ProcessRegistry> = raw_registry.clone();
     let sink = Arc::new(RecordingProcessEventSink::default());
@@ -12,7 +12,7 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
     let registry = Arc::clone(watched.registry());
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
     let policy = test_session_policy();
-    let foreign_session_id = "cleanup-failure-foreign-root";
+    let foreign_session_id = "cancel-never-creates-foreign-root";
     factory
         .create_store(&crate::SessionStoreCreateRequest {
             session_id: SessionId::from(foreign_session_id.to_string()),
@@ -22,9 +22,8 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
         })
         .await
         .expect("materialize unrelated durable root session");
-    // This test drives every attempt by hand and counts them, so the idle
-    // dispatcher's autonomous rescan is pushed outside the test's window: the
-    // attempts asserted below are the ones this test asked for.
+    // This test drives the attempt by hand, so the idle dispatcher's
+    // autonomous rescan is pushed outside the test's window.
     let mut config = DurableProcessWorkerConfig::new(
         Arc::new(PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
@@ -33,106 +32,66 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         ),
-        factory,
+        factory.clone(),
         crate::WorkerProcessWork::SelfNative(watched),
         Arc::new(crate::NoQueuedWork::new()),
-        local_owner("cleanup-failure-worker", "host-a", "cleanup-failure-start"),
+        local_owner(
+            "cancel-before-start-worker",
+            "host-a",
+            "cancel-before-start",
+        ),
     )
     .with_session_policy(policy)
     .with_process_event_sink(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>);
     config.native_substrate.worker_sweep.rescan_interval = Duration::from_secs(3600);
-    let worker = DurableProcessWorker::new(config).expect("valid cleanup-failure worker");
-    let process_id = "session-turn-repeated-cleanup-failure";
+    let worker = DurableProcessWorker::new(config).expect("valid cancel worker");
+    let process_id = "session-turn-cancelled-before-start";
     registry
-        .register_process(
-            session_turn_registration(
-                &ProcessId::from(process_id),
-                &SessionId::from(foreign_session_id),
-            )
-            .with_max_attempts(Some(2)),
-        )
+        .register_process(session_turn_registration(
+            &ProcessId::from(process_id),
+            &SessionId::from(foreign_session_id),
+        ))
         .await
-        .expect("register cleanup-failure SessionTurn");
+        .expect("register SessionTurn fixture");
     registry
         .append_event(
             &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
-&crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_abandoned", 11)),
+&crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone", 11)),
         )
         .await
         .expect("append durable cancellation");
 
-    for expected_faults in 1..=2 {
-        let report = worker
-            .drive_pending_processes()
-            .await
-            .expect("admit failed cleanup attempt");
-        assert_eq!(report.admitted, vec![process_id.to_string()]);
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while sink.faults().len() < expected_faults {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("failed cleanup attempt reaches the fault sink");
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                // The dispatcher is resident: it rescans the registry on the
-                // worker-sweep cadence rather than exiting when the worklist
-                // drains, so "idle" is "nothing is executing", not "the
-                // dispatcher task is gone".
-                let idle = {
-                    let state = worker.execution_scheduler.state.lock_recover();
-                    state.running_count() == 0 && matches!(state.extra, ProcessWorklistScan::Idle)
-                };
-                if idle {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("failed cleanup attempt leaves the worker idle");
-        let record = registry
-            .get_process(&ProcessId::from(process_id))
-            .await
-            .expect("read failed cleanup process")
-            .expect("failed cleanup process remains retained");
-        assert!(
-            !record.is_terminal(),
-            "cleanup attempt {expected_faults} must remain retryable"
-        );
-    }
-
-    let faults = sink.faults();
-    assert_eq!(faults.len(), 2);
-    for fault in &faults {
-        match fault {
-            ProcessWorkerFault::RecoveryRunFailed {
-                process_id: fault_process_id,
-                error,
-            } => {
-                assert_eq!(fault_process_id, process_id);
-                assert!(
-                    error.contains("not owned by process"),
-                    "cleanup fault preserves the ownership failure: {error}"
-                );
-            }
-            other => panic!("expected RecoveryRunFailed, got {other:?}"),
-        }
-    }
-
     let report = worker
         .drive_pending_processes()
         .await
-        .expect("admit exhausted cleanup process");
+        .expect("admit cancelled SessionTurn");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
     await_terminal(&registry, &ProcessId::from(process_id)).await;
-    let evidence = abandoned_evidence(&registry, &ProcessId::from(process_id)).await;
-    assert_eq!(evidence.writer, AbandonWriter::EngineGaveUp);
+    let record = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read cancelled SessionTurn")
+        .expect("cancelled SessionTurn remains retained");
     assert_eq!(
-        sink.faults().len(),
-        2,
-        "attempt-budget abandonment must not run cleanup a third time"
+        record.status,
+        ProcessStatus::Cancelled,
+        "cancellation observed before initialization settles the process Cancelled"
+    );
+    assert!(
+        sink.faults().is_empty(),
+        "cancellation before initialization is not a fault: {:?}",
+        sink.faults()
+    );
+    // The registration named a foreign session id; the cancellation path must
+    // not touch it — lash never deletes a session because a process was
+    // cancelled, and the port creates nothing before the create commit.
+    assert!(
+        factory
+            .open_existing_store_by_id(&SessionId::from(foreign_session_id))
+            .await
+            .expect("foreign session still resolvable")
+            .is_some(),
+        "the foreign session the cancelled process named stays retained"
     );
 }
