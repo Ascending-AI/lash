@@ -7,12 +7,21 @@ use crate::session_graph_integrity::{ancestry_indices, graph_node_indices};
 use crate::session_model::SessionHistoryRecord;
 use crate::{BaseRenderCache, Message, NodeId};
 
+/// Bound on the shared-base append delta. While `base` is shared, inserts
+/// accumulate in `appended` and every builder creation or cache detach
+/// clones them; the bound rebuilds a private base before that clone cost
+/// can grow toward the full resident set.
+const APPENDED_FOLD_BOUND: usize = 256;
+
 /// Resident node-id → position index shared across a graph's snapshots.
 ///
 /// The bulk map lives behind an `Arc` so detaching a shared cache for an
-/// append copies the `Arc` rather than N ids. Ids appended after the index
-/// was built accumulate in `appended` — the small map the detach actually
-/// clones — and are consulted first on lookup.
+/// append copies the `Arc` rather than N ids. Whenever the base map is
+/// privately held, inserts — and any accumulated delta — fold straight
+/// into it, keeping `appended` empty. While the base is shared, inserts
+/// accumulate in `appended` (consulted first on lookup) and the fold bound
+/// rebuilds a private base rather than letting the delta — and therefore
+/// every index clone — grow to the whole resident set.
 #[derive(Clone, Debug)]
 pub(crate) struct NodeIdIndex {
     base: Arc<HashMap<NodeId, usize>>,
@@ -35,7 +44,18 @@ impl NodeIdIndex {
     }
 
     fn insert(&mut self, node_id: NodeId, index: usize) {
+        if let Some(base) = Arc::get_mut(&mut self.base) {
+            base.extend(self.appended.drain());
+            base.insert(node_id, index);
+            return;
+        }
         self.appended.insert(node_id, index);
+        if self.appended.len() >= APPENDED_FOLD_BOUND {
+            let mut folded = (*self.base).clone();
+            folded.reserve(self.appended.len());
+            folded.extend(self.appended.drain());
+            self.base = Arc::new(folded);
+        }
     }
 
     fn reserve(&mut self, additional: usize) {
@@ -151,18 +171,21 @@ impl SessionGraphCache {
     }
 
     /// The current unscoped read model, materializing pending appends once.
+    ///
+    /// Each pending tail folds independently: an event-only append neither
+    /// copies nor replaces the message vec or the render cache built on it,
+    /// and `Arc::make_mut` extends the existing allocation in place whenever
+    /// no reader still holds the vec.
     pub(crate) fn active_read_model(&self) -> SessionReadModel {
-        let mut read = self
+        let read = &mut *self
             .active_read
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if !read.pending_events.is_empty() || !read.pending_messages.is_empty() {
-            let mut events = (*read.active_events).clone();
-            events.append(&mut read.pending_events);
-            let mut messages = (*read.active_messages).clone();
-            messages.append(&mut read.pending_messages);
-            read.active_events = Arc::new(events);
-            read.active_messages = Arc::new(messages);
+        if !read.pending_events.is_empty() {
+            Arc::make_mut(&mut read.active_events).append(&mut read.pending_events);
+        }
+        if !read.pending_messages.is_empty() {
+            Arc::make_mut(&mut read.active_messages).append(&mut read.pending_messages);
             read.prompt_render_cache = Arc::new(BaseRenderCache::new());
         }
         SessionReadModel {
@@ -265,5 +288,51 @@ impl SessionGraphCache {
                 .pending_messages
                 .reserve(additional_messages);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn appended_delta_folds_at_the_bound_and_stays_resolvable() {
+        let mut index = NodeIdIndex::from_resident(HashMap::new());
+        // A shared base forces inserts into the delta; the fold bound keeps
+        // the delta — and therefore every index clone — bounded.
+        let held = index.clone();
+        for ordinal in 0..APPENDED_FOLD_BOUND + 8 {
+            index.insert(format!("n{ordinal}").into(), ordinal);
+        }
+        assert!(index.appended.len() < APPENDED_FOLD_BOUND);
+        for ordinal in 0..APPENDED_FOLD_BOUND + 8 {
+            assert_eq!(index.get(&format!("n{ordinal}")), Some(ordinal));
+        }
+        // The held clone's view froze at clone time.
+        assert!(held.get("n0").is_none());
+    }
+
+    #[test]
+    fn privately_held_base_absorbs_appends_without_a_delta() {
+        let mut index = NodeIdIndex::from_resident(HashMap::new());
+        for ordinal in 0..APPENDED_FOLD_BOUND * 2 {
+            index.insert(format!("n{ordinal}").into(), ordinal);
+        }
+        assert!(index.appended.is_empty());
+        assert_eq!(index.base.len(), APPENDED_FOLD_BOUND * 2);
+        assert_eq!(index.get("n511"), Some(511));
+
+        // Once a sharing clone drops, the next insert folds the accumulated
+        // delta into the now-private base.
+        let mut shared = NodeIdIndex::from_resident(HashMap::new());
+        let held = shared.clone();
+        shared.insert("a".into(), 0);
+        shared.insert("b".into(), 1);
+        drop(held);
+        shared.insert("c".into(), 2);
+        assert!(shared.appended.is_empty());
+        assert_eq!(shared.get("a"), Some(0));
+        assert_eq!(shared.get("c"), Some(2));
     }
 }

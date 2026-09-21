@@ -13,12 +13,18 @@ const RESIDENT_GRAPH_SIZES: [usize; 4] = [0, 32, 128, 512];
 /// appended tail, so their slopes should be near zero. Append additionally
 /// copies the node-pointer vector and the active-path index vec (two
 /// pointer-width copies plus vector growth slack), so its cap is wider.
-const MAX_SLOPE_BYTES_PER_RESIDENT_NODE: [(&str, f64); 5] = [
+/// `builder` borrows the resident id index outright; `snapshot_append`
+/// pays the shared-cache detach (bounded id delta, index vec, node-pointer
+/// vec) plus the append itself.
+const MAX_SLOPE_BYTES_PER_RESIDENT_NODE: [(&str, f64); 8] = [
     ("construct", 32.0),
     ("cow", 32.0),
     ("append", 96.0),
     ("remap", 32.0),
     ("timestamps", 32.0),
+    ("builder", 32.0),
+    ("snapshot_append", 48.0),
+    ("event_read", 64.0),
 ];
 
 struct ResidentGraphFixture {
@@ -65,6 +71,36 @@ fn seed_resident_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFix
     })
 }
 
+/// The batch-seeded fixture cannot see per-append index or read-model
+/// drift: it lands all N nodes in one `apply_append`, so the id-index delta
+/// and pending read-model tails are empty no matter how large N is. This
+/// fixture warms the cache on an empty graph and then grows through the
+/// incremental `append_message` path a live session actually uses, so
+/// builder creation and held-snapshot appends are measured against the
+/// structures real append-only use produces.
+fn seed_growth_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFixture> {
+    let mut graph = lash_core::SessionGraph::default();
+    graph.read_model(None).map_err(anyhow::Error::from)?;
+    for index in 0..resident_nodes {
+        graph.append_message(checkpoint_message(
+            format!("growth-msg-{resident_nodes}-{index}"),
+            if index.is_multiple_of(2) {
+                MessageRole::User
+            } else {
+                MessageRole::Assistant
+            },
+            format!("Growth fixture message {index} at size {resident_nodes}."),
+        ));
+    }
+    // Fold the appended read-model tail: a resident graph at turn start
+    // holds a materialized read model, not N pending records.
+    let _ = graph.read_model(None).map_err(anyhow::Error::from)?;
+    Ok(ResidentGraphFixture {
+        resident_nodes,
+        graph,
+    })
+}
+
 /// The F3 N-curve: against a resident graph whose snapshot is still held
 /// (the frozen read view and rollback holder are legitimate by design), run
 /// the four graph writes a durable one-message turn performs — editor
@@ -75,12 +111,17 @@ pub(super) async fn run_once_resident_graph_append_curve(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let mut run = RunRecorder::start(RuntimePerfScenario::ResidentGraphAppendCurve, chat_turns);
-    let fixtures = run
+    let (fixtures, mut growth_fixtures) = run
         .seed(async {
-            RESIDENT_GRAPH_SIZES
+            let fixtures = RESIDENT_GRAPH_SIZES
                 .iter()
                 .map(|resident_nodes| seed_resident_graph(*resident_nodes))
-                .collect::<anyhow::Result<Vec<_>>>()
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            let growth_fixtures = RESIDENT_GRAPH_SIZES
+                .iter()
+                .map(|resident_nodes| seed_growth_graph(*resident_nodes))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            Ok((fixtures, growth_fixtures))
         })
         .await?;
 
@@ -176,6 +217,67 @@ pub(super) async fn run_once_resident_graph_append_curve(
                     )?;
                     phase_profile.insert(phase.0, phase.1);
                 }
+                for fixture in growth_fixtures.iter_mut() {
+                    let resident_nodes = fixture.resident_nodes;
+                    // Builder creation on an incrementally grown warm graph:
+                    // the id index must be borrowed, not re-cloned.
+                    let (_, phase) = measure_runtime_perf_phase(
+                        &resident_graph_phase(resident_nodes, "builder"),
+                        || {
+                            let _builder = fixture
+                                .graph
+                                .append_builder_in_namespace(format!(
+                                    "perf-growth-{turn_index}"
+                                ));
+                            Ok(())
+                        },
+                    )?;
+                    phase_profile.insert(phase.0, phase.1);
+
+                    // A single append while a snapshot pins the grown graph:
+                    // the detach must not re-clone accumulated id-index or
+                    // read-model state linear in resident size.
+                    let (_, phase) = measure_runtime_perf_phase(
+                        &resident_graph_phase(resident_nodes, "snapshot_append"),
+                        || {
+                            let mut adopted = fixture.graph.clone();
+                            adopted.append_message(checkpoint_message(
+                                format!("growth-append-{resident_nodes}-{turn_index}"),
+                                MessageRole::Assistant,
+                                format!(
+                                    "Measured held-snapshot append at resident size {resident_nodes}."
+                                ),
+                            ));
+                            Ok(())
+                        },
+                    )?;
+                    phase_profile.insert(phase.0, phase.1);
+
+                    // An event-only append followed by a read on the warm
+                    // graph itself: materialization extends the events vec
+                    // in place while the message vec and its render cache
+                    // stay untouched. Unconditionally cloning either shared
+                    // vec shows up as a full per-node copy here.
+                    let (_, phase) = measure_runtime_perf_phase(
+                        &resident_graph_phase(resident_nodes, "event_read"),
+                        || {
+                            fixture.graph.append_protocol_event(
+                                lash_core::ProtocolEvent::typed(
+                                    "perf_growth_event",
+                                    serde_json::json!({"turn": turn_index}),
+                                )
+                                .map_err(anyhow::Error::from)?,
+                            );
+                            let read = fixture
+                                .graph
+                                .read_model(None)
+                                .map_err(anyhow::Error::from)?;
+                            std::hint::black_box(read.messages.len());
+                            Ok(())
+                        },
+                    )?;
+                    phase_profile.insert(phase.0, phase.1);
+                }
                 Ok(TurnRun {
                     value: (),
                     tail: TurnTail {
@@ -201,10 +303,12 @@ pub(super) async fn run_once_resident_graph_append_curve(
     let result = run.finish(RunTail {
         session_nodes: fixtures
             .iter()
+            .chain(growth_fixtures.iter())
             .map(|fixture| fixture.graph.nodes.len())
             .sum(),
         active_path_messages: fixtures
             .iter()
+            .chain(growth_fixtures.iter())
             .map(|fixture| fixture.graph.nodes.len())
             .sum(),
         ..RunTail::default()

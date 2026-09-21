@@ -1321,3 +1321,44 @@ fn shared_records_serialize_with_the_unchanged_durable_shape() {
         serde_json::to_string(&graph).unwrap()
     );
 }
+
+#[test]
+fn event_only_appends_preserve_the_message_vec_and_render_cache() {
+    let mut graph = SessionGraph::default();
+    graph.append_message(text_message("m1", MessageRole::User, "hello"));
+    let before = graph.read_model(None).expect("warm read model");
+
+    graph.append_protocol_event(protocol_event());
+    let after = graph.read_model(None).expect("read after event append");
+
+    assert!(Arc::ptr_eq(&before.messages, &after.messages));
+    assert!(Arc::ptr_eq(
+        &before.prompt_render_cache,
+        &after.prompt_render_cache
+    ));
+    assert_eq!(after.messages.len(), 1);
+    assert_eq!(after.active_events.len(), before.active_events.len() + 1);
+    assert!(!Arc::ptr_eq(&before.active_events, &after.active_events));
+}
+
+#[test]
+fn held_readers_isolate_folded_pending_tails() {
+    let mut graph = SessionGraph::default();
+    graph.append_message(text_message("m1", MessageRole::User, "hello"));
+    graph.append_protocol_event(protocol_event());
+    let held = graph.read_model(None).expect("held reader");
+
+    graph.append_protocol_event(protocol_event());
+    let latest = graph.read_model(None).expect("read after second event");
+
+    assert_eq!(latest.active_events.len(), held.active_events.len() + 1);
+    assert!(!Arc::ptr_eq(&held.active_events, &latest.active_events));
+
+    graph.append_message(text_message("m2", MessageRole::Assistant, "reply"));
+    let with_message = graph.read_model(None).expect("read after message append");
+    assert_eq!(with_message.messages.len(), 2);
+    assert!(!Arc::ptr_eq(
+        &with_message.prompt_render_cache,
+        &latest.prompt_render_cache
+    ));
+}

@@ -1247,11 +1247,18 @@ impl SessionGraph {
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        let mut builder = draft_namespace.map_or_else(
-            || self.append_builder(),
-            |namespace| self.append_builder_in_namespace(namespace),
-        );
-        let nodes = builder.append_drafts_at(drafts, timestamp);
+        let nodes = {
+            // Scope the builder to draft minting: it holds a read clone of
+            // the resident id index, and keeping it alive across the append
+            // would keep the index's shared base alive too — forcing every
+            // insert into the accumulated delta instead of folding into a
+            // privately held base.
+            let mut builder = draft_namespace.map_or_else(
+                || self.append_builder(),
+                |namespace| self.append_builder_in_namespace(namespace),
+            );
+            builder.append_drafts_at(drafts, timestamp)
+        };
         let node_ids = nodes
             .iter()
             .map(|node| node.node_id.clone())
