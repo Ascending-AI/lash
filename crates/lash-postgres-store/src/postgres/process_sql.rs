@@ -905,4 +905,3 @@ pub(crate) fn list_processes_sql(filter: &lash_core::ProcessListFilter) -> &'sta
         (true, true) => statements.list_by_parent_scope_pending_cancel.sql(),
     }
 }
-

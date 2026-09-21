@@ -68,6 +68,32 @@ them, so the effect family owns the whole predicate and reads the wait
 family's table inside it.
 """
 
+[[cross_family]]
+statement = "attachment_manifest.select_live_root_proving_process_death"
+owner = "crates/lash-store-sql/src/attachment/manifest.rs"
+touches = ["processes"]
+reason = """
+An attachment owned by a process outlives its owner only until the owner's row
+is gone, and "is the owner still there?" is the same question as "may this
+root be reclaimed?". Asking it separately would read the process row outside
+the transaction that decides the attachment's fate, so the attachment family
+owns the whole predicate and reads the process family's table inside it. It
+renders only for a layout that places `processes`, which is what keeps a
+connection with no registry bound from guessing.
+"""
+
+[[cross_family]]
+statement = "attachment_manifest.delete_aged_uncommitted_proving_process_death"
+owner = "crates/lash-store-sql/src/attachment/manifest.rs"
+touches = ["processes"]
+reason = """
+The write half of the same question as
+attachment_manifest.select_live_root_proving_process_death, and one statement
+for the same reason: a process row deleted between a separate liveness read
+and this delete would reclaim an attachment whose owner was live when the
+decision was taken.
+"""
+
 [families.artifact]
 tables = ["blobs", "artifact_refs", "artifact_owners", "artifact_owner_retirements"]
 statement_prefixes = ["blob", "artifact_ref", "artifact_owner", "artifact_owner_retirement"]
