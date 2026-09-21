@@ -130,7 +130,42 @@ pub struct ToolChildLawFixture {
     /// The completion routing this tier would record for a deferrable child:
     /// `Durable` where a resolution survives the worker, `ProcessLifetime`
     /// where the host's keys die with the process (ADR 0099 §14).
-    pub completion_routing: ToolChildCompletionRouting,
+    pub deferrable_routing: ToolChildDeferrableRouting,
+}
+
+/// Which routing fact a tier records for a deferrable child.
+///
+/// A kind rather than the value itself because `ProcessLifetime` carries the
+/// issuing registry's identity, which is only known once the world is built —
+/// [`deferrable_routing`] resolves the kind against the host at group
+/// construction.
+#[derive(Clone, Copy, Debug)]
+pub enum ToolChildDeferrableRouting {
+    /// A completion resolution survives the worker that issued it.
+    Durable,
+    /// Completion keys die with the issuing process.
+    ProcessLifetime,
+}
+
+/// Resolves the tier's deferrable routing kind into the recorded fact, binding
+/// a process-lifetime key to this host's registry identity.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: a host mints a non-empty registry identity"
+)]
+fn deferrable_routing(
+    kind: ToolChildDeferrableRouting,
+    host: &Arc<dyn crate::EffectHost>,
+) -> ToolChildCompletionRouting {
+    match kind {
+        ToolChildDeferrableRouting::Durable => ToolChildCompletionRouting::Durable,
+        ToolChildDeferrableRouting::ProcessLifetime => {
+            ToolChildCompletionRouting::ProcessLifetime {
+                issuer: crate::runtime::TurnControlBindingId::new(host.turn_control_binding_id())
+                    .expect("a host's registry identity is a valid binding id"),
+            }
+        }
+    }
 }
 
 /// The lease window the lane law and the recovery law's live phases use:
@@ -403,7 +438,26 @@ fn law_direct_completion() -> crate::DirectCompletion {
             call_id: crate::LlmCallId("law-direct-call".to_string()),
             label: None,
             replay_drops: Vec::new(),
-            attempts: Vec::new(),
+            attempts: vec![crate::AttemptRecord {
+                ordinal: 1,
+                started_at: 0,
+                duration: std::time::Duration::ZERO,
+                outcome: crate::AttemptOutcome::Completed,
+                protocol_position: crate::ProtocolPosition::ResponseObserved,
+                retry_budget_consumed: false,
+                retry_decision: None,
+                error: None,
+                evidence: None,
+                generation_disposition: None,
+                usage: Some(crate::llm::types::LlmUsage {
+                    input_tokens: 41,
+                    output_tokens: 7,
+                    cache_read_input_tokens: 0,
+                    cache_write_input_tokens: 0,
+                    reasoning_output_tokens: 0,
+                }),
+                usage_disposition: crate::AttemptUsageDisposition::default(),
+            }],
         },
     }
 }
@@ -654,13 +708,17 @@ fn register_opener(
     registry: Arc<dyn crate::ProcessRegistry>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     opener: crate::EffectOpener,
+    cooperative: tokio_util::sync::CancellationToken,
 ) -> crate::runtime::effect::LiveOpenerGuard {
     let installed = install_child_host(host, &process_env_store);
     let dispatch = opener_dispatch(host, scope, provider, registry, process_env_store);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
-    let context =
-        crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(&dispatch, event_tx)
-            .expect("the law's dispatch context is 'static");
+    let context = crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(
+        &dispatch,
+        event_tx,
+        cooperative,
+    )
+    .expect("the law's dispatch context is 'static");
     let (guard, ended) = installed.openers().register(opener, context);
     // The registration owns the sender's lifetime: the forwarder ends when the
     // entry leaves the registry, not when the channel's last clone drops.
@@ -897,6 +955,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
         Arc::clone(&scenario.registry),
         Arc::clone(&scenario.process_env_store),
         opener,
+        tokio_util::sync::CancellationToken::new(),
     );
 
     let parent = parent_invocation(&scope);
@@ -906,7 +965,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
         &group_key,
         &scenario.env_ref,
         &parent,
-        fixture.completion_routing,
+        deferrable_routing(fixture.deferrable_routing, &host),
     );
     let scoped = host.scoped(scope.clone()).expect("the group scope binds");
     let mut handle = scoped
@@ -1272,7 +1331,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             &session_id,
             &group_key,
             &env_ref,
-            fixture.completion_routing,
+            deferrable_routing(fixture.deferrable_routing, &host),
         );
         let refusal = scoped
             .controller()
@@ -1294,6 +1353,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             registry,
             Arc::clone(&process_env_store),
             opener,
+            tokio_util::sync::CancellationToken::new(),
         );
         let mut handle = scoped
             .controller()
@@ -1302,7 +1362,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                 &session_id,
                 &group_key,
                 &env_ref,
-                fixture.completion_routing,
+                deferrable_routing(fixture.deferrable_routing, &host),
             ))
             .await
             .expect("the identical group opens once the opener is live");
@@ -1344,7 +1404,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         let env_ref = env_ref.clone();
         let observation = Arc::clone(&observation);
         let call_id = call_id.clone();
-        let routing = fixture.completion_routing;
+        let routing_kind = fixture.deferrable_routing;
         let opener = opener.clone();
         move |world| {
             Box::pin(async move {
@@ -1362,6 +1422,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                     Arc::new(crate::TestLocalProcessRegistry::default()),
                     env_store,
                     opener,
+                    tokio_util::sync::CancellationToken::new(),
                 );
                 let scoped = world
                     .host
@@ -1374,7 +1435,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                         &session_id,
                         &group_key,
                         &env_ref,
-                        routing,
+                        deferrable_routing(routing_kind, &world.host),
                     ))
                     .await
                     .expect("the group opens under the live opener");
@@ -1444,7 +1505,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             &session_id,
             &group_key,
             &env_ref,
-            fixture.completion_routing,
+            deferrable_routing(fixture.deferrable_routing, &successor.host),
         ))
         .await
         .expect("a reopen tolerates a child this host cannot run");
@@ -1485,6 +1546,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         registry,
         Arc::clone(&process_env_store),
         opener,
+        tokio_util::sync::CancellationToken::new(),
     );
     let drain = Arc::clone(
         successor
@@ -1537,7 +1599,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             &session_id,
             &group_key,
             &env_ref,
-            fixture.completion_routing,
+            deferrable_routing(fixture.deferrable_routing, &successor.host),
         ))
         .await
         .expect("the successor reopens the drained group");

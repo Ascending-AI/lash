@@ -407,7 +407,7 @@ pub async fn coordinate_tool_invocation<'run>(
         Some(crate::runtime::ToolChildCompletionRouting::Inline) => false,
         Some(
             crate::runtime::ToolChildCompletionRouting::Durable
-            | crate::runtime::ToolChildCompletionRouting::ProcessLifetime,
+            | crate::runtime::ToolChildCompletionRouting::ProcessLifetime { .. },
         ) => true,
     };
 
@@ -421,7 +421,7 @@ pub async fn coordinate_tool_invocation<'run>(
                 may_defer,
             )
             .await;
-        if let Some(recorded) = recorded_completion_routing {
+        if let Some(ref recorded) = recorded_completion_routing {
             let observed = match &prepared_key {
                 Ok(crate::CompletionKeyPreparation::Issued(_)) => "issued",
                 Ok(crate::CompletionKeyPreparation::NotNeeded) => "not-needed",
@@ -431,14 +431,16 @@ pub async fn coordinate_tool_invocation<'run>(
             let honoured = match recorded {
                 crate::runtime::ToolChildCompletionRouting::Inline => observed == "not-needed",
                 crate::runtime::ToolChildCompletionRouting::Durable
-                | crate::runtime::ToolChildCompletionRouting::ProcessLifetime => {
+                | crate::runtime::ToolChildCompletionRouting::ProcessLifetime { .. } => {
                     observed == "issued"
                 }
             };
             if !observed.is_empty() && !honoured {
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::ControllerAborted(completion_routing_mismatch(
-                        recorded, observed, &call,
+                        recorded.clone(),
+                        observed,
+                        &call,
                     )),
                     triggers,
                 };

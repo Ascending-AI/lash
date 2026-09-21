@@ -23,10 +23,19 @@ pub(crate) async fn apply_direct_outcome(
     usage_source: &str,
     caused_by: Option<&CausalRef>,
     outcome: RuntimeEffectOutcome,
+    usage_sink: Option<&crate::runtime::effect::ToolUsageLedger>,
 ) -> Result<(LlmResponse, TokenUsage, crate::LlmCallRecord), PluginError> {
     let (result, call_record) = outcome
         .into_direct_response()
         .map_err(|err| PluginError::Session(err.to_string()))?;
+    // The sealed record's known usage is captured *before* its outcome is
+    // projected into a success or an error: a billed failed attempt and an
+    // aborted call's recorded spend are usage facts too, and the sealed
+    // record is the only place they exist — once the error path below
+    // returns, nothing else carries them to the child's settlement.
+    if let (Some(sink), Some(record)) = (usage_sink, call_record.as_ref()) {
+        sink.record(record);
+    }
     let (response, usage) = apply_direct_llm_result(
         current,
         usage_capability,

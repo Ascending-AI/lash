@@ -389,10 +389,24 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         // caller that offered different ones has simply staged nothing for the
         // children that exist.
         //
-        // Re-*resolving* is not the fix: the resolution above consumed this
-        // host's staged runners, and asking again would find none. It also
-        // cannot move below the write, because running before the group row
-        // exists is what lets a routing refusal journal nothing.
+        // Re-*resolving* is not the fix for children in general: the resolution
+        // above consumed this host's staged runners, and asking again would
+        // find none. It also cannot move below the write, because running
+        // before the group row exists is what lets a routing refusal journal
+        // nothing.
+        //
+        // A `ToolInvocation` child is the exception, and the exception is the
+        // point (ADR 0099 §3): its authority lives in the *retained* request —
+        // the recorded opener decides whose live context it borrows. An
+        // executor resolved for the *offered* request and matched only by
+        // replay key could lend a different opener's authority to this request,
+        // because a replay key is not proof of opener. Tool children therefore
+        // resolve fresh against the retained envelope — the resolver is the
+        // opener registry, so asking again is safe — and a `None` here is the
+        // routing fact "this retained opener is not live in this process": the
+        // child is not dispatched, stays accepted, and is recovered where its
+        // opener actually runs. It is never run under a stranger's context and
+        // never synthesized into a failed terminal.
         let replay_keys = replay_keys_of(&group)?;
         let mut offered: HashMap<&str, RuntimeEffectLocalExecutor<'static>> = offered_replay_keys
             .iter()
@@ -400,9 +414,17 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             .zip(offered_executors)
             .filter_map(|(key, executor)| executor.map(|executor| (key, executor)))
             .collect();
-        let executors = replay_keys
+        let resolver = self.group_executors()?;
+        let executors = group
+            .children()
             .iter()
-            .map(|key| offered.remove(key.as_str()))
+            .map(|child| {
+                if matches!(&child.command, RuntimeEffectCommand::ToolInvocation { .. }) {
+                    resolver.executor_for(child)
+                } else {
+                    offered.remove(child.invocation.replay_key())
+                }
+            })
             .collect::<Vec<_>>();
         let dispatched = executors
             .iter()

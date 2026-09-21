@@ -86,6 +86,7 @@ impl RuntimeSessionServices {
             .scoped_effect_controller(scoped_effect_controller)
             .causal_invocation(parent_invocation.clone())
             .dispatch_parent_invocation(parent_invocation)
+            .cancellation(cancellation.clone())
             .build()?;
         let dispatch = run_context.dispatch();
         let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))

@@ -14,7 +14,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_conformance::{ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec};
+use lash_conformance::{
+    ToolChildDeferrableRouting, ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec,
+};
 use lash_core::EffectHost;
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
@@ -77,7 +79,7 @@ lash_conformance::tool_child_invocation_tests!({
         ToolChildLawFixture {
             make_world,
             make_registry,
-            completion_routing: lash_core::runtime::effect::ToolChildCompletionRouting::Durable,
+            deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )
 });

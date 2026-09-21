@@ -742,6 +742,7 @@ impl LashRuntime {
             observes_durable_cancel_after_llm,
             protocol_reply: Default::default(),
             live_opener: std::sync::Mutex::new(None),
+            cooperative_cancel: CancellationToken::new(),
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);

@@ -16,7 +16,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use lash_conformance::{ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec};
+use lash_conformance::{
+    ToolChildDeferrableRouting, ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec,
+};
 use lash_core::EffectHost;
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry};
 
@@ -74,7 +76,7 @@ lash_conformance::tool_child_invocation_tests!({
         ToolChildLawFixture {
             make_world,
             make_registry,
-            completion_routing: lash_core::runtime::effect::ToolChildCompletionRouting::Durable,
+            deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )
 });

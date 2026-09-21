@@ -9,6 +9,7 @@ pub trait DirectCompletionService: Send + Sync {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
+        usage_sink: Option<&crate::runtime::ToolUsageLedger>,
     ) -> Result<crate::DirectCompletion, crate::PluginError>;
 
     async fn complete_llm(
@@ -19,7 +20,33 @@ pub trait DirectCompletionService: Send + Sync {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
+        usage_sink: Option<&crate::runtime::ToolUsageLedger>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError>;
+
+    /// Rebinds this service to a tool child's recorded authority, when the
+    /// implementation carries authority of its own.
+    ///
+    /// A `DirectCompletionService` is the live completion *transport* a group
+    /// child borrows from its opener. The transport is lent; everything that
+    /// decides whose call it is — the session the provider call resolves its
+    /// policy under, the environment it was admitted with — must answer from
+    /// the child's *recorded* facts, and the default answers `None` because a
+    /// service that cannot prove it executes under those facts is refused
+    /// rather than lent the opener's (ADR 0099 §3).
+    ///
+    /// `session_id` is the session the child attributes its work to and
+    /// `execution_env_spec` is the environment resolved from the child's
+    /// recorded `ProcessExecutionEnvRef` — an implementation bound to a
+    /// different session returns `None`, and a returned service must resolve
+    /// policy under `execution_env_spec`, not whatever the opener is running.
+    fn bind_tool_child(
+        self: Arc<Self>,
+        session_id: &crate::SessionId,
+        execution_env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Option<Arc<dyn DirectCompletionService>> {
+        let _ = (session_id, execution_env_spec);
+        None
+    }
 }
 
 /// Runtime-backed direct completion source.
@@ -128,12 +155,89 @@ impl<'run> DirectCompletionClient<'run> {
         self.usage_ledger.as_ref()
     }
 
-    /// Records one completed nested call against the bound ledger, when this
-    /// client has one.
-    fn record_usage(&self, call_record: &crate::LlmCallRecord, usage: &crate::TokenUsage) {
+    /// Records a completed nested call's sealed spend against the bound
+    /// ledger, when this client has one.
+    ///
+    /// Only the test sources need the client's help — a runtime source feeds
+    /// its sink inside the service, before the outcome is projected.
+    #[cfg(any(test, feature = "testing"))]
+    fn record_usage(&self, call_record: &crate::LlmCallRecord) {
         if let Some(ledger) = self.usage_ledger.as_ref() {
-            ledger.record(call_record, usage);
+            ledger.record(call_record);
         }
+    }
+
+    /// Rebinds this client to a tool child's recorded authority (ADR 0099 §3).
+    ///
+    /// What is lent is the live completion transport; what is rebound is
+    /// everything that decides whose call it is:
+    ///
+    /// * `session_id` — the session the child's work is attributed to, which a
+    ///   process opener's child need not share with its opener;
+    /// * `execution_env_spec` — the environment resolved from the child's
+    ///   recorded `ProcessExecutionEnvRef`, which a runtime-backed service
+    ///   must rebind its policy resolution to or be refused;
+    /// * `effect_controller` — the child's own admitted controller, so the
+    ///   direct effect is journaled under the child's claim scope;
+    /// * `turn_id` and `parent_invocation` — the recorded lineage, so the
+    ///   effect's causal parent is the child's, not the opener's current one;
+    /// * `usage_ledger` — the child's own accumulator, so every provider
+    ///   attempt's spend lands on the child's settlement.
+    ///
+    /// A service that cannot prove it executes under the recorded session and
+    /// environment makes this a typed refusal rather than a silent authority
+    /// leak.
+    pub fn bind_tool_child(
+        &self,
+        session_id: &crate::SessionId,
+        execution_env_spec: &crate::ProcessExecutionEnvSpec,
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'static>,
+        turn_id: Option<crate::TurnId>,
+        parent_invocation: Option<crate::RuntimeInvocation>,
+        usage_ledger: crate::runtime::ToolUsageLedger,
+    ) -> Result<DirectCompletionClient<'static>, crate::runtime::RuntimeEffectControllerError> {
+        let source = match &self.source {
+            DirectCompletionSource::Runtime(source) => {
+                let service = source
+                    .service
+                    .clone()
+                    .bind_tool_child(session_id, execution_env_spec)
+                    .ok_or_else(|| {
+                        crate::runtime::RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+                            format!(
+                                "the opener's direct-completion service cannot prove it executes \
+                                 under session `{session_id}` and the child's recorded \
+                                 environment; a managed-LLM call is refused rather than journaled \
+                                 under the opener's authority"
+                            ),
+                        )
+                    })?;
+                DirectCompletionSource::Runtime(RuntimeDirectSource {
+                    service,
+                    effect_controller,
+                    turn_id,
+                })
+            }
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::Unavailable(message) => {
+                DirectCompletionSource::Unavailable(message.clone())
+            }
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::TestFn(invoke) => {
+                DirectCompletionSource::TestFn(Arc::clone(invoke))
+            }
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::TestLlmFn(invoke) => {
+                DirectCompletionSource::TestLlmFn(Arc::clone(invoke))
+            }
+        };
+        Ok(DirectCompletionClient {
+            source,
+            parent_invocation: parent_invocation.map(Box::new),
+            inside_tool_attempt: self.inside_tool_attempt,
+            usage_ledger: Some(usage_ledger),
+        })
     }
 
     pub(crate) fn to_static(&self) -> Option<DirectCompletionClient<'static>> {
@@ -219,7 +323,11 @@ impl<'run> DirectCompletionClient<'run> {
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         match &self.source {
             DirectCompletionSource::Runtime(source) => {
-                let completion = source
+                // The sink rides into the service so the sealed call record is
+                // captured before its outcome is projected — a failed or
+                // aborted call's billed provider attempts are usage facts too,
+                // and they exist nowhere else once the record is dropped.
+                source
                     .service
                     .complete(
                         request,
@@ -227,10 +335,9 @@ impl<'run> DirectCompletionClient<'run> {
                         source.effect_controller.scoped(),
                         source.turn_id.as_ref(),
                         position,
+                        self.usage_ledger.as_ref(),
                     )
-                    .await?;
-                self.record_usage(&completion.llm_call, &completion.usage);
-                Ok(completion)
+                    .await
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::Unavailable(message) => {
@@ -243,7 +350,7 @@ impl<'run> DirectCompletionClient<'run> {
                 // have made, so it feeds the bound usage ledger the same way:
                 // a fixture asserting capture of managed-LLM spend exercises
                 // the real recording path rather than a second one.
-                self.record_usage(&completion.llm_call, &completion.usage);
+                self.record_usage(&completion.llm_call);
                 Ok(completion)
             }
             #[cfg(any(test, feature = "testing"))]
@@ -283,7 +390,7 @@ impl<'run> DirectCompletionClient<'run> {
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         match &self.source {
             DirectCompletionSource::Runtime(source) => {
-                let completion = source
+                source
                     .service
                     .complete_llm(
                         request,
@@ -292,10 +399,9 @@ impl<'run> DirectCompletionClient<'run> {
                         source.turn_id.as_ref(),
                         self.position(None),
                         caused_by,
+                        self.usage_ledger.as_ref(),
                     )
-                    .await?;
-                self.record_usage(&completion.llm_call, &completion.usage);
-                Ok(completion)
+                    .await
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::Unavailable(message) => {
@@ -308,7 +414,7 @@ impl<'run> DirectCompletionClient<'run> {
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestLlmFn(invoke) => {
                 let completion = invoke(request, usage_source.to_string())?;
-                self.record_usage(&completion.llm_call, &completion.usage);
+                self.record_usage(&completion.llm_call);
                 Ok(completion)
             }
         }

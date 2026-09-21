@@ -3,7 +3,7 @@ use super::*;
 use crate::MessageRole;
 use lash_sansio::core_support::ModelToolReturnCoreSupport;
 
-fn attempt(ordinal: u32) -> crate::AttemptRecord {
+fn attempt(ordinal: u32, input_tokens: i64) -> crate::AttemptRecord {
     crate::AttemptRecord {
         ordinal,
         started_at: 0,
@@ -15,17 +15,26 @@ fn attempt(ordinal: u32) -> crate::AttemptRecord {
         error: None,
         evidence: None,
         generation_disposition: None,
-        usage: None,
+        usage: Some(crate::llm::types::LlmUsage {
+            input_tokens,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
+        }),
         usage_disposition: crate::AttemptUsageDisposition::default(),
     }
 }
 
-fn call_record(id: &str, attempts: u32) -> crate::LlmCallRecord {
+fn call_record(id: &str, attempts: &[(u32, i64)]) -> crate::LlmCallRecord {
     crate::LlmCallRecord {
         call_id: LlmCallId(id.to_string()),
         label: None,
         replay_drops: Vec::new(),
-        attempts: (1..=attempts).map(attempt).collect(),
+        attempts: attempts
+            .iter()
+            .map(|(ordinal, usage)| attempt(*ordinal, *usage))
+            .collect(),
     }
 }
 
@@ -47,11 +56,11 @@ fn message(content: &str) -> PluginMessage {
     }
 }
 
-fn delta(attempt: u32, call_id: &str, provider_attempts: u32, usage: TokenUsage) -> ToolUsageDelta {
+fn delta(attempt: u32, call_id: &str, provider_attempt: u32, usage: TokenUsage) -> ToolUsageDelta {
     ToolUsageDelta {
         attempt,
         llm_call_id: LlmCallId(call_id.to_string()),
-        provider_attempts,
+        provider_attempt,
         usage,
     }
 }
@@ -208,19 +217,29 @@ fn an_attempt_capture_round_trips_and_refuses_an_unknown_field() {
 }
 
 /// §13: a spend is identified by its attempt and ADR 0032's `(LlmCallId,
-/// provider-attempt ordinal)` pair so a re-attached fact can be recognised.
+/// provider-attempt ordinal)` pair so a re-attached fact can be recognised —
+/// one fact per sealed provider attempt, so a billed failure and the retry
+/// that replaced it each carry their own spend rather than a summed one.
 #[test]
 fn the_ledger_records_a_spend_with_its_full_identity() {
     let ledger = ToolUsageLedger::for_attempt(2);
-    ledger.record(&call_record("call-a", 2), &spent(5));
+    ledger.record(&call_record("call-a", &[(1, 3), (2, 5)]));
     assert_eq!(
         ledger.take(),
-        vec![ToolUsageDelta {
-            attempt: 2,
-            llm_call_id: LlmCallId("call-a".to_string()),
-            provider_attempts: 2,
-            usage: spent(5),
-        }]
+        vec![
+            ToolUsageDelta {
+                attempt: 2,
+                llm_call_id: LlmCallId("call-a".to_string()),
+                provider_attempt: 1,
+                usage: spent(3),
+            },
+            ToolUsageDelta {
+                attempt: 2,
+                llm_call_id: LlmCallId("call-a".to_string()),
+                provider_attempt: 2,
+                usage: spent(5),
+            },
+        ]
     );
     assert!(
         ledger.take().is_empty(),
@@ -246,12 +265,12 @@ fn the_aggregate_ledger_restores_journaled_deltas() {
     );
 }
 
-/// Unknown is a value and zero is a false fact (§13, ADR 0032). A call with no
-/// known usage contributes no row rather than a zero row.
+/// Unknown is a value and zero is a false fact (§13, ADR 0032). A provider
+/// attempt reporting no usage contributes no row rather than a zero row.
 #[test]
 fn the_ledger_never_zero_fills() {
     let ledger = ToolUsageLedger::new();
-    ledger.record(&call_record("call-a", 1), &TokenUsage::default());
+    ledger.record(&call_record("call-a", &[(1, 0)]));
     assert!(
         ledger.take().is_empty(),
         "a call with no known usage must contribute no delta; only an explicit spend closes a hole"
@@ -264,6 +283,6 @@ fn the_ledger_never_zero_fills() {
 fn a_cloned_ledger_records_into_the_same_accumulator() {
     let ledger = ToolUsageLedger::new();
     let nested = ledger.clone();
-    nested.record(&call_record("call-a", 1), &spent(2));
+    nested.record(&call_record("call-a", &[(1, 2)]));
     assert_eq!(ledger.take().len(), 1);
 }

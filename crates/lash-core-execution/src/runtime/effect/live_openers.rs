@@ -109,10 +109,24 @@ use crate::EffectOpener;
 #[derive(Clone)]
 pub struct LiveOpenerContext {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'static>>,
+    /// The opener's own cooperative cancellation token.
+    ///
+    /// A child's body token is a child of this one, so a cooperative cancel
+    /// signalled to the opener reaches work the child is running in the same
+    /// process. For an opener whose turn control participates *locally* this
+    /// is the only cancellation a child can honour — there is no durable
+    /// address — and for a durable opener it is the same-process fast path
+    /// beside the journaled gate the child's waits attach.
+    cancellation: CancellationToken,
 }
 
 impl LiveOpenerContext {
     /// Captures an opener's dispatch context for the children it will open.
+    ///
+    /// `cancellation` is the opener's own cooperative token — the turn's, or
+    /// the process runner's — not a fresh one, because the child token the
+    /// driver mints is a child of it and an orphan parent would make the
+    /// child's cooperative cancel unsignalable.
     ///
     /// Returns `None` when the context cannot be taken to `'static`, which is
     /// the same condition
@@ -122,9 +136,13 @@ impl LiveOpenerContext {
     /// meets it must not register, because a half-captured opener would be a
     /// registry entry whose children could never actually run.
     #[must_use]
-    pub fn capture(dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>) -> Option<Self> {
+    pub fn capture(
+        dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
+        cancellation: CancellationToken,
+    ) -> Option<Self> {
         dispatch.to_static().map(|dispatch| Self {
             dispatch: Arc::new(dispatch),
+            cancellation,
         })
     }
 
@@ -140,11 +158,13 @@ impl LiveOpenerContext {
     pub fn capture_with_event_sender(
         dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
         event_tx: tokio::sync::mpsc::Sender<crate::SessionStreamEvent>,
+        cancellation: CancellationToken,
     ) -> Option<Self> {
         dispatch.to_static().map(|mut dispatch| {
             dispatch.event_tx = event_tx;
             Self {
                 dispatch: Arc::new(dispatch),
+                cancellation,
             }
         })
     }
@@ -154,6 +174,13 @@ impl LiveOpenerContext {
     #[must_use]
     pub fn dispatch(&self) -> &Arc<crate::tool_dispatch::ToolDispatchContext<'static>> {
         &self.dispatch
+    }
+
+    /// The opener's cooperative cancellation token, the parent of the child's
+    /// own body token.
+    #[must_use]
+    pub fn cancellation(&self) -> &CancellationToken {
+        &self.cancellation
     }
 }
 
@@ -171,6 +198,10 @@ impl std::fmt::Debug for LiveOpenerContext {
 #[derive(Default)]
 pub struct LiveOpenerRegistry {
     openers: Mutex<HashMap<EffectOpener, LiveOpenerEntry>>,
+    /// Woken on every registration, so a child routed between its opener's
+    /// deregistration and re-registration can wait for the same opener value
+    /// to come live again rather than failing a routing fact.
+    changed: tokio::sync::Notify,
     /// Monotonic, so a re-registration can be told from the registration it
     /// replaced. Without it a redriven opener's predecessor guard — which may
     /// drop at any moment, since the old worker is winding down concurrently —
@@ -239,6 +270,7 @@ impl LiveOpenerRegistry {
                 _ended: ended.clone().drop_guard(),
             },
         );
+        self.changed.notify_waiters();
         (
             LiveOpenerGuard {
                 registry: Arc::clone(self),
@@ -260,6 +292,33 @@ impl LiveOpenerRegistry {
             .lock_recover()
             .get(opener)
             .map(|entry| entry.context.clone())
+    }
+
+    /// The live context for `opener`, waiting until it registers when this
+    /// host does not have it yet.
+    ///
+    /// Used at the execution boundary, after routing has already run: an
+    /// opener that stepped down between resolution and execution is a child
+    /// whose opener is *coming back* — a redrive re-registers the same
+    /// [`EffectOpener`] value — so the correct answer is to wait for that
+    /// registration rather than fail a routing fact into a journaled
+    /// terminal. A child whose opener never returns waits for the life of the
+    /// process, which is the same bound the group places on any child that is
+    /// running here.
+    pub async fn context_for_or_wait(&self, opener: &EffectOpener) -> LiveOpenerContext {
+        loop {
+            // Register the wait *before* checking: `notify_waiters` wakes only
+            // waiters already enlisted, so a registration landing between the
+            // check and the await would otherwise be missed and the child
+            // would wait for the next registration — possibly forever.
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if let Some(context) = self.context_for(opener) {
+                return context;
+            }
+            notified.await;
+        }
     }
 
     /// Whether `opener` is live in this host.

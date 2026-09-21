@@ -150,6 +150,7 @@ impl RuntimeSessionServices {
                 .tool_surface(tool_surface)
                 .scoped_effect_controller(scoped_effect_controller)
                 .causal_invocation(execution_context_for_runtime.causal_invocation.clone())
+                .cancellation(cancellation_for_runtime.clone())
                 .build()?;
             let dispatch = run_context.dispatch();
             let event_context = crate::RuntimeExecutionProcessEventContext {

@@ -10,6 +10,7 @@ impl RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'a>,
         turn_id: Option<&'a crate::TurnId>,
         position: DirectExecutionPosition,
+        usage_sink: Option<crate::runtime::effect::ToolUsageLedger>,
     ) -> DirectInvocationContext<'a> {
         DirectInvocationContext {
             current: &self.current,
@@ -19,6 +20,7 @@ impl RuntimeSessionServices {
             position,
             replay_ordinals: self.direct_replay_ordinals.as_ref(),
             unkeyed_in_flight: self.direct_unkeyed_in_flight.as_ref(),
+            usage_sink,
         }
     }
 }
@@ -32,10 +34,16 @@ impl DirectCompletionService for RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
+        usage_sink: Option<&crate::runtime::effect::ToolUsageLedger>,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_completion(
-                self.direct_invocation_context(effect_controller, turn_id, position),
+                self.direct_invocation_context(
+                    effect_controller,
+                    turn_id,
+                    position,
+                    usage_sink.cloned(),
+                ),
                 request,
                 usage_source,
             )
@@ -50,15 +58,44 @@ impl DirectCompletionService for RuntimeSessionServices {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
+        usage_sink: Option<&crate::runtime::effect::ToolUsageLedger>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_llm_completion(
-                self.direct_invocation_context(effect_controller, turn_id, position),
+                self.direct_invocation_context(
+                    effect_controller,
+                    turn_id,
+                    position,
+                    usage_sink.cloned(),
+                ),
                 request,
                 usage_source,
                 caused_by,
             )
             .await
+    }
+
+    /// Rebinds this service to a tool child's recorded authority.
+    ///
+    /// The transport — the managed session, the provider registry, the live
+    /// token ledger — is lent unchanged; what is rebound is everything that
+    /// decides whose call it is. `current.policy` is replaced with the
+    /// child's recorded environment policy so provider and budget resolution
+    /// answer under the facts the child was admitted with, and a service
+    /// asked to rebind to a different session refuses: the transport is
+    /// session-bound, and lending it across sessions would journal the
+    /// child's call under the opener's session authority (ADR 0099 §3).
+    fn bind_tool_child(
+        self: Arc<Self>,
+        session_id: &crate::SessionId,
+        execution_env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Option<Arc<dyn DirectCompletionService>> {
+        if *session_id != self.current.session_id {
+            return None;
+        }
+        let mut services = (*self).clone();
+        services.current.policy = execution_env_spec.policy.clone();
+        Some(Arc::new(services))
     }
 }
 
@@ -70,6 +107,11 @@ pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
     unkeyed_in_flight: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
+    /// The tool-child usage accumulator every sealed call record is captured
+    /// into before its outcome is projected — failure and abort records
+    /// included, because a billed attempt is a spend even when the call
+    /// returns an error.
+    usage_sink: Option<crate::runtime::effect::ToolUsageLedger>,
 }
 
 impl DirectInvocationContext<'_> {
@@ -246,6 +288,7 @@ impl DirectCompletionCapability {
             &usage_source,
             caused_by.as_ref(),
             outcome,
+            context.usage_sink.as_ref(),
         )
         .await
     }

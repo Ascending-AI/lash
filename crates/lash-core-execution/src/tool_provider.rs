@@ -446,6 +446,11 @@ pub struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
+    /// The realized-start sink a group child's driver installs so an
+    /// orchestrating body's process starts reach its settlement's possession.
+    /// Empty for every caller that is not a group child; an ordinary
+    /// orchestrating run's starts still ride its `ToolIntent` records.
+    pub(crate) orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
 }
 
 #[derive(Clone)]
@@ -514,6 +519,7 @@ pub struct ToolContextBuilder<'run> {
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
+    orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
 }
 
 impl<'run> ToolContextBuilder<'run> {
@@ -543,6 +549,7 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
             child_execution_trace_hook: None,
+            orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer::default(),
         }
     }
 
@@ -635,6 +642,17 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
+    /// Installs the realized-start sink an orchestrating group child drains
+    /// into its settlement's possession. Internal: only the tool-child driver
+    /// sets one.
+    pub(crate) fn orchestrating_starts(
+        mut self,
+        buffer: crate::tool_dispatch::OrchestratingStartsBuffer,
+    ) -> Self {
+        self.orchestrating_starts = buffer;
+        self
+    }
+
     pub fn build(self) -> ToolContext<'run> {
         ToolContext {
             session_id: self.session_id,
@@ -661,6 +679,7 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
+            orchestrating_starts: self.orchestrating_starts,
         }
     }
 }
@@ -709,6 +728,7 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
+            orchestrating_starts: self.orchestrating_starts.clone(),
         })
     }
 
@@ -758,6 +778,7 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
+            orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer::default(),
         }
     }
 
@@ -824,6 +845,7 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             tool_call_id: self.tool_call_id.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
+            orchestrating_starts: self.orchestrating_starts.clone(),
         }
     }
 

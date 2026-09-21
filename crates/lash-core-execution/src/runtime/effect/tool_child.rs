@@ -134,7 +134,15 @@ use super::executor::RuntimeEffectControllerError;
 /// because a version that did not would let a v1 reader decode a v2 request,
 /// find an opener arm it has no branch for, and fail somewhere other than the
 /// boundary. The v1 refusal is kept as its own test.
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 2;
+///
+/// Version 3 adds the issuing-authority field to
+/// [`ToolChildCompletionRouting::ProcessLifetime`]: a process-lifetime key can
+/// only be resolved by the registry identity that minted it, so the request
+/// records *who* issued it, not just *that* it was process-lifetime. Without
+/// the issuer, a reopen on a second host — or on the same host after its
+/// registry was rebuilt — would prepare a key under an authority that cannot
+/// authenticate it.
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 3;
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///
@@ -215,22 +223,34 @@ impl ToolChildAdmission {
 /// registry or provider) and whether the host routes completions durably. Both
 /// are deployment facts at recovery time and admission facts at formation time,
 /// and only the admission facts are the ones the child was accepted under.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolChildCompletionRouting {
     /// The child settles inside its own attempt and needs no completion key.
     Inline,
     /// The child may defer, and its completion key is routed durably — a
     /// completion still resolves after the worker that issued it is gone.
+    ///
+    /// Valid only when the claim's admitted scope participates in durable
+    /// turn-control journaling; the driver refuses a durable routing request
+    /// whose scoped controller reports [`TurnControlParticipation::Local`].
+    ///
+    /// [`TurnControlParticipation::Local`]:
+    ///     crate::runtime::effect::TurnControlParticipation::Local
     Durable,
     /// The child may defer, and its completion key lives only as long as the OS
     /// process that issued it (`NativeEffectHost::allow_process_lifetime_completion_keys`,
     /// ADR 0099 §14: "Native durability ends at the runtime's lifetime").
     ///
-    /// Recovering such a child in a different process is a typed refusal, never
-    /// a fresh key: the original key is unresolvable and a new one would be a
+    /// `issuer` is the awaiting authority's durable identity — the host's
+    /// `EffectHost::turn_control_binding_id` at formation. Recovering such a
+    /// child under a different registry identity is a typed refusal, never a
+    /// fresh key: the original key is unresolvable and a new one would be a
     /// second dispatch of an opaque tool body.
-    ProcessLifetime,
+    ProcessLifetime {
+        /// The await-event authority that minted the key.
+        issuer: TurnControlBindingId,
+    },
 }
 
 /// Where a tool child runs and whose work it is.
@@ -795,10 +815,13 @@ mod tests {
         for mode in [
             ToolChildCompletionRouting::Inline,
             ToolChildCompletionRouting::Durable,
-            ToolChildCompletionRouting::ProcessLifetime,
+            ToolChildCompletionRouting::ProcessLifetime {
+                issuer: TurnControlBindingId::new("registry-identity-1")
+                    .expect("a valid binding id"),
+            },
         ] {
             let mut request = request();
-            request.completion_routing = mode;
+            request.completion_routing = mode.clone();
             let decoded: ToolChildRequest =
                 serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
                     .expect("decodes");

@@ -277,6 +277,7 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolBatchCallReplay,
     RuntimeEffectToolBatchEmpty,
     RuntimeEffectToolBatchId,
+    RuntimeEffectToolChildCancellationAuthority,
     RuntimeEffectToolChildCompletionRouting,
     RuntimeEffectToolChildRequestAdmission,
     RuntimeEffectToolChildRequestCallId,
@@ -583,6 +584,9 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolBatchCallReplay => "runtime_effect_tool_batch_call_replay",
             Self::RuntimeEffectToolBatchEmpty => "runtime_effect_tool_batch_empty",
             Self::RuntimeEffectToolBatchId => "runtime_effect_tool_batch_id",
+            Self::RuntimeEffectToolChildCancellationAuthority => {
+                "runtime_effect_tool_child_cancellation_authority"
+            }
             Self::RuntimeEffectToolChildCompletionRouting => {
                 "runtime_effect_tool_child_completion_routing"
             }
@@ -807,6 +811,7 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectToolBatchCallReplay
             | Self::RuntimeEffectToolBatchEmpty
             | Self::RuntimeEffectToolBatchId
+            | Self::RuntimeEffectToolChildCancellationAuthority
             | Self::RuntimeEffectToolChildCompletionRouting
             | Self::RuntimeEffectToolChildRequestAdmission
             | Self::RuntimeEffectToolChildRequestCallId
@@ -1006,6 +1011,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupChildCancelled,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
+        Self::RuntimeEffectToolChildCancellationAuthority,
         Self::RuntimeEffectToolChildRequestAdmission,
         Self::RuntimeEffectToolChildRequestCallId,
         Self::RuntimeEffectToolChildRequestOpener,
@@ -1241,6 +1247,9 @@ impl RuntimeErrorCode {
             "runtime_effect_tool_batch_call_replay" => Self::RuntimeEffectToolBatchCallReplay,
             "runtime_effect_tool_batch_empty" => Self::RuntimeEffectToolBatchEmpty,
             "runtime_effect_tool_batch_id" => Self::RuntimeEffectToolBatchId,
+            "runtime_effect_tool_child_cancellation_authority" => {
+                Self::RuntimeEffectToolChildCancellationAuthority
+            }
             "runtime_effect_tool_child_completion_routing" => {
                 Self::RuntimeEffectToolChildCompletionRouting
             }

@@ -132,6 +132,16 @@ impl ToolChildHost {
         &self.openers
     }
 
+    /// The host this resolver routes for, or the routing fact "gone".
+    fn effect_host(&self) -> Result<Arc<dyn EffectHost>, RuntimeEffectControllerError> {
+        self.host.upgrade().ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                "the effect host that routed this tool child is gone",
+            )
+        })
+    }
+
     /// The child's own admitted controller (ADR 0099 §2).
     ///
     /// Built by the host for the child's *own* claim scope, never re-scoped
@@ -143,13 +153,8 @@ impl ToolChildHost {
         &self,
         scope: &ExecutionScope,
     ) -> Result<ScopedEffectController<'static>, RuntimeEffectControllerError> {
-        let host = self.host.upgrade().ok_or_else(|| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "the effect host that routed this tool child is gone",
-            )
-        })?;
-        host.scoped_static(scope.clone())
+        self.effect_host()?
+            .scoped_static(scope.clone())
             .map_err(RuntimeEffectControllerError::from)?
             .ok_or_else(|| {
                 RuntimeEffectControllerError::new(
@@ -192,12 +197,9 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
         let RuntimeEffectCommand::ToolInvocation { request } = &envelope.command else {
             return None;
         };
-        let live = self.openers.context_for(&request.scope.opener)?;
+        self.openers.context_for(&request.scope.opener)?;
         Some(RuntimeEffectLocalExecutor::owned_runner(
-            Box::new(ToolChildRunner {
-                host: self.clone(),
-                live,
-            }),
+            Box::new(ToolChildRunner { host: self.clone() }),
             None,
         ))
     }
@@ -206,7 +208,6 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
 /// One routed child, waiting to be handed its envelope.
 struct ToolChildRunner {
     host: ToolChildHost,
-    live: LiveOpenerContext,
 }
 
 #[async_trait::async_trait]
@@ -221,14 +222,27 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
                 "the tool-child driver was handed an envelope that is not a tool invocation",
             ));
         };
+        // The recorded opener is revalidated here, at the execution boundary:
+        // a runner resolved before the journal's retained membership was read
+        // proves only that *an* opener was live then, and the envelope this
+        // runner now serves is the retained request — so the live context is
+        // derived again from the request's own opener rather than carried over
+        // from resolution. If the opener has stepped down between resolution
+        // and execution this waits for its re-registration — an absent opener
+        // is a routing fact, never a failed terminal the journal keeps.
+        let live = self
+            .host
+            .openers
+            .context_for_or_wait(&request.scope.opener)
+            .await;
         // Boxed: the driver future carries the whole dispatch, and a group
         // child is spawned per member — 21 kB of stack per pending child is a
         // real cost, not a lint's taste.
         Box::pin(run_tool_child(
             &self.host,
-            &self.live,
+            &live,
             &request,
-            CancellationToken::new(),
+            live.cancellation().child_token(),
         ))
         .await
     }
@@ -254,7 +268,7 @@ pub(crate) fn rebind_child_dispatch(
     controller: ScopedEffectController<'static>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     usage_ledger: &ToolUsageLedger,
-) -> ToolDispatchContext<'static> {
+) -> Result<ToolDispatchContext<'static>, RuntimeEffectControllerError> {
     let mut child = lent.clone();
     // A child may be attributed to a session the lending opener is not: a
     // process opener has no session of its own (ADR 0094) and still does tool
@@ -270,27 +284,34 @@ pub(crate) fn rebind_child_dispatch(
     child.parent_invocation = request.attempt_identity.parent_invocation().cloned();
     // The environment the child was admitted under, resolved from its recorded
     // reference rather than inherited from whatever the opener is running now.
-    child.execution_env_spec = execution_env_spec;
+    child.execution_env_spec = execution_env_spec.clone();
     // §2: the child's own admitted controller, never the lent one. This is the
     // authority boundary; everything else on this list is attribution.
-    child.effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(controller);
+    child.effect_controller =
+        crate::runtime::RuntimeEffectControllerHandle::borrowed(controller.clone());
     // Child-local buffers. Their contents ride the child's outcome (§6, §13),
     // so a child that wrote into the opener's buffers would put its facts
     // somewhere its settlement cannot carry them from.
     child.checkpoint_messages = crate::tool_dispatch::CheckpointMessageBuffer::default();
     child.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
-    // The lent direct-completion client, with this child's usage ledger
-    // installed. The opener's own ledger is untouched; this only *also* names
-    // the spend as the child's, which §13 needs and an address space that is
-    // not the opener's has no other way to report. Each attempt's runner
-    // overlays a per-attempt sink on this, so the journaled attempt capture
-    // attributes every spend to the attempt that made it and the coordinator
-    // restores it here.
-    child.direct_completions = lent
-        .direct_completions
-        .clone()
-        .with_usage_ledger(usage_ledger.clone());
-    child
+    // The lent direct-completion client, rebound to the child's recorded
+    // authority. What is lent is the live completion *transport*; what is
+    // rebound is everything that decides whose call it is — the recorded
+    // session, environment, lineage, admitted controller and usage ledger —
+    // so a managed-LLM call the child makes is journaled under the child's
+    // facts, never the opener's (ADR 0099 §3, §13).
+    child.direct_completions = lent.direct_completions.bind_tool_child(
+        &request.scope.session_id,
+        &execution_env_spec,
+        crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
+        request
+            .attempt_identity
+            .parent_invocation()
+            .and_then(|parent| parent.attribution.turn_id.clone()),
+        request.attempt_identity.parent_invocation().cloned(),
+        usage_ledger.clone(),
+    )?;
+    Ok(child)
 }
 
 /// The catalog a child is dispatched against: exactly its admitted manifest.
@@ -359,6 +380,40 @@ pub(crate) async fn run_tool_child(
     })?;
 
     let controller = host.child_controller(&request.scope.admitted_scope)?;
+    // The child's admitted controller is pinned to the recorded process
+    // incarnation *before* any ToolContext is built: an opener or an
+    // orchestrating body that asked the controller for its enclosing process
+    // must get the incarnation the journal admitted, never whatever process
+    // currently carries the name (ADR 0099 §1). A process-scope claim without
+    // a recorded incarnation is an inconsistent pin and is refused the same
+    // way — running it would make a same-name successor's work
+    // indistinguishable from the predecessor's.
+    let controller = match request.enclosing_process.as_ref() {
+        Some(process_ref) => controller
+            .with_admitted_process(process_ref.clone())
+            .map_err(|error| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+                    format!(
+                        "tool child `{}` cannot bind its recorded process incarnation to its \
+                         admitted scope {:?}: {error}",
+                        request.call.call_id, request.scope.admitted_scope
+                    ),
+                )
+            })?,
+        None if matches!(request.scope.admitted_scope, ExecutionScope::Process { .. }) => {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+                format!(
+                    "tool child `{}` claims process scope {:?} but records no enclosing \
+                     incarnation; the pin and the scope are one fact",
+                    request.call.call_id, request.scope.admitted_scope
+                ),
+            ));
+        }
+        None => controller,
+    };
+    validate_recorded_authorities(host, &controller, request).await?;
 
     let usage_ledger = ToolUsageLedger::new();
     let dispatch = Arc::new(rebind_child_dispatch(
@@ -367,18 +422,34 @@ pub(crate) async fn run_tool_child(
         controller,
         execution_env_spec,
         &usage_ledger,
-    ));
+    )?);
 
+    // The orchestrating-start sink the context carries: an orchestrating body
+    // runs outside an attempt frame, so its realized starts have no intent
+    // outcome to ride and are captured here instead (ADR 0099 §6).
+    let orchestrating_starts = crate::tool_dispatch::OrchestratingStartsBuffer::default();
     // Boxed for the same reason the runner's call is: `drive` holds the
     // coordinator and its attempt machinery live across every await.
-    let mut outcome = Box::pin(drive(&dispatch, request, cancel)).await?;
+    let mut outcome = Box::pin(drive(
+        &dispatch,
+        request,
+        cancel,
+        orchestrating_starts.clone(),
+    ))
+    .await?;
     // Realized intent evidence moves into the settlement, where the opener
     // incorporates it as evidence. The journaled terminal keeps the record and
     // the declarations; the outcomes belong to the settlement channel.
     let intent_outcomes = std::mem::take(&mut outcome.intent_outcomes);
+    let mut possession = started_processes(&intent_outcomes);
+    for process_id in orchestrating_starts.drain() {
+        if !possession.contains(&process_id) {
+            possession.push(process_id);
+        }
+    }
     let settlement = ToolSettlement {
         version: super::tool_settlement::TOOL_SETTLEMENT_VERSION,
-        possession: started_processes(&intent_outcomes),
+        possession,
         model_return: resolve_model_return(&dispatch, request, &outcome, &intent_outcomes).await,
         intent_outcomes,
         triggers: dispatch.trigger_outcomes.drain(),
@@ -391,6 +462,102 @@ pub(crate) async fn run_tool_child(
     })
 }
 
+/// Authenticates the recorded authority set against this host before any key
+/// is prepared or any attempt dispatched.
+///
+/// Two recorded facts are checked, both the way the journal means them:
+///
+/// * **Cancellation authority** (ADR 0099 §3): the recorded
+///   [`TurnControlBindingId`](crate::TurnControlBindingId) is what the
+///   opener's cooperative signal is fenced on, so it must mint to *exactly*
+///   the binding this host's controller derives for the child's admitted
+///   scope — a foreign id means the child would observe a cancellation
+///   channel nothing signals, or none. `None` is legal only where the opener
+///   recorded it: a locally participating controller has no durable address
+///   to signal, so a `None` record on a durable-journaled participant is a
+///   refused inconsistency, not a silent absence of cancellation.
+/// * **Completion routing** (ADR 0099 §14): `Durable` requires a durable
+///   await-event resolver behind the child's controller — a host whose
+///   controller does not identify a durable authority would prepare keys no
+///   resolution can reach. `ProcessLifetime` requires the recorded issuing
+///   registry identity to be *this* host's: a process-lifetime key minted by
+///   another registry is unresolvable here and a fresh one would double
+///   dispatch.
+async fn validate_recorded_authorities(
+    host: &ToolChildHost,
+    controller: &ScopedEffectController<'static>,
+    request: &ToolChildRequest,
+) -> Result<(), RuntimeEffectControllerError> {
+    let participation = controller
+        .controller()
+        .turn_control_participation()
+        .await
+        .map_err(RuntimeEffectControllerError::from)?;
+    match request.cancellation_authority.as_ref() {
+        Some(recorded) => {
+            let effect_host = host.effect_host()?;
+            let binding = effect_host
+                .turn_control_binding(controller)
+                .await
+                .map_err(RuntimeEffectControllerError::from)?;
+            if binding.binding_id() != recorded.as_str() {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
+                    format!(
+                        "tool child `{}` records cancellation authority `{}` and this host \
+                         derives `{}` for its admitted scope; a foreign binding means the \
+                         cooperative signal it would honour is not the one this opener sends",
+                        request.call.call_id,
+                        recorded.as_str(),
+                        binding.binding_id()
+                    ),
+                ));
+            }
+        }
+        // `None` records that no cooperative authority existed at admission;
+        // there is nothing to re-derive and the child simply is not wired to
+        // the cooperative signal.
+        None => {}
+    }
+    match &request.completion_routing {
+        crate::runtime::effect::ToolChildCompletionRouting::Inline => {}
+        crate::runtime::effect::ToolChildCompletionRouting::Durable => {
+            if participation != crate::runtime::effect::TurnControlParticipation::DurableJournaled
+                || controller
+                    .controller()
+                    .await_event_authority_binding_id()
+                    .is_none()
+            {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
+                    format!(
+                        "tool child `{}` was admitted under durable completion routing and this \
+                         controller names no durable await-event authority; the child is \
+                         refused rather than parked on a key nothing resolves",
+                        request.call.call_id
+                    ),
+                ));
+            }
+        }
+        crate::runtime::effect::ToolChildCompletionRouting::ProcessLifetime { issuer } => {
+            let current = host.effect_host()?.turn_control_binding_id();
+            if current != issuer.as_str() {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
+                    format!(
+                        "tool child `{}` was admitted under a process-lifetime key issued by \
+                         registry `{issuer}` and this host is registry `{current}`; the \
+                         recorded key is unresolvable here and a fresh one would double dispatch",
+                        request.call.call_id,
+                        issuer = issuer.as_str(),
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Dispatches the child down the lane its admitted manifest names.
 ///
 /// The orchestrating lane is a lane of coordination, not an attempt: ADR 0042
@@ -401,9 +568,20 @@ async fn drive(
     dispatch: &Arc<ToolDispatchContext<'static>>,
     request: &ToolChildRequest,
     cancel: CancellationToken,
+    orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
-    let tool_context = child_tool_context(dispatch, request, &cancel);
-    if dispatch.is_orchestrating_tool(&request.call.tool_id) {
+    let tool_context = child_tool_context(dispatch, request, &cancel, orchestrating_starts);
+    // The orchestrating lane is a catalog lane: only a child the Tool Catalog
+    // itself admitted may run a handler-level body with no attempt frame. A
+    // granted call names its own authority, and running a grant's call under
+    // an orchestrating registration would let a registered orchestrator stand
+    // in for a call the grant never described — the admission arm and the
+    // lane are one fact, checked together.
+    if matches!(
+        request.admission,
+        super::tool_child::ToolChildAdmission::Catalog { .. }
+    ) && dispatch.is_orchestrating_tool(&request.call.tool_id)
+    {
         return Ok(crate::tool_dispatch::execute_orchestrating_tool(
             dispatch.as_ref(),
             request.call.clone(),
@@ -420,7 +598,7 @@ async fn drive(
         request.call.clone(),
         request.admission.grant().cloned().map(Box::new),
         request.admission.retry_policy(),
-        Some(request.completion_routing),
+        Some(request.completion_routing.clone()),
         request.attempt_identity.clone(),
         &turn_cancel_wait,
         // §5: no cross-child gate here. See `run_tool_child`.
@@ -463,11 +641,13 @@ fn child_tool_context(
     dispatch: &Arc<ToolDispatchContext<'static>>,
     request: &ToolChildRequest,
     cancel: &CancellationToken,
+    orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
 ) -> crate::ToolContext<'static> {
     let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch))
         .prepared_call(&request.call)
         .cancellation_token(Some(cancel.clone()))
-        .parent_invocation(request.attempt_identity.parent_invocation().cloned());
+        .parent_invocation(request.attempt_identity.parent_invocation().cloned())
+        .orchestrating_starts(orchestrating_starts);
     if let Some(process_ref) = request.enclosing_process.as_ref() {
         builder = builder.enclosing_process(Some(process_ref.process_id.clone()));
     }

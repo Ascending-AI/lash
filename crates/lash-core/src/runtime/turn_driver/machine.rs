@@ -81,6 +81,7 @@ impl RuntimeTurnDriver<'_> {
         cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+        self.cooperative_cancel = cancel.clone();
         // The erasure's reason lives on `EffectLoop`: the alias exists to make
         // the cut a named decision rather than an incidental annotation.
         let result = {

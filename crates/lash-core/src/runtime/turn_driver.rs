@@ -87,4 +87,11 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// which is the conservative direction — it stays accepted for recovery
     /// rather than running against a context that is finishing.
     pub(super) live_opener: std::sync::Mutex<Option<crate::facade_support::LiveOpenerGuard>>,
+    /// The cooperative cancellation signal this turn's effect loop runs under.
+    ///
+    /// The lent opener context carries this token so a tool child's waits are
+    /// cancelled with the turn that opened it (FIG-2266). Set at `run`; a
+    /// registration taken before `run` — impossible today, since the first
+    /// context is built inside the loop — would lend a token nobody cancels.
+    pub(super) cooperative_cancel: CancellationToken,
 }

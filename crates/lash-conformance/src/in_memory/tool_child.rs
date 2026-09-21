@@ -34,7 +34,7 @@ crate::tool_child_invocation_tests!({
                         as Arc<dyn crate::ProcessRegistry>
                 })
             }),
-            completion_routing: crate::runtime::effect::ToolChildCompletionRouting::ProcessLifetime,
+            deferrable_routing: crate::ToolChildDeferrableRouting::ProcessLifetime,
         },
     )
 });

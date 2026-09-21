@@ -123,6 +123,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         let Some(context) = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
             dispatch.as_ref(),
             child_event_tx,
+            self.cooperative_cancel.clone(),
         ) else {
             return;
         };

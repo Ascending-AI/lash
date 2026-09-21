@@ -159,6 +159,7 @@ fn rebound(request: &ToolChildRequest) -> ToolDispatchContext<'static> {
         spec(3),
         &ToolUsageLedger::new(),
     )
+    .expect("the lent client's test service binds to any recorded authority")
 }
 
 /// A child may be attributed to a session the lending opener is not: a process
@@ -282,7 +283,8 @@ fn the_child_gets_fresh_checkpoint_and_trigger_buffers() {
         child_controller(),
         spec(3),
         &ToolUsageLedger::new(),
-    );
+    )
+    .expect("the lent client's test service binds to any recorded authority");
     assert!(
         child.checkpoint_messages.drain().is_empty(),
         "a child must not inherit the opener's committed messages"
@@ -307,7 +309,8 @@ fn everything_not_on_the_checklist_is_the_lent_value() {
         child_controller(),
         spec(3),
         &ToolUsageLedger::new(),
-    );
+    )
+    .expect("the lent client's test service binds to any recorded authority");
     assert!(Arc::ptr_eq(&lent.plugins, &child.plugins));
     assert!(Arc::ptr_eq(&lent.tools, &child.tools));
     assert!(Arc::ptr_eq(&lent.processes, &child.processes));
@@ -355,7 +358,8 @@ fn a_child_whose_opener_is_not_registered_here_is_not_routed() {
         "an unregistered opener is a routing fact, not an executor and not a failure"
     );
 
-    let live = LiveOpenerContext::capture(&lent()).expect("a shared controller lends a context");
+    let live = LiveOpenerContext::capture(&lent(), tokio_util::sync::CancellationToken::new())
+        .expect("a shared controller lends a context");
     let guard = tool_children
         .openers()
         .register(crate::EffectOpener::turn("child-session", "turn"), live);

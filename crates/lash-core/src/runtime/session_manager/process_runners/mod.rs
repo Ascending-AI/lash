@@ -27,6 +27,7 @@ impl<'run> ProcessRunContext<'run> {
             scoped_effect_controller: None,
             causal_invocation: None,
             dispatch_parent_invocation: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         }
     }
 
@@ -58,6 +59,7 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContex
     scoped_effect_controller: Option<crate::ScopedEffectController<'run>>,
     causal_invocation: Option<crate::RuntimeInvocation>,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
+    cancellation: tokio_util::sync::CancellationToken,
 }
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallRun<'run> {
@@ -99,6 +101,16 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         invocation: Option<crate::RuntimeInvocation>,
     ) -> Self {
         self.dispatch_parent_invocation = invocation;
+        self
+    }
+
+    /// The cooperative signal the lent opener context carries: a tool child's
+    /// waits cancel with the process that opened it (FIG-2266).
+    pub(in crate::runtime::session_manager::process_runners) fn cancellation(
+        mut self,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        self.cancellation = cancellation;
         self
     }
 
@@ -194,6 +206,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                 let context = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
                     dispatch.as_ref(),
                     child_event_tx,
+                    self.cancellation.clone(),
                 )?;
                 let (guard, ended) = tool_children.openers().register(opener, context);
                 let event_tx = dispatch.event_tx.clone();

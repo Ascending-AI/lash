@@ -120,14 +120,20 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// that this crate owns — so a field added, retired or retyped fails the
 /// repository gate rather than a production replay.
 ///
-/// Version 1 is the shape FIG-2266 minted.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 1;
+/// Version 1 is the shape FIG-2266 minted. Version 2 renames
+/// [`ToolUsageDelta::provider_attempt`] from a count to the sealed provider
+/// attempt's own ordinal — usage is journaled one fact per provider attempt,
+/// so a billed failed attempt and the retry that replaced it each carry their
+/// own spend.
+pub const TOOL_SETTLEMENT_VERSION: u16 = 2;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
-/// Guarded by `scripts/versioned-surfaces.toml` over [`ToolAttemptCapture`].
-/// Version 1 is the shape FIG-2266 minted.
-pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 1;
+/// Guarded by `scripts/versioned-surfaces.toml` over [`ToolAttemptCapture`]
+/// and [`ToolUsageDelta`], which the capture's `usage` list is made of.
+/// Version 1 is the shape FIG-2266 minted; version 2 is the same
+/// [`ToolUsageDelta`] rename [`TOOL_SETTLEMENT_VERSION`] records.
+pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 2;
 
 /// One provider spend attributable to one attempt of a tool child.
 ///
@@ -135,15 +141,17 @@ pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 1;
 /// provider-attempt ordinal)` pair from ADR 0032, "and is **not** by itself a
 /// tool driver's lineage, which is why the opener and invocation are named
 /// beside it". The full deduplication identity is therefore `(opener,
-/// invocation, attempt, llm_call_id, provider_attempts)`: the opener and the
+/// invocation, attempt, llm_call_id, provider_attempt)`: the opener and the
 /// child's invocation are the envelope's, [`attempt`](Self::attempt) resolves
 /// to the attempt invocation it was spent under, and the ADR 0032 pair is the
 /// provider's own record identity.
 ///
-/// The provider-attempt count is carried rather than a per-attempt usage
-/// breakdown because the sealed [`LlmCallRecord`](crate::LlmCallRecord) already
-/// totals the call's usage; a second breakdown here would be a copy free to
-/// disagree with the record the trace sink keeps.
+/// One delta per sealed provider attempt — not one per call — because a call
+/// that failed after the provider billed it and a retry that then succeeded
+/// are two spends, and a per-call fact would either lose the first or
+/// double-count the second. The ordinal is the sealed
+/// [`AttemptRecord`](crate::LlmCallRecord)'s own, so the fact names the same
+/// attempt the trace sink does.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolUsageDelta {
@@ -153,11 +161,12 @@ pub struct ToolUsageDelta {
     pub attempt: u32,
     /// The nested call this spend belongs to.
     pub llm_call_id: LlmCallId,
-    /// How many provider attempts that call made, so a re-attached fact can be
-    /// recognised as the same one rather than counted again.
-    pub provider_attempts: u32,
-    /// What the call is known to have spent. Never zero-filled: a call with no
-    /// known usage contributes no delta at all (§13, ADR 0032).
+    /// Which sealed provider attempt inside that call the spend belongs to —
+    /// the `AttemptRecord`'s own ordinal, so a billed failure and its retry
+    /// are distinct facts rather than a summed or lost one.
+    pub provider_attempt: u32,
+    /// What the call is known to have spent. Never zero-filled: a provider
+    /// attempt reporting no usage contributes no delta at all (§13, ADR 0032).
     pub usage: TokenUsage,
 }
 
@@ -369,20 +378,31 @@ impl ToolUsageLedger {
         }
     }
 
-    /// Records one nested call's known spend.
+    /// Records every known spend a sealed call record carries.
     ///
-    /// A call with no known usage records nothing: unknown is a value and zero
-    /// is a false fact (§13, ADR 0032).
-    pub fn record(&self, call_record: &crate::LlmCallRecord, usage: &TokenUsage) {
-        if usage == &TokenUsage::default() {
-            return;
+    /// One delta per provider attempt that reports usage, stamped with the
+    /// attempt's own ordinal: a billed failed attempt and the retry that
+    /// succeeded are two facts, never a summed or a lost one. An attempt
+    /// whose `usage` is absent — unreported by the provider, aborted before
+    /// the response, or failed before billing — records nothing: unknown is a
+    /// value and zero is a false fact (§13, ADR 0032).
+    pub fn record(&self, call_record: &crate::LlmCallRecord) {
+        let mut facts = self.facts.lock_recover();
+        for attempt in &call_record.attempts {
+            let Some(usage) = attempt.usage.as_ref() else {
+                continue;
+            };
+            let usage = super::outcome::token_usage_from_llm(usage);
+            if usage == TokenUsage::default() {
+                continue;
+            }
+            facts.push(ToolUsageDelta {
+                attempt: self.attempt,
+                llm_call_id: call_record.call_id.clone(),
+                provider_attempt: attempt.ordinal,
+                usage,
+            });
         }
-        self.facts.lock_recover().push(ToolUsageDelta {
-            attempt: self.attempt,
-            llm_call_id: call_record.call_id.clone(),
-            provider_attempts: u32::try_from(call_record.attempts.len()).unwrap_or(u32::MAX),
-            usage: usage.clone(),
-        });
     }
 
     /// Merges deltas already journaled by an attempt's capture.
