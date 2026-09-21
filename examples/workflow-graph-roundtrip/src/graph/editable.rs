@@ -4,26 +4,26 @@
 //! through `lash_typescript`'s workflow-graph doors, so the example carries no
 //! grammar of its own.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_typescript::workflow_graph::{
     TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
-    typescript_expression_source, typescript_statement_source,
+    typescript_expression_source,
 };
 use lashlang::{
     Expr, WorkflowDeclaration, WorkflowEffectKind, WorkflowGraph, WorkflowNode, WorkflowNodeId,
-    WorkflowTerminalKind,
+    WorkflowNodeKind, WorkflowTerminalKind, workflow_call_to_ir, workflow_effect_to_ir,
 };
 
-use super::{apply_fields, required_text};
+use super::{effect_name, required_text};
 use crate::{EditableValue, NodeData, RenderErrorResponse, WorkflowDocument};
 
 pub(super) fn editable_expression(
     id: &str,
     data: &NodeData,
     graph_scope: &GraphScope,
-) -> Result<String, RenderErrorResponse> {
-    editable_parsed_expression(id, data, graph_scope).map(|(source, _)| source)
+) -> Result<Expr, RenderErrorResponse> {
+    editable_parsed_expression(id, data, graph_scope).map(|(_, expression)| expression)
 }
 
 pub(super) fn editable_parsed_expression(
@@ -104,22 +104,56 @@ pub(super) fn editable_effect_expression(
     data: &NodeData,
     graph_scope: &GraphScope,
 ) -> Result<(String, Expr), RenderErrorResponse> {
-    if data.expression.is_some() {
-        return editable_parsed_expression(id, data, graph_scope);
+    let scope = FragmentScope::of_data(data, graph_scope);
+    let requested_effect = data.effect.as_deref();
+    let mut expression = match &data.expression {
+        Some(source) => parse_fragment(source, &scope).map_err(|error| {
+            RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
+        })?,
+        None => synthesize_effect_expression(
+            id,
+            data,
+            &required_text(id, data.effect.as_ref(), "effect")?,
+            &scope,
+        )?,
+    };
+    if let Some(requested_effect) = requested_effect {
+        let current_effect = lashlang::workflow_effect_from_ir(&expression)
+            .map(|(effect, _, _)| effect)
+            .ok_or_else(|| {
+                RenderErrorResponse::invalid_node_payload(
+                    id,
+                    "an effect node needs a recognized effect expression",
+                )
+            })?;
+        if effect_name(&current_effect) != requested_effect {
+            expression = synthesize_effect_expression(id, data, requested_effect, &scope)?;
+        } else {
+            apply_fields(id, &mut expression, &data.fields, &scope)?;
+        }
+    } else {
+        apply_fields(id, &mut expression, &data.fields, &scope)?;
     }
-    let effect = required_text(id, data.effect.as_ref(), "effect")?;
-    let expression = match effect.as_str() {
+    let source = typescript_expression_source(&expression).map_err(|error| {
+        RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
+    })?;
+    Ok((source, expression))
+}
+
+fn synthesize_effect_expression(
+    id: &str,
+    data: &NodeData,
+    effect: &str,
+    scope: &FragmentScope,
+) -> Result<Expr, RenderErrorResponse> {
+    let expression = match effect {
         "sleep" => Expr::SleepFor(Box::new(
             data.fields
                 .get("duration")
                 .ok_or_else(|| {
                     RenderErrorResponse::invalid_node_payload(id, "sleep needs a `duration` field")
                 })?
-                .to_expr(
-                    id,
-                    "fields.duration",
-                    &FragmentScope::of_data(data, graph_scope),
-                )?,
+                .to_expr(id, "fields.duration", scope)?,
         )),
         "wait_signal" => {
             let Some(EditableValue::String(signal)) = data.fields.get("signal") else {
@@ -139,10 +173,172 @@ pub(super) fn editable_effect_expression(
             ));
         }
     };
-    let source = typescript_expression_source(&expression).map_err(|error| {
-        RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
-    })?;
-    Ok((source, expression))
+    Ok(expression)
+}
+
+pub(super) fn editable_fields(
+    node: &WorkflowNode,
+    _graph_scope: &GraphScope,
+) -> BTreeMap<String, EditableValue> {
+    let expression = match &node.kind {
+        WorkflowNodeKind::Data { expression, .. }
+        | WorkflowNodeKind::Terminal { expression, .. } => expression.clone(),
+        WorkflowNodeKind::Call {
+            receiver,
+            operation,
+            arguments,
+            result_steps,
+            ..
+        } => workflow_call_to_ir(receiver, operation, arguments, result_steps),
+        WorkflowNodeKind::Effect {
+            effect,
+            arguments,
+            result_steps,
+            ..
+        } => {
+            let Some(expression) = workflow_effect_to_ir(*effect, arguments, result_steps) else {
+                return BTreeMap::new();
+            };
+            expression
+        }
+        _ => return BTreeMap::new(),
+    };
+    if let Some(fields) = receiver_fields(&expression) {
+        return fields
+            .iter()
+            .map(|(name, value)| (name.to_string(), EditableValue::from_expr(value)))
+            .collect();
+    }
+    match &expression {
+        Expr::SleepFor(value) | Expr::SleepUntil(value) => {
+            BTreeMap::from([("duration".to_string(), EditableValue::from_expr(value))])
+        }
+        Expr::WaitSignal { name } => BTreeMap::from([(
+            "signal".to_string(),
+            EditableValue::String(name.to_string()),
+        )]),
+        _ => BTreeMap::new(),
+    }
+}
+
+pub(super) fn apply_fields(
+    node_id: &str,
+    expression: &mut Expr,
+    fields: &BTreeMap<String, EditableValue>,
+    scope: &FragmentScope,
+) -> Result<(), RenderErrorResponse> {
+    if let Some(entries) = receiver_fields_mut(expression) {
+        entries.clear();
+        for (name, value) in fields {
+            let value = value.to_expr(node_id, &format!("fields.{name}"), scope)?;
+            entries.push((name.clone().into(), value));
+        }
+        return Ok(());
+    }
+    match expression {
+        Expr::SleepFor(value) | Expr::SleepUntil(value) => {
+            if let Some(duration) = fields.get("duration") {
+                **value = duration.to_expr(node_id, "fields.duration", scope)?;
+            }
+        }
+        Expr::WaitSignal { name } => {
+            if let Some(EditableValue::String(signal)) = fields.get("signal") {
+                *name = signal.clone().into();
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn receiver_fields(expression: &Expr) -> Option<&Vec<(compact_str::CompactString, Expr)>> {
+    match expression {
+        Expr::ReceiverCall { args, .. } => args.first().and_then(|arg| match arg {
+            Expr::Record(fields) => Some(fields),
+            _ => None,
+        }),
+        Expr::Await(inner) | Expr::ResultUnwrap(inner) => receiver_fields(inner),
+        _ => None,
+    }
+}
+
+fn receiver_fields_mut(
+    expression: &mut Expr,
+) -> Option<&mut Vec<(compact_str::CompactString, Expr)>> {
+    match expression {
+        Expr::ReceiverCall { args, .. } => args.first_mut().and_then(|arg| match arg {
+            Expr::Record(fields) => Some(fields),
+            _ => None,
+        }),
+        Expr::Await(inner) | Expr::ResultUnwrap(inner) => receiver_fields_mut(inner),
+        _ => None,
+    }
+}
+
+impl EditableValue {
+    #[expect(
+        clippy::expect_used,
+        reason = "the expression was parsed from authored source, so re-sourcing it round-trips"
+    )]
+    fn from_expr(expression: &Expr) -> Self {
+        Self::literal_from_expr(expression).unwrap_or_else(|| {
+            Self::Expr(
+                typescript_expression_source(expression)
+                    .expect("a parsed editable expression must remain sourceable"),
+            )
+        })
+    }
+
+    fn literal_from_expr(expression: &Expr) -> Option<Self> {
+        match expression {
+            Expr::Null => Some(Self::Null),
+            Expr::Bool(value) => Some(Self::Bool(*value)),
+            Expr::Number(value) => Some(Self::Number(*value)),
+            Expr::String(value) => Some(Self::String(value.to_string())),
+            Expr::List(values) => values
+                .iter()
+                .map(Self::literal_from_expr)
+                .collect::<Option<Vec<_>>>()
+                .map(Self::List),
+            Expr::Record(entries) => entries
+                .iter()
+                .map(|(key, value)| Some((key.to_string(), Self::literal_from_expr(value)?)))
+                .collect::<Option<BTreeMap<_, _>>>()
+                .map(Self::Object),
+            _ => None,
+        }
+    }
+
+    fn to_expr(
+        &self,
+        node_id: &str,
+        field: &str,
+        scope: &FragmentScope,
+    ) -> Result<Expr, RenderErrorResponse> {
+        Ok(match self {
+            Self::Null => Expr::Null,
+            Self::Bool(value) => Expr::Bool(*value),
+            Self::Number(value) => Expr::Number(*value),
+            Self::String(value) => Expr::String(value.clone().into()),
+            Self::List(values) => Expr::List(
+                values
+                    .iter()
+                    .map(|value| value.to_expr(node_id, field, scope))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Self::Expr(source) => parse_fragment(source, scope).map_err(|error| {
+                RenderErrorResponse::invalid_expression(node_id, field, error.to_string())
+            })?,
+            Self::Object(entries) => Expr::Record(
+                entries
+                    .iter()
+                    .map(|(key, value)| {
+                        Ok((key.clone().into(), value.to_expr(node_id, field, scope)?))
+                    })
+                    .collect::<Result<_, RenderErrorResponse>>()?,
+            ),
+        })
+    }
 }
 
 pub(super) fn parse_terminal_kind(
@@ -168,7 +364,7 @@ pub(super) fn terminal_expression(
     terminal: &WorkflowTerminalKind,
     value: Option<&String>,
     scope: &FragmentScope,
-) -> Result<String, RenderErrorResponse> {
+) -> Result<Expr, RenderErrorResponse> {
     let value = required_text(id, value, "expression")?;
     let value = parse_fragment(&value, scope).map_err(|error| {
         RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
@@ -176,18 +372,13 @@ pub(super) fn terminal_expression(
     // Inside a process the terminal is the `return` that ends the run body;
     // `finish` is cell-only. Both render through the lens's own printer.
     if scope.in_process && matches!(terminal, WorkflowTerminalKind::Finish) {
-        let bound = scope.globals.iter().cloned().collect::<Vec<_>>();
-        return typescript_statement_source(&Expr::Return(Box::new(value)), &bound).map_err(
-            |error| RenderErrorResponse::invalid_expression(id, "expression", error.to_string()),
-        );
+        return Ok(Expr::Return(Box::new(value)));
     }
     let expression = match terminal {
         WorkflowTerminalKind::Finish => Expr::Finish(Box::new(value)),
         WorkflowTerminalKind::Fail => Expr::Fail(Box::new(value)),
     };
-    typescript_expression_source(&expression).map_err(|error| {
-        RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
-    })
+    Ok(expression)
 }
 
 pub(super) fn parse_assignment_target(
@@ -392,40 +583,16 @@ pub(super) fn receiver_operation_mut(
     }
 }
 
-pub(super) fn effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
-    if let Expr::ResultUnwrap(inner) = expression {
-        return direct_effect_kind(inner);
-    }
-    direct_effect_kind(expression)
-}
-
-pub(super) fn direct_effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
-    match expression {
-        Expr::Await(_) => Some(WorkflowEffectKind::AwaitJoin),
-        Expr::WaitSignal { .. } => Some(WorkflowEffectKind::WaitSignal),
-        Expr::SleepFor(_) | Expr::SleepUntil(_) => Some(WorkflowEffectKind::Sleep),
-        Expr::Print(_) => Some(WorkflowEffectKind::Print),
-        Expr::Yield(_) => Some(WorkflowEffectKind::Yield),
-        Expr::Break => Some(WorkflowEffectKind::Break),
-        Expr::Continue => Some(WorkflowEffectKind::Continue),
-        _ => None,
-    }
-}
-
 pub(super) fn parse_effect_kind(
     id: &str,
     effect: &str,
 ) -> Result<WorkflowEffectKind, RenderErrorResponse> {
     match effect {
-        "start_process" => Ok(WorkflowEffectKind::StartProcess),
         "await_join" => Ok(WorkflowEffectKind::AwaitJoin),
-        "signal_run" => Ok(WorkflowEffectKind::SignalRun),
         "wait_signal" => Ok(WorkflowEffectKind::WaitSignal),
-        "sleep" => Ok(WorkflowEffectKind::Sleep),
-        "cancel" => Ok(WorkflowEffectKind::Cancel),
+        "sleep" => Ok(WorkflowEffectKind::SleepFor),
         "print" => Ok(WorkflowEffectKind::Print),
         "yield" => Ok(WorkflowEffectKind::Yield),
-        "wake" => Ok(WorkflowEffectKind::Wake),
         "break" => Ok(WorkflowEffectKind::Break),
         "continue" => Ok(WorkflowEffectKind::Continue),
         _ => Err(RenderErrorResponse::invalid_node_payload(

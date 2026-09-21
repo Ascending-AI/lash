@@ -7,18 +7,22 @@
 //! estate this file replaces was authored in the retired Lashlang surface
 //! (FIG-3033); every property it proved is proved here over TypeScript.
 
+use std::collections::BTreeSet;
+
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
-    GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError, typescript_program_source,
+    GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError,
+    parse_typescript_assign_target, parse_typescript_expression, typescript_program_source,
     workflow_graph_from_program, workflow_graph_from_source,
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangExecutionSite, LashlangHostCatalog, LashlangHostEnvironment,
     TypeExpr, TypeField, VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION,
-    WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSubgraph, WorkflowTypeDiagnostic,
+    WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument, WorkflowContainer, WorkflowDeclaration,
+    WorkflowDiagnosticClass, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowGraph,
+    WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSubgraph, WorkflowTypeDiagnostic,
     node_id_for_execution_site,
 };
 
@@ -44,6 +48,47 @@ fn only_process(graph: &WorkflowGraph) -> &lashlang::WorkflowProcess {
 fn canonical(source: &str) -> String {
     typescript_program_source(&parse(source).expect("fixture parses"))
         .expect("a parsed fixture prints back as TypeScript")
+}
+
+fn ir(text: &str) -> lashlang::Expr {
+    let globals = [
+        "state",
+        "started",
+        "processes",
+        "child",
+        "tools",
+        "value",
+        "values",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<BTreeSet<_>>();
+    parse_typescript_expression(text, &globals, &BTreeSet::new())
+        .expect("fixture expression parses")
+}
+
+fn ir_target(text: &str) -> lashlang::AssignTarget {
+    let globals = ["state", "started"]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    parse_typescript_assign_target(text, &globals, &BTreeSet::new()).expect("fixture target parses")
+}
+
+fn replace_number(expression: &mut lashlang::Expr, replacement: f64) {
+    fn replace_first(expression: &mut lashlang::Expr, replacement: f64) -> bool {
+        if let lashlang::Expr::Number(value) = expression {
+            *value = replacement;
+            return true;
+        }
+        expression
+            .children_mut()
+            .any(|child| replace_first(child, replacement))
+    }
+    assert!(
+        replace_first(expression, replacement),
+        "fixture expression has a numeric descendant"
+    );
 }
 
 /// Every lens law over one fixture.
@@ -150,6 +195,87 @@ finish(items);
 }
 
 #[test]
+fn workflow_graph_ir_json_golden_is_exact() {
+    let graph =
+        workflow_graph_from_source("await tools.lookup({ query: \"x\" });\nawait sleep(\"1s\");\n")
+            .expect("fixture projects");
+    let kinds = serde_json::Value::Array(
+        graph
+            .main
+            .nodes
+            .iter()
+            .map(|node| serde_json::to_value(&node.kind).expect("node kind serializes"))
+            .collect(),
+    );
+    assert_eq!(
+        kinds,
+        serde_json::json!([
+            {
+                "kind": "call",
+                "receiver": {
+                    "ResourceRef": {
+                        "path": ["tools"],
+                        "resource_type": "",
+                        "alias": ""
+                    }
+                },
+                "operation": "lookup",
+                "arguments": [{
+                    "kind": "named",
+                    "fields": [["query", { "String": "x" }]]
+                }],
+                "result_steps": ["unwrap_result", "await"]
+            },
+            {
+                "kind": "effect",
+                "effect": "sleep_for",
+                "arguments": [{
+                    "kind": "positional",
+                    "value": { "String": "1s" }
+                }]
+            }
+        ])
+    );
+}
+
+#[test]
+fn workflow_graph_refuses_unknown_type_expr_variant() {
+    let graph = WorkflowGraph {
+        schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        facet_schema_version: None,
+        declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
+            name: "Name".into(),
+            ty: TypeExpr::Str,
+        })],
+        main: WorkflowSubgraph::default(),
+    };
+    let mut value = serde_json::to_value(graph).expect("graph serializes");
+    assert_eq!(value["declarations"][0]["ty"], "Str");
+    value["declarations"][0]["ty"] = serde_json::json!("FutureType");
+
+    let error = serde_json::from_value::<WorkflowGraph>(value)
+        .expect_err("an unknown TypeExpr variant must be refused");
+    assert!(error.to_string().contains("unknown variant `FutureType`"));
+}
+
+#[test]
+fn facet_reader_refuses_unknown_type_expr_variant() {
+    let facets = WorkflowNodeTypeFacets {
+        available_variables: vec![lashlang::WorkflowTypedVariable {
+            name: "value".to_string(),
+            ty: TypeExpr::Str,
+        }],
+        ..WorkflowNodeTypeFacets::default()
+    };
+    let mut value = serde_json::to_value(facets).expect("facets serialize");
+    value["available_variables"][0]["ty"] = serde_json::json!("FutureType");
+
+    let error = serde_json::from_value::<WorkflowNodeTypeFacets>(value)
+        .expect_err("an unknown TypeExpr variant must be refused");
+    assert!(error.to_string().contains("unknown variant `FutureType`"));
+}
+
+#[test]
 fn expression_if_and_direct_else_if_obey_all_lens_laws() {
     let source = r#"const choice = true ? 1 : (false ? 2 : 3);
 if (choice === 1) {
@@ -235,7 +361,7 @@ fn missing_and_null_container_children_fail_at_decode() {
         (
             WorkflowContainer::If {
                 binding: None,
-                condition: "true".to_string(),
+                condition: ir("true"),
                 then_is_block: true,
                 else_is_block: true,
                 then_graph: empty(),
@@ -246,7 +372,7 @@ fn missing_and_null_container_children_fail_at_decode() {
         (
             WorkflowContainer::If {
                 binding: None,
-                condition: "true".to_string(),
+                condition: ir("true"),
                 then_is_block: true,
                 else_is_block: true,
                 then_graph: empty(),
@@ -257,14 +383,14 @@ fn missing_and_null_container_children_fail_at_decode() {
         (
             WorkflowContainer::For {
                 binding: "item".to_string(),
-                iterable: "[]".to_string(),
+                iterable: ir("[]"),
                 body: empty(),
             },
             "body",
         ),
         (
             WorkflowContainer::While {
-                condition: "false".to_string(),
+                condition: ir("false"),
                 body: empty(),
             },
             "body",
@@ -274,7 +400,7 @@ fn missing_and_null_container_children_fail_at_decode() {
                 binding: None,
                 clauses: vec![WorkflowListComprehensionClause::For {
                     binding: "item".to_string(),
-                    iterable: "[]".to_string(),
+                    iterable: ir("[]"),
                 }],
                 element: empty(),
             },
@@ -351,7 +477,7 @@ finish(state);
 }
 
 #[test]
-fn edited_expression_text_is_rendered_and_reprojected() {
+fn edited_expression_ir_is_rendered_and_reprojected() {
     // A process body lifts out of the module as a derived declaration, so the
     // editable statements a host reaches are the module's own: every slot below
     // lives in `main`, and the one process literal stays a value it names.
@@ -374,13 +500,13 @@ finish(1);
     else {
         panic!("expected while container")
     };
-    *condition = "(state.count < 2)".to_string();
+    *condition = ir("state.count < 2");
     let WorkflowNodeKind::StateUpdate { target, expression } = &mut edited.main.nodes[3].kind
     else {
         panic!("expected state update")
     };
-    *target = "state.other".to_string();
-    *expression = "(state.count + 40)".to_string();
+    *target = ir_target("state.other");
+    *expression = ir("state.count + 40");
     let WorkflowNodeKind::Computation {
         binding,
         expression,
@@ -388,8 +514,12 @@ finish(1);
     else {
         panic!("expected computation")
     };
-    *binding = Some("started".to_string());
-    *expression = "[await processes.start({ definition: child }), await processes.start({ definition: child }), await processes.start({ definition: child })]".to_string();
+    *binding = Some(ir_target("started"));
+    let lashlang::Expr::List(items) = expression else {
+        panic!("expected a list computation");
+    };
+    items.push(items[0].clone());
+    let edited_runs = expression.clone();
 
     let rendered = workflow_graph_to_source(&edited).expect("edited graph renders");
     assert!(
@@ -406,18 +536,18 @@ finish(1);
     assert!(matches!(
         &reprojected.main.nodes[2].kind,
         WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. })
-            if condition == "(state.count < 2)"
+            if condition == &ir("state.count < 2")
     ));
     assert!(matches!(
         &reprojected.main.nodes[3].kind,
         WorkflowNodeKind::StateUpdate { target, expression }
-            if target == "state.other" && expression == "(state.count + 40)"
+            if target == &ir_target("state.other") && expression == &ir("state.count + 40")
     ));
     assert!(matches!(
         &reprojected.main.nodes[4].kind,
         WorkflowNodeKind::Computation { binding, expression }
-            if binding.as_deref() == Some("started")
-                && expression == "[await (processes.start({ definition: child })), await (processes.start({ definition: child })), await (processes.start({ definition: child }))]"
+            if binding.as_ref() == Some(&ir_target("started"))
+                && expression == &edited_runs
     ));
     assert_eq!(
         workflow_graph_to_source(&reprojected).expect("reprojected graph renders"),
@@ -426,39 +556,10 @@ finish(1);
 }
 
 #[test]
-fn invalid_edited_expression_returns_field_typed_error() {
-    let mut graph =
-        workflow_graph_from_source("while (true) {\n  await sleep(1);\n}\nfinish(1);\n")
-            .expect("fixture projects");
-    let WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. }) =
-        &mut graph.main.nodes[0].kind
-    else {
-        panic!("expected while container")
-    };
-    *condition = "value <".to_string();
-
-    assert!(matches!(
-        workflow_graph_to_source(&graph),
-        Err(GraphRenderError::InvalidExpression {
-            field: "condition",
-            ..
-        })
-    ));
-
-    let mut graph =
-        workflow_graph_from_source("const state = { count: 0 };\nstate.count = 1;\nfinish(1);\n")
-            .expect("fixture projects");
-    let WorkflowNodeKind::StateUpdate { target, .. } = &mut graph.main.nodes[1].kind else {
-        panic!("expected state update")
-    };
-    *target = "state.".to_string();
-    assert!(matches!(
-        workflow_graph_to_source(&graph),
-        Err(GraphRenderError::InvalidAssignmentTarget {
-            field: "target",
-            ..
-        })
-    ));
+fn invalid_host_edited_text_is_refused_before_it_enters_the_graph() {
+    let globals = BTreeSet::from(["value".to_string(), "state".to_string()]);
+    assert!(parse_typescript_expression("value <", &globals, &BTreeSet::new()).is_err());
+    assert!(parse_typescript_assign_target("state.", &globals, &BTreeSet::new()).is_err());
 }
 
 #[test]
@@ -480,13 +581,13 @@ finish(1);
     else {
         panic!("expected if container")
     };
-    *condition = "false".to_string();
+    *condition = ir("false");
     let WorkflowNodeKind::Container(WorkflowContainer::For { iterable, .. }) =
         &mut graph.main.nodes[2].kind
     else {
         panic!("expected for container")
     };
-    *iterable = "[3, 4]".to_string();
+    *iterable = ir("[3, 4]");
 
     let rendered = workflow_graph_to_source(&graph).expect("edited graph renders");
     assert!(
@@ -502,12 +603,12 @@ finish(1);
     assert!(matches!(
         &reprojected.main.nodes[1].kind,
         WorkflowNodeKind::Container(WorkflowContainer::If { condition, .. })
-            if condition == "false"
+            if condition == &ir("false")
     ));
     assert!(matches!(
         &reprojected.main.nodes[2].kind,
         WorkflowNodeKind::Container(WorkflowContainer::For { iterable, .. })
-            if iterable == "[3, 4]"
+            if iterable == &ir("[3, 4]")
     ));
     assert_eq!(
         workflow_graph_to_source(&reprojected).expect("reprojected graph renders"),
@@ -539,7 +640,7 @@ finish(1);
     else {
         panic!("expected if container")
     };
-    *condition = "await tools.ready({ attempt: 2 })".to_string();
+    replace_number(condition, 2.0);
 
     let WorkflowNodeKind::Container(WorkflowContainer::For {
         binding, iterable, ..
@@ -548,7 +649,7 @@ finish(1);
         panic!("expected for container")
     };
     *binding = "entry".to_string();
-    *iterable = "await tools.values({ batch: 3 })".to_string();
+    replace_number(iterable, 3.0);
 
     let rendered = workflow_graph_to_source(&graph).expect("edited graph renders");
     let reprojected = workflow_graph_from_source(&rendered).expect("edited source reprojects");
@@ -972,6 +1073,135 @@ fn facet_environment() -> LashlangHostEnvironment {
     LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
 }
 
+fn slot_path_environment() -> LashlangHostEnvironment {
+    let mut catalog = LashlangHostCatalog::new();
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "echo",
+            "echo",
+            TypeExpr::Str,
+            TypeExpr::Str,
+        )
+        .expect("echo operation is unique");
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "shape_text",
+            "shape_text",
+            TypeExpr::Object(vec![TypeField {
+                name: "text".into(),
+                ty: TypeExpr::Str,
+                optional: false,
+            }]),
+            TypeExpr::Str,
+        )
+        .expect("shape-text operation is unique");
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "compose",
+            "compose",
+            TypeExpr::Object(vec![
+                TypeField {
+                    name: "query".into(),
+                    ty: TypeExpr::Enum(vec!["ok".into()]),
+                    optional: false,
+                },
+                TypeField {
+                    name: "items".into(),
+                    ty: TypeExpr::List(Box::new(TypeExpr::Str)),
+                    optional: false,
+                },
+            ]),
+            TypeExpr::Str,
+        )
+        .expect("compose operation is unique");
+    LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
+}
+
+#[test]
+fn facet_slots_address_positional_named_nested_record_and_list_arguments() {
+    let source = r#"const first = await tools.echo("x");
+const second = await tools.compose({
+  query: "ok",
+  items: ["a"]
+});
+const nested = await tools.shape_text({ text: await tools.echo("x") });
+finish(second);
+"#;
+    let graph = workflow_graph_from_source_with_facets(source, Some(&slot_path_environment()))
+        .expect("fixture projects with facets");
+
+    let first = graph.main.nodes[0]
+        .type_facets
+        .as_ref()
+        .expect("echo has facets");
+    assert!(
+        first
+            .expected_arguments
+            .iter()
+            .any(|slot| slot.slot == "arg[0]")
+    );
+
+    let second = graph.main.nodes[1]
+        .type_facets
+        .as_ref()
+        .expect("compose has facets");
+    let slots = second
+        .expected_arguments
+        .iter()
+        .map(|slot| slot.slot.as_str())
+        .collect::<BTreeSet<_>>();
+    for expected in ["arg[0]", "arg[0].query", "arg[0].items", "arg[0].items[0]"] {
+        assert!(
+            slots.contains(expected),
+            "missing slot {expected}: {slots:?}"
+        );
+    }
+
+    let nested = graph.main.nodes[2]
+        .type_facets
+        .as_ref()
+        .expect("nested call has facets");
+    let nested_slots = nested
+        .expected_arguments
+        .iter()
+        .map(|slot| slot.slot.as_str())
+        .collect::<BTreeSet<_>>();
+    for expected in ["call[0].arg[0]", "call[0].arg[0].text", "call[1].arg[0]"] {
+        assert!(
+            nested_slots.contains(expected),
+            "missing nested slot {expected}: {nested_slots:?}"
+        );
+    }
+}
+
+#[test]
+fn type_diagnostic_carries_slot_kind_and_class() {
+    let graph = workflow_graph_from_source_with_facets(
+        "await tools.compose({ query: \"bad\", items: [\"a\"] });\n",
+        Some(&slot_path_environment()),
+    )
+    .expect("a definite mismatch remains projectable");
+    let diagnostic = graph.main.nodes[0]
+        .type_facets
+        .as_ref()
+        .expect("call has facets")
+        .diagnostics
+        .first()
+        .expect("mismatch produces a diagnostic");
+    assert_eq!(
+        diagnostic.kind,
+        WorkflowDiagnosticKind::IncompatibleExpectedLiteral
+    );
+    assert_eq!(diagnostic.class, WorkflowDiagnosticClass::Definite);
+    assert_eq!(diagnostic.slot.as_deref(), Some("arg[0].query"));
+}
+
 #[test]
 fn catalog_projection_exposes_typed_facets_non_fatally() {
     let source = r#"const workflow = async (name: string) => {
@@ -1048,7 +1278,9 @@ fn type_facets_are_ignored_by_put_and_canonicalization() {
         .diagnostics
         .push(WorkflowTypeDiagnostic {
             node_id: terminal_id,
-            kind: "client_echo".to_string(),
+            kind: WorkflowDiagnosticKind::UnknownName,
+            class: WorkflowDiagnosticClass::Definite,
+            slot: None,
             message: "must not become source".to_string(),
             span: None,
         });
@@ -1068,7 +1300,7 @@ fn standalone_pure_expressions_remain_computations() {
     assert!(matches!(
         graph.main.nodes[0].kind,
         WorkflowNodeKind::Computation { ref expression, binding: None }
-            if expression == "(1 + 1)"
+            if expression == &ir("1 + 1")
     ));
     assert_lens_laws("1 + 1;\n");
 }
@@ -1407,14 +1639,14 @@ fn an_edit_inside_a_process_container_survives_the_round_trip() {
     let WorkflowDeclaration::Process(process) = &mut graph.declarations[0] else {
         panic!("the fixture lifts one process");
     };
-    let WorkflowNodeKind::Call { expression, .. } = &mut process.body.nodes[0].kind else {
+    let WorkflowNodeKind::Call { arguments, .. } = &mut process.body.nodes[0].kind else {
         panic!("the container's first node is the display call");
     };
-    assert_eq!(
-        expression,
-        "await (display.show_message({ text: \"before\" }))"
-    );
-    *expression = "await (display.show_message({ text: \"after\" }))".to_string();
+    let [WorkflowArgument::Named { fields }] = arguments.as_mut_slice() else {
+        panic!("the call has one named argument record");
+    };
+    assert_eq!(fields[0].1, lashlang::Expr::String("before".into()));
+    fields[0].1 = lashlang::Expr::String("after".into());
 
     let saved = workflow_graph_to_source(&graph).expect("the edited graph renders");
     assert_eq!(
@@ -1429,16 +1661,61 @@ fn an_edit_inside_a_process_container_survives_the_round_trip() {
     let WorkflowDeclaration::Process(reprojected_process) = &reprojected.declarations[0] else {
         panic!("the saved source lifts one process");
     };
-    let WorkflowNodeKind::Call { expression, .. } = &reprojected_process.body.nodes[0].kind else {
+    let WorkflowNodeKind::Call { arguments, .. } = &reprojected_process.body.nodes[0].kind else {
         panic!("the reprojected container's first node is the display call");
     };
-    assert_eq!(
-        expression,
-        "await (display.show_message({ text: \"after\" }))"
-    );
+    let [WorkflowArgument::Named { fields }] = arguments.as_slice() else {
+        panic!("the call has one named argument record");
+    };
+    assert_eq!(fields[0].1, lashlang::Expr::String("after".into()));
     assert_eq!(
         workflow_graph_to_source(&reprojected).expect("the reprojection renders"),
         saved,
         "rendering the reprojection is a fixpoint"
     );
+}
+
+#[test]
+fn call_argument_ir_edit_renders_without_an_expression_text_field() {
+    const SOURCE: &str = "const flow = async () => {\n  \
+        await (display.show_message({ text: \"before\" }));\n};\n";
+
+    let mut graph = workflow_graph_from_source(SOURCE).expect("the fixture projects");
+    let WorkflowDeclaration::Process(process) = &mut graph.declarations[0] else {
+        panic!("the fixture lifts one process");
+    };
+    let WorkflowNodeKind::Call { arguments, .. } = &mut process.body.nodes[0].kind else {
+        panic!("the process body starts with a call");
+    };
+    let [WorkflowArgument::Named { fields }] = arguments.as_mut_slice() else {
+        panic!("the call has one named argument record");
+    };
+    let (_, lashlang::Expr::String(value)) = &mut fields[0] else {
+        panic!("the named text argument is a string");
+    };
+    *value = "after".into();
+
+    let rendered = workflow_graph_to_source(&graph).expect("edited argument IR renders");
+    assert_eq!(rendered, SOURCE.replace("\"before\"", "\"after\""));
+}
+
+#[test]
+fn effect_argument_ir_edit_renders_without_an_expression_text_field() {
+    const SOURCE: &str = "await sleep(\"1s\");\n";
+    let mut graph = workflow_graph_from_source(SOURCE).expect("fixture projects");
+    let WorkflowNodeKind::Effect { arguments, .. } = &mut graph.main.nodes[0].kind else {
+        panic!("sleep projects as an effect");
+    };
+    let [
+        WorkflowArgument::Positional {
+            value: lashlang::Expr::String(duration),
+        },
+    ] = arguments.as_mut_slice()
+    else {
+        panic!("sleep carries one positional string argument");
+    };
+    *duration = "2s".into();
+
+    let rendered = workflow_graph_to_source(&graph).expect("edited effect argument IR renders");
+    assert_eq!(rendered, "await sleep(\"2s\");\n");
 }

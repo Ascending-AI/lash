@@ -23,7 +23,8 @@ use lashlang::{
     WorkflowEdgeKind, WorkflowEffectKind, WorkflowGraph, WorkflowLinkAnalysis,
     WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
     WorkflowNodeNameSource, WorkflowProcess, WorkflowSubgraph, WorkflowTerminalKind,
-    analyze_workflow_program,
+    analyze_workflow_program, workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir,
+    workflow_effect_to_ir,
 };
 use thiserror::Error;
 
@@ -40,11 +41,7 @@ pub use editable_text::{
     TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
     parse_typescript_process_statement,
 };
-use editable_text::{
-    assign_target_text, expression_text, opaque_wrapper_run_body, parse_assignment_target_field,
-    parse_comprehension_clauses, parse_expression_field, parse_simple_binding_field,
-    parse_typescript_fragment, statement_text, with_assignment, workflow_clause,
-};
+use editable_text::{opaque_wrapper_run_body, parse_typescript_fragment, statement_text};
 use literals::collect_process_literals;
 pub use printer::{
     TypeScriptSourceError, typescript_assign_target_source, typescript_expression_source,
@@ -216,17 +213,9 @@ impl<'a> GraphProjector<'a> {
         }
     }
 
-    fn expression_text(&self, expression: &Expr) -> String {
-        expression_text(expression, self.allow_non_sourceable_expressions)
-    }
-
     fn statement_text(&self, expression: &Expr, versions: &VersionState) -> String {
         let bound = versions.known.iter().cloned().collect::<Vec<_>>();
         statement_text(expression, &bound, self.allow_non_sourceable_expressions)
-    }
-
-    fn workflow_clause(&self, clause: &ListComprehensionClause) -> WorkflowListComprehensionClause {
-        workflow_clause(clause, self.allow_non_sourceable_expressions)
     }
 
     fn project(&self) -> WorkflowGraph {
@@ -502,13 +491,15 @@ impl<'a> GraphProjector<'a> {
         versions: &mut VersionState,
     ) -> (WorkflowNodeKind, String, Vec<VariableVersion>) {
         if let Some((target, value)) = printer::assignment_sugar(expression) {
+            let name = format!("update {}", target.root);
+            let outputs = vec![versions.allocate(target.root.as_str())];
             return (
                 WorkflowNodeKind::StateUpdate {
-                    target: assign_target_text(&target, self.allow_non_sourceable_expressions),
-                    expression: self.expression_text(value),
+                    target,
+                    expression: value.clone(),
                 },
-                format!("update {}", target.root),
-                vec![versions.allocate(target.root.as_str())],
+                name,
+                outputs,
             );
         }
         let (binding, value, value_path) = assignment_parts(expression, path);
@@ -524,8 +515,8 @@ impl<'a> GraphProjector<'a> {
         {
             return (
                 WorkflowNodeKind::StateUpdate {
-                    target: assign_target_text(target, self.allow_non_sourceable_expressions),
-                    expression: self.expression_text(expr),
+                    target: target.clone(),
+                    expression: expr.as_ref().clone(),
                 },
                 format!("update {}", target.root),
                 vec![versions.allocate(target.root.as_str())],
@@ -557,10 +548,8 @@ impl<'a> GraphProjector<'a> {
                 outputs.extend(versions.merge_outputs(&then_versions, &else_versions));
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::If {
-                        binding: binding.as_ref().map(|target| {
-                            assign_target_text(target, self.allow_non_sourceable_expressions)
-                        }),
-                        condition: self.expression_text(condition),
+                        binding: binding.clone(),
+                        condition: condition.as_ref().clone(),
                         then_is_block: matches!(then_block.as_ref(), Expr::Block(_)),
                         // The lowerer spells a missing `else` as the unit
                         // value, which renders as the empty block it was, and
@@ -634,7 +623,7 @@ impl<'a> GraphProjector<'a> {
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::For {
                         binding: loop_binding.to_string(),
-                        iterable: self.expression_text(iterable),
+                        iterable: iterable.clone(),
                         body: Box::new(body_graph),
                     }),
                     format!("for {loop_binding}"),
@@ -653,7 +642,7 @@ impl<'a> GraphProjector<'a> {
                 let outputs = loop_outputs(body, None, versions);
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::While {
-                        condition: self.expression_text(condition),
+                        condition: condition.as_ref().clone(),
                         body: Box::new(body_graph),
                     }),
                     "while".to_string(),
@@ -677,13 +666,8 @@ impl<'a> GraphProjector<'a> {
                 let outputs = assignment_output(binding.as_ref(), versions);
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-                        binding: binding.as_ref().map(|target| {
-                            assign_target_text(target, self.allow_non_sourceable_expressions)
-                        }),
-                        clauses: clauses
-                            .iter()
-                            .map(|clause| self.workflow_clause(clause))
-                            .collect(),
+                        binding: binding.clone(),
+                        clauses: clauses.iter().map(workflow_clause_from_ir).collect(),
                         element: Box::new(element_graph),
                     }),
                     "list comprehension".to_string(),
@@ -693,7 +677,7 @@ impl<'a> GraphProjector<'a> {
             Expr::Finish(_) => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Finish,
-                    expression: self.expression_text(value),
+                    expression: value.clone(),
                 },
                 "finish".to_string(),
                 Vec::new(),
@@ -701,7 +685,7 @@ impl<'a> GraphProjector<'a> {
             Expr::Fail(_) => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Fail,
-                    expression: self.expression_text(value),
+                    expression: value.clone(),
                 },
                 "fail".to_string(),
                 Vec::new(),
@@ -714,7 +698,7 @@ impl<'a> GraphProjector<'a> {
             Expr::Return(_) => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Finish,
-                    expression: self.statement_text(value, versions),
+                    expression: value.clone(),
                 },
                 "return".to_string(),
                 Vec::new(),
@@ -732,10 +716,8 @@ impl<'a> GraphProjector<'a> {
                 let outputs = assignment_output(binding.as_ref(), versions);
                 (
                     WorkflowNodeKind::Data {
-                        binding: binding.as_ref().map(|target| {
-                            assign_target_text(target, self.allow_non_sourceable_expressions)
-                        }),
-                        expression: self.expression_text(value),
+                        binding: binding.clone(),
+                        expression: value.clone(),
                     },
                     data_name(value),
                     outputs,
@@ -743,27 +725,30 @@ impl<'a> GraphProjector<'a> {
             }
             _ => {
                 let outputs = assignment_output(binding.as_ref(), versions);
-                if let Some(operation) = first_receiver_operation(value) {
+                if let Some((receiver, operation, arguments, result_steps)) =
+                    workflow_call_from_ir(value)
+                {
                     (
                         WorkflowNodeKind::Call {
-                            binding: binding.as_ref().map(|target| {
-                                assign_target_text(target, self.allow_non_sourceable_expressions)
-                            }),
-                            operation: operation.to_string(),
-                            expression: self.expression_text(value),
+                            binding: binding.clone(),
+                            receiver,
+                            operation: operation.clone(),
+                            arguments,
+                            result_steps,
                         },
-                        operation.to_string(),
+                        operation,
                         outputs,
                     )
-                } else if let Some(effect) = effect_kind(value) {
+                } else if let Some((effect, arguments, result_steps)) =
+                    workflow_effect_from_ir(value)
+                {
                     let name = effect_name(value, &effect);
                     (
                         WorkflowNodeKind::Effect {
-                            binding: binding.as_ref().map(|target| {
-                                assign_target_text(target, self.allow_non_sourceable_expressions)
-                            }),
+                            binding: binding.clone(),
                             effect,
-                            expression: self.expression_text(value),
+                            arguments,
+                            result_steps,
                         },
                         name,
                         outputs,
@@ -771,10 +756,8 @@ impl<'a> GraphProjector<'a> {
                 } else {
                     (
                         WorkflowNodeKind::Computation {
-                            binding: binding.as_ref().map(|target| {
-                                assign_target_text(target, self.allow_non_sourceable_expressions)
-                            }),
-                            expression: self.expression_text(value),
+                            binding: binding.clone(),
+                            expression: value.clone(),
                         },
                         computation_name(value),
                         outputs,
@@ -1171,73 +1154,46 @@ fn subgraph_to_block(
 }
 
 fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr, GraphRenderError> {
-    // The module's own binding of a declared process.
-    if context.scope == RenderScope::Main
-        && let WorkflowNodeKind::Data {
-            binding: Some(binding),
-            expression,
-        } = &node.kind
-        && context.processes.iter().any(|name| name == expression)
-    {
-        return Ok(Expr::Assign {
-            target: parse_simple_binding_field(node, "binding", binding)?,
-            expr: Box::new(Expr::ProcessRef {
-                process: expression.clone().into(),
-            }),
-        });
-    }
     let expression = match &node.kind {
         WorkflowNodeKind::Data {
             binding,
             expression,
         } => {
-            let expression = parse_expression_field(node, "expression", expression, context)?;
-            if !lashlang::is_pure_expr(&expression) && !matches!(expression, Expr::TypeLiteral(_)) {
+            if !lashlang::is_pure_expr(expression) && !matches!(expression, Expr::TypeLiteral(_)) {
                 return invalid_payload(node, "data expression is effectful");
             }
-            with_assignment(node, binding, expression, true)?
+            with_assignment_ir(binding, expression.clone())
         }
         WorkflowNodeKind::Call {
             binding,
-            expression,
+            receiver,
             operation,
+            arguments,
+            result_steps,
         } => {
-            let expression = parse_expression_field(node, "expression", expression, context)?;
-            if first_receiver_operation(&expression) != Some(operation.as_str()) {
-                return invalid_payload(
-                    node,
-                    "call operation does not match its receiver-call expression",
-                );
-            }
-            with_assignment(node, binding, expression, true)?
+            let expression = workflow_call_to_ir(receiver, operation, arguments, result_steps);
+            with_assignment_ir(binding, expression)
         }
         WorkflowNodeKind::Effect {
             binding,
-            expression,
             effect,
+            arguments,
+            result_steps,
         } => {
-            // Loop control carries no payload and is not an expression the
-            // language will parse outside its loop, so it renders from the
-            // effect kind rather than from its own text.
-            let expression = match effect {
-                WorkflowEffectKind::Break => Expr::Break,
-                WorkflowEffectKind::Continue => Expr::Continue,
-                _ => parse_expression_field(node, "expression", expression, context)?,
-            };
-            if effect_kind(&expression).as_ref() != Some(effect) {
-                return invalid_payload(node, "effect kind does not match its expression");
-            }
-            with_assignment(node, binding, expression, true)?
+            let expression =
+                workflow_effect_to_ir(*effect, arguments, result_steps).ok_or_else(|| {
+                    GraphRenderError::InvalidNodePayload {
+                        node_id: node.id.to_string(),
+                        message: "effect arguments do not match its kind".to_string(),
+                    }
+                })?;
+            with_assignment_ir(binding, expression)
         }
         WorkflowNodeKind::Computation {
             binding,
             expression,
-        } => {
-            let expression = parse_expression_field(node, "expression", expression, context)?;
-            with_assignment(node, binding, expression, true)?
-        }
+        } => with_assignment_ir(binding, expression.clone()),
         WorkflowNodeKind::StateUpdate { target, expression } => {
-            let target = parse_assignment_target_field(node, "target", target)?;
             let [output] = node.outputs.as_slice() else {
                 return invalid_payload(node, "state update must have exactly one output");
             };
@@ -1245,27 +1201,14 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                 return invalid_payload(node, "state-update target root must match its output");
             }
             Expr::Assign {
-                target,
-                expr: Box::new(parse_expression_field(
-                    node,
-                    "expression",
-                    expression,
-                    context,
-                )?),
+                target: target.clone(),
+                expr: Box::new(expression.clone()),
             }
         }
         WorkflowNodeKind::Terminal {
             terminal,
             expression,
         } => {
-            // A process terminal is a `return` statement, which is not an
-            // expression the language will parse in expression position.
-            let expression = match context.scope {
-                RenderScope::Process => parse_opaque_statement(node, expression, context)?,
-                RenderScope::Main => {
-                    parse_expression_field(node, "expression", expression, context)?
-                }
-            };
             let valid = matches!(
                 (terminal, &expression),
                 (
@@ -1276,7 +1219,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
             if !valid {
                 return invalid_payload(node, "terminal kind does not match its expression");
             }
-            expression
+            expression.clone()
         }
         WorkflowNodeKind::Container(container) => match container {
             WorkflowContainer::If {
@@ -1286,16 +1229,10 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                 else_is_block,
                 then_graph,
                 else_graph,
-            } => with_assignment(
-                node,
+            } => with_assignment_ir(
                 binding,
                 Expr::If {
-                    condition: Box::new(parse_expression_field(
-                        node,
-                        "condition",
-                        condition,
-                        context,
-                    )?),
+                    condition: Box::new(condition.clone()),
                     then_block: Box::new(subgraph_to_branch(
                         node,
                         then_graph,
@@ -1311,24 +1248,18 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                         "else_graph",
                     )?),
                 },
-                true,
-            )?,
+            ),
             WorkflowContainer::For {
                 binding,
                 iterable,
                 body,
             } => Expr::For {
-                binding: parse_simple_binding_field(node, "binding", binding)?.root,
-                iterable: Box::new(parse_expression_field(node, "iterable", iterable, context)?),
+                binding: binding.clone().into(),
+                iterable: Box::new(iterable.clone()),
                 body: Box::new(subgraph_to_block(body, context)?),
             },
             WorkflowContainer::While { condition, body } => Expr::While {
-                condition: Box::new(parse_expression_field(
-                    node,
-                    "condition",
-                    condition,
-                    context,
-                )?),
+                condition: Box::new(condition.clone()),
                 body: Box::new(subgraph_to_block(body, context)?),
             },
             WorkflowContainer::ListComprehension {
@@ -1345,15 +1276,13 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                         "list-comprehension element must contain exactly one node",
                     );
                 }
-                with_assignment(
-                    node,
+                with_assignment_ir(
                     binding,
                     Expr::ListComprehension {
                         element: Box::new(expressions.remove(0)),
-                        clauses: parse_comprehension_clauses(node, clauses, context)?,
+                        clauses: clauses.iter().map(workflow_clause_to_ir).collect(),
                     },
-                    true,
-                )?
+                )
             }
         },
         WorkflowNodeKind::Opaque { source } => parse_opaque_statement(node, source, context)?,
@@ -1537,6 +1466,44 @@ fn assignment_parts<'a>(
             )
         }
         _ => (None, expression, path.to_vec()),
+    }
+}
+
+fn workflow_clause_from_ir(clause: &ListComprehensionClause) -> WorkflowListComprehensionClause {
+    match clause {
+        ListComprehensionClause::For { binding, iterable } => {
+            WorkflowListComprehensionClause::For {
+                binding: binding.to_string(),
+                iterable: iterable.clone(),
+            }
+        }
+        ListComprehensionClause::If { condition } => WorkflowListComprehensionClause::If {
+            condition: condition.clone(),
+        },
+    }
+}
+
+fn workflow_clause_to_ir(clause: &WorkflowListComprehensionClause) -> ListComprehensionClause {
+    match clause {
+        WorkflowListComprehensionClause::For { binding, iterable } => {
+            ListComprehensionClause::For {
+                binding: binding.clone().into(),
+                iterable: iterable.clone(),
+            }
+        }
+        WorkflowListComprehensionClause::If { condition } => ListComprehensionClause::If {
+            condition: condition.clone(),
+        },
+    }
+}
+
+fn with_assignment_ir(binding: &Option<AssignTarget>, expression: Expr) -> Expr {
+    match binding {
+        Some(target) => Expr::Assign {
+            target: target.clone(),
+            expr: Box::new(expression),
+        },
+        None => expression,
     }
 }
 

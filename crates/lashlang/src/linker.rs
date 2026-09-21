@@ -74,12 +74,14 @@ pub(crate) struct WorkflowLinkNodeFacts {
 pub(crate) struct WorkflowLinkDiagnostic {
     pub(crate) error: LinkError,
     pub(crate) span: Option<Span>,
+    pub(crate) path: AstPath,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkflowLinkExpectedArgument {
     pub(crate) slot: String,
     pub(crate) ty: TypeExpr,
+    pub(crate) path: AstPath,
 }
 
 #[derive(Debug, Default)]

@@ -38,6 +38,12 @@ impl<'module> Linker<'module> {
             scope.span = Some(span);
         }
         let result = self.lower_expr_expected_inner(expr, path, scope, expected);
+        if result.is_err()
+            && self.recover_workflow_errors.get()
+            && self.workflow_error_path.borrow().is_none()
+        {
+            self.workflow_error_path.replace(Some(path.clone()));
+        }
         scope.span = previous_span;
         if result.is_ok() && self.collect_completion.get() {
             self.completion_facts

@@ -2,20 +2,20 @@ use lash::ProcessId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_typescript::workflow_graph::{
-    parse_typescript_process_statement, typescript_assign_target_source,
-    typescript_expression_source,
+    typescript_assign_target_source, typescript_expression_source,
 };
 use lashlang::{
     Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
     WorkflowEdgeKind, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId,
     WorkflowNodeKind, WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
+    workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
 };
 use serde_json::json;
 
 use crate::{
-    ChildGroup, EdgeData, EditableComprehensionClause, EditableValue, ExpectedArgumentType,
-    FlowEdge, FlowNode, GraphRoots, NodeData, NodeName, RenderErrorResponse, TypeDiagnostic,
-    TypedVariable, ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
+    ChildGroup, EdgeData, EditableComprehensionClause, ExpectedArgumentType, FlowEdge, FlowNode,
+    GraphRoots, NodeData, NodeName, RenderErrorResponse, TypeDiagnostic, TypedVariable,
+    ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
 };
 
 mod editable;
@@ -278,8 +278,8 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
     graph.main.nodes.retain(|node| match &node.kind {
         WorkflowNodeKind::Data {
             binding: Some(binding),
-            expression,
-        } if binding == expression => declared.contains(binding),
+            expression: Expr::ProcessRef { process },
+        } if binding.is_simple() && binding.root == *process => declared.contains(process.as_str()),
         _ => true,
     });
     let bound = graph
@@ -289,8 +289,8 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
         .filter_map(|node| match &node.kind {
             WorkflowNodeKind::Data {
                 binding: Some(binding),
-                expression,
-            } if binding == expression => Some(binding.clone()),
+                expression: Expr::ProcessRef { process },
+            } if binding.is_simple() && binding.root == *process => Some(process.to_string()),
             _ => None,
         })
         .collect::<BTreeSet<_>>();
@@ -313,8 +313,10 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
             description: None,
             name_source: lashlang::WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Data {
-                binding: Some(name.clone()),
-                expression: name,
+                binding: Some(lashlang::AssignTarget::variable(name.clone().into())),
+                expression: Expr::ProcessRef {
+                    process: name.into(),
+                },
             },
             available_variables: Vec::new(),
             type_facets: None,
@@ -532,7 +534,9 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         | WorkflowNodeKind::Computation { binding, .. }
         | WorkflowNodeKind::Container(WorkflowContainer::If { binding, .. })
         | WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { binding, .. }) => {
-            binding.clone()
+            binding
+                .as_ref()
+                .and_then(|target| typescript_assign_target_source(target).ok())
         }
         WorkflowNodeKind::Container(WorkflowContainer::For { binding, .. }) => {
             Some(binding.clone())
@@ -540,13 +544,37 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         _ => None,
     };
     let target = match &node.kind {
-        WorkflowNodeKind::StateUpdate { target, .. } => Some(target.clone()),
+        WorkflowNodeKind::StateUpdate { target, .. } => {
+            typescript_assign_target_source(target).ok()
+        }
         _ => None,
     };
     let expression = match &node.kind {
         WorkflowNodeKind::Data { expression, .. }
         | WorkflowNodeKind::Computation { expression, .. }
-        | WorkflowNodeKind::StateUpdate { expression, .. } => Some(expression.clone()),
+        | WorkflowNodeKind::StateUpdate { expression, .. } => {
+            typescript_expression_source(expression).ok()
+        }
+        WorkflowNodeKind::Call {
+            receiver,
+            operation,
+            arguments,
+            result_steps,
+            ..
+        } => typescript_expression_source(&workflow_call_to_ir(
+            receiver,
+            operation,
+            arguments,
+            result_steps,
+        ))
+        .ok(),
+        WorkflowNodeKind::Effect {
+            effect,
+            arguments,
+            result_steps,
+            ..
+        } => workflow_effect_to_ir(*effect, arguments, result_steps)
+            .and_then(|expression| typescript_expression_source(&expression).ok()),
         WorkflowNodeKind::Terminal { expression, .. } => {
             terminal_value(expression, &FragmentScope::of_node(node, graph_scope))
         }
@@ -555,13 +583,13 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
     let condition = match &node.kind {
         WorkflowNodeKind::Container(WorkflowContainer::If { condition, .. })
         | WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. }) => {
-            Some(condition.clone())
+            typescript_expression_source(condition).ok()
         }
         _ => None,
     };
     let iterable = match &node.kind {
         WorkflowNodeKind::Container(WorkflowContainer::For { iterable, .. }) => {
-            Some(iterable.clone())
+            typescript_expression_source(iterable).ok()
         }
         _ => None,
     };
@@ -635,7 +663,9 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                     .iter()
                     .map(|diagnostic| TypeDiagnostic {
                         node_id: diagnostic.node_id.to_string(),
-                        kind: diagnostic.kind.clone(),
+                        kind: diagnostic_kind_text(diagnostic.kind),
+                        class: diagnostic_class_text(diagnostic.class),
+                        slot: diagnostic.slot.clone(),
                         message: diagnostic.message.clone(),
                         span: diagnostic.span,
                     })
@@ -650,17 +680,12 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
 /// A cell terminal is `finish(value)` or `fail(value)`; a process terminal is
 /// the `return value;` that ends the run body, which the language will not
 /// parse in expression position, so it is read through the process door.
-fn terminal_value(expression: &str, scope: &FragmentScope) -> Option<String> {
-    let parsed = if scope.in_process {
-        parse_typescript_process_statement(expression, &scope.globals, &scope.processes).ok()?
-    } else {
-        parse_fragment(expression, scope).ok()?
-    };
-    let value = match parsed {
+fn terminal_value(expression: &Expr, _scope: &FragmentScope) -> Option<String> {
+    let value = match expression {
         Expr::Finish(value) | Expr::Fail(value) | Expr::Return(value) => value,
         _ => return None,
     };
-    typescript_expression_source(&value).ok()
+    typescript_expression_source(value).ok()
 }
 
 fn editable_clause(clause: &WorkflowListComprehensionClause) -> EditableComprehensionClause {
@@ -668,11 +693,13 @@ fn editable_clause(clause: &WorkflowListComprehensionClause) -> EditableComprehe
         WorkflowListComprehensionClause::For { binding, iterable } => {
             EditableComprehensionClause::For {
                 binding: binding.clone(),
-                iterable: iterable.clone(),
+                iterable: typescript_expression_source(iterable)
+                    .unwrap_or_else(|error| format!("<non-sourceable expression: {error}>")),
             }
         }
         WorkflowListComprehensionClause::If { condition } => EditableComprehensionClause::If {
-            condition: condition.clone(),
+            condition: typescript_expression_source(condition)
+                .unwrap_or_else(|error| format!("<non-sourceable expression: {error}>")),
         },
     }
 }
@@ -859,34 +886,59 @@ fn node_from_flow_data(
     let mut outputs = Vec::new();
     let kind = match data.kind.as_str() {
         "data" => WorkflowNodeKind::Data {
-            binding: data.binding.clone(),
+            binding: editable_binding(
+                id,
+                data.binding.as_ref(),
+                &FragmentScope::of_data(data, graph_scope),
+            )?,
             expression: editable_expression(id, data, graph_scope)?,
         },
         "call" => {
-            let (expression, parsed) = editable_call_expression(id, data, graph_scope)?;
-            let operation = first_receiver_operation(&parsed)
+            let (_, parsed) = editable_call_expression(id, data, graph_scope)?;
+            let (receiver, operation, arguments, result_steps) = workflow_call_from_ir(&parsed)
                 .expect("editable_call_expression guarantees a receiver call");
             WorkflowNodeKind::Call {
-                binding: data.binding.clone(),
-                operation: operation.to_string(),
-                expression,
+                binding: editable_binding(
+                    id,
+                    data.binding.as_ref(),
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
+                receiver,
+                operation,
+                arguments,
+                result_steps,
             }
         }
         "effect" => {
-            let (expression, parsed) = editable_effect_expression(id, data, graph_scope)?;
-            let effect = match data.effect.as_deref() {
-                Some(effect) => parse_effect_kind(id, effect)?,
-                None => effect_kind(&parsed).ok_or_else(|| {
+            let (_, parsed) = editable_effect_expression(id, data, graph_scope)?;
+            let (parsed_effect, arguments, result_steps) = workflow_effect_from_ir(&parsed)
+                .ok_or_else(|| {
                     RenderErrorResponse::invalid_node_payload(
                         id,
                         "an effect node needs `data.effect` or a recognized effect expression",
                     )
-                })?,
-            };
+                })?;
+            let effect = data
+                .effect
+                .as_deref()
+                .map(|effect| parse_effect_kind(id, effect))
+                .transpose()?
+                .unwrap_or(parsed_effect);
+            if effect != parsed_effect {
+                return Err(RenderErrorResponse::invalid_node_payload(
+                    id,
+                    "effect kind does not match its expression",
+                ));
+            }
             WorkflowNodeKind::Effect {
-                binding: data.binding.clone(),
+                binding: editable_binding(
+                    id,
+                    data.binding.as_ref(),
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
                 effect,
-                expression,
+                arguments,
+                result_steps,
             }
         }
         "state_update" => {
@@ -898,14 +950,16 @@ fn node_from_flow_data(
                 version: 0,
             });
             WorkflowNodeKind::StateUpdate {
-                target: typescript_assign_target_source(&target).map_err(|error| {
-                    RenderErrorResponse::invalid_assignment_target(id, "target", error.to_string())
-                })?,
+                target,
                 expression: editable_expression(id, data, graph_scope)?,
             }
         }
         "computation" => WorkflowNodeKind::Computation {
-            binding: data.binding.clone(),
+            binding: editable_binding(
+                id,
+                data.binding.as_ref(),
+                &FragmentScope::of_data(data, graph_scope),
+            )?,
             expression: editable_expression(id, data, graph_scope)?,
         },
         "terminal" => {
@@ -926,25 +980,54 @@ fn node_from_flow_data(
         },
         "container" => WorkflowNodeKind::Container(match data.subkind.as_deref() {
             Some("if") => WorkflowContainer::If {
-                binding: data.binding.clone(),
-                condition: required_text(id, data.condition.as_ref(), "condition")?,
+                binding: editable_binding(
+                    id,
+                    data.binding.as_ref(),
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
+                condition: required_expression(
+                    id,
+                    data.condition.as_ref(),
+                    "condition",
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
                 then_is_block: true,
                 else_is_block: true,
                 then_graph: Box::new(WorkflowSubgraph::default()),
                 else_graph: Box::new(WorkflowSubgraph::default()),
             },
             Some("while") => WorkflowContainer::While {
-                condition: required_text(id, data.condition.as_ref(), "condition")?,
+                condition: required_expression(
+                    id,
+                    data.condition.as_ref(),
+                    "condition",
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
                 body: Box::new(WorkflowSubgraph::default()),
             },
             Some("for") => WorkflowContainer::For {
                 binding: required_text(id, data.binding.as_ref(), "binding")?,
-                iterable: required_text(id, data.iterable.as_ref(), "iterable")?,
+                iterable: required_expression(
+                    id,
+                    data.iterable.as_ref(),
+                    "iterable",
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
                 body: Box::new(WorkflowSubgraph::default()),
             },
             Some("comprehension") => WorkflowContainer::ListComprehension {
-                binding: data.binding.clone(),
-                clauses: data.clauses.iter().map(workflow_clause).collect(),
+                binding: editable_binding(
+                    id,
+                    data.binding.as_ref(),
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
+                clauses: data
+                    .clauses
+                    .iter()
+                    .map(|clause| {
+                        workflow_clause(id, clause, &FragmentScope::of_data(data, graph_scope))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
                 element: Box::new(WorkflowSubgraph::default()),
             },
             subkind => {
@@ -1019,17 +1102,19 @@ fn apply_editable_data(
             binding,
             expression,
         } => {
-            *binding = data.binding.clone();
+            *binding = editable_binding(&node_id, data.binding.as_ref(), &scope)?;
             *expression =
                 canonical_editable_expression(&node_id, data.expression.as_ref(), &scope)?;
         }
         WorkflowNodeKind::Call {
             binding,
+            receiver,
             operation,
-            expression,
+            arguments,
+            result_steps,
         } => {
-            *binding = data.binding.clone();
-            let mut parsed = parse_stored_expression(&node_id, expression, &scope)?;
+            *binding = editable_binding(&node_id, data.binding.as_ref(), &scope)?;
+            let mut parsed = workflow_call_to_ir(receiver, operation, arguments, result_steps);
             let edited_operation = required_text(&node_id, data.operation.as_ref(), "operation")?;
             // Switching an existing call to an operation of another receiver
             // rewrites more than the method name: the stored expression still
@@ -1048,39 +1133,48 @@ fn apply_editable_data(
                 )
             })? = edited_operation.into();
             apply_fields(&node_id, &mut parsed, &data.fields, &scope)?;
-            *operation = first_receiver_operation(&parsed)
-                .expect("receiver operation was updated")
-                .to_string();
-            *expression = typescript_expression_source(&parsed).map_err(|error| {
-                RenderErrorResponse::invalid_expression(&node_id, "expression", error.to_string())
-            })?;
+            let (new_receiver, new_operation, new_arguments, new_result_steps) =
+                workflow_call_from_ir(&parsed).expect("receiver operation was updated");
+            *receiver = new_receiver;
+            *operation = new_operation;
+            *arguments = new_arguments;
+            *result_steps = new_result_steps;
         }
         WorkflowNodeKind::Effect {
             binding,
             effect,
-            expression,
+            arguments,
+            result_steps,
         } => {
-            *binding = data.binding.clone();
-            let (edited_expression, parsed) =
-                editable_effect_expression(&node_id, data, graph_scope)?;
-            *effect = effect_kind(&parsed).ok_or_else(|| {
-                RenderErrorResponse::invalid_node_payload(
-                    &node_id,
-                    "edited expression is not a recognized effect",
-                )
-            })?;
-            *expression = edited_expression;
+            *binding = editable_binding(&node_id, data.binding.as_ref(), &scope)?;
+            let (_, parsed) = editable_effect_expression(&node_id, data, graph_scope)?;
+            let (new_effect, new_arguments, new_result_steps) = workflow_effect_from_ir(&parsed)
+                .ok_or_else(|| {
+                    RenderErrorResponse::invalid_node_payload(
+                        &node_id,
+                        "edited expression is not a recognized effect",
+                    )
+                })?;
+            *effect = new_effect;
+            *arguments = new_arguments;
+            *result_steps = new_result_steps;
         }
         WorkflowNodeKind::Computation {
             binding,
             expression,
         } => {
-            *binding = data.binding.clone();
-            *expression = required_text(&node_id, data.expression.as_ref(), "expression")?;
+            *binding = editable_binding(&node_id, data.binding.as_ref(), &scope)?;
+            *expression =
+                required_expression(&node_id, data.expression.as_ref(), "expression", &scope)?;
         }
         WorkflowNodeKind::StateUpdate { target, expression } => {
-            *target = required_text(&node_id, data.target.as_ref(), "target")?;
-            *expression = required_text(&node_id, data.expression.as_ref(), "expression")?;
+            *target = parse_assignment_target(
+                &node_id,
+                &required_text(&node_id, data.target.as_ref(), "target")?,
+                &scope,
+            )?;
+            *expression =
+                required_expression(&node_id, data.expression.as_ref(), "expression", &scope)?;
         }
         WorkflowNodeKind::Terminal {
             terminal,
@@ -1093,25 +1187,31 @@ fn apply_editable_data(
         WorkflowNodeKind::Container(WorkflowContainer::If {
             binding, condition, ..
         }) => {
-            *binding = data.binding.clone();
-            *condition = required_text(&node_id, data.condition.as_ref(), "condition")?;
+            *binding = editable_binding(&node_id, data.binding.as_ref(), &scope)?;
+            *condition =
+                required_expression(&node_id, data.condition.as_ref(), "condition", &scope)?;
         }
         WorkflowNodeKind::Container(WorkflowContainer::For {
             binding, iterable, ..
         }) => {
             *binding = required_text(&node_id, data.binding.as_ref(), "binding")?;
-            *iterable = required_text(&node_id, data.iterable.as_ref(), "iterable")?;
+            *iterable = required_expression(&node_id, data.iterable.as_ref(), "iterable", &scope)?;
         }
         WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. }) => {
-            *condition = required_text(&node_id, data.condition.as_ref(), "condition")?;
+            *condition =
+                required_expression(&node_id, data.condition.as_ref(), "condition", &scope)?;
         }
         WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
             binding,
             clauses,
             ..
         }) => {
-            *binding = data.binding.clone();
-            *clauses = data.clauses.iter().map(workflow_clause).collect();
+            *binding = editable_binding(&node_id, data.binding.as_ref(), &scope)?;
+            *clauses = data
+                .clauses
+                .iter()
+                .map(|clause| workflow_clause(&node_id, clause, &scope))
+                .collect::<Result<Vec<_>, _>>()?;
         }
         _ => {}
     }
@@ -1122,27 +1222,33 @@ fn canonical_editable_expression(
     node_id: &str,
     expression: Option<&String>,
     scope: &FragmentScope,
-) -> Result<String, RenderErrorResponse> {
+) -> Result<Expr, RenderErrorResponse> {
     let expression = required_text(node_id, expression, "expression")?;
     let expression = parse_fragment(&expression, scope).map_err(|error| {
         RenderErrorResponse::invalid_expression(node_id, "expression", error.to_string())
     })?;
-    typescript_expression_source(&expression).map_err(|error| {
-        RenderErrorResponse::invalid_expression(node_id, "expression", error.to_string())
-    })
+    Ok(expression)
 }
 
-fn parse_stored_expression(
+fn required_expression(
     node_id: &str,
-    source: &str,
+    source: Option<&String>,
+    field: &'static str,
     scope: &FragmentScope,
 ) -> Result<Expr, RenderErrorResponse> {
-    parse_fragment(source, scope).map_err(|error| {
-        RenderErrorResponse::document(
-            format!("stored expression for node `{node_id}` did not parse: {error}"),
-            json!({ "nodeId": node_id, "reason": error.to_string() }),
-        )
-    })
+    let source = required_text(node_id, source, field)?;
+    parse_fragment(&source, scope)
+        .map_err(|error| RenderErrorResponse::invalid_expression(node_id, field, error.to_string()))
+}
+
+fn editable_binding(
+    node_id: &str,
+    source: Option<&String>,
+    scope: &FragmentScope,
+) -> Result<Option<lashlang::AssignTarget>, RenderErrorResponse> {
+    source
+        .map(|source| parse_assignment_target(node_id, source, scope))
+        .transpose()
 }
 
 fn required_text(
@@ -1158,171 +1264,48 @@ fn required_text(
     })
 }
 
-fn workflow_clause(clause: &EditableComprehensionClause) -> WorkflowListComprehensionClause {
-    match clause {
+fn diagnostic_kind_text(kind: lashlang::WorkflowDiagnosticKind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "invalid_diagnostic_kind".to_string())
+}
+
+fn diagnostic_class_text(class: lashlang::WorkflowDiagnosticClass) -> String {
+    serde_json::to_value(class)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "definite".to_string())
+}
+
+fn workflow_clause(
+    node_id: &str,
+    clause: &EditableComprehensionClause,
+    scope: &FragmentScope,
+) -> Result<WorkflowListComprehensionClause, RenderErrorResponse> {
+    Ok(match clause {
         EditableComprehensionClause::For { binding, iterable } => {
             WorkflowListComprehensionClause::For {
                 binding: binding.clone(),
-                iterable: iterable.clone(),
+                iterable: parse_fragment(iterable, scope).map_err(|error| {
+                    RenderErrorResponse::invalid_expression(
+                        node_id,
+                        "clause iterable",
+                        error.to_string(),
+                    )
+                })?,
             }
         }
         EditableComprehensionClause::If { condition } => WorkflowListComprehensionClause::If {
-            condition: condition.clone(),
-        },
-    }
-}
-
-fn editable_fields(
-    node: &WorkflowNode,
-    graph_scope: &GraphScope,
-) -> BTreeMap<String, EditableValue> {
-    let scope = FragmentScope::of_node(node, graph_scope);
-    let expression = match &node.kind {
-        WorkflowNodeKind::Data { expression, .. }
-        | WorkflowNodeKind::Call { expression, .. }
-        | WorkflowNodeKind::Effect { expression, .. }
-        | WorkflowNodeKind::Terminal { expression, .. } => expression,
-        _ => return BTreeMap::new(),
-    };
-    let Ok(expression) = parse_fragment(expression, &scope) else {
-        return BTreeMap::new();
-    };
-    if let Some(fields) = receiver_fields(&expression) {
-        return fields
-            .iter()
-            .map(|(name, value)| (name.to_string(), EditableValue::from_expr(value)))
-            .collect();
-    }
-    match &expression {
-        Expr::SleepFor(value) | Expr::SleepUntil(value) => {
-            BTreeMap::from([("duration".to_string(), EditableValue::from_expr(value))])
-        }
-        Expr::WaitSignal { name } => BTreeMap::from([(
-            "signal".to_string(),
-            EditableValue::String(name.to_string()),
-        )]),
-        _ => BTreeMap::new(),
-    }
-}
-
-fn apply_fields(
-    node_id: &str,
-    expression: &mut Expr,
-    fields: &BTreeMap<String, EditableValue>,
-    scope: &FragmentScope,
-) -> Result<(), RenderErrorResponse> {
-    if let Some(entries) = receiver_fields_mut(expression) {
-        entries.clear();
-        for (name, value) in fields {
-            let value = value.to_expr(node_id, &format!("fields.{name}"), scope)?;
-            entries.push((name.clone().into(), value));
-        }
-        return Ok(());
-    }
-    match expression {
-        Expr::SleepFor(value) | Expr::SleepUntil(value) => {
-            if let Some(duration) = fields.get("duration") {
-                **value = duration.to_expr(node_id, "fields.duration", scope)?;
-            }
-        }
-        Expr::WaitSignal { name } => {
-            if let Some(EditableValue::String(signal)) = fields.get("signal") {
-                *name = signal.clone().into();
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn receiver_fields(expression: &Expr) -> Option<&Vec<(compact_str::CompactString, Expr)>> {
-    match expression {
-        Expr::ReceiverCall { args, .. } => args.first().and_then(|arg| match arg {
-            Expr::Record(fields) => Some(fields),
-            _ => None,
-        }),
-        Expr::Await(inner) | Expr::ResultUnwrap(inner) => receiver_fields(inner),
-        _ => None,
-    }
-}
-
-fn receiver_fields_mut(
-    expression: &mut Expr,
-) -> Option<&mut Vec<(compact_str::CompactString, Expr)>> {
-    match expression {
-        Expr::ReceiverCall { args, .. } => args.first_mut().and_then(|arg| match arg {
-            Expr::Record(fields) => Some(fields),
-            _ => None,
-        }),
-        Expr::Await(inner) | Expr::ResultUnwrap(inner) => receiver_fields_mut(inner),
-        _ => None,
-    }
-}
-
-impl EditableValue {
-    #[expect(
-        clippy::expect_used,
-        reason = "the expression was parsed from authored source, so re-sourcing it round-trips"
-    )]
-    fn from_expr(expression: &Expr) -> Self {
-        Self::literal_from_expr(expression).unwrap_or_else(|| {
-            Self::Expr(
-                typescript_expression_source(expression)
-                    .expect("a parsed editable expression must remain sourceable"),
-            )
-        })
-    }
-
-    fn literal_from_expr(expression: &Expr) -> Option<Self> {
-        match expression {
-            Expr::Null => Some(Self::Null),
-            Expr::Bool(value) => Some(Self::Bool(*value)),
-            Expr::Number(value) => Some(Self::Number(*value)),
-            Expr::String(value) => Some(Self::String(value.to_string())),
-            Expr::List(values) => values
-                .iter()
-                .map(Self::literal_from_expr)
-                .collect::<Option<Vec<_>>>()
-                .map(Self::List),
-            Expr::Record(entries) => entries
-                .iter()
-                .map(|(key, value)| Some((key.to_string(), Self::literal_from_expr(value)?)))
-                .collect::<Option<BTreeMap<_, _>>>()
-                .map(Self::Object),
-            _ => None,
-        }
-    }
-
-    fn to_expr(
-        &self,
-        node_id: &str,
-        field: &str,
-        scope: &FragmentScope,
-    ) -> Result<Expr, RenderErrorResponse> {
-        Ok(match self {
-            Self::Null => Expr::Null,
-            Self::Bool(value) => Expr::Bool(*value),
-            Self::Number(value) => Expr::Number(*value),
-            Self::String(value) => Expr::String(value.clone().into()),
-            Self::List(values) => Expr::List(
-                values
-                    .iter()
-                    .map(|value| value.to_expr(node_id, field, scope))
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::Expr(source) => parse_fragment(source, scope).map_err(|error| {
-                RenderErrorResponse::invalid_expression(node_id, field, error.to_string())
+            condition: parse_fragment(condition, scope).map_err(|error| {
+                RenderErrorResponse::invalid_expression(
+                    node_id,
+                    "clause condition",
+                    error.to_string(),
+                )
             })?,
-            Self::Object(entries) => Expr::Record(
-                entries
-                    .iter()
-                    .map(|(key, value)| {
-                        Ok((key.clone().into(), value.to_expr(node_id, field, scope)?))
-                    })
-                    .collect::<Result<_, RenderErrorResponse>>()?,
-            ),
-        })
-    }
+        },
+    })
 }
 
 fn node_ids(graph: &WorkflowSubgraph) -> Vec<String> {
@@ -1357,15 +1340,11 @@ fn node_subkind(node: &WorkflowNode) -> Option<&'static str> {
 fn effect_name(effect: &lashlang::WorkflowEffectKind) -> &'static str {
     use lashlang::WorkflowEffectKind;
     match effect {
-        WorkflowEffectKind::StartProcess => "start_process",
         WorkflowEffectKind::AwaitJoin => "await_join",
-        WorkflowEffectKind::SignalRun => "signal_run",
         WorkflowEffectKind::WaitSignal => "wait_signal",
-        WorkflowEffectKind::Sleep => "sleep",
-        WorkflowEffectKind::Cancel => "cancel",
+        WorkflowEffectKind::SleepFor | WorkflowEffectKind::SleepUntil => "sleep",
         WorkflowEffectKind::Print => "print",
         WorkflowEffectKind::Yield => "yield",
-        WorkflowEffectKind::Wake => "wake",
         WorkflowEffectKind::Break => "break",
         WorkflowEffectKind::Continue => "continue",
     }
@@ -1538,7 +1517,7 @@ finish(items);
             name_source: lashlang::WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Data {
                 binding: None,
-                expression: "value".to_string(),
+                expression: Expr::Variable("value".into()),
             },
             available_variables: vec!["value".to_string()],
             type_facets: None,
@@ -1552,10 +1531,10 @@ finish(items);
             description: None,
             name_source: lashlang::WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-                binding: Some("doubled".to_string()),
+                binding: Some(lashlang::AssignTarget::variable("doubled".into())),
                 clauses: vec![WorkflowListComprehensionClause::For {
                     binding: "value".to_string(),
-                    iterable: "items".to_string(),
+                    iterable: Expr::Variable("items".into()),
                 }],
                 element: Box::new(WorkflowSubgraph {
                     nodes: vec![element],

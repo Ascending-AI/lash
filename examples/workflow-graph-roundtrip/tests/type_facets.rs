@@ -1,5 +1,30 @@
 use serde_json::Value;
-use workflow_graph_roundtrip::{AppState, EditableValue, SaveWorkflowResponse, WorkflowDocument};
+use workflow_graph_roundtrip::{
+    AppState, EditableValue, SaveWorkflowResponse, TypeDiagnostic, WorkflowDocument,
+};
+
+#[test]
+fn facet_diagnostic_http_json_golden_is_exact() {
+    let diagnostic = TypeDiagnostic {
+        node_id: "node-1".to_string(),
+        kind: "incompatible_expected_literal".to_string(),
+        class: "definite".to_string(),
+        slot: Some("arg[0].query".to_string()),
+        message: "expected enum, got incompatible literal \"bad\"".to_string(),
+        span: Some(lashlang::Span { start: 4, end: 9 }),
+    };
+    assert_eq!(
+        serde_json::to_value(diagnostic).expect("diagnostic serializes"),
+        serde_json::json!({
+            "nodeId": "node-1",
+            "kind": "incompatible_expected_literal",
+            "class": "definite",
+            "slot": "arg[0].query",
+            "message": "expected enum, got incompatible literal \"bad\"",
+            "span": { "start": 4, "end": 9 }
+        })
+    );
+}
 
 #[tokio::test]
 async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {

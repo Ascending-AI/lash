@@ -56,59 +56,7 @@ impl WorkflowLinkAnalysis {
 
 impl LinkError {
     pub fn kind(&self) -> &'static str {
-        match self {
-            Self::DuplicateDeclaration { .. } => "duplicate_declaration",
-            Self::DuplicateProcessParam { .. } => "duplicate_process_param",
-            Self::DuplicateProcessSignal { .. } => "duplicate_process_signal",
-            Self::UnknownProcess { .. } => "unknown_process",
-            Self::UnknownName { .. } => "unknown_name",
-            Self::UnknownBuiltin { .. } => "unknown_builtin",
-            Self::UnknownResource { .. } => "unknown_resource",
-            Self::UnknownType { .. } => "unknown_type",
-            Self::IncompatibleConstructorInput { .. } => "incompatible_constructor_input",
-            Self::IncompatibleOperationInput { .. } => "incompatible_operation_input",
-            Self::AwaitedSettledExpression { .. } => "awaited_settled_expression",
-            Self::IncompatibleExpectedLiteral { .. } => "incompatible_expected_literal",
-            Self::IncompatibleProcessReturn { .. } => "incompatible_process_return",
-            Self::IncompatibleFunctionReturn { .. } => "incompatible_function_return",
-            Self::DuplicateFunctionParam { .. } => "duplicate_function_param",
-            Self::FunctionArgumentCount { .. } => "function_argument_count",
-            Self::IncompatibleFunctionArgument { .. } => "incompatible_function_argument",
-            Self::ForbiddenInFunction { .. } => "forbidden_in_function",
-            Self::FunctionNameIsNotAValue { .. } => "function_name_is_not_a_value",
-            Self::FunctionShadowsBuiltin { .. } => "function_shadows_builtin",
-            Self::InvalidTriggerRegistration { .. } => "invalid_trigger_registration",
-            Self::InvalidTriggerSubscriptionKey { .. } => "invalid_trigger_subscription_key",
-            Self::ProcessLiteralOutsideProcessSlot { .. } => "process_literal_outside_process_slot",
-            Self::ConflictingSignalPayload { .. } => "conflicting_signal_payload",
-            Self::InvalidTriggerInputs { .. } => "invalid_trigger_inputs",
-            Self::DuplicateTriggerInput { .. } => "duplicate_trigger_input",
-            Self::MissingTriggerInput { .. } => "missing_trigger_input",
-            Self::UnknownTriggerInput { .. } => "unknown_trigger_input",
-            Self::MissingTriggerEventInput { .. } => "missing_trigger_event_input",
-            Self::TriggerTargetTakesNoEvent { .. } => "trigger_target_takes_no_event",
-            Self::AmbiguousOmittedTriggerInputs { .. } => "ambiguous_omitted_trigger_inputs",
-            Self::TriggerEventOutsideInputs { .. } => "trigger_event_outside_inputs",
-            Self::TriggerEventProjection { .. } => "trigger_event_projection",
-            Self::InvalidTriggerList { .. } => "invalid_trigger_list",
-            Self::UnknownTriggerEventType { .. } => "unknown_trigger_event_type",
-            Self::InvalidTriggerTarget { .. } => "invalid_trigger_target",
-            Self::TriggerEventMismatch { .. } => "trigger_event_mismatch",
-            Self::UnresolvedReceiver { .. } => "unresolved_receiver",
-            Self::UnknownResourceOperation { .. } => "unknown_resource_operation",
-            Self::AmbiguousModuleOperation { .. } => "ambiguous_module_operation",
-            Self::BareToolCall { .. } => "bare_tool_call",
-            Self::IncompatibleProcessArgument { .. } => "incompatible_process_argument",
-            Self::FeatureDisabled { .. } => "feature_disabled",
-            Self::ProcessLifecycleOutsideProcess { .. } => "process_lifecycle_outside_process",
-            Self::OpaqueHostDescriptorAccess { .. } => "opaque_host_descriptor_access",
-            Self::UnknownObjectField { .. } => "unknown_object_field",
-            Self::IncompatibleBinaryOperands { .. } => "incompatible_binary_operands",
-            Self::IncompatibleBuiltinOperands { .. } => "incompatible_builtin_operands",
-            Self::IncompatibleIterationTarget { .. } => "incompatible_iteration_target",
-            Self::ModuleHash { .. } => "module_hash",
-            Self::InvalidAst { .. } => "invalid_ast",
-        }
+        crate::WorkflowDiagnosticKind::from_link_error(self).as_str()
     }
 }
 
@@ -190,15 +138,22 @@ impl<'module> Linker<'module> {
 
     pub(super) fn record_workflow_error(&self, expr: &Expr, path: &AstPath, error: LinkError) {
         let span = error.span();
+        let error_path = self
+            .workflow_error_path
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| path.clone());
         let Some(analysis) = &self.workflow_analysis else {
             return;
         };
         let expected_arguments = self.expected_arguments_for_node(expr, path);
         let mut analysis = analysis.borrow_mut();
         let facts = analysis.nodes.entry(path.clone()).or_default();
-        facts
-            .diagnostics
-            .push(WorkflowLinkDiagnostic { error, span });
+        facts.diagnostics.push(WorkflowLinkDiagnostic {
+            error,
+            span,
+            path: error_path,
+        });
         facts.expected_arguments = expected_arguments;
     }
 
@@ -222,13 +177,22 @@ impl<'module> Linker<'module> {
             .get(&owner)
             .copied()
             .or_else(|| error.span());
+        let error_path = self
+            .workflow_error_path
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| path.clone());
         let mut analysis = analysis.borrow_mut();
         analysis
             .nodes
             .entry(owner)
             .or_default()
             .diagnostics
-            .push(WorkflowLinkDiagnostic { error, span });
+            .push(WorkflowLinkDiagnostic {
+                error,
+                span,
+                path: error_path,
+            });
     }
 
     pub(super) fn clear_workflow_analysis(&self) {
@@ -363,6 +327,7 @@ fn collect_expected_slots(
         arguments.push(WorkflowLinkExpectedArgument {
             slot: slot.clone(),
             ty: ty.clone(),
+            path: path.clone(),
         });
     }
     match expr {

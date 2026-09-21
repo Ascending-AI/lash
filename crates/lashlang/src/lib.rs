@@ -124,12 +124,15 @@ pub use trigger::{
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
-    WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
+    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClass,
+    WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
     WorkflowExpectedArgument, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode,
     WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets,
-    WorkflowProcess, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
-    WorkflowTypedVariable, child_path, execution_sites, node_id_for_execution_site,
-    projected_node_type_facets, runtime_execution_site_for_workflow_site,
+    WorkflowProcess, WorkflowResultStep, WorkflowSubgraph, WorkflowTerminalKind,
+    WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path, execution_sites,
+    node_id_for_execution_site, projected_node_type_facets,
+    runtime_execution_site_for_workflow_site, workflow_call_from_ir, workflow_call_to_ir,
+    workflow_effect_from_ir, workflow_effect_to_ir, workflow_slot_accepts_value,
 };
 
 /// Internals the workflow-graph projector needs.

@@ -1230,6 +1230,11 @@ where
     }
 }
 
+/// A serialized value-type expression.
+///
+/// Host decoders must refuse unknown variants. `TypeExpr` is decoded only
+/// after its graph or facet carrier version is accepted; adding a variant
+/// therefore requires the owning carrier version to advance.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeExpr {
     Any,

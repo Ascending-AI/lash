@@ -43,13 +43,26 @@ overlays. Projection parses source and operates on the AST; rendering
 reconstructs an AST and delegates all text generation to the existing canonical
 printer. It does not compile or link the workflow.
 
-Every expression-valued field owned by a structured node is stored in the
-graph as canonical Lashlang text. This includes assignment expressions and
-targets, computation expressions and bindings, `if`/`while` conditions, `for`
-iterables, and list-comprehension iterable/filter clauses. Rendering parses
-those fields back independently and returns field-typed errors for invalid
-host edits. The retained AST from the original projection is never an input to
-graph → source, so an edited field cannot silently reset.
+Every expression-valued field owned by a structured node is stored as
+serialized Lashlang IR. This includes assignment expressions and targets,
+computation expressions and bindings, `if` and `while` conditions, `for`
+iterables, and list-comprehension iterable and filter clauses. Call nodes store
+their receiver and positional or named arguments separately. Effect nodes store
+their exact effect kind and the same structured IR argument list. Their slot
+paths use `arg[N]`, `.field`, and `[N]`; nodes with several nested receiver
+calls add the depth-first `call[N]` prefix used by the type facets. Rendering
+consumes the IR directly and parses no expression text.
+
+Facet diagnostics carry an optional slot path, a closed diagnostic kind, and a
+serialized `definite` or `advisory` class. `definite` diagnostics block a save
+under ADR 0073. `TypeExpr` is closed: a host refuses an unknown variant after
+accepting the graph or facet carrier version.
+
+Canonical text belongs to a dialect and is derived, non-authoritative output.
+A host text edit enters through that dialect's existing fragment parser, which
+returns replacement IR for the selected field. The graph never stores that
+text beside the IR. Opaque statement nodes remain statement text because the
+lens has not decomposed them into an expression-valued field.
 
 The lens laws are:
 

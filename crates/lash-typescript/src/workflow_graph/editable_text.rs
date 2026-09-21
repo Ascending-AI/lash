@@ -10,24 +10,10 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{AssignPathStep, AssignTarget, Expr, ListComprehensionClause, Program};
+use lashlang::{AssignPathStep, AssignTarget, Expr, Program};
 
-use super::printer::{
-    typescript_assign_target_source, typescript_expression_source, typescript_statement_source,
-};
-use super::{
-    GraphRenderError, RenderContext, RenderScope, WorkflowListComprehensionClause, WorkflowNode,
-};
-
-pub(super) fn expression_text(expression: &Expr, allow_non_sourceable: bool) -> String {
-    match typescript_expression_source(expression) {
-        Ok(text) => text,
-        Err(error) if allow_non_sourceable => format!("<non-sourceable expression: {error}>"),
-        Err(error) => {
-            panic!("an expression parsed from canonical source must remain sourceable: {error}")
-        }
-    }
-}
+use super::printer::typescript_statement_source;
+use super::{GraphRenderError, RenderContext, RenderScope, WorkflowNode};
 
 pub(super) fn statement_text(
     expression: &Expr,
@@ -40,35 +26,6 @@ pub(super) fn statement_text(
         Err(error) => {
             panic!("a statement parsed from canonical source must remain sourceable: {error}")
         }
-    }
-}
-
-pub(super) fn assign_target_text(target: &AssignTarget, allow_non_sourceable: bool) -> String {
-    match typescript_assign_target_source(target) {
-        Ok(text) => text,
-        // A lowered program projected for a trace may bind a generated
-        // destructuring temporary, which has no authored spelling.
-        Err(error) if allow_non_sourceable => format!("<non-sourceable target: {error}>"),
-        Err(_) => {
-            panic!("an assignment target parsed from canonical source must remain sourceable")
-        }
-    }
-}
-
-pub(super) fn workflow_clause(
-    clause: &ListComprehensionClause,
-    allow_non_sourceable: bool,
-) -> WorkflowListComprehensionClause {
-    match clause {
-        ListComprehensionClause::For { binding, iterable } => {
-            WorkflowListComprehensionClause::For {
-                binding: binding.to_string(),
-                iterable: expression_text(iterable, allow_non_sourceable),
-            }
-        }
-        ListComprehensionClause::If { condition } => WorkflowListComprehensionClause::If {
-            condition: expression_text(condition, allow_non_sourceable),
-        },
     }
 }
 
@@ -256,26 +213,6 @@ pub fn parse_typescript_process_statement(
 #[error("{0}")]
 pub struct TypeScriptFragmentError(String);
 
-pub(super) fn parse_expression_field(
-    node: &WorkflowNode,
-    field: &'static str,
-    text: &str,
-    context: RenderContext<'_>,
-) -> Result<Expr, GraphRenderError> {
-    let globals = node
-        .available_variables
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    expression_fragment(text, &globals, &context.process_bindings()).map_err(|message| {
-        GraphRenderError::InvalidExpression {
-            node_id: node.id.to_string(),
-            field,
-            message,
-        }
-    })
-}
-
 /// The throwaway binding an `async` arrow field is parsed under.
 const PROCESS_LITERAL_BINDING: &str = "__workflow_process_literal";
 
@@ -298,25 +235,6 @@ fn single_expression(main: Expr) -> Option<Expr> {
 /// The dialect has no production for a bare target, so the text is parsed as
 /// the member expression it is and converted; that keeps one grammar in play
 /// rather than a second hand-written path parser.
-pub(super) fn parse_assignment_target_field(
-    node: &WorkflowNode,
-    field: &'static str,
-    text: &str,
-) -> Result<AssignTarget, GraphRenderError> {
-    let globals = node
-        .available_variables
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    parse_typescript_assign_target(text, &globals, &BTreeSet::new()).map_err(|error| {
-        GraphRenderError::InvalidAssignmentTarget {
-            node_id: node.id.to_string(),
-            field,
-            message: error.to_string(),
-        }
-    })
-}
-
 fn assign_target_from_expression(expression: &Expr) -> Option<AssignTarget> {
     match expression {
         Expr::Variable(name) => Some(AssignTarget {
@@ -337,65 +255,4 @@ fn assign_target_from_expression(expression: &Expr) -> Option<AssignTarget> {
         }
         _ => None,
     }
-}
-
-pub(super) fn parse_simple_binding_field(
-    node: &WorkflowNode,
-    field: &'static str,
-    text: &str,
-) -> Result<AssignTarget, GraphRenderError> {
-    let target = parse_assignment_target_field(node, field, text)?;
-    if !target.is_simple() {
-        return invalid_payload(node, "this field requires a simple binding target");
-    }
-    Ok(target)
-}
-
-pub(super) fn parse_comprehension_clauses(
-    node: &WorkflowNode,
-    clauses: &[WorkflowListComprehensionClause],
-    context: RenderContext<'_>,
-) -> Result<Vec<ListComprehensionClause>, GraphRenderError> {
-    clauses
-        .iter()
-        .map(|clause| match clause {
-            WorkflowListComprehensionClause::For { binding, iterable } => {
-                Ok(ListComprehensionClause::For {
-                    binding: parse_simple_binding_field(node, "clause binding", binding)?.root,
-                    iterable: parse_expression_field(node, "clause iterable", iterable, context)?,
-                })
-            }
-            WorkflowListComprehensionClause::If { condition } => Ok(ListComprehensionClause::If {
-                condition: parse_expression_field(node, "clause condition", condition, context)?,
-            }),
-        })
-        .collect()
-}
-
-pub(super) fn with_assignment(
-    node: &WorkflowNode,
-    binding: &Option<String>,
-    expression: Expr,
-    must_be_simple: bool,
-) -> Result<Expr, GraphRenderError> {
-    match binding {
-        Some(text) => {
-            let target = parse_assignment_target_field(node, "binding", text)?;
-            if must_be_simple && !target.is_simple() {
-                return invalid_payload(node, "this node kind requires a simple binding target");
-            }
-            Ok(Expr::Assign {
-                target,
-                expr: Box::new(expression),
-            })
-        }
-        None => Ok(expression),
-    }
-}
-
-fn invalid_payload<T>(node: &WorkflowNode, message: &str) -> Result<T, GraphRenderError> {
-    Err(GraphRenderError::InvalidNodePayload {
-        node_id: node.id.to_string(),
-        message: message.to_string(),
-    })
 }
