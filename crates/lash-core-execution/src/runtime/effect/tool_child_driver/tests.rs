@@ -378,6 +378,43 @@ fn everything_not_on_the_checklist_is_the_lent_value() {
     assert!(lent.event_tx.same_channel(&child.event_tx));
 }
 
+/// §3's ruling stated as a negative: a group child holds no runtime execution
+/// context — the live context is exactly the authority a retained child must
+/// not borrow, because the facts it would record are the child's buffers'
+/// job to carry into the settlement. What the context *does* name is the
+/// rebound dispatch itself, never the opener's live one.
+#[test]
+fn a_childs_tool_context_holds_no_runtime_execution_context() {
+    let lent = lent();
+    let rebound = Arc::new(
+        rebind_child_dispatch(
+            &lent,
+            &request(),
+            child_controller(),
+            spec(3),
+            &ToolUsageLedger::new(),
+        )
+        .expect("the lent client's test service binds to any recorded authority"),
+    );
+    let context = child_tool_context(
+        &rebound,
+        &request(),
+        &tokio_util::sync::CancellationToken::new(),
+        crate::tool_dispatch::OrchestratingStartsBuffer::default(),
+    );
+    assert!(
+        context.runtime_execution_context.is_none(),
+        "a group child is not lent a live execution context (§3)"
+    );
+    assert!(
+        context
+            .runtime_dispatch
+            .as_ref()
+            .is_some_and(|dispatch| Arc::ptr_eq(dispatch, &rebound)),
+        "the context's dispatch is the child's rebound dispatch"
+    );
+}
+
 /// §1 and the registry's key rule, at the driver's door: a child whose opener
 /// is not live in this process is **neither run nor failed**. The resolver
 /// answers absence, the group leaves the child accepted, and the process whose
@@ -510,12 +547,23 @@ struct CompletionProbe {
     completes: std::sync::Mutex<Vec<(ExecutionScope, Option<crate::TurnId>, bool)>>,
 }
 
+/// What the service's `complete` does after it has received the call. The
+/// billed-failure arm models `apply_direct_outcome`'s ordering: the sealed
+/// provider record — a billed attempt that then failed — is a usage fact of
+/// the call and feeds the sink *before* the error projects.
+#[derive(Clone, Copy)]
+enum ProbeCall {
+    Succeed,
+    FailAfterBilling,
+}
+
 struct ProbedCompletionService {
     probe: Arc<CompletionProbe>,
     /// What `bind_tool_child` answers. `false` models a service that cannot
     /// prove it executes under the recorded authority — the production
     /// transport's answer to a foreign session.
     bindable: bool,
+    call: ProbeCall,
 }
 
 #[async_trait::async_trait]
@@ -535,11 +583,20 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
             usage_sink.is_some(),
         ));
         // The sealed record feeds the bound sink the way the runtime service
-        // does — a billed provider attempt is a usage fact of the call.
+        // does — a billed provider attempt is a usage fact of the call,
+        // whatever the call then returns.
         if let Some(sink) = usage_sink {
-            sink.record(&probed_call_record());
+            sink.record(&match self.call {
+                ProbeCall::Succeed => probed_call_record(),
+                ProbeCall::FailAfterBilling => failed_billed_call_record(),
+            });
         }
-        Ok(probed_completion())
+        match self.call {
+            ProbeCall::Succeed => Ok(probed_completion()),
+            ProbeCall::FailAfterBilling => Err(crate::PluginError::Session(
+                "the provider attempt billed, then failed".to_string(),
+            )),
+        }
     }
 
     async fn complete_llm(
@@ -570,6 +627,7 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
             Arc::new(ProbedCompletionService {
                 probe: Arc::clone(&self.probe),
                 bindable: self.bindable,
+                call: self.call,
             }) as Arc<dyn crate::direct_completion_client::DirectCompletionService>
         })
     }
@@ -603,6 +661,16 @@ fn probed_call_record() -> crate::LlmCallRecord {
     }
 }
 
+/// A sealed provider record whose only attempt billed, then failed — the
+/// hostile case §13's usage line exists for: the spend is a fact even though
+/// the call's terminal outcome is an error.
+fn failed_billed_call_record() -> crate::LlmCallRecord {
+    let mut record = probed_call_record();
+    record.call_id = crate::LlmCallId("failed-billed-call".to_string());
+    record.attempts[0].outcome = crate::AttemptOutcome::Failed;
+    record
+}
+
 fn probed_completion() -> crate::DirectCompletion {
     crate::DirectCompletion {
         text: "probed completion".to_string(),
@@ -615,11 +683,16 @@ fn probed_completion() -> crate::DirectCompletion {
     }
 }
 
-fn probed_lent(probe: &Arc<CompletionProbe>, bindable: bool) -> ToolDispatchContext<'static> {
+fn probed_lent(
+    probe: &Arc<CompletionProbe>,
+    bindable: bool,
+    call: ProbeCall,
+) -> ToolDispatchContext<'static> {
     lent_with_direct_completions(crate::DirectCompletionClient::runtime(
         Arc::new(ProbedCompletionService {
             probe: Arc::clone(probe),
             bindable,
+            call,
         }),
         crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default(),
@@ -636,7 +709,7 @@ fn probed_lent(probe: &Arc<CompletionProbe>, bindable: bool) -> ToolDispatchCont
 #[tokio::test]
 async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
     let probe = Arc::new(CompletionProbe::default());
-    let lent = probed_lent(&probe, true);
+    let lent = probed_lent(&probe, true, ProbeCall::Succeed);
     // A recorded parent that carries the child's turn, so the rebound
     // client's attribution observably comes from the journal and not from
     // the opener's minted `opener-turn`.
@@ -716,7 +789,7 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
 #[test]
 fn a_completion_service_that_cannot_bind_the_recorded_authority_refuses() {
     let probe = Arc::new(CompletionProbe::default());
-    let lent = probed_lent(&probe, false);
+    let lent = probed_lent(&probe, false, ProbeCall::Succeed);
     let error = rebind_child_dispatch(
         &lent,
         &request(),
@@ -735,4 +808,291 @@ fn a_completion_service_that_cannot_bind_the_recorded_authority_refuses() {
         1,
         "the refusal came from asking, not from skipping the bind"
     );
+}
+
+/// §13's usage line: a provider attempt that billed and then failed is a
+/// spend of the child even though the call returns an error. The service
+/// feeds its sealed record to the bound sink before the error projects —
+/// the same ordering `apply_direct_outcome` holds — so the ledger the
+/// settlement drains already carries the failed attempt's usage.
+#[tokio::test]
+async fn a_billed_failed_completion_attempt_lands_on_the_child_usage() {
+    let probe = Arc::new(CompletionProbe::default());
+    let lent = probed_lent(&probe, true, ProbeCall::FailAfterBilling);
+    let usage_ledger = ToolUsageLedger::new();
+    let child = rebind_child_dispatch(
+        &lent,
+        &request(),
+        child_controller(),
+        spec(3),
+        &usage_ledger,
+    )
+    .expect("the probe service binds to the recorded authority");
+
+    child
+        .direct_completions
+        .direct_completion(
+            crate::DirectRequest::text("law-model", "a call that bills then fails"),
+            "law-source",
+        )
+        .await
+        .expect_err("the failed call surfaces as an error");
+
+    let deltas = usage_ledger.take();
+    assert_eq!(
+        deltas.len(),
+        1,
+        "the failed attempt's billed spend is retained, not dropped"
+    );
+    assert_eq!(
+        deltas[0].llm_call_id,
+        crate::LlmCallId("failed-billed-call".to_string())
+    );
+    assert_eq!(deltas[0].provider_attempt, 1);
+    assert_eq!(deltas[0].usage.input_tokens, 5);
+}
+
+/// The tool-child host the recorded-authority checks run against.
+fn tool_children(host: &Arc<dyn EffectHost>) -> Arc<ToolChildHost> {
+    ToolChildHost::new(
+        host,
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::default()),
+    )
+}
+
+/// A controller that reports durable-journaled turn-control participation and
+/// names the host's await-event authority, so the recorded-authority checks
+/// see the durable arms rather than the native local ones.
+struct DurableReplayController {
+    authority_id: std::sync::OnceLock<String>,
+}
+
+impl crate::AwaitEventResolver for DurableReplayController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.authority_id.get().cloned()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for DurableReplayController {
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+        Ok(crate::TurnControlParticipation::DurableJournaled)
+    }
+
+    async fn execute_effect(
+        &self,
+        _envelope: RuntimeEffectEnvelope,
+        _local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        unreachable!("the authority-check tests execute no effects")
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("DurableReplayController"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("DurableReplayController"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("DurableReplayController"))
+    }
+}
+
+/// A scoped durable-participant controller whose await-event authority is this
+/// host's, so the host's binding derivation accepts it.
+fn durable_child_controller(host: &Arc<dyn EffectHost>) -> ScopedEffectController<'static> {
+    let controller = Arc::new(DurableReplayController {
+        authority_id: std::sync::OnceLock::new(),
+    });
+    controller
+        .authority_id
+        .set(host.turn_control_binding_id())
+        .expect("the authority id is set once");
+    ScopedEffectController::shared(controller, ExecutionScope::turn("child-session", "turn"))
+        .expect("a valid child scope")
+}
+
+/// A request whose recorded cancellation authority is exactly what `host`
+/// derives for the child's admitted scope — the fixture every durable-side
+/// check needs, because a durable participant always records `Some`.
+fn durably_admitted_request(
+    host: &Arc<dyn EffectHost>,
+    routing: ToolChildCompletionRouting,
+) -> ToolChildRequest {
+    let derived = crate::runtime::effect::executor::turn_control_binding_id_for_scope(
+        &host.turn_control_binding_id(),
+        &ExecutionScope::turn("child-session", "turn"),
+    )
+    .expect("a scope-derived binding id");
+    let mut request = request().with_cancellation_authority(
+        crate::TurnControlBindingId::new(derived).expect("a valid binding id"),
+    );
+    request.completion_routing = routing;
+    request
+}
+
+/// §3's cancellation line, wrong direction: a recorded binding this host did
+/// not mint for the admitted scope is a foreign authority — the cooperative
+/// signal it would honour is not the one this opener sends.
+#[tokio::test]
+async fn a_foreign_cancellation_binding_is_refused() {
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = tool_children(&host);
+    let request = request().with_cancellation_authority(
+        crate::TurnControlBindingId::new("a-binding-this-host-did-not-mint")
+            .expect("a valid binding id"),
+    );
+    let error = validate_recorded_authorities(&tool_children, &child_controller(), &request)
+        .await
+        .expect_err("a binding this host did not mint for the scope is refused");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority
+    );
+}
+
+/// And the matching one is accepted: presence was never the check — the
+/// recorded id must equal what this host derives for the admitted scope.
+#[tokio::test]
+async fn the_recorded_cancellation_binding_is_accepted() {
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = tool_children(&host);
+    let request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
+    validate_recorded_authorities(&tool_children, &child_controller(), &request)
+        .await
+        .expect("the binding this host derives for the admitted scope is accepted");
+}
+
+/// A `None` record is legal only under local participation: reopened against
+/// a durable-journaled controller it is an inconsistency, because the
+/// cooperative authority exists and the record that omits it lies.
+#[tokio::test]
+async fn a_missing_cancellation_record_on_a_durable_participant_is_refused() {
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = tool_children(&host);
+    let controller = durable_child_controller(&host);
+    let error = validate_recorded_authorities(&tool_children, &controller, &request())
+        .await
+        .expect_err("a durable participant without a recorded binding is inconsistent");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority
+    );
+}
+
+/// The recorded cancellation authority is the scope the child's waits
+/// observe: whether the child is waiting out a retry, parked on a deferred
+/// completion, or running the attempt body, the cooperative signal that can
+/// reach it is the recorded binding's — never a foreign opener's.
+#[tokio::test]
+async fn the_cancel_wait_observes_the_admitted_scope() {
+    let with_authority = request().with_cancellation_authority(
+        crate::TurnControlBindingId::new("recorded-authority").expect("a valid binding id"),
+    );
+    let dispatch = Arc::new(rebound(&with_authority));
+    let wait = child_turn_cancel_wait(
+        &dispatch,
+        &with_authority,
+        &tokio_util::sync::CancellationToken::new(),
+    );
+    let observed = wait
+        .process_turn_cancellation()
+        .expect("a recorded authority observes turn cancellation");
+    assert_eq!(
+        observed.scope,
+        ExecutionScope::turn("child-session", "turn"),
+        "the wait observes the child's admitted scope"
+    );
+
+    let request = request();
+    let dispatch = Arc::new(rebound(&request));
+    let wait = child_turn_cancel_wait(
+        &dispatch,
+        &request,
+        &tokio_util::sync::CancellationToken::new(),
+    );
+    assert!(
+        wait.process_turn_cancellation().is_none(),
+        "no recorded authority, no turn observation"
+    );
+}
+
+/// §14's routing line, wrong issuer: a process-lifetime key minted by another
+/// registry is unresolvable here — refused, never re-minted into a second
+/// dispatch.
+#[tokio::test]
+async fn a_process_lifetime_key_from_a_foreign_issuer_is_refused() {
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = tool_children(&host);
+    let mut request = request();
+    request.completion_routing = ToolChildCompletionRouting::ProcessLifetime {
+        issuer: crate::TurnControlBindingId::new("registry-not-this-one")
+            .expect("a valid binding id"),
+    };
+    let error = validate_recorded_authorities(&tool_children, &child_controller(), &request)
+        .await
+        .expect_err("a key issued by another registry is refused");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting
+    );
+}
+
+/// The same routing bound to this host's registry identity is accepted.
+#[tokio::test]
+async fn a_process_lifetime_key_from_this_registry_is_accepted() {
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = tool_children(&host);
+    let mut request = request();
+    request.completion_routing = ToolChildCompletionRouting::ProcessLifetime {
+        issuer: crate::TurnControlBindingId::new(host.turn_control_binding_id())
+            .expect("a valid binding id"),
+    };
+    validate_recorded_authorities(&tool_children, &child_controller(), &request)
+        .await
+        .expect("a key this registry issued resolves here");
+}
+
+/// `Durable` routing needs a durable await-event authority behind the child's
+/// controller — on a locally-participating one the child is refused rather
+/// than parked on a key nothing resolves.
+#[tokio::test]
+async fn durable_routing_without_a_durable_authority_is_refused() {
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = tool_children(&host);
+    let request = durably_admitted_request(&host, ToolChildCompletionRouting::Durable);
+    let error = validate_recorded_authorities(&tool_children, &child_controller(), &request)
+        .await
+        .expect_err("durable routing needs a durable await-event authority");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting
+    );
+}
+
+/// And it is admitted where the authority exists.
+#[tokio::test]
+async fn durable_routing_with_a_durable_authority_is_accepted() {
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = tool_children(&host);
+    let controller = durable_child_controller(&host);
+    let request = durably_admitted_request(&host, ToolChildCompletionRouting::Durable);
+    validate_recorded_authorities(&tool_children, &controller, &request)
+        .await
+        .expect("durable routing under a durable authority is admitted");
 }

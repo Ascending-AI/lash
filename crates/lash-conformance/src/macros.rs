@@ -1964,6 +1964,14 @@ macro_rules! tool_child_invocation_tests {
                 a_foreign_opener_cannot_drive_another_openers_child,
                 "tool-child-foreign-opener"
             ),
+            (
+                a_same_name_process_incarnation_is_not_the_recorded_opener,
+                "tool-child-process-incarnation"
+            ),
+            (
+                a_crashed_child_replays_its_committed_attempts_facts,
+                "tool-child-attempt-capture"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

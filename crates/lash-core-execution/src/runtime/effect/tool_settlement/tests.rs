@@ -4,18 +4,30 @@ use crate::MessageRole;
 use lash_sansio::core_support::ModelToolReturnCoreSupport;
 
 fn attempt(ordinal: u32, input_tokens: i64) -> crate::AttemptRecord {
+    attempt_with(
+        ordinal,
+        crate::AttemptOutcome::Completed,
+        Some(input_tokens),
+    )
+}
+
+fn attempt_with(
+    ordinal: u32,
+    outcome: crate::AttemptOutcome,
+    input_tokens: Option<i64>,
+) -> crate::AttemptRecord {
     crate::AttemptRecord {
         ordinal,
         started_at: 0,
         duration: std::time::Duration::ZERO,
-        outcome: crate::AttemptOutcome::Completed,
+        outcome,
         protocol_position: crate::ProtocolPosition::ResponseObserved,
         retry_budget_consumed: false,
         retry_decision: None,
         error: None,
         evidence: None,
         generation_disposition: None,
-        usage: Some(crate::llm::types::LlmUsage {
+        usage: input_tokens.map(|input_tokens| crate::llm::types::LlmUsage {
             input_tokens,
             output_tokens: 0,
             cache_read_input_tokens: 0,
@@ -35,6 +47,15 @@ fn call_record(id: &str, attempts: &[(u32, i64)]) -> crate::LlmCallRecord {
             .iter()
             .map(|(ordinal, usage)| attempt(*ordinal, *usage))
             .collect(),
+    }
+}
+
+fn call_record_of(id: &str, attempts: Vec<crate::AttemptRecord>) -> crate::LlmCallRecord {
+    crate::LlmCallRecord {
+        call_id: LlmCallId(id.to_string()),
+        label: None,
+        replay_drops: Vec::new(),
+        attempts,
     }
 }
 
@@ -285,4 +306,59 @@ fn a_cloned_ledger_records_into_the_same_accumulator() {
     let nested = ledger.clone();
     nested.record(&call_record("call-a", &[(1, 2)]));
     assert_eq!(ledger.take().len(), 1);
+}
+
+/// §13's headline case: a provider attempt that billed and failed and the
+/// retry that succeeded are two spends. The ledger keys a delta off the sealed
+/// record's attempts — not the call's terminal outcome — so a billed failure
+/// is kept next to, never instead of, the billed retry.
+#[test]
+fn a_billed_failed_attempt_and_its_successful_retry_are_two_facts() {
+    let ledger = ToolUsageLedger::for_attempt(1);
+    ledger.record(&call_record_of(
+        "call-a",
+        vec![
+            attempt_with(1, crate::AttemptOutcome::Failed, Some(10)),
+            attempt_with(2, crate::AttemptOutcome::Completed, Some(41)),
+        ],
+    ));
+    assert_eq!(
+        ledger.take(),
+        vec![
+            delta(1, "call-a", 1, spent(10)),
+            delta(1, "call-a", 2, spent(41)),
+        ]
+    );
+}
+
+/// A call aborted after the provider billed it is still a spend: the sealed
+/// record's attempt carries usage and the ledger keeps it — the capture
+/// exists nowhere else once the error path returns.
+#[test]
+fn a_billed_aborted_attempt_is_a_fact() {
+    let ledger = ToolUsageLedger::for_attempt(2);
+    ledger.record(&call_record_of(
+        "call-a",
+        vec![attempt_with(1, crate::AttemptOutcome::Aborted, Some(9))],
+    ));
+    assert_eq!(ledger.take(), vec![delta(2, "call-a", 1, spent(9))]);
+}
+
+/// A failed attempt that never reached the provider reports `None` and
+/// contributes no row: unbilled is a fact about billing, not a zero spend.
+#[test]
+fn an_unbilled_failed_attempt_records_nothing() {
+    let ledger = ToolUsageLedger::new();
+    ledger.record(&call_record_of(
+        "call-a",
+        vec![
+            attempt_with(1, crate::AttemptOutcome::Failed, None),
+            attempt_with(2, crate::AttemptOutcome::Completed, Some(3)),
+        ],
+    ));
+    assert_eq!(
+        ledger.take(),
+        vec![delta(0, "call-a", 2, spent(3))],
+        "only the billed attempt is a fact"
+    );
 }

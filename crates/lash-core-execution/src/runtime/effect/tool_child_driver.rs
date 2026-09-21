@@ -538,6 +538,16 @@ async fn validate_recorded_authorities(
                 ),
             ));
         }
+    } else if participation == crate::runtime::effect::TurnControlParticipation::DurableJournaled {
+        return Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
+            format!(
+                "tool child `{}` records no cancellation authority, but its admitted \
+                 controller participates through a durable journaled binding; the \
+                 cooperative signal exists and the record that omits it is inconsistent",
+                request.call.call_id
+            ),
+        ));
     }
     match &request.completion_routing {
         crate::runtime::effect::ToolChildCompletionRouting::Inline => {}
