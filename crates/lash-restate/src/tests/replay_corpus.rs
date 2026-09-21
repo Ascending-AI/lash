@@ -161,6 +161,7 @@ async fn drive_scalar_lashlang_tool_attempt(
                             intents: lash_core::ToolIntents::default(),
                         }),
                         triggers: Vec::new(),
+                        capture: None,
                     })
                 }
             }),

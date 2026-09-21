@@ -312,6 +312,7 @@ fn tool_attempt_outcome(
             intents: crate::ToolIntents::default(),
         }),
         triggers: Vec::new(),
+        capture: None,
     }
 }
 

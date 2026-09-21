@@ -1881,6 +1881,7 @@ pub(super) fn restate_segment_tool_attempt_outcome(ordinal: u64) -> RuntimeEffec
             intents: lash_core::ToolIntents::default(),
         }),
         triggers: Vec::new(),
+        capture: None,
     }
 }
 

@@ -437,23 +437,40 @@ symbols = [
 ]
 
 [[surface]]
-constant = "TOOL_CHILD_CAPTURE_VERSION"
-constant_path = "crates/lash-core-execution/src/runtime/effect/tool_child_capture.rs"
-description = "facts a tool child of a durable effect group carries on its outcome (ADR 0099 sections 6 and 13)"
+constant = "TOOL_SETTLEMENT_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
+description = "the semantic settlement a tool child of a durable effect group carries on its outcome (ADR 0099 sections 6 and 13)"
 
-# The capture is journaled inside a `ToolInvocation` outcome and read back by a
-# replay, so a field added, retired or retyped in either item changes what an
-# opener can reconstruct of what its child produced. Both items are named
+# The settlement is journaled inside a `ToolInvocation` outcome and read back
+# by a replay, so a field added, retired or retyped in either item changes what
+# an opener can reconstruct of what its child produced. Both items are named
 # because a `rust_items` guard projects only the declarations it lists and
-# nothing their payloads reach: `ToolChildCapture` carries `ToolChildUsageFact`
-# with no discriminant of its own, so a field added there would leave the
-# guard's signature byte-identical.
+# nothing their payloads reach: `ToolSettlement` carries `ToolUsageDelta` with
+# no discriminant of its own, so a field added there would leave the guard's
+# signature byte-identical.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/effect/tool_child_capture.rs"]
+paths = ["crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"]
 symbols = [
-  "ToolChildCapture",
-  "ToolChildUsageFact",
+  "ToolSettlement",
+  "ToolUsageDelta",
+]
+
+[[surface]]
+constant = "TOOL_ATTEMPT_CAPTURE_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
+description = "the semantic facts one atomic tool attempt journaled with its outcome (ADR 0099 section 13)"
+
+# The attempt capture rides `RuntimeEffectOutcome::ToolAttempt` — including the
+# ungrouped arm — and is restored into the dispatch buffers when a recorded
+# attempt replays, so a field added, retired or retyped changes what a replay
+# can restore of what the attempt committed. It is guarded separately from the
+# settlement because the two carriers move for different reasons.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"]
+symbols = [
+  "ToolAttemptCapture",
 ]
 
 [[surface]]

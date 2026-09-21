@@ -1197,6 +1197,7 @@ fn attempt_outcome(call_id: &str, value: &str) -> RuntimeEffectOutcome {
             )]),
         }),
         triggers: Vec::new(),
+        capture: None,
     }
 }
 

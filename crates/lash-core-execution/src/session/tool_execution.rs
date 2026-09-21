@@ -611,9 +611,14 @@ impl RuntimeExecutionContext<'_> {
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
         attempt_dispatch.direct_completions = attempt_dispatch
             .direct_completions
-            .with_tool_attempt_parent_invocation(attempt_invocation.clone());
+            .with_tool_attempt_parent_invocation(attempt_invocation.clone())
+            .with_usage_ledger(crate::runtime::ToolUsageLedger::for_attempt(attempt));
         attempt_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
+        // Attempt-local: what this attempt commits is journaled on its
+        // outcome's capture rather than read out of the shared buffer.
+        attempt_dispatch.checkpoint_messages =
+            crate::tool_dispatch::CheckpointMessageBuffer::default();
         let attempt_dispatch = std::sync::Arc::new(attempt_dispatch);
         let mut attempt_context = self.clone();
         attempt_context.dispatch = std::sync::Arc::clone(&attempt_dispatch);
@@ -1305,7 +1310,7 @@ impl RuntimeExecutionContext<'_> {
     }
 }
 
-fn surface_attachment_materialization_notices(
+pub(crate) fn surface_attachment_materialization_notices(
     snapshot: &crate::provider::AttachmentCapabilitySnapshot,
     output: &ToolCallOutput,
     model_return: &mut ModelToolReturn,

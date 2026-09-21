@@ -49,13 +49,17 @@
 //! sibling. See the module's `intent_drain_slot` note in
 //! [`tool_child`](super::tool_child).
 //!
-//! It does not project the child's result into a `CompletedToolCall`. The
-//! session's tool-result projector is a singleton owned by the opener's
-//! session, and §3 gives the child no `RuntimeExecutionContext`; the
-//! unprojected terminal is journaled and FIG-3397's integration projects it.
+//! It projects the child's result exactly once, at its own presentation
+//! boundary: the session's plugin projector is a singleton lent through the
+//! dispatch context, and the driver journals the resolved `ModelToolReturn` on
+//! the settlement rather than leaving a `CompletedToolCall` for the opener to
+//! derive. Incorporation consumes the record; it never re-projects, so a
+//! changed projector environment on replay cannot change what the child
+//! settled.
 
 use std::sync::Arc;
 
+use lash_sansio::core_support::ModelToolReturnCoreSupport;
 use tokio_util::sync::CancellationToken;
 
 use super::envelope::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome};
@@ -66,7 +70,7 @@ use super::executor::{
 };
 use super::live_openers::{LiveOpenerContext, LiveOpenerRegistry};
 use super::tool_child::ToolChildRequest;
-use super::tool_child_capture::{ToolChildCapture, ToolChildUsageLedger};
+use super::tool_settlement::{ToolSettlement, ToolUsageLedger};
 use crate::tool_dispatch::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 use crate::{
     EffectOpener, ExecutionScope, ProcessExecutionEnvStore, ToolCatalog,
@@ -240,7 +244,7 @@ pub(crate) fn rebind_child_dispatch(
     request: &ToolChildRequest,
     controller: ScopedEffectController<'static>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
-    usage_ledger: &ToolChildUsageLedger,
+    usage_ledger: &ToolUsageLedger,
 ) -> ToolDispatchContext<'static> {
     let mut child = lent.clone();
     // A child may be attributed to a session the lending opener is not: a
@@ -269,11 +273,14 @@ pub(crate) fn rebind_child_dispatch(
     // The lent direct-completion client, with this child's usage ledger
     // installed. The opener's own ledger is untouched; this only *also* names
     // the spend as the child's, which §13 needs and an address space that is
-    // not the opener's has no other way to report.
+    // not the opener's has no other way to report. Each attempt's runner
+    // overlays a per-attempt sink on this, so the journaled attempt capture
+    // attributes every spend to the attempt that made it and the coordinator
+    // restores it here.
     child.direct_completions = lent
         .direct_completions
         .clone()
-        .with_child_usage_ledger(usage_ledger.clone());
+        .with_usage_ledger(usage_ledger.clone());
     child
 }
 
@@ -344,7 +351,7 @@ pub(crate) async fn run_tool_child(
 
     let controller = host.child_controller(&request.scope.admitted_scope)?;
 
-    let usage_ledger = ToolChildUsageLedger::new();
+    let usage_ledger = ToolUsageLedger::new();
     let dispatch = Arc::new(rebind_child_dispatch(
         live.dispatch().as_ref(),
         request,
@@ -353,18 +360,23 @@ pub(crate) async fn run_tool_child(
         &usage_ledger,
     ));
 
-    let outcome = drive(&dispatch, request, cancel).await?;
-    let triggers = dispatch.trigger_outcomes.drain();
-    let capture = ToolChildCapture {
-        possession: started_processes(&outcome),
+    let mut outcome = drive(&dispatch, request, cancel).await?;
+    // Realized intent evidence moves into the settlement, where the opener
+    // incorporates it as evidence. The journaled terminal keeps the record and
+    // the declarations; the outcomes belong to the settlement channel.
+    let intent_outcomes = std::mem::take(&mut outcome.intent_outcomes);
+    let settlement = ToolSettlement {
+        version: super::tool_settlement::TOOL_SETTLEMENT_VERSION,
+        possession: started_processes(&intent_outcomes),
+        intent_outcomes,
+        triggers: dispatch.trigger_outcomes.drain(),
         checkpoint_messages: dispatch.checkpoint_messages.drain(),
         usage: usage_ledger.take(),
-        ..ToolChildCapture::default()
+        model_return: resolve_model_return(&dispatch, request, &outcome).await,
     };
     Ok(RuntimeEffectOutcome::ToolInvocation {
         outcome: Box::new(outcome),
-        triggers,
-        capture: Box::new(capture),
+        settlement: Box::new(settlement),
     })
 }
 
@@ -609,6 +621,53 @@ fn failed_child_outcome(
     }
 }
 
+/// The child's presentation boundary: the singleton plugin projector, run once
+/// over the settled outcome, with attachment notices computed under the child's
+/// *recorded* environment (ADR 0099 §3 — a reopen uses the recorded facts).
+///
+/// The resolved return is journaled on the settlement so incorporation consumes
+/// a record instead of re-running the projector: a projector that changed
+/// between execution and replay cannot change what the child settled. A
+/// projector *error* resolves to the same recorded fallback the session path
+/// uses, so a broken projector settles a refusal rather than aborting the
+/// settlement.
+async fn resolve_model_return(
+    dispatch: &ToolDispatchContext<'_>,
+    request: &ToolChildRequest,
+    outcome: &ToolDispatchOutcome,
+) -> crate::ModelToolReturn {
+    let mut model_return = match dispatch
+        .plugins
+        .project_tool_result(crate::plugin::ToolResultProjectionContext {
+            session_id: dispatch.session_id.clone(),
+            call_id: request.call.call_id.clone(),
+            tool_name: outcome.record.tool.clone(),
+            args: outcome.record.args.clone(),
+            output: outcome.record.output.clone(),
+            duration_ms: outcome.record.duration_ms,
+        })
+        .await
+    {
+        Ok(projected) => projected,
+        Err(error) => crate::ModelToolReturn::text(
+            request.call.call_id.clone(),
+            outcome.record.tool.clone(),
+            error.to_string(),
+        ),
+    };
+    crate::session::tool_execution::surface_attachment_materialization_notices(
+        &dispatch
+            .execution_env_spec
+            .policy
+            .model
+            .capability
+            .attachment_acceptance,
+        &outcome.record.output,
+        &mut model_return,
+    );
+    model_return
+}
+
 /// Possession, read out of the same realized outcome the bound value's
 /// projection is taken from (ADR 0099 §6).
 ///
@@ -616,9 +675,10 @@ fn failed_child_outcome(
 /// `record_processes_started_by_intents` reads for an in-turn call, and a
 /// possession set assembled from anywhere else could name a process the child's
 /// own result never bound.
-fn started_processes(outcome: &ToolDispatchOutcome) -> Vec<crate::ProcessId> {
-    outcome
-        .intent_outcomes
+fn started_processes(
+    intent_outcomes: &[crate::ToolIntentExecutionOutcome],
+) -> Vec<crate::ProcessId> {
+    intent_outcomes
         .iter()
         .filter_map(|intent| match intent {
             crate::ToolIntentExecutionOutcome::Executed { kind, result, .. }

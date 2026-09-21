@@ -22,9 +22,10 @@ pub use tool_child::{
 };
 mod tool_child_driver;
 pub use tool_child_driver::{ToolChildHost, opener_for_execution_scope};
-mod tool_child_capture;
-pub use tool_child_capture::{
-    TOOL_CHILD_CAPTURE_VERSION, ToolChildCapture, ToolChildUsageFact, ToolChildUsageLedger,
+mod tool_settlement;
+pub use tool_settlement::{
+    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
+    ToolUsageDelta, ToolUsageLedger,
 };
 mod outcome;
 pub use lash_core_effect::promise_semantics;
@@ -535,6 +536,7 @@ mod tests {
                 intents: crate::ToolIntents::default(),
             }),
             triggers: Vec::new(),
+            capture: None,
         }
         .into_tool_batch_effect()
         .expect_err("tool attempt is not a tool batch outcome");

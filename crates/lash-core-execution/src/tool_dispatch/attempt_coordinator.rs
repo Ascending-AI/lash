@@ -501,6 +501,17 @@ pub async fn coordinate_tool_invocation<'run>(
             crate::panic_containment::enforce_message("tool_panicked", &failure.message);
         }
         triggers.extend(outcome.triggers);
+        // Restore what the attempt journaled. On a live execution this moves
+        // the facts out of the attempt-local buffers the runner installed; on
+        // replay the journaled capture is the only place they exist. Either
+        // way they land here exactly once per consumption, which is what makes
+        // a replayed attempt indistinguishable from a fresh one (ADR 0099 §13).
+        context
+            .checkpoint_messages
+            .enqueue(outcome.capture.messages);
+        if let Some(ledger) = context.direct_completions.usage_ledger() {
+            ledger.extend(outcome.capture.usage);
+        }
         match outcome.launch {
             crate::ToolAttemptLaunch::Pending {
                 key,

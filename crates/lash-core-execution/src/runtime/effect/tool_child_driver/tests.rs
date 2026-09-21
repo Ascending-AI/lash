@@ -157,7 +157,7 @@ fn rebound(request: &ToolChildRequest) -> ToolDispatchContext<'static> {
         request,
         child_controller(),
         spec(3),
-        &ToolChildUsageLedger::new(),
+        &ToolUsageLedger::new(),
     )
 }
 
@@ -281,7 +281,7 @@ fn the_child_gets_fresh_checkpoint_and_trigger_buffers() {
         &request(),
         child_controller(),
         spec(3),
-        &ToolChildUsageLedger::new(),
+        &ToolUsageLedger::new(),
     );
     assert!(
         child.checkpoint_messages.drain().is_empty(),
@@ -306,7 +306,7 @@ fn everything_not_on_the_checklist_is_the_lent_value() {
         &request(),
         child_controller(),
         spec(3),
-        &ToolChildUsageLedger::new(),
+        &ToolUsageLedger::new(),
     );
     assert!(Arc::ptr_eq(&lent.plugins, &child.plugins));
     assert!(Arc::ptr_eq(&lent.tools, &child.tools));

@@ -280,6 +280,7 @@ impl RuntimeBoundaryHarness {
                             intents: recorded_intents,
                         }),
                         triggers: Vec::new(),
+                        capture: None,
                     })
                 }),
             )
@@ -403,6 +404,7 @@ impl RuntimeBoundaryHarness {
                             intents: lash_core::ToolIntents::default(),
                         }),
                         triggers: Vec::new(),
+                        capture: None,
                     })
                 }),
             )

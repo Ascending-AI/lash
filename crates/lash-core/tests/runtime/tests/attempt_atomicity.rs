@@ -495,6 +495,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
                     intents: lash_core::ToolIntents::default(),
                 }),
                 triggers: Vec::new(),
+                capture: None,
             })
         }),
     )
@@ -588,6 +589,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                     intents: lash_core::ToolIntents::default(),
                 }),
                 triggers: Vec::new(),
+                capture: None,
             })
         }),
     )
@@ -710,6 +712,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                     intents: lash_core::ToolIntents::default(),
                 }),
                 triggers: Vec::new(),
+                capture: None,
             })
         }),
     )
@@ -1263,6 +1266,7 @@ fn attempt_done_outcome() -> lash_core::RuntimeEffectOutcome {
             intents: lash_core::ToolIntents::default(),
         }),
         triggers: Vec::new(),
+        capture: None,
     }
 }
 
@@ -1622,6 +1626,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
             Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
                 launch: Box::new(outcome.launch),
                 triggers: outcome.triggers,
+                capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
             })
         }),
     )

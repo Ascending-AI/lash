@@ -20,7 +20,7 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
-use super::tool_child_capture::ToolChildCapture;
+use super::tool_settlement::{ToolAttemptCapture, ToolSettlement};
 
 /// Effect-specific header whose address is present by construction.
 ///
@@ -846,25 +846,27 @@ pub struct ToolAttemptEffectOutcome {
     pub launch: ToolAttemptLaunch,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<ToolTriggerEffectOutcome>,
+    /// The attempt-local `EnqueueMessages` facts and managed LLM usage this
+    /// attempt produced, journaled with it and restored into the dispatch
+    /// buffers by whoever consumes this outcome — identically whether it was
+    /// just executed or served by replay (ADR 0099 §6, §13).
+    #[serde(default)]
+    pub capture: ToolAttemptCapture,
 }
 
 /// What one tool child of a durable effect group settled on, unpacked.
 ///
 /// The read side of
-/// [`RuntimeEffectOutcome::ToolInvocation`](RuntimeEffectOutcome::ToolInvocation),
-/// mirroring [`ToolAttemptEffectOutcome`] so a caller that already handles one
-/// tool outcome shape handles this one the same way.
+/// [`RuntimeEffectOutcome::ToolInvocation`](RuntimeEffectOutcome::ToolInvocation).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolInvocationEffectOutcome {
     /// The terminal the per-leaf coordinator produced for this child.
     pub outcome: crate::tool_dispatch::ToolDispatchOutcome,
-    /// Trigger occurrences the child emitted, carried exactly as a
-    /// [`ToolAttempt`](RuntimeEffectOutcome::ToolAttempt) carries them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triggers: Vec<ToolTriggerEffectOutcome>,
-    /// Possession, committed checkpoint messages and known usage
+    /// The child's complete semantic record: realized intent outcomes, realized
+    /// started-process identities, trigger receipts, committed checkpoint
+    /// messages, per-attempt usage deltas and the resolved `ModelToolReturn`
     /// (ADR 0099 §6, §13).
-    pub capture: ToolChildCapture,
+    pub settlement: ToolSettlement,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -973,6 +975,15 @@ pub enum RuntimeEffectOutcome {
         launch: Box<ToolAttemptLaunch>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         triggers: Vec<ToolTriggerEffectOutcome>,
+        /// The attempt-local facts the attempt produced: `EnqueueMessages`
+        /// directives and managed LLM usage. Journaled with the attempt so a
+        /// replay restores them rather than re-running their producers — a
+        /// crash after the attempt committed but before its invocation settled
+        /// would otherwise drop them (ADR 0099 §13). Absent when the attempt
+        /// captured nothing, so attempts that produced no facts serialize
+        /// exactly as they did before this field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capture: Option<Box<ToolAttemptCapture>>,
     },
     ToolBatch {
         launches: Vec<ToolCallLaunch>,
@@ -992,15 +1003,12 @@ pub enum RuntimeEffectOutcome {
     /// cannot express a child that retried; [`ToolBatch`](Self::ToolBatch) is
     /// the whole batch, which is the composition a group replaces.
     ///
-    /// # Why the coordinator's own terminal, and not a projected one
-    ///
-    /// `outcome` is exactly what the per-leaf coordinator produced. A group
-    /// child holds no `RuntimeExecutionContext` — ADR 0099 §3 forbids carrying
-    /// one across the handler boundary — so it cannot run the session's
-    /// tool-result projector, and a `CompletedToolCall` projected here would
-    /// have to invent the `model_return` the projector owns. Journaling the
-    /// unprojected terminal keeps the projection with the opener that has the
-    /// projector, which is FIG-3397's integration.
+    /// `outcome` is exactly the terminal the per-leaf coordinator produced;
+    /// `settlement` is the child's complete semantic record, including the
+    /// `ModelToolReturn` the singleton plugin projector resolved at the
+    /// child's own presentation boundary. The opener incorporates the
+    /// settlement as recorded evidence; it never re-executes a declaration and
+    /// never re-runs the projector.
     ///
     /// There is deliberately no pending arm. Deferred completion is
     /// *coordination* and runs at handler level inside the driver (§2), so a
@@ -1009,15 +1017,10 @@ pub enum RuntimeEffectOutcome {
     /// state no reader of a settlement could act on.
     ToolInvocation {
         outcome: Box<crate::tool_dispatch::ToolDispatchOutcome>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        triggers: Vec<ToolTriggerEffectOutcome>,
-        /// The §6/§13 facts the child accumulated in its own address space.
-        ///
-        /// Skipped when empty, so a child that started no process, committed no
-        /// message and is not known to have spent anything writes the same
-        /// bytes it would have written before this field existed.
-        #[serde(default, skip_serializing_if = "ToolChildCapture::is_empty")]
-        capture: Box<ToolChildCapture>,
+        /// The §6/§13 settlement the child accumulated in its own address
+        /// space. Always journaled: a child that reached a terminal always
+        /// produced a settled presentation.
+        settlement: Box<ToolSettlement>,
     },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
@@ -1222,10 +1225,19 @@ impl RuntimeEffectOutcome {
         self,
     ) -> Result<ToolAttemptEffectOutcome, RuntimeEffectControllerError> {
         match self {
-            Self::ToolAttempt { launch, triggers } => Ok(ToolAttemptEffectOutcome {
-                launch: *launch,
+            Self::ToolAttempt {
+                launch,
                 triggers,
-            }),
+                capture,
+            } => {
+                let capture = capture.map(|capture| *capture).unwrap_or_default();
+                capture.validate()?;
+                Ok(ToolAttemptEffectOutcome {
+                    launch: *launch,
+                    triggers,
+                    capture,
+                })
+            }
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::ToolAttempt,
                 other.kind(),
@@ -1235,24 +1247,23 @@ impl RuntimeEffectOutcome {
 
     /// Unpacks a settled tool child of a durable effect group.
     ///
-    /// Validates the capture rather than trusting it: a journal entry written
-    /// by a build whose capture format this build cannot read completely is
-    /// refused here, where the outcome is consumed, instead of being served to
-    /// an opener as a prefix of what its child actually produced.
+    /// Validates the settlement rather than trusting it: a journal entry
+    /// written by a build whose settlement format this build cannot read
+    /// completely is refused here, where the outcome is consumed, instead of
+    /// being served to an opener as a prefix of what its child actually
+    /// produced.
     pub fn into_tool_invocation_effect(
         self,
     ) -> Result<ToolInvocationEffectOutcome, RuntimeEffectControllerError> {
         match self {
             Self::ToolInvocation {
                 outcome,
-                triggers,
-                capture,
+                settlement,
             } => {
-                capture.validate()?;
+                settlement.validate()?;
                 Ok(ToolInvocationEffectOutcome {
                     outcome: *outcome,
-                    triggers,
-                    capture: *capture,
+                    settlement: *settlement,
                 })
             }
             other => Err(RuntimeEffectControllerError::wrong_outcome(

@@ -446,6 +446,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
                             ]),
                         }),
                         triggers: Vec::new(),
+                        capture: None,
                     })
                 }
             }),

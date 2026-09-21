@@ -72,17 +72,21 @@ pub struct DirectCompletionClient<'run> {
     /// this client is captured by the deep tool-dispatch futures.
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
     inside_tool_attempt: bool,
-    /// The child-local usage accumulator a tool child of an effect group runs
-    /// under (ADR 0099 §13, FIG-2266).
+    /// The usage accumulator this client's spends are *also* recorded into
+    /// (ADR 0099 §13, FIG-2266).
     ///
-    /// `None` everywhere else, which is every caller that is not a group
-    /// child: the opener's own ledger already attributes their spend and a
-    /// second reader would have nothing to say. When it is set, every nested
-    /// call made through this client is *also* named as that child's spend, so
-    /// a child whose address space is not its opener's can carry its usage on
-    /// its settlement instead of losing it. This never replaces the opener's
-    /// ledger and never changes what is merged into it.
-    child_usage: Option<crate::runtime::ToolChildUsageLedger>,
+    /// Two install sites, both deliberate:
+    ///
+    /// * a **per-attempt sink** (`ToolUsageLedger::for_attempt`) is installed
+    ///   by every `ToolAttempt` runner, so the attempt's journaled capture
+    ///   carries exactly the spend that attempt made and a replay restores it;
+    /// * a **child aggregate** is installed by the group-child driver's rebind,
+    ///   so a child whose address space is not its opener's carries its usage
+    ///   on its settlement instead of losing it.
+    ///
+    /// This never replaces the opener's ledger and never changes what is
+    /// merged into it: it is a second reader only.
+    usage_ledger: Option<crate::runtime::ToolUsageLedger>,
 }
 
 impl<'run> DirectCompletionClient<'run> {
@@ -99,25 +103,35 @@ impl<'run> DirectCompletionClient<'run> {
             }),
             parent_invocation: None,
             inside_tool_attempt: false,
-            child_usage: None,
+            usage_ledger: None,
         }
     }
 
-    /// Binds the child-local usage ledger one group child's spends are also
-    /// recorded into.
+    /// Binds the usage ledger this client's spends are also recorded into.
     ///
     /// Taken by value and returned, so the driver installs it on the clone it
-    /// rebinds for one child and the opener's own client is untouched.
+    /// rebinds — a child aggregate on the child's context, a per-attempt sink
+    /// on an attempt's — and the caller's own client is untouched.
     #[must_use]
-    pub fn with_child_usage_ledger(mut self, ledger: crate::runtime::ToolChildUsageLedger) -> Self {
-        self.child_usage = Some(ledger);
+    pub fn with_usage_ledger(mut self, ledger: crate::runtime::ToolUsageLedger) -> Self {
+        self.usage_ledger = Some(ledger);
         self
     }
 
-    /// Records one completed nested call against the child ledger, when this
-    /// client is a group child's.
-    fn record_child_usage(&self, call_record: &crate::LlmCallRecord, usage: &crate::TokenUsage) {
-        if let Some(ledger) = self.child_usage.as_ref() {
+    /// The ledger this client's spends are also recorded into, when one is
+    /// installed.
+    ///
+    /// Read by the attempt boundary to journal the attempt's captured usage
+    /// and by the coordinator to merge a journaled capture back into the child
+    /// aggregate it was restored for.
+    pub(crate) fn usage_ledger(&self) -> Option<&crate::runtime::ToolUsageLedger> {
+        self.usage_ledger.as_ref()
+    }
+
+    /// Records one completed nested call against the bound ledger, when this
+    /// client has one.
+    fn record_usage(&self, call_record: &crate::LlmCallRecord, usage: &crate::TokenUsage) {
+        if let Some(ledger) = self.usage_ledger.as_ref() {
             ledger.record(call_record, usage);
         }
     }
@@ -148,7 +162,7 @@ impl<'run> DirectCompletionClient<'run> {
             source,
             parent_invocation: self.parent_invocation.clone(),
             inside_tool_attempt: self.inside_tool_attempt,
-            child_usage: self.child_usage.clone(),
+            usage_ledger: self.usage_ledger.clone(),
         })
     }
 
@@ -215,7 +229,7 @@ impl<'run> DirectCompletionClient<'run> {
                         position,
                     )
                     .await?;
-                self.record_child_usage(&completion.llm_call, &completion.usage);
+                self.record_usage(&completion.llm_call, &completion.usage);
                 Ok(completion)
             }
             #[cfg(any(test, feature = "testing"))]
@@ -272,7 +286,7 @@ impl<'run> DirectCompletionClient<'run> {
                         caused_by,
                     )
                     .await?;
-                self.record_child_usage(&completion.llm_call, &completion.usage);
+                self.record_usage(&completion.llm_call, &completion.usage);
                 Ok(completion)
             }
             #[cfg(any(test, feature = "testing"))]
@@ -294,7 +308,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::Unavailable(message.into()),
             parent_invocation: None,
             inside_tool_attempt: false,
-            child_usage: None,
+            usage_ledger: None,
         }
     }
 
@@ -310,7 +324,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::TestFn(Arc::new(invoke)),
             parent_invocation: None,
             inside_tool_attempt: false,
-            child_usage: None,
+            usage_ledger: None,
         }
     }
 
@@ -328,7 +342,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::TestLlmFn(Arc::new(invoke)),
             parent_invocation: None,
             inside_tool_attempt: false,
-            child_usage: None,
+            usage_ledger: None,
         }
     }
 }
