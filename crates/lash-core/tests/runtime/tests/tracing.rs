@@ -754,7 +754,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
                 CancellationToken::new(),
                 lash_core::ScopedEffectController::shared(
                     controller,
-                    lash_core::ExecutionScope::turn("root", "pending-tool-turn"),
+                    lash_core::AdmittedScope::turn("root", "pending-tool-turn"),
                 )
                 .expect("scoped controller"),
             )

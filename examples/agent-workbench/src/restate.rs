@@ -878,7 +878,7 @@ async fn run_button_trigger(
     .await?;
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
-        .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
+        .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "button-trigger:{}",
             request.operation_id
         )))
@@ -932,7 +932,7 @@ async fn run_mail_received(
     .await?;
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
-        .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
+        .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "mail-received:{}",
             request.operation_id
         )))
@@ -1065,7 +1065,7 @@ async fn run_process_cancel(
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     let scoped_effect_controller = controller
-        .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
+        .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "workbench-process-cancel:{}",
             request.process_id
         )))

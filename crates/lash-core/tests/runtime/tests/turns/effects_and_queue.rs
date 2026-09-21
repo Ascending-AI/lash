@@ -893,7 +893,10 @@ pub(super) async fn process_scoped_agent_frame_follow_on_uses_distinct_cancel_pe
                 CancellationToken::new(),
                 lash_core::ScopedEffectController::shared(
                     Arc::new(recorder.clone()),
-                    lash_core::ExecutionScope::process(&process_id),
+                    lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
+                        &process_id,
+                        lash_core::ProcessIncarnation::from_registration_sequence(1),
+                    )),
                 )
                 .expect("process scope"),
             ),

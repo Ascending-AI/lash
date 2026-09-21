@@ -138,7 +138,7 @@ async fn persisted_provider_response(
     };
     let scoped_controller = lash_core::ScopedEffectController::shared(
         Arc::new(CountingEffectController::default()),
-        lash_core::ExecutionScope::turn(session_id, "turn-1"),
+        lash_core::AdmittedScope::turn(session_id, "turn-1"),
     )
     .expect("scoped controller");
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![

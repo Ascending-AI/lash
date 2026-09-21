@@ -470,7 +470,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     });
     let scoped_effect_controller = ScopedEffectController::borrowed(
         controller.as_ref(),
-        lash_core::ExecutionScope::turn(session_id, root_turn_id),
+        lash_core::AdmittedScope::turn(session_id, root_turn_id),
     )
     .expect("scoped durable effect controller");
     let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)

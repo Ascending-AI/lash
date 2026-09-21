@@ -686,7 +686,10 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 .run_turn_assembled(
                     TurnInput::text("refused"),
                     CancellationToken::new(),
-                    native_scope(persisted.turn_scope(&turn_id)),
+                    native_scope(
+                        lash_core::AdmittedScope::unpinned(persisted.turn_scope(&turn_id))
+                            .expect("turn scope"),
+                    ),
                 )
                 .await
                 .expect("refused turn assembles");
@@ -758,7 +761,9 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
         );
         let turn_id = format!("no-drain-{mode:?}").to_ascii_lowercase();
-        let turn_scope = native_scope(persisted.turn_scope(&turn_id));
+        let turn_scope = native_scope(
+            lash_core::AdmittedScope::unpinned(persisted.turn_scope(&turn_id)).expect("turn scope"),
+        );
         let turn = lash_core::task::spawn(async move {
             runtime
                 .run_turn_assembled(

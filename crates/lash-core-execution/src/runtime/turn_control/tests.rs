@@ -1,8 +1,8 @@
 use super::*;
 use crate::runtime::InMemorySessionStore;
 use crate::{
-    EffectHost, NativeEffectHost, SessionCommitStore, SessionExecutionLeaseStore, TurnFinish,
-    TurnInputStore, TurnStop,
+    AdmittedScope, EffectHost, NativeEffectHost, SessionCommitStore, SessionExecutionLeaseStore,
+    TurnFinish, TurnInputStore, TurnStop,
 };
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -144,7 +144,7 @@ fn scoped_turn_controller<'a>(
     host: &'a NativeEffectHost,
     address: &TurnAddress,
 ) -> ScopedEffectController<'a> {
-    host.scoped(address.execution_scope())
+    host.scoped(AdmittedScope::unpinned(address.execution_scope()).expect("a turn admits unpinned"))
         .expect("scope turn controller")
 }
 
@@ -301,7 +301,10 @@ async fn process_scoped_turn_control_peek_uses_admitted_effect_scope() {
         .expect("active process-backed turn control");
     let process_scope = ExecutionScope::process("process:subagent:scope-probe");
     let scoped = host
-        .scoped(process_scope.clone())
+        .scoped(AdmittedScope::process(crate::ProcessRef::new(
+            "process:subagent:scope-probe",
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )))
         .expect("scope process controller");
 
     assert_eq!(
@@ -1597,7 +1600,7 @@ async fn recovered_owner_observes_pending_cancel_after_control_recreation() {
     };
 
     let scoped = host
-        .scoped(address.execution_scope())
+        .scoped(AdmittedScope::unpinned(address.execution_scope()).expect("a turn admits unpinned"))
         .expect("scope recovered turn controller");
     let recovered = ActiveTurnControl::new(host.as_ref(), address)
         .await

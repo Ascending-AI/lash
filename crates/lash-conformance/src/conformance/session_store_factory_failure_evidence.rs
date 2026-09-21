@@ -1,6 +1,7 @@
 //! Durable failed-generation evidence shared by every session-store backend.
 
 use super::session_store_factory::session_store_request;
+use crate::admit;
 use lash_sansio::SessionId;
 use lash_sansio::TurnFailureCode;
 use lash_sansio::TurnId;
@@ -105,7 +106,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     .expect("build failure-evidence conformance runtime");
     let turn_id = "z-failure-evidence-turn-early";
     let scope = effect_host
-        .scoped(crate::ExecutionScope::turn(SESSION_ID, turn_id))
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
         .expect("scope failure-evidence conformance turn");
     let mut input = crate::TurnInput::text("trigger a paid mid-stream failure");
     input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
@@ -121,7 +122,10 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     advance_commit_clock();
     let later_turn_id = "a-failure-evidence-turn-late";
     let later_scope = effect_host
-        .scoped(crate::ExecutionScope::turn(SESSION_ID, later_turn_id))
+        .scoped(admit(crate::ExecutionScope::turn(
+            SESSION_ID,
+            later_turn_id,
+        )))
         .expect("scope later failure-evidence conformance turn");
     let mut later_input = crate::TurnInput::text("trigger a later paid mid-stream failure");
     later_input.trace_turn_id = Some(TurnId::from(later_turn_id.to_string()));

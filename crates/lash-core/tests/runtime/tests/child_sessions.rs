@@ -438,7 +438,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     let turn_id = "attachment-child-turn";
     let controller = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::turn(&child.session_id, turn_id),
+        lash_core::AdmittedScope::turn(&child.session_id, turn_id),
     )
     .expect("child effect controller");
     let request = lash_core::facade_support::SessionTurnRequest::new(
@@ -580,7 +580,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let turn_id = "process-child-first-turn";
     let controller = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::turn(&child.session_id, turn_id),
+        lash_core::AdmittedScope::turn(&child.session_id, turn_id),
     )
     .expect("child effect controller");
     lifecycle

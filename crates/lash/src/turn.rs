@@ -148,10 +148,12 @@ enum EffectBinding<'run> {
 }
 
 impl<'run> EffectBinding<'run> {
-    fn scoped(self, scope: lash_core::ExecutionScope) -> Result<ScopedEffectController<'run>> {
+    fn scoped(self, admitted: lash_core::AdmittedScope) -> Result<ScopedEffectController<'run>> {
         match self {
-            Self::Host(host) => Ok(host.scoped(scope)?),
-            Self::Borrowed(controller) => Ok(ScopedEffectController::borrowed(controller, scope)?),
+            Self::Host(host) => Ok(host.scoped(admitted)?),
+            Self::Borrowed(controller) => {
+                Ok(ScopedEffectController::borrowed(controller, admitted)?)
+            }
         }
     }
 }
@@ -370,7 +372,10 @@ impl TurnBuilder {
         binding: EffectBinding<'_>,
     ) -> Result<TurnReport> {
         let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
-        let scoped_effect_controller = binding.scoped(self.turn_scope(&turn_id))?;
+        let scoped_effect_controller = binding.scoped(
+            lash_core::AdmittedScope::unpinned(self.turn_scope(&turn_id))
+                .map_err(lash_core::RuntimeError::from)?,
+        )?;
         self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
             .await
     }
@@ -395,7 +400,10 @@ impl TurnBuilder {
     fn stream_with_effect_host(self, effect_host: &dyn EffectHost) -> Result<TurnStream> {
         let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
         let scoped_effect_controller = effect_host
-            .scoped_static(self.turn_scope(&turn_id))?
+            .scoped_static(
+                lash_core::AdmittedScope::unpinned(self.turn_scope(&turn_id))
+                    .map_err(lash_core::RuntimeError::from)?,
+            )?
             .ok_or(EmbedError::StaticTurnStreamRequiresStaticEffectHost)?;
         self.stream_with_scope(scoped_effect_controller, Some(turn_id))
     }
@@ -733,7 +741,9 @@ impl QueuedTurnBuilder {
     ) -> Result<QueuedTurnDrain<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self.execution_scope(drain_id)?;
-        let scoped_effect_controller = binding.scoped(scope)?;
+        let scoped_effect_controller = binding.scoped(
+            lash_core::AdmittedScope::unpinned(scope).map_err(lash_core::RuntimeError::from)?,
+        )?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
     }
@@ -752,7 +762,8 @@ impl QueuedTurnBuilder {
         {
             let scoped_turn_controller = ScopedEffectController::borrowed(
                 scoped_effect_controller.controller(),
-                self.turn_scope(turn_id),
+                lash_core::AdmittedScope::unpinned(self.turn_scope(turn_id))
+                    .map_err(lash_core::RuntimeError::from)?,
             )?;
             return self
                 .stream_to_with_resolved_scope(events, scoped_turn_controller)
@@ -915,7 +926,9 @@ impl SelectedQueuedTurnBuilder {
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self.builder.execution_scope(drain_id)?;
-        let scoped_effect_controller = binding.scoped(scope)?;
+        let scoped_effect_controller = binding.scoped(
+            lash_core::AdmittedScope::unpinned(scope).map_err(lash_core::RuntimeError::from)?,
+        )?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
     }
@@ -936,7 +949,8 @@ impl SelectedQueuedTurnBuilder {
         {
             let scoped_turn_controller = ScopedEffectController::borrowed(
                 scoped_effect_controller.controller(),
-                self.builder.turn_scope(turn_id),
+                lash_core::AdmittedScope::unpinned(self.builder.turn_scope(turn_id))
+                    .map_err(lash_core::RuntimeError::from)?,
             )?;
             return self
                 .stream_to_with_resolved_scope(events, scoped_turn_controller)

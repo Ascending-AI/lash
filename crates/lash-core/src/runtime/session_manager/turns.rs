@@ -781,7 +781,10 @@ async fn run_managed_session_turn(
     let mut runtime_guard = runtime.runtime.lock().await;
     let scoped_effect_controller = match scoped_effect_controller.execution_scope() {
         crate::ExecutionScope::Turn { turn_id, .. } => scoped_effect_controller
-            .rescope(runtime_guard.state.turn_scope(turn_id.clone()))
+            .rescope(
+                crate::AdmittedScope::unpinned(runtime_guard.state.turn_scope(turn_id.clone()))
+                    .map_err(|err| crate::PluginError::Session(err.to_string()))?,
+            )
             .map_err(crate::PluginError::Runtime)?,
         crate::ExecutionScope::Process { .. } => scoped_effect_controller,
         scope => {
@@ -1025,7 +1028,7 @@ mod tests {
         let controller = crate::NativeRuntimeEffectController::default();
         let scoped_effect_controller = crate::ScopedEffectController::borrowed(
             &controller,
-            crate::ExecutionScope::turn("child", "child-turn"),
+            crate::AdmittedScope::turn("child", "child-turn"),
         )
         .expect("turn scope");
         let request = crate::SessionTurnRequest::new(
@@ -1046,7 +1049,7 @@ mod tests {
         let controller = crate::NativeRuntimeEffectController::default();
         let scoped_effect_controller = crate::ScopedEffectController::borrowed(
             &controller,
-            crate::ExecutionScope::turn("child", "other-turn"),
+            crate::AdmittedScope::turn("child", "other-turn"),
         )
         .expect("turn scope");
         let err = match crate::SessionTurnRequest::new(
@@ -1066,9 +1069,14 @@ mod tests {
     fn process_backed_session_turn_request_preserves_admitted_scope_and_trace_identity() {
         let controller = crate::NativeRuntimeEffectController::default();
         let process_scope = crate::ExecutionScope::process("process:subagent:call");
-        let scoped_effect_controller =
-            crate::ScopedEffectController::borrowed(&controller, process_scope.clone())
-                .expect("process scope");
+        let scoped_effect_controller = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::AdmittedScope::process(crate::ProcessRef::new(
+                "process:subagent:call",
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            )),
+        )
+        .expect("process scope");
         let request = crate::SessionTurnRequest::new_process_backed(
             "session:subagent:call",
             "process:subagent:call",

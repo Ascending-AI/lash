@@ -2175,7 +2175,8 @@ fn rlm_core_builder() -> crate::core::LashCoreBuilder {
 
 mod scope_support;
 use scope_support::{
-    delete_bound_session, native_scope, runtime_operation_scope, text_message, turn_scope,
+    delete_bound_session, native_process_scope, native_scope, runtime_operation_scope,
+    text_message, turn_scope,
 };
 mod control_admin;
 mod core_session_builder;

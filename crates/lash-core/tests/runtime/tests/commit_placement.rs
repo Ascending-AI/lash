@@ -126,7 +126,7 @@ async fn assert_commit_placement(
             CancellationToken::new(),
             lash_core::ScopedEffectController::shared(
                 controller,
-                lash_core::ExecutionScope::turn(session_id, "placement-turn"),
+                lash_core::AdmittedScope::turn(session_id, "placement-turn"),
             )
             .unwrap(),
         )
@@ -227,7 +227,7 @@ fn commit_admission_ownership_survives_controller_wrappers() {
         );
         let (proxy, _requests) = lash_core::runtime::effect::EffectTaskController::scoped(
             &host,
-            lash_core::ExecutionScope::turn("ownership", "turn"),
+            lash_core::AdmittedScope::turn("ownership", "turn"),
         )
         .unwrap();
         assert_eq!(proxy.controller().owns_commit_backpressure(), expected);

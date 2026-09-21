@@ -200,7 +200,9 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
     .await
     .expect("commit authoritative journal retirement");
     let late_commit = host
-        .scoped(scope.clone())
+        .scoped(lash_core::testing::store_fixtures::durable_admission(
+            &scope,
+        ))
         .expect("retired scope still binds for a typed refusal")
         .controller()
         .execute_effect(

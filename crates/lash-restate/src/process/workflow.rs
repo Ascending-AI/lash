@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::{
-    AbandonEvidence, AbandonWriter, ExecutionScope, PluginError, ProcessAwaitOutput,
-    ProcessExecutionContext, ProcessRegistration, ProcessRegistry, ScopedEffectController,
+    AbandonEvidence, AbandonWriter, PluginError, ProcessAwaitOutput, ProcessExecutionContext,
+    ProcessRegistration, ProcessRegistry, ScopedEffectController,
 };
 use restate_sdk::context::{
     ContextClient, ContextPromises, SharedWorkflowContext, WorkflowContext,
@@ -601,7 +601,9 @@ where
         };
         let outcome = loop {
             let scoped_effect_controller = controller
-                .scoped_effect_controller(ExecutionScope::process(process_id.clone()))
+                .scoped_effect_controller(lash_core::AdmittedScope::process(
+                    lash_core::ProcessRef::from_record(&record),
+                ))
                 .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
             let cancel_signal = self.cancellation_signal(&process_id, input.segment_ordinal);
             let outcome = self

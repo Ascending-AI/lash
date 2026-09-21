@@ -585,6 +585,24 @@ impl DurableProcessWorker {
             "attachment owner must carry the incarnation the authority CAS admitted"
         );
         let admitted_incarnation = admitted.incarnation;
+        // The authority CAS above is the admission: the controller must
+        // already carry the exact pair it returned, because the caller pinned
+        // it from the same record read. A mismatch means the pin was minted
+        // from a stale record — a same-name successor — which is refused as a
+        // admission error, never relabelled (ADR 0099 §1).
+        let cas_admission =
+            crate::AdmittedScope::process(crate::ProcessRef::from_record(&admitted));
+        if scoped_effect_controller.admitted_scope() != &cas_admission {
+            return Err(PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+                format!(
+                    "process worker for `{}` was pinned to {:?} but the admission CAS admitted {:?}",
+                    registration.id,
+                    scoped_effect_controller.admitted_scope(),
+                    cas_admission,
+                ),
+            )));
+        }
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
@@ -886,9 +904,14 @@ impl DurableProcessWorker {
                     .runtime_host
                     .control
                     .effect_host
-                    .scoped_static(lash_core::runtime::trigger_delivery_reconcile_scope(
-                        &delivery.process_id,
-                    ))
+                    .scoped_static(
+                        lash_core::AdmittedScope::unpinned(
+                            lash_core::runtime::trigger_delivery_reconcile_scope(
+                                &delivery.process_id,
+                            ),
+                        )
+                        .map_err(|err| PluginError::Session(err.to_string()))?,
+                    )
                     .map_err(|err| PluginError::Session(err.to_string()))?
                 else {
                     return Err(PluginError::Session(
@@ -1265,7 +1288,9 @@ impl DurableProcessWorker {
             .runtime_host
             .control
             .effect_host
-            .scoped_static(crate::ExecutionScope::process(registration.id.clone()))
+            .scoped_static(crate::AdmittedScope::process(
+                crate::ProcessRef::from_record(&current),
+            ))
             .map_err(|err| RecoverFailure::Run(PluginError::Session(err.to_string())))?
             .ok_or_else(|| {
                 RecoverFailure::Run(PluginError::Session(

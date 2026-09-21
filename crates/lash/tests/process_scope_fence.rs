@@ -342,15 +342,38 @@ async fn register_and_complete(registry: &dyn lash_core::ProcessRegistry, proces
         .expect("complete the process");
 }
 
+/// The admission a registered process's record carries: the pair the store
+/// minted at registration, which is what the process worker would hold.
+async fn record_admission(
+    registry: &dyn lash_core::ProcessRegistry,
+    process_id: &ProcessId,
+) -> lash_core::AdmittedScope {
+    let record = registry
+        .get_process(process_id)
+        .await
+        .expect("read the process record")
+        .expect("the process is registered");
+    lash_core::AdmittedScope::process(lash_core::ProcessRef::from_record(&record))
+}
+
+/// A fabricated admission for a process the registry does not hold: stands in
+/// for the stale pin a driver could carry into a fenced scope.
+fn stale_admission(process_id: &ProcessId) -> lash_core::AdmittedScope {
+    lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
+        process_id.clone(),
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    ))
+}
+
 async fn admission(
     host: &dyn EffectHost,
-    scope: &ExecutionScope,
+    admitted: &lash_core::AdmittedScope,
     effect_id: &str,
 ) -> Result<(), lash_core::RuntimeErrorCode> {
-    host.scoped(scope.clone())
+    host.scoped(admitted.clone())
         .expect("scope binds")
         .controller()
-        .execute_effect(envelope(scope, effect_id), executor())
+        .execute_effect(envelope(admitted.scope(), effect_id), executor())
         .await
         .map(|_| ())
         .map_err(|err| err.code)
@@ -403,9 +426,13 @@ async fn prune_fences_only_what_the_registry_prunes(kind: Kind) {
         "an unpruned process keeps its resolved promise"
     );
     assert_eq!(backend.fence_count(&scope).await.unwrap_or(0), 0);
-    admission(backend.host.as_ref(), &scope, "still-admitted")
-        .await
-        .expect("an unpruned process is still admitted");
+    admission(
+        backend.host.as_ref(),
+        &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+        "still-admitted",
+    )
+    .await
+    .expect("an unpruned process is still admitted");
 
     let report = core
         .processes()
@@ -414,7 +441,12 @@ async fn prune_fences_only_what_the_registry_prunes(kind: Kind) {
         .expect("prune without a projector");
     assert_eq!(report.pruned_processes, 1);
     assert_eq!(
-        admission(backend.host.as_ref(), &scope, "after-prune").await,
+        admission(
+            backend.host.as_ref(),
+            &stale_admission(&ProcessId::from(process_id)),
+            "after-prune",
+        )
+        .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
         "a pruned process is fenced"
     );
@@ -437,9 +469,13 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
     let process_id = "reused-by-host";
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
-    admission(backend.host.as_ref(), &scope, "first-incarnation")
-        .await
-        .expect("the first incarnation journals");
+    admission(
+        backend.host.as_ref(),
+        &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+        "first-incarnation",
+    )
+    .await
+    .expect("the first incarnation journals");
 
     let report = core
         .processes()
@@ -450,8 +486,8 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
     assert_eq!(
         admission(
             backend.host.as_ref(),
-            &scope,
-            "between-prune-and-reregistration"
+            &stale_admission(&ProcessId::from(process_id)),
+            "between-prune-and-reregistration",
         )
         .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
@@ -469,7 +505,9 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
 
     let start_scope = backend
         .host
-        .scoped_static(ExecutionScope::runtime_operation("reregister-start"))
+        .scoped_static(lash_core::AdmittedScope::runtime_operation(
+            "reregister-start",
+        ))
         .expect("runtime operation scope")
         .expect("owned runtime operation scope");
     let record = core
@@ -496,9 +534,13 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
     if let Some(fences) = backend.fence_count(&scope).await {
         assert_eq!(fences, 0, "registration cleared the fence row");
     }
-    admission(backend.host.as_ref(), &scope, "second-incarnation")
-        .await
-        .expect("the re-registered incarnation claims");
+    admission(
+        backend.host.as_ref(),
+        &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+        "second-incarnation",
+    )
+    .await
+    .expect("the re-registered incarnation claims");
     let key = backend
         .host
         .await_event_key(
@@ -670,9 +712,17 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
     )
     .await;
     let scope = ExecutionScope::process(&process_id);
-    admission(backend.host.as_ref(), &scope, "first-incarnation")
-        .await
-        .expect("the first incarnation journals");
+    admission(
+        backend.host.as_ref(),
+        &record_admission(
+            backend.registry.as_ref(),
+            &ProcessId::from(process_id.clone()),
+        )
+        .await,
+        "first-incarnation",
+    )
+    .await
+    .expect("the first incarnation journals");
     let report = core
         .processes()
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
@@ -683,7 +733,12 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
         "{path:?}: the prune took the process"
     );
     assert_eq!(
-        admission(backend.host.as_ref(), &scope, "while-pruned").await,
+        admission(
+            backend.host.as_ref(),
+            &stale_admission(&ProcessId::from(process_id.clone())),
+            "while-pruned",
+        )
+        .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
         "{path:?}: the pruned id is fenced"
     );
@@ -694,7 +749,7 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
     let start_scope = || {
         backend
             .host
-            .scoped_static(ExecutionScope::runtime_operation(format!(
+            .scoped_static(lash_core::AdmittedScope::runtime_operation(format!(
                 "fence-reuse-{path:?}"
             )))
             .expect("runtime operation scope")
@@ -768,7 +823,7 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
     assert!(
         backend
             .registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&ProcessId::from(process_id.clone()))
             .await
             .expect("read the process")
             .is_some(),
@@ -780,9 +835,17 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
             "{path:?}: the registry insert cleared the fence row"
         );
     }
-    admission(backend.host.as_ref(), &scope, "second-incarnation")
-        .await
-        .unwrap_or_else(|err| panic!("{path:?}: the re-registered incarnation claims: {err:?}"));
+    admission(
+        backend.host.as_ref(),
+        &record_admission(
+            backend.registry.as_ref(),
+            &ProcessId::from(process_id.clone()),
+        )
+        .await,
+        "second-incarnation",
+    )
+    .await
+    .unwrap_or_else(|err| panic!("{path:?}: the re-registered incarnation claims: {err:?}"));
     let key = backend
         .host
         .await_event_key(
@@ -850,7 +913,7 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
     }
     let start_scope = backend
         .host
-        .scoped_static(ExecutionScope::runtime_operation("failing-start"))
+        .scoped_static(lash_core::AdmittedScope::runtime_operation("failing-start"))
         .expect("runtime operation scope")
         .expect("owned runtime operation scope");
     let err = core
@@ -881,7 +944,12 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
     );
     let cold = (backend.cold_host.as_ref().expect("durable backend"))().await;
     assert_eq!(
-        admission(cold.as_ref(), &scope, "stale-redrive").await,
+        admission(
+            cold.as_ref(),
+            &stale_admission(&ProcessId::from(process_id)),
+            "stale-redrive",
+        )
+        .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
         "a cold host admits nothing under the still-fenced id"
     );
@@ -908,7 +976,6 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
         Arc::new(lash_core::facade_support::NativeEffectHost::default());
     backend.registry.bind_effect_host(&other);
     let process_id = "reused-across-hosts";
-    let scope = ExecutionScope::process(process_id);
     other
         .retire_effect_journal(lash::durability::EffectJournalRetirement::process(
             process_id,
@@ -916,7 +983,12 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
         .await
         .expect("the other host fences the id");
     assert_eq!(
-        admission(other.as_ref(), &scope, "while-fenced").await,
+        admission(
+            other.as_ref(),
+            &stale_admission(&ProcessId::from(process_id)),
+            "while-fenced",
+        )
+        .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired)
     );
     backend
@@ -924,9 +996,13 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
         .register_process(external_registration(&ProcessId::from(process_id)))
         .await
         .expect("register the id");
-    admission(other.as_ref(), &scope, "after-registration")
-        .await
-        .expect("the registration seam reinstated the bound host's scope");
+    admission(
+        other.as_ref(),
+        &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+        "after-registration",
+    )
+    .await
+    .expect("the registration seam reinstated the bound host's scope");
 }
 
 macro_rules! registration_path_tests {
@@ -1056,9 +1132,13 @@ async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_
     let scope = ExecutionScope::process(process_id);
     let key = scope_key(&scope);
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
-    admission(backend.host.as_ref(), &scope, "first-incarnation")
-        .await
-        .expect("the first incarnation journals");
+    admission(
+        backend.host.as_ref(),
+        &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+        "first-incarnation",
+    )
+    .await
+    .expect("the first incarnation journals");
     let report = core
         .processes()
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
@@ -1142,9 +1222,13 @@ async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_
     assert_eq!(sqlite_fence_rows(&registry_path, &key), 0);
     assert_eq!(sqlite_fence_rows(&journal_path, &key), 0);
     let cold = (backend.cold_host.as_ref().expect("durable backend"))().await;
-    admission(cold.as_ref(), &scope, "after-committed-cut")
-        .await
-        .expect("a registered, unfenced id is admitted after the cut");
+    admission(
+        cold.as_ref(),
+        &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+        "after-committed-cut",
+    )
+    .await
+    .expect("a registered, unfenced id is admitted after the cut");
     cold.await_event_key(
         &scope,
         AwaitEventWaitIdentity::tool_completion("after-committed-cut"),
@@ -1162,7 +1246,12 @@ async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_
     assert_eq!(sqlite_fence_rows(&journal_path, &key), 0);
     let cold = (backend.cold_host.as_ref().expect("durable backend"))().await;
     assert_eq!(
-        admission(cold.as_ref(), &scope, "after-lost-cut").await,
+        admission(
+            cold.as_ref(),
+            &stale_admission(&ProcessId::from(process_id)),
+            "after-lost-cut",
+        )
+        .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
         "a fenced, unregistered id admits nothing after the cut"
     );
@@ -1215,9 +1304,13 @@ async fn sqlite_fence_committed_before_a_lost_journal_purge_refuses_cold_admissi
     for process_id in ["purge-lost-swept", "purge-lost-bound"] {
         let scope = ExecutionScope::process(process_id);
         register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
-        admission(backend.host.as_ref(), &scope, "journaled-before-retirement")
-            .await
-            .expect("the process journals");
+        admission(
+            backend.host.as_ref(),
+            &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+            "journaled-before-retirement",
+        )
+        .await
+        .expect("the process journals");
         let key = scope_key(&scope);
         assert_eq!(journal_rows(&key), 1);
         // The prune committed and the retirement's first transaction — the
@@ -1257,7 +1350,12 @@ async fn sqlite_fence_committed_before_a_lost_journal_purge_refuses_cold_admissi
     let (bound_scope, bound_key) = &keys[1];
     let cold = (backend.cold_host.as_ref().expect("durable backend"))().await;
     assert_eq!(
-        admission(cold.as_ref(), bound_scope, "after-lost-purge").await,
+        admission(
+            cold.as_ref(),
+            &stale_admission(&ProcessId::from(bound_scope.id())),
+            "after-lost-purge",
+        )
+        .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
         "the committed fence refuses admission whatever the journal still holds"
     );

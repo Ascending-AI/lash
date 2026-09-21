@@ -551,7 +551,9 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(ExecutionScope::process(&process_id))
+                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                            &process_id,
+                        )))
                         .expect("sleeping process scope"),
                     0,
                     None,
@@ -645,7 +647,9 @@ pub(super) async fn process_sleep_wake_verdict_failure_retries_before_settling_r
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(ExecutionScope::process(process_id))
+                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                            process_id,
+                        )))
                         .expect("sleeping process scope"),
                     0,
                     None,
@@ -701,7 +705,7 @@ pub(super) async fn process_sleep_wake_verdict_failure_retries_before_settling_r
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(ExecutionScope::process(process_id))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(process_id)))
                 .expect("sleeping process retry scope"),
             0,
             None,
@@ -769,7 +773,9 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(ExecutionScope::process(process_id))
+                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                            process_id,
+                        )))
                         .expect("sleeping post-wake-effect scope"),
                     0,
                     None,
@@ -836,7 +842,7 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(ExecutionScope::process(process_id))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(process_id)))
                 .expect("sleeping post-wake-effect redelivery scope"),
             0,
             None,
@@ -1421,7 +1427,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
             execution_context,
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::process("task-workflow"),
+                durable_admission(&ExecutionScope::process("task-workflow")),
             )
             .expect("native process scope"),
             0,
@@ -1863,7 +1869,7 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::process("ob-restart"),
+                durable_admission(&ExecutionScope::process("ob-restart")),
             )
             .expect("native process scope"),
             0,
@@ -1920,7 +1926,7 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::process("ob-fresh"),
+                durable_admission(&ExecutionScope::process("ob-fresh")),
             )
             .expect("native process scope"),
             0,
@@ -2336,7 +2342,9 @@ pub(super) async fn process_sleep_wake_verdict_replays_from_the_journal() {
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(ExecutionScope::process(&process_id))
+                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                            &process_id,
+                        )))
                         .expect("verdict replay scope"),
                     0,
                     None,
@@ -2396,7 +2404,7 @@ pub(super) async fn process_sleep_wake_verdict_replays_from_the_journal() {
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(ExecutionScope::process(&process_id))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(&process_id)))
                 .expect("verdict replay redelivery scope"),
             0,
             None,
@@ -2460,7 +2468,9 @@ pub(super) async fn process_sleep_wake_verdict_extends_a_pre_verdict_journal() {
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(ExecutionScope::process(&process_id))
+                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                            &process_id,
+                        )))
                         .expect("pre-verdict journal scope"),
                     0,
                     None,
@@ -2504,7 +2514,7 @@ pub(super) async fn process_sleep_wake_verdict_extends_a_pre_verdict_journal() {
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(ExecutionScope::process(&process_id))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(&process_id)))
                 .expect("pre-verdict journal redelivery scope"),
             0,
             None,

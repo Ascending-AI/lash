@@ -38,7 +38,7 @@ impl lash_core::EffectHost for FailOnceRetirementHost {
 
     fn scoped<'a>(
         &'a self,
-        scope: lash_core::ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'a>, lash_core::RuntimeError> {
         self.inner.scoped(scope)
     }

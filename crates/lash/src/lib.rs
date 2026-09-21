@@ -852,8 +852,9 @@ pub mod runtime {
     pub use lash_core::runtime::current_epoch_ms;
     /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
-        ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver,
-        CheckpointClaimSet, CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
+        AdmittedScope, AdmittedScopeError, ApplyConfigPatch, AssembledTurn,
+        AssistantResponseHookEvents, AwaitEventResolver, CheckpointClaimSet,
+        CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
         DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
         EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
         GroupWakePolicy, LashRuntime, LlmRequestSpec, LoserPolicy, NativeQueuedWork,

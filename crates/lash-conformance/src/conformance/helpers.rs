@@ -11,6 +11,26 @@ pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, s
     );
 }
 
+/// Admit a scope for a host entry point: conformance suites mint scopes
+/// directly, so this stands in for the admission authority's answer — a
+/// process scope pins the fabricated first-registration incarnation the
+/// fixture fabricates for it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: a non-process scope always admits unpinned"
+)]
+pub(crate) fn admit(scope: crate::ExecutionScope) -> crate::AdmittedScope {
+    match &scope {
+        crate::ExecutionScope::Process { process_id } => {
+            crate::AdmittedScope::process(crate::ProcessRef::new(
+                process_id.clone(),
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            ))
+        }
+        _ => crate::AdmittedScope::unpinned(scope).expect("a non-process scope admits unpinned"),
+    }
+}
+
 /// Record one completed attachment write: acquire the write fence, then stamp
 /// the upload evidence. This is the only way a manifest row comes into being,
 /// and the stamp is the only thing that makes a digest adoptable.

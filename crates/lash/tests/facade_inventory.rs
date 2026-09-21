@@ -115,6 +115,7 @@ use lash::remote::llm::RemoteSchemaContract as _;
 use lash::remote::llm::RemoteSchemaProjectionPolicy as _;
 use lash::remote::processes::RemoteProcessIdentity as _;
 use lash::remote::processes::RemoteProcessRecord as _;
+use lash::runtime::AdmittedScopeError as _;
 use lash::runtime::Clock as _;
 use lash::runtime::RuntimeEffectController as _;
 use lash::runtime::RuntimeError as _;

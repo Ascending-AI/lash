@@ -250,7 +250,10 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             .await
             .expect("create turn gate");
     let scoped = host
-        .scoped(address.execution_scope())
+        .scoped(
+            crate::AdmittedScope::unpinned(address.execution_scope().clone())
+                .expect("a turn address admits unpinned"),
+        )
         .expect("scope final-cancel CAS controller");
     let honoured = control
         .observe_pending_cancel(

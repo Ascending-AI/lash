@@ -524,7 +524,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
         .await;
         let effect_host = state.core.effect_host();
         let scoped_effect_controller = effect_host
-            .scoped(lash::runtime::ExecutionScope::runtime_operation(
+            .scoped(lash::runtime::AdmittedScope::runtime_operation(
                 "cron-occurrence-classification-test",
             ))
             .expect("scope inline trigger emission");
@@ -616,7 +616,7 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
     for attempt in 0..2 {
         let scoped = lash::runtime::ScopedEffectController::borrowed(
             &controller,
-            lash::runtime::ExecutionScope::runtime_operation("fig806-cron-redrive"),
+            lash::runtime::AdmittedScope::runtime_operation("fig806-cron-redrive"),
         )
         .expect("scope cron trigger emission");
         emit_cron_occurrence_with_effect_controller(
@@ -662,7 +662,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
         )
         .effect_host();
-    let scope = lash::runtime::ExecutionScope::turn("routing-session", "routing-turn");
+    let scope = lash::runtime::AdmittedScope::turn("routing-session", "routing-turn");
     let native_scoped = native_host.scoped(scope.clone()).expect("inline scope");
     assert!(matches!(
         native_host

@@ -566,7 +566,10 @@ async fn run_high_traffic_operation(
             .allow_process_lifetime_completion_keys();
         let controller = lash_core::ScopedEffectController::borrowed(
             &trigger_controller,
-            session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
+            lash_core::AdmittedScope::unpinned(
+                session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
+            )
+            .map_err(anyhow::Error::from)?,
         )?;
         let delivery_report = core.triggers().emit(request, controller).await?;
         let delivery_process_ids = delivery_report.started_process_ids();

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use lash_core::{
-    ExecutionScope, RuntimeError, ScopedEffectController, SessionAdministration,
-    SessionDeleteContext, SessionDeleteExecution,
+    RuntimeError, ScopedEffectController, SessionAdministration, SessionDeleteContext,
+    SessionDeleteExecution,
 };
 
 use crate::{
@@ -84,8 +84,8 @@ where
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        admitted: lash_core::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        self.controller.scoped_effect_controller(scope)
+        self.controller.scoped_effect_controller(admitted)
     }
 }

@@ -457,7 +457,7 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
         let controller =
             lash_restate::RestateRuntimeEffectController::new(ctx, self.authority.clone());
         let scoped = controller
-            .scoped_effect_controller(lash_core::ExecutionScope::turn(
+            .scoped_effect_controller(lash_core::AdmittedScope::turn(
                 &session_id,
                 lash_conformance::tool_batch_turn_id(&session_id),
             ))

@@ -426,7 +426,7 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
         "a distinct authority owns distinct promises"
     );
     let mixed_controller = other_host
-        .scoped(scope.clone())
+        .scoped(durable_admission(&scope))
         .expect("scope the distinct configured owner");
     let mixed = first_host.turn_control_binding(&mixed_controller).await;
     assert!(

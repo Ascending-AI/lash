@@ -720,7 +720,7 @@ pub fn code_execution_context_with_process_dependencies(
         .borrowed_effect_controller(
             crate::ScopedEffectController::shared(
                 effect_controller,
-                crate::ExecutionScope::turn("test-session", "test-turn"),
+                crate::AdmittedScope::turn("test-session", "test-turn"),
             )
             .expect("foreground process fixture has an admitted turn"),
         )
@@ -1163,7 +1163,10 @@ pub fn process_engine_run_context_for_validation(
     let effect_host = crate::facade_support::NativeEffectHost::default();
     let scoped_effect_controller = crate::EffectHost::scoped_static(
         &effect_host,
-        crate::ExecutionScope::process(process_id.clone()),
+        crate::AdmittedScope::process(crate::ProcessRef::new(
+            process_id.clone(),
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )),
     )
     .expect("valid process scope")
     .expect("native effect host owns a static controller");
@@ -1266,7 +1269,7 @@ impl EffectBackedProcessService {
         let controller = scope.controller();
         let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
             controller,
-            scope.effect_controller.scoped().execution_scope().clone(),
+            scope.effect_controller.scoped().admitted_scope().clone(),
         )
         .map_err(crate::RuntimeEffectControllerError::from)?;
         let local_executor = crate::RuntimeEffectLocalExecutor::processes(

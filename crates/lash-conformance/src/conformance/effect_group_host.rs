@@ -71,7 +71,7 @@ type Host = Arc<dyn EffectHost>;
 pub async fn a_reopen_dispatches_the_retained_membership<F: Fn() -> Host>(make: &F, prefix: &str) {
     let opener = make();
     let scoped = opener
-        .scoped(scope(prefix, "w1-membership"))
+        .scoped(admit(scope(prefix, "w1-membership")))
         .expect("a scope binds");
     let key = group_key(prefix, "w1-membership");
 
@@ -94,7 +94,7 @@ pub async fn a_reopen_dispatches_the_retained_membership<F: Fn() -> Host>(make: 
     // A successor that never saw the opener's group, reopening with impostors.
     let successor = make();
     let scoped = successor
-        .scoped(scope(prefix, "w1-membership"))
+        .scoped(admit(scope(prefix, "w1-membership")))
         .expect("a scope binds");
     let impostor = Arc::new(AtomicUsize::new(0));
     let reopened = scoped
@@ -146,7 +146,7 @@ pub async fn a_reopen_reissues_each_childs_original_identity<F: Fn() -> Host>(
 ) {
     let opener = make();
     let scoped = opener
-        .scoped(scope(prefix, "w2-identity"))
+        .scoped(admit(scope(prefix, "w2-identity")))
         .expect("a scope binds");
     let key = group_key(prefix, "w2-identity");
 
@@ -178,7 +178,7 @@ pub async fn a_reopen_reissues_each_childs_original_identity<F: Fn() -> Host>(
 
     let successor = make();
     let scoped = successor
-        .scoped(scope(prefix, "w2-identity"))
+        .scoped(admit(scope(prefix, "w2-identity")))
         .expect("a scope binds");
     let impostor = Arc::new(AtomicUsize::new(0));
     let mut reopened = scoped
@@ -289,7 +289,7 @@ pub async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Hos
     let host = make();
     let admitted = scope(prefix, "scope-admission");
     let foreign = scope(prefix, "foreign-scope");
-    let scoped = host.scoped(admitted.clone()).expect("a scope binds");
+    let scoped = host.scoped(admit(admitted.clone())).expect("a scope binds");
 
     for (label, header_scope, child_scope) in [
         ("wrong-header", &foreign, &admitted),
@@ -382,7 +382,7 @@ where
     let prefix = format!("group-cancel-terminal-{}", uuid::Uuid::new_v4().simple());
     let host = make();
     let scoped = host
-        .scoped(scope(&prefix, "cancel-terminal"))
+        .scoped(admit(scope(&prefix, "cancel-terminal")))
         .expect("a scope binds");
     let key = group_key(&prefix, "cancel-terminal");
     let (child, lifecycle) = gated(0);
@@ -410,7 +410,7 @@ where
     // close happened — so anything it reads at rank 1 came out of the journal.
     let reader = make();
     let resumed = reader
-        .scoped(scope(&prefix, "cancel-terminal"))
+        .scoped(admit(scope(&prefix, "cancel-terminal")))
         .expect("a scope binds on the reading host");
     let mut reopened = resumed
         .controller()
@@ -471,7 +471,7 @@ where
 
     let retired_scope = scope(&prefix, "retired");
     let retired = host
-        .scoped(retired_scope.clone())
+        .scoped(admit(retired_scope.clone()))
         .expect("the finished operation's scope binds");
     let retired_key = group_key(&prefix, "retired");
     let mut finished = open(
@@ -495,7 +495,7 @@ where
 
     let in_flight_scope = scope(&prefix, "in-flight");
     let in_flight = host
-        .scoped(in_flight_scope.clone())
+        .scoped(admit(in_flight_scope.clone()))
         .expect("the in-flight operation's scope binds");
     let in_flight_key = group_key(&prefix, "in-flight");
     let mut open_handle = open(
@@ -525,7 +525,7 @@ where
 
     let reader = make();
     let refusal = reader
-        .scoped(retired_scope.clone())
+        .scoped(admit(retired_scope.clone()))
         .expect("a retired scope still binds a controller")
         .controller()
         .open_effect_group(staged(
@@ -541,7 +541,7 @@ where
     );
 
     let resumed = reader
-        .scoped(in_flight_scope.clone())
+        .scoped(admit(in_flight_scope.clone()))
         .expect("the in-flight scope binds on the reading host");
     let mut reopened = resumed
         .controller()
@@ -601,7 +601,7 @@ where
 
     let live_scope = scope(&prefix, "live");
     let live = host
-        .scoped(live_scope.clone())
+        .scoped(admit(live_scope.clone()))
         .expect("the live operation's scope binds");
     let live_key = group_key(&prefix, "live");
     let (draining, gate) = gated(1);
@@ -711,7 +711,7 @@ where
 
     let reader = make();
     let refusal = reader
-        .scoped(live_scope.clone())
+        .scoped(admit(live_scope.clone()))
         .expect("a retired scope still binds a controller")
         .controller()
         .open_effect_group(staged(
@@ -754,7 +754,7 @@ pub async fn an_unregistered_host_refuses_all_three_from_wiring<F: Fn() -> Host>
     let unsupported = crate::RuntimeErrorCode::EffectGroupUnsupported;
     let host = unwired();
     let scoped = host
-        .scoped(scope(prefix, "unwired"))
+        .scoped(admit(scope(prefix, "unwired")))
         .expect("a scope binds");
     let key = group_key(prefix, "unwired");
     let staged_group = staged(
@@ -817,7 +817,7 @@ pub async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
     let key = group_key(prefix, "refused");
     let refused_on = unwired();
     let refused_scope = refused_on
-        .scoped(scope(prefix, "refused"))
+        .scoped(admit(scope(prefix, "refused")))
         .expect("a scope binds");
     let refusal = refused_scope
         .controller()
@@ -844,7 +844,7 @@ pub async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
 
     let host = make();
     let scoped = host
-        .scoped(scope(prefix, "refused"))
+        .scoped(admit(scope(prefix, "refused")))
         .expect("a scope binds on the wired host");
     let mut handle = open(
         &scoped,
@@ -895,7 +895,7 @@ pub async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn
 ) {
     let host = make();
     let scoped = host
-        .scoped(scope(prefix, "no-runner"))
+        .scoped(admit(scope(prefix, "no-runner")))
         .expect("a scope binds");
     let key = group_key(prefix, "no-runner");
     let missing = format!("{key}:child:1");
@@ -907,7 +907,7 @@ pub async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn
     // second as a different opener of a group it already holds — a reopen.
     let retry_host = make();
     let retry = retry_host
-        .scoped(scope(prefix, "no-runner-retry"))
+        .scoped(admit(scope(prefix, "no-runner-retry")))
         .expect("a scope binds on the retrying host");
     for (attempt, opener) in [(1, &scoped), (2, &retry)] {
         // Child 0 routes, child 1 does not. Restaged each time, because a
@@ -985,7 +985,7 @@ pub async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F
     let key = group_key(prefix, "lost-runner");
     let host = make();
     let scoped = host
-        .scoped(scope(prefix, "lost-runner"))
+        .scoped(admit(scope(prefix, "lost-runner")))
         .expect("a scope binds");
     let (loser, gate) = gated(1);
     let mut handle = open(
@@ -1006,7 +1006,7 @@ pub async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F
     // so this is not a group to refuse: it is a queue another host can finish.
     let resumed_host = make();
     let resumed = resumed_host
-        .scoped(scope(prefix, "lost-runner"))
+        .scoped(admit(scope(prefix, "lost-runner")))
         .expect("a scope binds on the resuming host");
     let mut reopened = resumed
         .controller()
@@ -1056,7 +1056,7 @@ pub async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F
 pub async fn a_wired_host_serves_all_three_group_methods<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scope = scope(prefix, "flag");
-    let scoped = host.scoped(scope.clone()).expect("a scope binds");
+    let scoped = host.scoped(admit(scope.clone())).expect("a scope binds");
 
     let key = group_key(prefix, "flag");
     let mut handle = open(
@@ -1097,7 +1097,9 @@ pub async fn duplicate_replay_keys_are_refused_before_a_host_sees_them<F: Fn() -
     prefix: &str,
 ) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "dup")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "dup")))
+        .expect("a scope binds");
     let key = group_key(prefix, "dup");
 
     let error = RuntimeEffectGroup::try_new(
@@ -1154,7 +1156,9 @@ pub async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F:
     prefix: &str,
 ) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "race")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "race")))
+        .expect("a scope binds");
     let key = group_key(prefix, "race");
     let (slow, loser) = gated(0);
     let mut handle = open(
@@ -1199,7 +1203,7 @@ pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
 ) {
     let host = make();
     let scope = scope(prefix, "live-child");
-    let scoped = host.scoped(scope.clone()).expect("a scope binds");
+    let scoped = host.scoped(admit(scope.clone())).expect("a scope binds");
     let key = group_key(prefix, "live-child");
     let (slow, child) = gated(0);
     let mut handle = open(&scoped, &key, 1, GroupWakePolicy::All, RUN, vec![slow]).await;
@@ -1257,7 +1261,9 @@ pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
 )]
 pub async fn settlement_n_is_stable_across_re_reads<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "stable")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "stable")))
+        .expect("a scope binds");
     let key = group_key(prefix, "stable");
     let (slow, loser) = gated(0);
     let mut handle = open(
@@ -1310,7 +1316,9 @@ pub async fn settlement_n_is_stable_across_re_reads<F: Fn() -> Host>(make: &F, p
 )]
 pub async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "order")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "order")))
+        .expect("a scope binds");
     let key = group_key(prefix, "order");
     let width = 4;
     let mut handle = open(
@@ -1360,7 +1368,9 @@ pub async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: 
 )]
 pub async fn awaiting_past_the_last_child_is_refused<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "past")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "past")))
+        .expect("a scope binds");
     let key = group_key(prefix, "past");
     let mut handle = open(
         &scoped,
@@ -1398,7 +1408,7 @@ pub async fn a_cancelled_await_leaves_the_rank_to_be_read_again<F: Fn() -> Host>
 ) {
     let host = make();
     let scoped = host
-        .scoped(scope(prefix, "cancelled"))
+        .scoped(admit(scope(prefix, "cancelled")))
         .expect("a scope binds");
     let key = group_key(prefix, "cancelled");
     let (slow, gate) = gated(0);
@@ -1444,7 +1454,9 @@ pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() ->
     prefix: &str,
 ) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "run")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "run")))
+        .expect("a scope binds");
     let key = group_key(prefix, "run");
     let (slow, loser) = gated(1);
     let mut handle = open(
@@ -1479,7 +1491,7 @@ pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() ->
     // non-vacuous for hosts whose fresh instance has no registered group.
     let resumed = make();
     let resumed_scope = resumed
-        .scoped(scope(prefix, "run-resumed"))
+        .scoped(admit(scope(prefix, "run-resumed")))
         .expect("a scope binds on the resuming host");
     let mut fresh_host =
         EffectGroupHandle::restored(key.as_str(), 2, 1).expect("the cursor restores");
@@ -1506,7 +1518,9 @@ pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() ->
 )]
 pub async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "cancel")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "cancel")))
+        .expect("a scope binds");
     let key = group_key(prefix, "cancel");
     let (slow, loser) = gated(1);
     let mut handle = open(
@@ -1548,7 +1562,9 @@ pub async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
 )]
 pub async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "narrow")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "narrow")))
+        .expect("a scope binds");
 
     let widened_key = group_key(prefix, "narrow-widened");
     let handle = open(
@@ -1612,7 +1628,7 @@ pub async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefi
 pub async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host
-        .scoped(scope(prefix, "idempotent"))
+        .scoped(admit(scope(prefix, "idempotent")))
         .expect("a scope binds");
     let key = group_key(prefix, "idempotent");
     let handle = open(
@@ -1648,7 +1664,9 @@ pub async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host
     prefix: &str,
 ) {
     let host = make();
-    let scoped = host.scoped(scope(prefix, "reopen")).expect("a scope binds");
+    let scoped = host
+        .scoped(admit(scope(prefix, "reopen")))
+        .expect("a scope binds");
     let key = group_key(prefix, "reopen");
     let runs = Arc::new(AtomicUsize::new(0));
     let counted = |runs: &Arc<AtomicUsize>, position: usize| {
@@ -1730,7 +1748,7 @@ pub async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -
 ) {
     let first = make();
     let scoped = first
-        .scoped(scope(prefix, "handoff"))
+        .scoped(admit(scope(prefix, "handoff")))
         .expect("a scope binds");
     let key = group_key(prefix, "handoff");
     let (slow, loser) = gated(1);
@@ -1752,7 +1770,7 @@ pub async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -
     // only what a durable continuation carries — the group and its own cursor.
     let second = make();
     let resumed = second
-        .scoped(scope(prefix, "handoff"))
+        .scoped(admit(scope(prefix, "handoff")))
         .expect("a scope binds on the resuming host");
     let runs = Arc::new(AtomicUsize::new(0));
     let counted = |position: usize| {

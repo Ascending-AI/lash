@@ -208,16 +208,16 @@ impl EffectHost for StoreDelegatedTurnControlHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: crate::ExecutionScope,
+        admitted: crate::AdmittedScope,
     ) -> Result<crate::ScopedEffectController<'run>, crate::RuntimeError> {
-        self.owner.scoped(scope)
+        self.owner.scoped(admitted)
     }
 
     fn scoped_static(
         &self,
-        scope: crate::ExecutionScope,
+        admitted: crate::AdmittedScope,
     ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
-        self.owner.scoped_static(scope)
+        self.owner.scoped_static(admitted)
     }
 
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
@@ -239,7 +239,7 @@ impl EffectHost for StoreDelegatedTurnControlHost {
             resolver: self,
             peek: crate::ScopedEffectController::shared(
                 Arc::clone(&self.peek_controller) as Arc<dyn crate::RuntimeEffectController>,
-                scoped.execution_scope().clone(),
+                scoped.admitted_scope().clone(),
             )?,
             turn_attach: crate::TurnControlAttachment::Resolver(self),
         })

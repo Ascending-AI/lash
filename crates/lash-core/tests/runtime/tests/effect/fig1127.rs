@@ -116,7 +116,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     };
     let scoped_controller = lash_core::ScopedEffectController::borrowed(
         &controller,
-        lash_core::ExecutionScope::runtime_operation("fig1127-trigger-emission"),
+        lash_core::AdmittedScope::runtime_operation("fig1127-trigger-emission"),
     )
     .expect("bind trigger emitter scope");
     let first = router

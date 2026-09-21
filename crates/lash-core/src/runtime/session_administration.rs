@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{
-    EffectHost, ExecutionScope, ProcessWorkWiring, RuntimeError, ScopedEffectController,
+    AdmittedScope, EffectHost, ProcessWorkWiring, RuntimeError, ScopedEffectController,
     SessionStoreFactory,
 };
 use crate::SessionId;
@@ -96,7 +96,7 @@ pub trait SessionDeleteExecution {
 
     fn scoped<'a>(
         &'a self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'a>, RuntimeError>;
 }
 
@@ -107,9 +107,9 @@ impl SessionDeleteExecution for SessionAdministration {
 
     fn scoped<'a>(
         &'a self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'a>, RuntimeError> {
-        self.effect_host.scoped(scope)
+        self.effect_host.scoped(admitted)
     }
 }
 
@@ -133,8 +133,7 @@ impl<'a> SessionDeleteContext<'a> {
         E: SessionDeleteExecution + ?Sized,
     {
         let session_id = SessionId::from(session_id.as_ref());
-        let scope = ExecutionScope::session_delete(&session_id);
-        let controller = executor.scoped(scope)?;
+        let controller = executor.scoped(AdmittedScope::session_delete(&session_id))?;
         Ok(Self {
             session_id,
             administration: executor.administration().clone(),

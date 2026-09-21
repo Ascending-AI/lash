@@ -592,7 +592,7 @@ impl lash_core::EffectHost for KeyJournalController {
 
     fn scoped<'run>(
         &'run self,
-        scope: lash_core::ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         lash_core::ScopedEffectController::borrowed(self, scope)
     }
@@ -717,7 +717,7 @@ impl lash_core::EffectHost for AdmissionCrashController {
 
     fn scoped<'run>(
         &'run self,
-        scope: lash_core::ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         lash_core::ScopedEffectController::borrowed(self, scope)
     }
@@ -2094,7 +2094,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
 
     let session = core.session(SESSION).open().await?;
     let effect_host = session.effect_host();
-    let scoped = effect_host.scoped(lash_core::ExecutionScope::turn(
+    let scoped = effect_host.scoped(lash_core::AdmittedScope::turn(
         SESSION,
         "session-recorded-intent-route",
     ))?;

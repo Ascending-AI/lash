@@ -120,7 +120,7 @@ where
     );
 
     let owner = make()
-        .scoped_static(scope.clone())
+        .scoped_static(admit(scope.clone()))
         .expect("host A creates static controller")
         .expect("durable host exposes a static controller");
     let owner_envelope = envelope.clone();
@@ -156,7 +156,7 @@ where
     );
     for role in ["C", "D"] {
         let controller = make()
-            .scoped_static(scope.clone())
+            .scoped_static(admit(scope.clone()))
             .expect("redrive creates static controller")
             .expect("durable host exposes a static controller");
         let outcome = controller
@@ -458,7 +458,7 @@ where
     assert_eq!(mint_error.code.as_str(), "await_event_unknown_or_revoked");
     let host = make();
     let admission = host
-        .scoped(scope.clone())
+        .scoped(admit(scope.clone()))
         .expect("a retired scope still binds a controller")
         .controller()
         .execute_effect(

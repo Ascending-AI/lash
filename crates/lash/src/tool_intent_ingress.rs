@@ -1073,13 +1073,10 @@ impl ToolIntentIngress {
                     "trigger store is unavailable in this runtime".to_string(),
                 ))
             })?;
-        let scoped = self
-            .core
-            .env
-            .core
-            .control
-            .effect_host
-            .scoped(self.scope.clone())?;
+        let scoped = self.core.env.core.control.effect_host.scoped(
+            lash_core::AdmittedScope::unpinned(self.scope.clone())
+                .map_err(lash_core::RuntimeError::from)?,
+        )?;
         let invocation = lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 scoped.execution_scope().clone(),
@@ -1250,13 +1247,10 @@ impl ToolIntentIngress {
                 std::sync::Arc::clone(&self.core.env.core.durability.process_env_store),
                 self.core.host_process_engines.clone(),
             );
-        let scoped = self
-            .core
-            .env
-            .core
-            .control
-            .effect_host
-            .scoped(self.scope.clone())?;
+        let scoped = self.core.env.core.control.effect_host.scoped(
+            lash_core::AdmittedScope::unpinned(self.scope.clone())
+                .map_err(lash_core::RuntimeError::from)?,
+        )?;
         router
             .emit_recorded_reporting_realization(request, &scoped)
             .await
@@ -1317,13 +1311,10 @@ impl ToolIntentIngress {
         command: lash_core::ProcessCommand,
     ) -> crate::Result<(lash_core::ProcessEffectOutcome, bool)> {
         let registry = self.process_registry()?;
-        let scoped = self
-            .core
-            .env
-            .core
-            .control
-            .effect_host
-            .scoped(self.scope.clone())?;
+        let scoped = self.core.env.core.control.effect_host.scoped(
+            lash_core::AdmittedScope::unpinned(self.scope.clone())
+                .map_err(lash_core::RuntimeError::from)?,
+        )?;
         #[expect(
             clippy::expect_used,
             reason = "the scope comes from the effect host's own `scoped` handle, which \

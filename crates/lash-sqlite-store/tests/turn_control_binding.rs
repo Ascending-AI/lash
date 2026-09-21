@@ -9,6 +9,7 @@ use lash_core::SessionStoreFactory;
 use lash_core::facade_support::{NativeEffectHost, NativeRuntimeEffectController};
 use lash_core::runtime::{TurnAddress, TurnCancelOutcome, TurnCancelRequest, TurnWorkDriver};
 use lash_core::testing::conformance_support::{ActiveTurnControl, TurnCancelPeekIdentity};
+use lash_core::testing::store_fixtures::durable_admission;
 use lash_core::{
     AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
     ExecutionScope, LeaseOwnerIdentity, ProcessRegistrar, RuntimeErrorCode, ScopedEffectController,
@@ -29,7 +30,11 @@ async fn turn_control_local_gate_is_owned_and_awaited_by_sqlite_host() {
     );
     let controller = NativeRuntimeEffectController::default();
     let address = TurnAddress::new("local-session", "local-turn");
-    let scoped = ScopedEffectController::borrowed(&controller, address.execution_scope()).unwrap();
+    let scoped = ScopedEffectController::borrowed(
+        &controller,
+        durable_admission(&address.execution_scope()),
+    )
+    .unwrap();
     let binding = host.turn_control_binding(&scoped).await.unwrap();
     let resolver = match &binding {
         TurnControlBinding::HostOwned { resolver, .. }
@@ -88,7 +93,9 @@ async fn turn_control_durable_journaled_binding_remains_run_scoped() {
         .await
         .unwrap();
     let address = TurnAddress::new("durable-session", "durable-turn");
-    let scoped = host.scoped(address.execution_scope()).unwrap();
+    let scoped = host
+        .scoped(durable_admission(&address.execution_scope()))
+        .unwrap();
     let binding = host.turn_control_binding(&scoped).await.unwrap();
     match binding {
         TurnControlBinding::RunScoped {
@@ -196,7 +203,7 @@ async fn authorize_completion_closure(
         .acquired()
         .expect("closure lane is free");
     let scoped = host
-        .scoped(physical_scope.clone())
+        .scoped(durable_admission(physical_scope))
         .expect("scope effect owner");
     let binding = host
         .turn_control_binding(&scoped)
@@ -364,7 +371,7 @@ async fn owner_retirement_before_authorization_refuses_the_catalog_without_a_pin
         .acquired()
         .expect("late lane is free");
     let scoped = host
-        .scoped(scope.clone())
+        .scoped(durable_admission(&scope))
         .expect("scope owner before retirement");
     let binding = host
         .turn_control_binding(&scoped)
@@ -508,7 +515,7 @@ async fn process_scoped_physical_turn_start_gates_are_distinct_and_replayable() 
     let path = dir.path().join("physical-turn-peeks.sqlite");
     let host = SqliteEffectHost::open(&path).await.unwrap();
     let process_scope = ExecutionScope::process("process:subagent:physical-turn-peeks");
-    let scoped = host.scoped(process_scope.clone()).unwrap();
+    let scoped = host.scoped(durable_admission(&process_scope)).unwrap();
     let root = TurnAddress::new(
         "session:subagent:physical-turn-peeks",
         "process:subagent:physical-turn-peeks",
@@ -603,7 +610,7 @@ async fn shared_scope_physical_turn_start_gates_are_distinct_and_replayable() {
     ];
 
     for (scope, root, follow_on) in &cases {
-        let scoped = host.scoped(scope.clone()).unwrap();
+        let scoped = host.scoped(durable_admission(scope)).unwrap();
         for address in [root, root, follow_on, follow_on] {
             let active = ActiveTurnControl::new(&host, address.clone())
                 .await

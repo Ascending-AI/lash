@@ -50,7 +50,7 @@ impl lash_core::EffectHost for DefaultBindingHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: lash_core::ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         self.0.scoped(scope)
     }
@@ -98,9 +98,12 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
     .await;
     let address = lash_core::facade_support::TurnAddress::new("root", "external-local-cancel");
     let scope = native_scope(
-        runtime
-            .export_persistence_state()
-            .turn_scope(&address.turn_id),
+        lash_core::AdmittedScope::unpinned(
+            runtime
+                .export_persistence_state()
+                .turn_scope(&address.turn_id),
+        )
+        .expect("turn scope"),
     );
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -140,9 +143,11 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
     let host = Arc::new(DefaultBindingHost::default());
     let controller = NativeRuntimeEffectController::default();
     let address = lash_core::facade_support::TurnAddress::new("active-session", "active-turn");
-    let scoped =
-        lash_core::ScopedEffectController::borrowed(&controller, address.execution_scope())
-            .unwrap();
+    let scoped = lash_core::ScopedEffectController::borrowed(
+        &controller,
+        lash_core::AdmittedScope::unpinned(address.execution_scope()).unwrap(),
+    )
+    .unwrap();
     let binding = host.turn_control_binding(&scoped).await.unwrap();
     let resolver = match binding {
         lash_core::TurnControlBinding::HostOwned { resolver, .. }

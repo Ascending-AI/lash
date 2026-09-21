@@ -1257,7 +1257,7 @@ impl crate::restate::CronTickCancelSurface for RecordingCronTickCancelSurface {
         self.events.lock_recover().push("record");
         let scoped = lash::runtime::ScopedEffectController::borrowed(
             &self.controller,
-            lash::runtime::ExecutionScope::runtime_operation("fig2316-public-cancel-path"),
+            lash::runtime::AdmittedScope::runtime_operation("fig2316-public-cancel-path"),
         )
         .expect("scope public cron cancel outcome");
         crate::restate::record_cron_tick_outcome_with_effect_controller(
@@ -1595,7 +1595,7 @@ async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
     let controller = CountingProcessEffectController::default();
     let scoped = lash::runtime::ScopedEffectController::borrowed(
         &controller,
-        lash::runtime::ExecutionScope::runtime_operation("fig1018-live-non-current-cron"),
+        lash::runtime::AdmittedScope::runtime_operation("fig1018-live-non-current-cron"),
     )
     .expect("scope live non-current cron occurrence");
     emit_cron_occurrence_with_effect_controller(
@@ -1706,7 +1706,7 @@ async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_so
     let controller = CountingProcessEffectController::default();
     let scoped = lash::runtime::ScopedEffectController::borrowed(
         &controller,
-        lash::runtime::ExecutionScope::runtime_operation("fig3126-tz-less-cron"),
+        lash::runtime::AdmittedScope::runtime_operation("fig3126-tz-less-cron"),
     )
     .expect("scope tz-less cron occurrence");
     let restate_sdk::prelude::Json(report) = emit_cron_occurrence_with_effect_controller(

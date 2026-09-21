@@ -15,7 +15,7 @@ impl lash_core::EffectHost for RecordingEffectController {
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
         ScopedEffectController::borrowed(self, scope)
     }
@@ -145,7 +145,7 @@ impl lash_core::EffectHost for ControllerEffectHost {
     }
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
         ScopedEffectController::borrowed(self.controller.as_ref(), scope)
     }

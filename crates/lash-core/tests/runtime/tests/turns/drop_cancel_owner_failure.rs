@@ -87,7 +87,10 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     }));
 
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = native_scope(persisted_state.turn_scope(TURN_ID));
+    let turn_scope = native_scope(
+        lash_core::AdmittedScope::unpinned(persisted_state.turn_scope(TURN_ID))
+            .expect("turn scope"),
+    );
     let turn_address = lash_core::facade_support::TurnAddress::new(SESSION_ID, TURN_ID);
     let mut turn = lash_core::task::spawn(async move {
         runtime

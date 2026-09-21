@@ -1713,7 +1713,7 @@ fn scoped_controller(
 ) -> crate::ScopedEffectController<'static> {
     crate::ScopedEffectController::shared(
         controller,
-        crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id),
+        crate::AdmittedScope::turn(&identity.session_id, &identity.turn_id),
     )
     .expect("valid reference turn scope")
 }
@@ -1802,7 +1802,7 @@ impl crate::EffectHost for InvocationEffectHost {
     }
     fn scoped<'run>(
         &'run self,
-        scope: crate::ExecutionScope,
+        scope: crate::AdmittedScope,
     ) -> Result<crate::ScopedEffectController<'run>, crate::RuntimeError> {
         crate::ScopedEffectController::shared(Arc::clone(&self.inner), scope)
     }

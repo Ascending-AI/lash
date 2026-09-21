@@ -35,6 +35,7 @@ use lash_core::ProcessClockRebind as _;
 use lash_core::ProcessWorkSubstrate as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
+use lash_core::testing::store_fixtures::{durable_admission, recorded_process_admission};
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress,
     EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
@@ -120,7 +121,9 @@ async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_exec
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let scoped = controller
-        .scoped_effect_controller(ExecutionScope::process("admitted-restate-process"))
+        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+            "admitted-restate-process",
+        )))
         .expect("scoped Restate controller");
     let envelope = RuntimeEffectEnvelope::new(
         lash_core::RuntimeEffectInvocation::new(
@@ -163,7 +166,9 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
         test_restate_authority_id(),
     );
     let scoped = host
-        .scoped(ExecutionScope::process("admitted-deployment-process"))
+        .scoped(durable_admission(&ExecutionScope::process(
+            "admitted-deployment-process",
+        )))
         .expect("scoped deployment host");
     let envelope = RuntimeEffectEnvelope::new(
         lash_core::RuntimeEffectInvocation::new(
@@ -211,7 +216,7 @@ async fn restate_scope_controller_refuses_wrong_scope_group_before_index_or_hand
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let admitted = ExecutionScope::process("admitted-restate-process");
     let scoped = controller
-        .scoped_effect_controller(admitted.clone())
+        .scoped_effect_controller(durable_admission(&admitted))
         .expect("scoped Restate controller");
     let group_key = "restate-scope-group";
     let child = RuntimeEffectEnvelope::new(
@@ -1131,9 +1136,8 @@ impl Fig806TriggerRedrive for Fig806TriggerRedriveImpl {
     ) -> HandlerResult<Json<lash_core::facade_support::TriggerEmitReport>> {
         let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let scoped = controller
-            .scoped_effect_controller(ExecutionScope::runtime_operation(format!(
-                "fig806-trigger:{}",
-                input.occurrence.idempotency_key
+            .scoped_effect_controller(durable_admission(&ExecutionScope::runtime_operation(
+                format!("fig806-trigger:{}", input.occurrence.idempotency_key),
             )))
             .map_err(HandlerError::from)?;
         let report = self

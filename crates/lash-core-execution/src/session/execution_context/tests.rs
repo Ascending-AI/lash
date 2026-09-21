@@ -387,9 +387,9 @@ async fn execution_context_without_process_execution_returns_typed_error_from_ap
 
 // ---------------------------------------------------------------------------
 // FIG-3417: the lifecycle parent a child start declares comes from ONE shared
-// derivation — the admitted execution scope plus the incarnation the process
-// runner pinned onto it. Nothing on this path re-resolves the reusable process
-// name against the registry.
+// derivation — the admitted execution scope, which for a process already
+// carries the incarnation the admission authority bound. Nothing on this path
+// re-resolves the reusable process name against the registry.
 // ---------------------------------------------------------------------------
 
 fn registration_for_parent_scope(process_id: &str) -> crate::ProcessRegistration {
@@ -406,20 +406,13 @@ fn registration_for_parent_scope(process_id: &str) -> crate::ProcessRegistration
 
 fn scoped_context(
     session_id: &str,
-    scope: crate::ExecutionScope,
-    admitted_process: Option<crate::ProcessRef>,
+    admitted: crate::AdmittedScope,
 ) -> RuntimeExecutionContext<'static> {
     let controller = crate::ScopedEffectController::shared(
         Arc::new(crate::NativeRuntimeEffectController::default()),
-        scope,
+        admitted,
     )
     .expect("the test scope validates");
-    let controller = match admitted_process {
-        Some(process_ref) => controller
-            .with_admitted_process(process_ref)
-            .expect("the pin names the scope's process"),
-        None => controller,
-    };
     crate::testing::TestExecutionContextBuilder::new()
         .session_id(session_id)
         .borrowed_effect_controller(controller)
@@ -451,8 +444,7 @@ fn process_event_context(
 async fn a_child_started_from_a_turn_parents_on_the_turn() {
     let context = scoped_context(
         "session-1",
-        crate::ExecutionScope::turn("session-1", "turn-7"),
-        None,
+        crate::AdmittedScope::turn("session-1", "turn-7"),
     );
     assert_eq!(
         context
@@ -465,29 +457,25 @@ async fn a_child_started_from_a_turn_parents_on_the_turn() {
     );
 }
 
-/// A process scope nobody bound an admitted incarnation to cannot name a
-/// lifecycle parent — the reusable name is not a fallback. The registry in
-/// this fixture *could* resolve the name, which is what makes the refusal
-/// prove the derivation never asked it.
+/// A process scope nobody bound an admitted incarnation to cannot be built —
+/// `AdmittedScope` refuses the unpinned pair at construction, so no execution
+/// context can ever carry the reusable name as a fallback. The registry in
+/// this fixture *could* resolve the name, which is what makes the construction
+/// refusal prove the derivation never asks it.
 #[tokio::test]
-async fn a_process_scope_without_an_admitted_incarnation_cannot_parent_a_child() {
+async fn a_process_scope_without_an_admitted_incarnation_is_unconstructible() {
     let registry: Arc<dyn crate::ProcessRegistry> =
         Arc::new(crate::TestLocalProcessRegistry::default());
-    let record = registry
+    registry
         .register_process(registration_for_parent_scope("worker"))
         .await
         .expect("first registration");
-    let context = scoped_context("session-1", crate::ExecutionScope::process("worker"), None)
-        .with_process_execution(
-            &registration_for_parent_scope("worker"),
-            Some(process_event_context(&record.id, Arc::clone(&registry))),
-        );
-    let error = context
-        .child_process_parent_scope()
-        .expect_err("a process scope without its admitted incarnation cannot parent a child");
     assert!(
-        error.to_string().contains("incarnation"),
-        "unexpected refusal: {error}"
+        matches!(
+            crate::AdmittedScope::new(crate::ExecutionScope::process("worker"), None),
+            Err(crate::AdmittedScopeError::ProcessIncarnationMissing { .. })
+        ),
+        "the reusable name alone is never admitted"
     );
 }
 
@@ -539,8 +527,7 @@ async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
 
     let context = scoped_context(
         "session-1",
-        crate::ExecutionScope::process("worker"),
-        Some(crate::ProcessRef::new(
+        crate::AdmittedScope::process(crate::ProcessRef::new(
             retired.id.clone(),
             retired.incarnation,
         )),
@@ -567,8 +554,7 @@ async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
 async fn a_child_started_from_a_queued_drain_parents_on_the_host() {
     let context = scoped_context(
         "session-1",
-        crate::ExecutionScope::queue_drain("session-1", "drain-3"),
-        None,
+        crate::AdmittedScope::queue_drain("session-1", "drain-3"),
     );
     assert_eq!(
         context

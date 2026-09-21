@@ -599,7 +599,10 @@ impl SessionAdmin {
         let operation_scope = lash_core::ExecutionScope::runtime_operation(scope_id);
         let scoped_effect_controller = runtime
             .effect_host()
-            .scoped_static(operation_scope.clone())
+            .scoped_static(
+                lash_core::AdmittedScope::unpinned(operation_scope.clone())
+                    .map_err(|err| EmbedError::Runtime(err.into()))?,
+            )
             .map_err(EmbedError::Runtime)?
             .ok_or_else(|| {
                 EmbedError::Plugin(lash_core::PluginError::Session(

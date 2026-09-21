@@ -441,7 +441,7 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
             session_graph: manager,
             scoped_effect_controller: lash::runtime::ScopedEffectController::shared(
                 Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
-                lash::runtime::ExecutionScope::turn(
+                lash::runtime::AdmittedScope::turn(
                     "workbench-rolling-history-session",
                     "workbench-rolling-history-turn",
                 ),

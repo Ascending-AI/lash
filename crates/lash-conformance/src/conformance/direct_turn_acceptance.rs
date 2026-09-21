@@ -11,6 +11,7 @@
 //! `list_pending_turn_inputs`, `list_turn_input_applications`, and
 //! `cancel_pending_turn_input`.
 
+use crate::admit;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -158,7 +159,7 @@ pub async fn direct_turn_accepts_before_driving(
     )
     .await;
     let scope = effect_host
-        .scoped(crate::ExecutionScope::turn(SESSION_ID, &turn_id))
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the direct acceptance turn");
     let turn = runtime
         .stream_turn(
@@ -284,7 +285,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     )
     .await;
     let scope = effect_host
-        .scoped(crate::ExecutionScope::turn(SESSION_ID, &turn_id))
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the abandoned direct turn");
     let failure = first_driver
         .stream_turn(
@@ -321,7 +322,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     .await;
     let drain_id = format!("{prefix}-successor-drain");
     let drain_scope = effect_host
-        .scoped(crate::ExecutionScope::turn(SESSION_ID, &drain_id))
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
         .expect("scope the successor drain");
     let drain = successor
         .stream_next_queued_work(crate::TurnOptions::new(
@@ -405,7 +406,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     for round in 0..2 {
         let turn_id = TurnId::from(format!("{prefix}-resubmit-{round}"));
         let scope = effect_host
-            .scoped(crate::ExecutionScope::turn(SESSION_ID, &turn_id))
+            .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
             .expect("scope a resubmitted direct turn");
         let turn = runtime
             .stream_turn(
@@ -490,7 +491,7 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
     )
     .await;
     let scope = effect_host
-        .scoped(crate::ExecutionScope::turn(SESSION_ID, &turn_id))
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the refused direct turn");
     let failure = loser
         .stream_turn(
@@ -527,7 +528,7 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
     let mut successor =
         acceptance_runtime(&store, &effect_host, provider, Vec::new(), successor_owner).await;
     let scope = effect_host
-        .scoped(crate::ExecutionScope::turn(SESSION_ID, &turn_id))
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the successor direct turn");
     successor
         .stream_turn(

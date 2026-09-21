@@ -1354,7 +1354,7 @@ mod tests {
         };
         let scoped_controller = lash_core::ScopedEffectController::shared(
             Arc::new(CountingEffectController::default()),
-            lash_core::ExecutionScope::turn("whitespace-response-session", "turn-1"),
+            lash_core::AdmittedScope::turn("whitespace-response-session", "turn-1"),
         )
         .expect("scoped controller");
         let mut runtime = Box::pin(
@@ -1489,7 +1489,7 @@ mod tests {
         let controller = CountingEffectController::default();
         let scoped_controller = lash_core::ScopedEffectController::shared(
             Arc::new(controller.clone()),
-            lash_core::ExecutionScope::turn("standard-batch-session", "turn-1"),
+            lash_core::AdmittedScope::turn("standard-batch-session", "turn-1"),
         )
         .expect("scoped controller");
         let mut runtime = Box::pin(

@@ -671,7 +671,7 @@ mod tests {
         ProcessOpScope::new(
             crate::ScopedEffectController::shared(
                 Arc::new(crate::NativeRuntimeEffectController::default()),
-                crate::ExecutionScope::runtime_operation(id),
+                crate::AdmittedScope::runtime_operation(id),
             )
             .expect("test execution scope"),
         )

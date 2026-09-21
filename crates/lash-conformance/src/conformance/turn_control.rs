@@ -1,5 +1,6 @@
 //! Shared foreground-turn control conformance.
 
+use crate::admit;
 use std::sync::Arc;
 
 use lash_sansio::SessionId;
@@ -98,7 +99,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn Ef
     let address = address("escalation");
     let (host, driver) = driver_for_session(host, &address).await;
     let peek = host
-        .scoped(address.execution_scope())
+        .scoped(admit(address.execution_scope()))
         .expect("scoped peek controller");
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
@@ -215,7 +216,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
     let address = address("boundary");
     let (host, driver) = driver_for_session(host, &address).await;
     let peek = host
-        .scoped(address.execution_scope())
+        .scoped(admit(address.execution_scope()))
         .expect("scoped peek controller");
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await

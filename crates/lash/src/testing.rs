@@ -509,7 +509,7 @@ finish("registered");
         ) -> lash_core::ScopedEffectController<'static> {
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::runtime_operation(scope_id.into()),
+                lash_core::AdmittedScope::runtime_operation(scope_id.into()),
             )
             .expect("native trigger occurrence execution scope")
         }

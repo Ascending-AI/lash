@@ -32,6 +32,12 @@ pub enum RuntimeErrorCode {
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
+    /// An execution scope was admitted for effect work without the process
+    /// incarnation its scope kind requires (or pinned to an incarnation that
+    /// is not its own). Retrying the identical admission fails identically;
+    /// the caller must admit the scope through the authority that owns the
+    /// process incarnation.
+    ExecutionScopeAdmissionRefused,
     /// The managed-turn registry's admission cap is full. Retrying the
     /// same request after another managed turn finishes is safe.
     ManagedTurnConcurrencyLimitExceeded,
@@ -423,6 +429,7 @@ impl RuntimeErrorCode {
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
+            Self::ExecutionScopeAdmissionRefused => "execution_scope_admission_refused",
             Self::ManagedTurnConcurrencyLimitExceeded => "managed_turn_concurrency_limit_exceeded",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
@@ -700,6 +707,7 @@ impl RuntimeErrorCode {
             | Self::EffectPanicked
             | Self::MissingExecutionScopeId
             | Self::ExecutionScopeTurnIdMismatch
+            | Self::ExecutionScopeAdmissionRefused
             | Self::TurnInputRedriveSetUnavailable
             | Self::TurnExecutionRequiresReconciledToolSurface
             | Self::QueuedWorkRowExceedsContextWindow
@@ -875,6 +883,7 @@ impl RuntimeErrorCode {
         Self::EffectPanicked,
         Self::MissingExecutionScopeId,
         Self::ExecutionScopeTurnIdMismatch,
+        Self::ExecutionScopeAdmissionRefused,
         Self::ManagedTurnConcurrencyLimitExceeded,
         Self::SessionExecutionLeaseLost,
         Self::SessionExecutionLaneBusy,
@@ -1068,6 +1077,7 @@ impl RuntimeErrorCode {
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
+            "execution_scope_admission_refused" => Self::ExecutionScopeAdmissionRefused,
             "managed_turn_concurrency_limit_exceeded" => Self::ManagedTurnConcurrencyLimitExceeded,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,

@@ -819,7 +819,7 @@ impl AgentSessionTurnProcessScenario {
             .processes()
             .start(
                 self.start_request(),
-                native_scope(lash_core::ExecutionScope::process(self.process_id.clone())),
+                native_process_scope(self.process_id.clone()),
             )
             .await?;
         assert_eq!(handle.process_id, self.process_id);

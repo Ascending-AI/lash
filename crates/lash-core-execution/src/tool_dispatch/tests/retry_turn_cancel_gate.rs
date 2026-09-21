@@ -85,8 +85,20 @@ async fn retry_sleep_shape(
     }));
     context.session_id = crate::SessionId::from(ambient_session_id);
     context.effect_controller = RuntimeEffectControllerHandle::borrowed(
-        crate::ScopedEffectController::shared(recorder.clone(), execution_scope)
-            .expect("valid retry witness scope"),
+        crate::ScopedEffectController::shared(
+            recorder.clone(),
+            match &execution_scope {
+                crate::ExecutionScope::Process { process_id } => {
+                    crate::AdmittedScope::process(crate::ProcessRef::new(
+                        process_id.clone(),
+                        crate::ProcessIncarnation::from_registration_sequence(1),
+                    ))
+                }
+                _ => crate::AdmittedScope::unpinned(execution_scope.clone())
+                    .expect("the retry witness scope admits unpinned"),
+            },
+        )
+        .expect("valid retry witness scope"),
     );
     let manifest =
         resolve_callable_manifest(&context, "retry_probe").expect("the retry probe is callable");

@@ -63,19 +63,31 @@ pub(super) struct HostBridgeConfig<'run> {
 
 /// Why a cell has no logical opener to mint identities under.
 ///
-/// Both arms are unreachable from the production entry: the turn driver always
+/// All arms are unreachable from the production entry: the turn driver always
 /// installs the code-execution effect as the parent invocation
 /// (`crates/lash-core/src/runtime/turn_driver/effects.rs`), and every scope a
 /// managed turn may run under is an opener — `Turn`, `QueueDrain`, or the
 /// `Process` scope a `ProcessInput::SessionTurn` row runs its child turn
-/// under, whose admitted incarnation the process runner binds onto the scoped
-/// controller. They are refusals rather than fallbacks because the fallback
+/// under, whose admitted incarnation the controller's admitted scope already
+/// carries. They are refusals rather than fallbacks because the fallback
 /// that used to stand here — the bare session id — minted one identity for the
 /// first unsited call of every cell in a session.
 #[derive(Debug, thiserror::Error)]
 enum LashlangCellOpener {
     #[error("lashlang cell runs outside a code-execution effect, so it has no logical opener")]
     NoEffect,
+    /// The effect the cell runs under names a different scope than the
+    /// controller was admitted under — a claim/opener disagreement, refused
+    /// rather than resolved in either direction.
+    #[error(
+        "code-execution effect names scope `{address}` but this execution was admitted under `{admitted}`"
+    )]
+    AddressScope {
+        /// The scope the installed effect address claims.
+        address: String,
+        /// The scope the controller's checked admitted pair carries.
+        admitted: String,
+    },
     #[error(transparent)]
     Scope(lash_core::EffectOpenerError),
 }
@@ -88,25 +100,31 @@ impl<'run> HostBridge<'run> {
         // The opener this cell belongs to and the cell's own key within it,
         // resolved once from the code-execution effect the turn driver
         // installed (`turn_driver/effects.rs` always sets the parent
-        // invocation). The opener is the turn; the replay key is the cell.
-        let admitted_process = config.ctx.admitted_process();
+        // invocation). The opener is the controller's own admitted scope —
+        // the checked pair it already carries — not a pair re-paired here
+        // from a scope claim and a separately read pin. The address must name
+        // that same scope; a disagreement is refused rather than resolved.
+        let admitted_scope = config.ctx.admitted_scope();
         let identities = config
             .ctx
             .parent_invocation()
             .and_then(lash_core::RuntimeInvocation::effect_address)
             .ok_or(LashlangCellOpener::NoEffect)
             .and_then(|address| {
-                lash_core::EffectOpener::for_scope(
-                    &address.execution_scope,
-                    admitted_process.as_ref(),
-                )
-                .map(|opener| {
-                    lash_lashlang_runtime::LashlangHostIdentities::cell(
-                        opener,
-                        address.replay_key.clone(),
-                    )
-                })
-                .map_err(LashlangCellOpener::Scope)
+                if address.execution_scope != *admitted_scope.scope() {
+                    return Err(LashlangCellOpener::AddressScope {
+                        address: address.execution_scope.id().to_string(),
+                        admitted: admitted_scope.scope().id().to_string(),
+                    });
+                }
+                lash_core::EffectOpener::for_scope(&admitted_scope)
+                    .map_err(LashlangCellOpener::Scope)
+                    .map(|opener| {
+                        lash_lashlang_runtime::LashlangHostIdentities::cell(
+                            opener,
+                            address.replay_key.clone(),
+                        )
+                    })
             });
         Self {
             identities,

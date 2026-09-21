@@ -515,7 +515,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     .await;
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let scoped_effect_controller = controller
-        .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
+        .scoped_effect_controller(durable_admission(&durable_turn_scope(session_id, turn_id)))
         .expect("scoped replay controller");
     let replay_turn = fresh_worker
         .stream_turn(

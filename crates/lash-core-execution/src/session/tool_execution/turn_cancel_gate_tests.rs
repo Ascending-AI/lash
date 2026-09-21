@@ -139,7 +139,7 @@ async fn deferred_tool_await_shape(
     let recorder = Arc::new(AwaitShapeRecorder::default());
     let scoped = crate::ScopedEffectController::shared(
         Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
-        turn_scope(),
+        crate::AdmittedScope::unpinned(turn_scope()).expect("a turn admits unpinned"),
     )
     .expect("valid turn scope");
     let mut context = crate::testing::TestExecutionContextBuilder::new()
@@ -208,7 +208,7 @@ async fn scalar_retry_sleep_attaches_the_owning_turn_cancel_gate() {
     let recorder = Arc::new(AwaitShapeRecorder::default());
     let scoped = crate::ScopedEffectController::shared(
         Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
-        turn_scope(),
+        crate::AdmittedScope::unpinned(turn_scope()).expect("a turn admits unpinned"),
     )
     .expect("valid turn scope");
     let context = crate::testing::TestExecutionContextBuilder::new()

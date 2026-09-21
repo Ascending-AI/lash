@@ -287,7 +287,7 @@ pub(super) async fn emit_cron_occurrence(
     controller: &lash_restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
 ) -> HandlerResult<Json<CronEmitReport>> {
     let scoped_effect_controller = controller
-        .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
+        .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "cron:{}:{fired_at}",
             controller.context().key()
         )))

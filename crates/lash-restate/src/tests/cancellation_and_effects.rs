@@ -1372,7 +1372,7 @@ pub(super) async fn run_restate_replay_turn(
 ) -> lash_core::facade_support::AssembledTurn {
     let controller = RestateRuntimeEffectController::new_for_test(context);
     let scoped_effect_controller = controller
-        .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
+        .scoped_effect_controller(durable_admission(&durable_turn_scope(session_id, turn_id)))
         .expect("scoped restate controller");
     runtime
         .stream_turn(

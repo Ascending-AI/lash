@@ -35,6 +35,7 @@ pub use control::{
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
+pub use lash_core_store::admitted_scope::{AdmittedScope, AdmittedScopeError};
 pub use lash_core_store::effect_opener::EffectOpener;
 
 /// The one typed refusal a controller that does not implement durable effect
@@ -1430,9 +1431,11 @@ mod task_boundary_tests {
         });
         let controller = NativeRuntimeEffectController::default();
         let execution_scope = ExecutionScope::runtime_operation("replay-skips-local");
-        let (proxy, mut requests) =
-            EffectTaskController::scoped(&controller, execution_scope.clone())
-                .expect("task controller");
+        let (proxy, mut requests) = EffectTaskController::scoped(
+            &controller,
+            crate::AdmittedScope::runtime_operation("replay-skips-local"),
+        )
+        .expect("task controller");
         let envelope = RuntimeEffectEnvelope::new(
             RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(execution_scope, "replay-skips-local:sleep")

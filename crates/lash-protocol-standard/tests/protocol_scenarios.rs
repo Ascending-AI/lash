@@ -959,7 +959,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             tokio_util::sync::CancellationToken::new(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::turn(
+                lash_core::AdmittedScope::turn(
                     "standard-protocol-scenario",
                     "standard-protocol-turn",
                 ),

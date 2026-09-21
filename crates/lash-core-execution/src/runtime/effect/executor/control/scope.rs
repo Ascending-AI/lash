@@ -11,8 +11,8 @@ use super::*;
 /// hands to [`ScopedEffectController::owned`], so the runtime's rescoping (a
 /// turn under a process, a child under its parent) keeps the scope exact.
 pub trait ScopeBoundController: RuntimeEffectController {
-    /// This controller, bound to `scope` instead; it lives as long as this one does.
-    fn for_scope<'a>(&self, scope: ExecutionScope) -> Arc<dyn ScopeBoundController + 'a>
+    /// This controller, bound to `admitted` instead; it lives as long as this one does.
+    fn for_scope<'a>(&self, admitted: AdmittedScope) -> Arc<dyn ScopeBoundController + 'a>
     where
         Self: 'a;
 }
@@ -36,102 +36,87 @@ impl Clone for ScopedEffectControllerInner<'_> {
     }
 }
 
-/// Scoped low-level controller plus the semantic execution scope it is serving.
+/// Scoped low-level controller plus the admitted execution scope it is
+/// serving.
 #[derive(Clone)]
 pub struct ScopedEffectController<'run> {
     pub(in crate::runtime::effect::executor) controller: ScopedEffectControllerInner<'run>,
-    pub(in crate::runtime::effect::executor) scope: ExecutionScope,
-    /// The store-minted incarnation a process scope was admitted under, when
-    /// the caller knew it.
+    /// The scope this controller serves plus, when it is a process, the
+    /// store-minted incarnation it was admitted under.
     ///
     /// [`ExecutionScope::Process`] carries the reusable process *name* and
     /// nothing else, which ADR 0099 §1 names as the gap: the opener that owns
     /// durable work is the name bound to one incarnation, and "a retired or
     /// mismatched incarnation is refused, never rebound to the current process
-    /// carrying the same name". The scope is a durable journal address and does
-    /// not change; this rides beside it, set once by the process runner from the
-    /// record the authority CAS admitted, so any execution running under this
-    /// controller can name its opener ([`Self::admitted_process`]).
-    pub(in crate::runtime::effect::executor) admitted_process: Option<crate::ProcessRef>,
+    /// carrying the same name". Keeping the pair in one [`AdmittedScope`]
+    /// means a process-scoped controller always carries its incarnation —
+    /// the half-admitted shape is unconstructible, so any execution running
+    /// under this controller can name its opener
+    /// ([`Self::admitted_process`]).
+    pub(in crate::runtime::effect::executor) admitted: AdmittedScope,
 }
 
 impl<'run> ScopedEffectController<'run> {
     /// Returns the execution scope this controller has admitted.
     pub fn execution_scope(&self) -> &ExecutionScope {
-        &self.scope
+        self.admitted.scope()
     }
 
-    /// The process incarnation this controller's scope was admitted under, when
-    /// a process runner bound one.
+    /// Returns the admitted scope this controller serves: the execution scope
+    /// plus, when it is a process, the incarnation it was admitted under.
+    pub fn admitted_scope(&self) -> &AdmittedScope {
+        &self.admitted
+    }
+
+    /// The process incarnation this controller's scope was admitted under.
     ///
-    /// `None` for every non-process scope, and for a process scope nobody has
-    /// bound an incarnation to — which is not a fallback to the bare name but a
-    /// fact a caller that needs an opener must refuse on (ADR 0099 §1).
+    /// `None` for every non-process scope. A `Process` scope always carries
+    /// `Some`: [`AdmittedScope`] makes the unpinned shape unconstructible, so
+    /// `None` here is "not a process", never "not yet bound" (ADR 0099 §1).
     pub fn admitted_process(&self) -> Option<&crate::ProcessRef> {
-        self.admitted_process.as_ref()
+        self.admitted.process_ref()
     }
 
-    /// Binds the incarnation this process scope was admitted under.
-    ///
-    /// Refused unless the scope is that exact process: a controller that
-    /// claimed an incarnation of some other process would let a run mint
-    /// identities under an opener it does not own.
-    pub fn with_admitted_process(
-        mut self,
-        process_ref: crate::ProcessRef,
-    ) -> Result<Self, crate::PluginError> {
-        match &self.scope {
-            ExecutionScope::Process { process_id } if *process_id == process_ref.process_id => {
-                self.admitted_process = Some(process_ref);
-                Ok(self)
-            }
-            scope => Err(crate::PluginError::Session(format!(
-                "process `{}` cannot bind its admitted incarnation to execution scope {scope:?}",
-                process_ref.process_id
-            ))),
-        }
-    }
-
-    /// Validates a scope and binds a borrowed controller for effect-host implementors; invalid or
-    /// empty scope identities are rejected before execution.
+    /// Validates the admitted scope and binds a borrowed controller for
+    /// effect-host implementors; invalid or empty scope identities are
+    /// rejected before execution.
     pub fn borrowed(
         controller: &'run dyn RuntimeEffectController,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<Self, RuntimeError> {
-        scope.validate()?;
+        admitted.scope().validate()?;
         Ok(Self {
             controller: ScopedEffectControllerInner::Borrowed(controller),
-            scope,
-            admitted_process: None,
+            admitted,
         })
     }
 
-    /// Validates a scope and binds an owned controller for effect-host implementors that must move
-    /// the scoped host across an asynchronous boundary.
+    /// Validates the admitted scope and binds an owned controller for
+    /// effect-host implementors that must move the scoped host across an
+    /// asynchronous boundary.
     pub fn shared(
         controller: Arc<dyn RuntimeEffectController>,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<Self, RuntimeError> {
-        scope.validate()?;
+        admitted.scope().validate()?;
         Ok(Self {
             controller: ScopedEffectControllerInner::Shared(controller),
-            scope,
-            admitted_process: None,
+            admitted,
         })
     }
 
-    /// Validates a scope and binds a controller built for that scope and bounded by the borrow it
-    /// wraps, for effect-host implementors whose engine-side controller must know the scope of
-    /// every effect it runs.
+    /// Validates the admitted scope and binds a controller built for that
+    /// scope and bounded by the borrow it wraps, for effect-host implementors
+    /// whose engine-side controller must know the scope of every effect it
+    /// runs.
     pub fn owned(
         controller: Arc<dyn ScopeBoundController + 'run>,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<Self, RuntimeError> {
-        scope.validate()?;
+        admitted.scope().validate()?;
         Ok(Self {
             controller: ScopedEffectControllerInner::Owned(controller),
-            scope,
-            admitted_process: None,
+            admitted,
         })
     }
 
@@ -148,7 +133,9 @@ impl<'run> ScopedEffectController<'run> {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Result<(), RuntimeEffectControllerError> {
-        envelope.invocation.validate_execution_scope(&self.scope)
+        envelope
+            .invocation
+            .validate_execution_scope(self.admitted.scope())
     }
 
     /// Executes an effect only after proving that its address belongs to this
@@ -166,13 +153,13 @@ impl<'run> ScopedEffectController<'run> {
 
     /// Exposes scope id to effect-host implementors while scoping and journaling durable effects.
     pub fn scope_id(&self) -> &str {
-        self.scope.id()
+        self.admitted.scope().id()
     }
 
     /// Exposes turn id to effect-host implementors while scoping and journaling durable effects.
     /// Returns `None` when no turn id is present.
     pub fn turn_id(&self) -> Option<&TurnId> {
-        self.scope.turn_id()
+        self.admitted.scope().turn_id()
     }
 
     /// The complete turn-cancel trio for a wait built directly against this
@@ -185,7 +172,7 @@ impl<'run> ScopedEffectController<'run> {
     /// bodies instead build one unobserved trio at their execution boundary and
     /// carry it through retry sleeps and deferred-tool awaits whole.
     pub(crate) fn turn_cancel_wait(&self, cancellation: CancellationToken) -> TurnCancelWait {
-        TurnCancelWait::observing(cancellation, self.scope.clone())
+        TurnCancelWait::observing(cancellation, self.admitted.scope().clone())
     }
 
     pub fn to_static(&self) -> Option<ScopedEffectController<'static>> {
@@ -194,8 +181,7 @@ impl<'run> ScopedEffectController<'run> {
         };
         Some(ScopedEffectController {
             controller: ScopedEffectControllerInner::Shared(Arc::clone(controller)),
-            scope: self.scope.clone(),
-            admitted_process: self.admitted_process.clone(),
+            admitted: self.admitted.clone(),
         })
     }
 
@@ -234,7 +220,7 @@ pub mod facade_ops {
     #[async_trait::async_trait]
     impl ScopedEffectControllerFacadeOps for ScopedEffectController<'_> {
         fn execution_scope(&self) -> &ExecutionScope {
-            &self.scope
+            self.admitted.scope()
         }
 
         #[expect(
@@ -252,7 +238,7 @@ pub mod facade_ops {
                 (owned, None)
             } else {
                 let (proxy, requests) =
-                    EffectTaskController::scoped(controller, self.execution_scope().clone())?;
+                    EffectTaskController::scoped(controller, self.admitted.clone())?;
                 (
                     proxy
                         .owned_controller()
@@ -278,9 +264,12 @@ pub mod facade_ops {
 }
 
 #[cfg(test)]
-mod admitted_process_tests {
+mod admitted_scope_tests {
     use super::*;
-    use crate::{ProcessIncarnation, ProcessRef};
+    use crate::{
+        AdmittedScopeError, ProcessIncarnation, ProcessLifecycle, ProcessRef, ProcessRegistrar,
+        ProcessRetention,
+    };
 
     fn process_ref(name: &str, incarnation: u64) -> ProcessRef {
         ProcessRef::new(
@@ -294,63 +283,59 @@ mod admitted_process_tests {
     }
 
     /// A process scope alone cannot name its opener: the incarnation the
-    /// process runner admitted rides beside it (ADR 0099 §1).
+    /// admission authority bound is part of the controller's construction, so
+    /// the half-admitted shape has no constructor to build (ADR 0099 §1).
     #[test]
     fn a_process_scoped_controller_carries_the_admitted_incarnation() {
-        let scoped =
-            ScopedEffectController::shared(shared_controller(), ExecutionScope::process("worker"))
-                .expect("process scope");
-        assert!(
-            scoped.admitted_process().is_none(),
-            "nothing is admitted until a process runner says so"
-        );
-
-        let scoped = scoped
-            .with_admitted_process(process_ref("worker", 4))
-            .expect("the scope names this process");
+        let scoped = ScopedEffectController::shared(
+            shared_controller(),
+            AdmittedScope::process(process_ref("worker", 4)),
+        )
+        .expect("process scope");
 
         assert_eq!(scoped.admitted_process(), Some(&process_ref("worker", 4)));
         assert_eq!(scoped.execution_scope(), &ExecutionScope::process("worker"));
     }
 
-    /// Binding another process's incarnation would let a run mint identities
-    /// under an opener it does not own.
+    /// The checked constructor refuses the two ways to lie about a process:
+    /// no incarnation at all, and an incarnation of another process. Both are
+    /// `AdmittedScope` construction errors — they never reach the controller.
     #[test]
-    fn an_incarnation_of_another_process_is_refused() {
-        let error =
-            ScopedEffectController::shared(shared_controller(), ExecutionScope::process("worker"))
-                .expect("process scope")
-                .with_admitted_process(process_ref("indexer", 1))
-                .err()
-                .expect("a foreign incarnation is refused");
-
-        assert!(error.to_string().contains("indexer"), "{error}");
+    fn a_process_scope_must_name_its_own_incarnation() {
+        assert!(matches!(
+            AdmittedScope::new(ExecutionScope::process("worker"), None),
+            Err(AdmittedScopeError::ProcessIncarnationMissing { .. })
+        ));
+        assert!(matches!(
+            AdmittedScope::new(
+                ExecutionScope::process("worker"),
+                Some(process_ref("indexer", 1)),
+            ),
+            Err(AdmittedScopeError::ProcessPinMismatch { .. })
+        ));
     }
 
     /// A turn scope has an opener of its own and never borrows a process's.
     #[test]
     fn a_turn_scope_refuses_an_admitted_incarnation() {
-        let error = ScopedEffectController::shared(
-            shared_controller(),
-            ExecutionScope::turn("session-1", "turn-1"),
-        )
-        .expect("turn scope")
-        .with_admitted_process(process_ref("worker", 1))
-        .err()
-        .expect("a turn scope is not a process");
-
-        assert!(error.to_string().contains("worker"), "{error}");
+        assert!(matches!(
+            AdmittedScope::new(
+                ExecutionScope::turn("session-1", "turn-1"),
+                Some(process_ref("worker", 1)),
+            ),
+            Err(AdmittedScopeError::NonProcessScopePinned { .. })
+        ));
     }
 
     /// The managed child turn a process backs is spawned onto its own task, so
     /// the binding has to survive the `'static` conversion that spawn requires.
     #[test]
     fn the_admitted_incarnation_survives_the_static_conversion() {
-        let scoped =
-            ScopedEffectController::shared(shared_controller(), ExecutionScope::process("worker"))
-                .expect("process scope")
-                .with_admitted_process(process_ref("worker", 9))
-                .expect("bind the admitted incarnation");
+        let scoped = ScopedEffectController::shared(
+            shared_controller(),
+            AdmittedScope::process(process_ref("worker", 9)),
+        )
+        .expect("process scope");
 
         assert_eq!(
             scoped
@@ -373,16 +358,115 @@ mod admitted_process_tests {
     /// the scope it left.
     #[test]
     fn a_rescope_drops_the_admitted_incarnation() {
-        let scoped =
-            ScopedEffectController::shared(shared_controller(), ExecutionScope::process("worker"))
-                .expect("process scope")
-                .with_admitted_process(process_ref("worker", 2))
-                .expect("bind the admitted incarnation");
+        let scoped = ScopedEffectController::shared(
+            shared_controller(),
+            AdmittedScope::process(process_ref("worker", 2)),
+        )
+        .expect("process scope");
 
         let rescoped = scoped
-            .rescope(ExecutionScope::turn("session-1", "turn-1"))
+            .rescope(AdmittedScope::turn("session-1", "turn-1"))
             .expect("rescope onto a turn");
 
         assert!(rescoped.admitted_process().is_none());
+    }
+
+    /// A same-name successor incarnation is a different opener, so rescope
+    /// refuses it outright rather than rebinding the pin: the admission a
+    /// controller carries is fixed at construction (ADR 0099 §1). The
+    /// incarnations here come from the real registry — one name registered,
+    /// completed, pruned and registered again — not fabricated sequence
+    /// numbers, so the pair the controller refuses is exactly the pair a
+    /// stale pin would present.
+    #[tokio::test]
+    async fn a_rescope_onto_a_same_name_successor_incarnation_is_refused() {
+        let registry = crate::TestLocalProcessRegistry::default();
+        let process_id = crate::ProcessId::from("worker");
+        let registration = || {
+            crate::ProcessRegistration::new(
+                process_id.clone(),
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            )
+        };
+        let old = registry
+            .register_process(registration())
+            .await
+            .expect("register the old incarnation");
+        registry
+            .complete_process(
+                &process_id,
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::json!("old"),
+                )),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete the old incarnation");
+        registry
+            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune the old incarnation so the name is reusable");
+        let successor = registry
+            .register_process(registration())
+            .await
+            .expect("register the same-name successor incarnation");
+        let old_ref = ProcessRef::from_record(&old);
+        let successor_ref = ProcessRef::from_record(&successor);
+        assert_ne!(old_ref.incarnation, successor_ref.incarnation);
+
+        let scoped = ScopedEffectController::shared(
+            shared_controller(),
+            AdmittedScope::process(old_ref.clone()),
+        )
+        .expect("process scope");
+
+        // Rescoping onto the pin it already carries is still fine — that is
+        // the same admission restated, not a repin.
+        scoped
+            .rescope(AdmittedScope::process(old_ref))
+            .expect("rescope onto the same incarnation");
+
+        let error = scoped
+            .rescope(AdmittedScope::process(successor_ref))
+            .err()
+            .expect("the successor incarnation is a different opener");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused
+        );
+        assert_eq!(
+            scoped.admitted_process(),
+            Some(&ProcessRef::from_record(&old)),
+            "a refused rescope leaves the admitted pair untouched"
+        );
+    }
+
+    /// A non-process controller has no pin a process target could match, so
+    /// it can never rescope into a process controller: process admission only
+    /// exists at construction.
+    #[test]
+    fn a_non_process_controller_cannot_rescope_into_a_process() {
+        let scoped = ScopedEffectController::shared(
+            shared_controller(),
+            AdmittedScope::turn("session-1", "turn-1"),
+        )
+        .expect("turn scope");
+
+        let error = scoped
+            .rescope(AdmittedScope::process(process_ref("worker", 3)))
+            .err()
+            .expect("a turn controller cannot become a process controller");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused
+        );
     }
 }

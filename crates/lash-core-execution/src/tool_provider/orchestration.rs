@@ -70,13 +70,12 @@ impl<'run> OrchestrationContext<'run> {
 
     /// The enclosing durable parent for an orchestrated child start.
     ///
-    /// The same one derivation the recorded attempt uses — the admitted scope
-    /// plus the pinned `ProcessRef`, never a registry lookup (FIG-3417).
+    /// The same one derivation the recorded attempt uses — the admitted scope,
+    /// never a registry lookup (FIG-3417).
     pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
         let scoped = self.context.effect_controller.scoped();
-        let opener =
-            crate::EffectOpener::for_scope(scoped.execution_scope(), scoped.admitted_process())
-                .map_err(|error| PluginError::Session(error.to_string()))?;
+        let opener = crate::EffectOpener::for_scope(scoped.admitted_scope())
+            .map_err(|error| PluginError::Session(error.to_string()))?;
         Ok(crate::ParentScope::from_owner(&opener))
     }
 

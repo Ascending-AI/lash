@@ -4,8 +4,25 @@ use crate::*;
 pub use lash_core_store::testing::store_fixtures::{
     append_conformance_event_node, bind_conformance_session,
     claim_session_execution_lease_for_test, commit_conformance_state,
-    commit_runtime_state_for_test, durable_turn_address, durable_turn_scope, session_store_request,
+    commit_runtime_state_for_test, durable_admission, durable_turn_address, durable_turn_scope,
+    session_store_request,
 };
+
+/// The store-backed admitted scope for a registered process row: the
+/// `ProcessRef` the record itself minted, never a fabricated incarnation.
+/// Tests that hand a controller to the durable process worker must pin this —
+/// the worker's admission CAS refuses any other pair.
+pub async fn recorded_process_admission(
+    registry: &dyn ProcessRegistry,
+    process_id: &ProcessId,
+) -> AdmittedScope {
+    let record = registry
+        .get_process(process_id)
+        .await
+        .expect("process registry read")
+        .expect("process record must be registered");
+    AdmittedScope::process(ProcessRef::from_record(&record))
+}
 
 /// Authorize and settle the completion gate for a direct store-deferral fixture.
 /// This performs the same store-owned promise protocol as a real Native turn.

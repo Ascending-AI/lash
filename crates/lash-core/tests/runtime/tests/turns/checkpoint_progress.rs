@@ -1497,7 +1497,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
     let input = TurnInput::text("opening input");
     let scope = lash_core::ScopedEffectController::shared(
         Arc::clone(&controller),
-        lash_core::ExecutionScope::turn("root", turn_id),
+        lash_core::AdmittedScope::turn("root", turn_id),
     )
     .expect("scope the first checkpoint-injected turn");
     // FIG-3157: the wake claimed at the terminal checkpoint drives a
@@ -1533,7 +1533,7 @@ pub(super) async fn redrive_checkpoint_injected_turn(
     .await;
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::ExecutionScope::turn("root", turn_id),
+        lash_core::AdmittedScope::turn("root", turn_id),
     )
     .expect("scope the checkpoint-injected redrive");
     // FIG-3157: the run holds the admitted turn plus the follow-on turn the

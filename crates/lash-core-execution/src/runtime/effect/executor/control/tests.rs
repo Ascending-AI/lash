@@ -276,7 +276,7 @@ async fn scoped_controller_refuses_wrong_scope_before_controller_or_local_execut
     let local_calls_for_executor = Arc::clone(&local_calls);
     let scoped = ScopedEffectController::borrowed(
         &probe,
-        ExecutionScope::runtime_operation("admitted-scope"),
+        AdmittedScope::runtime_operation("admitted-scope"),
     )
     .expect("scoped admission probe");
 
@@ -309,7 +309,7 @@ async fn task_proxy_refuses_wrong_scope_before_handoff() {
     let probe = EffectAdmissionProbe::default();
     let (scoped, mut requests) = EffectTaskController::scoped(
         &probe,
-        ExecutionScope::runtime_operation("admitted-proxy-scope"),
+        AdmittedScope::runtime_operation("admitted-proxy-scope"),
     )
     .expect("scoped task proxy");
 
@@ -501,7 +501,7 @@ async fn acquire_through_task_controller(
 ) -> Result<QueuedLaneAcquisition, RuntimeError> {
     let (scoped, mut requests) = EffectTaskController::scoped(
         controller,
-        ExecutionScope::queue_drain("queued-lane-test", "drain"),
+        AdmittedScope::queue_drain("queued-lane-test", "drain"),
     )?;
     let acquire = scoped
         .controller()
@@ -547,7 +547,7 @@ async fn closed_task_controller_returns_a_typed_queued_lane_error() {
     let controller = TestResolver;
     let (scoped, requests) = EffectTaskController::scoped(
         &controller,
-        ExecutionScope::queue_drain("queued-lane-test", "closed"),
+        AdmittedScope::queue_drain("queued-lane-test", "closed"),
     )
     .expect("queued-lane task proxy");
     drop(requests);
@@ -576,7 +576,7 @@ async fn dropped_queued_lane_response_returns_a_typed_error() {
     let controller = TestResolver;
     let (scoped, mut requests) = EffectTaskController::scoped(
         &controller,
-        ExecutionScope::queue_drain("queued-lane-test", "dropped-response"),
+        AdmittedScope::queue_drain("queued-lane-test", "dropped-response"),
     )
     .expect("queued-lane task proxy");
 

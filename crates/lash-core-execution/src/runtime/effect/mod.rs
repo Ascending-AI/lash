@@ -31,18 +31,19 @@ pub use envelope::{
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    EffectOpener, EffectRetirementGate, ExecutionScope, ExternalCompletionError,
-    NativeRuntimeEffectController, ProcessLocalExecution, ProcessOutcomeObserver,
-    ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
-    QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectFailureDisposition,
-    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
-    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, TurnControlParticipation, concrete_turn_cancellation_authority,
+    AdmittedScope, AdmittedScopeError, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
+    BoundaryReason, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
+    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
+    ExternalCompletionError, NativeRuntimeEffectController, ProcessLocalExecution,
+    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
+    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
+    ScopeBoundController, ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
+    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    TurnControlParticipation, concrete_turn_cancellation_authority,
     turn_control_binding_id_for_scope,
 };
 pub use group::{
@@ -156,7 +157,7 @@ mod tests {
             crate::RuntimeEffectFailureDisposition::AbortInvocation
         );
         let scoped = host
-            .scoped(ExecutionScope::turn("ownership-session", "ownership-turn"))
+            .scoped(AdmittedScope::turn("ownership-session", "ownership-turn"))
             .expect("scope wrapped controller");
         assert_eq!(
             scoped
@@ -189,7 +190,7 @@ mod tests {
 
         let local_host = NativeEffectHost::default();
         let local_scoped = local_host
-            .scoped(ExecutionScope::turn("local-session", "local-turn"))
+            .scoped(AdmittedScope::turn("local-session", "local-turn"))
             .expect("local scoped controller");
         assert!(
             matches!(
@@ -305,7 +306,9 @@ mod tests {
             )
             .await
             .expect("host A key");
-        let scoped_a = host_a.scoped(scope).expect("host A scoped controller");
+        let scoped_a = host_a
+            .scoped(AdmittedScope::unpinned(scope).expect("a turn admits unpinned"))
+            .expect("host A scoped controller");
         let terminal = Resolution::Ok(serde_json::json!("owned"));
         assert_eq!(
             scoped_a

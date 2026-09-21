@@ -20,7 +20,9 @@
 
 use super::*;
 use crate::SessionId;
-use crate::{AwaitEventResolver, EffectHost, RuntimeEffectController, ScopedEffectController};
+use crate::{
+    AdmittedScope, AwaitEventResolver, EffectHost, RuntimeEffectController, ScopedEffectController,
+};
 
 /// Names the driver a store-owned host or controller forwards to.
 ///
@@ -200,30 +202,30 @@ impl<T: StoreReplayHost> EffectHost for T {
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate()?;
+        admitted.scope().validate()?;
         let controller = ScopedStoreReplayController {
             driver: Arc::clone(self.replay_driver()),
-            scope: scope.clone(),
+            scope: admitted.scope().clone(),
             authority_binding_id: StoreReplayHost::turn_control_binding_id(self),
         };
-        ScopedEffectController::shared(Arc::new(controller), scope)
+        ScopedEffectController::shared(Arc::new(controller), admitted)
     }
 
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        scope.validate()?;
+        admitted.scope().validate()?;
         let controller = ScopedStoreReplayController {
             driver: Arc::clone(self.replay_driver()),
-            scope: scope.clone(),
+            scope: admitted.scope().clone(),
             authority_binding_id: StoreReplayHost::turn_control_binding_id(self),
         };
         Ok(Some(ScopedEffectController::shared(
             Arc::new(controller),
-            scope,
+            admitted,
         )?))
     }
 

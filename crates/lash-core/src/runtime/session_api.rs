@@ -1196,7 +1196,7 @@ impl LashRuntime {
         let host = self.effect_host();
         // Select the host's controller without executing an effect. The command
         // commit keeps its claimed batch's existing operation identity.
-        let controller = host.scoped(crate::ExecutionScope::queue_drain(
+        let controller = host.scoped(crate::AdmittedScope::queue_drain(
             &self.state.session_id,
             "session-command",
         ))?;

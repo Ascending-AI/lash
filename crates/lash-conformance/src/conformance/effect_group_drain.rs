@@ -153,7 +153,7 @@ async fn a_group_this_process_is_still_working_is_refused(make: &DrainWorldFacto
     let key = group_key(prefix, "open-here");
     let scoped = world
         .host
-        .scoped(scope(prefix, "open-here"))
+        .scoped(admit(scope(prefix, "open-here")))
         .expect("scope");
     let handle = open(&scoped, &key, 2, RUN, vec![never(), never()]).await;
 
@@ -255,7 +255,7 @@ async fn a_live_lease_is_left_to_the_executor_that_holds_it(
     let key = group_key(prefix, "live-lease");
     let scoped = owner
         .host
-        .scoped(scope(prefix, "live-lease"))
+        .scoped(admit(scope(prefix, "live-lease")))
         .expect("scope");
     let entered = Arc::new(AtomicUsize::new(0));
     let handle = open(
@@ -326,7 +326,7 @@ async fn orphaned_losers_settle_exactly_once_across_a_restart(
         let scope = scope.clone();
         move |world| {
             Box::pin(async move {
-                let scoped = world.host.scoped(scope).expect("scope");
+                let scoped = world.host.scoped(admit(scope)).expect("scope");
                 let entered = Arc::new(AtomicUsize::new(0));
                 let mut handle = open(
                     &scoped,
@@ -387,7 +387,7 @@ async fn orphaned_losers_settle_exactly_once_across_a_restart(
     // Journal-visible: a reader holding none of the drain's memory reads all
     // three ranks back, in rank order, one per child.
     let reader = make(spec(CRASH_LEASE_MS, &RecordingExecutors::settling())).await;
-    let scoped = reader.host.scoped(scope).expect("scope");
+    let scoped = reader.host.scoped(admit(scope)).expect("scope");
     let mut handle = reopen(&scoped, &key, 3, RUN).await;
     let mut positions = Vec::new();
     let mut sequences = Vec::new();
@@ -648,7 +648,7 @@ async fn a_cancel_group_is_never_re_executed_by_the_drain(make: &DrainWorldFacto
         let scope = scope.clone();
         move |world| {
             Box::pin(async move {
-                let scoped = world.host.scoped(scope).expect("scope");
+                let scoped = world.host.scoped(admit(scope)).expect("scope");
                 let entered = Arc::new(AtomicUsize::new(0));
                 let handle = open(
                     &scoped,
@@ -716,7 +716,7 @@ async fn a_child_this_host_cannot_run_is_reported_not_invented(
         let scope = scope.clone();
         move |world| {
             Box::pin(async move {
-                let scoped = world.host.scoped(scope).expect("scope");
+                let scoped = world.host.scoped(admit(scope)).expect("scope");
                 let entered = Arc::new(AtomicUsize::new(0));
                 let handle = open(&scoped, &key, 1, RUN, vec![blocking(&entered)]).await;
                 until(|| entered.load(Ordering::SeqCst) == 1).await;
@@ -790,7 +790,7 @@ async fn a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(
         let scope = scope.clone();
         move |world| {
             Box::pin(async move {
-                let scoped = world.host.scoped(scope).expect("scope");
+                let scoped = world.host.scoped(admit(scope)).expect("scope");
                 let entered = Arc::new(AtomicUsize::new(0));
                 let handle = open(&scoped, &key, 1, RUN, vec![blocking(&entered)]).await;
                 until(|| entered.load(Ordering::SeqCst) == 1).await;
@@ -926,7 +926,7 @@ async fn orphan_two_losers(make: &DrainWorldFactory, key: &str, scope: &Executio
         let scope = scope.clone();
         move |world| {
             Box::pin(async move {
-                let scoped = world.host.scoped(scope).expect("scope");
+                let scoped = world.host.scoped(admit(scope)).expect("scope");
                 let entered = Arc::new(AtomicUsize::new(0));
                 let handle = open(
                     &scoped,

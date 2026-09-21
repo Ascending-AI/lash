@@ -487,7 +487,8 @@ mod tests {
     }
     use crate::llm::types::LlmStreamEvent;
     use crate::runtime::tests::helpers::{
-        MockCall, mock_provider, native_scope, runtime_with_plugins_and_tools_and_host,
+        MockCall, mock_provider, native_process_scope, native_scope,
+        runtime_with_plugins_and_tools_and_host,
     };
     use std::sync::Arc;
 
@@ -614,7 +615,7 @@ mod tests {
                 foreign_registration,
                 foreign_create_request,
                 crate::TurnInput::text("must not run"),
-                native_scope(crate::ExecutionScope::process(&foreign_process_id)),
+                native_process_scope(&foreign_process_id),
                 foreign_cancellation,
             )
             .await
@@ -668,7 +669,7 @@ mod tests {
             registration,
             create_request.clone(),
             crate::TurnInput::text("park the child turn"),
-            native_scope(crate::ExecutionScope::process(&process_id)),
+            native_process_scope(&process_id),
             cancellation.clone(),
         ));
         tokio::select! {
@@ -744,7 +745,7 @@ mod tests {
                     &child_session_id,
                     &follow_up_turn_id,
                     crate::TurnInput::text("follow up after cancellation"),
-                    native_scope(crate::ExecutionScope::turn(
+                    native_scope(crate::AdmittedScope::turn(
                         &child_session_id,
                         &follow_up_turn_id,
                     )),
@@ -761,7 +762,7 @@ mod tests {
                 replay_registration,
                 create_request,
                 crate::TurnInput::text("replayed cancelled child turn"),
-                native_scope(crate::ExecutionScope::process(&process_id)),
+                native_process_scope(&process_id),
                 cancellation,
             )
             .await
@@ -905,7 +906,7 @@ mod tests {
             registration.clone(),
             create_request.clone(),
             crate::TurnInput::text("park the child turn"),
-            native_scope(crate::ExecutionScope::process(&process_id)),
+            native_process_scope(&process_id),
             cancellation.clone(),
         ));
         tokio::select! {
@@ -940,7 +941,7 @@ mod tests {
                 registration,
                 create_request,
                 crate::TurnInput::text("park the child turn"),
-                native_scope(crate::ExecutionScope::process(&process_id)),
+                native_process_scope(&process_id),
                 replay_cancellation,
             )
             .await
@@ -999,7 +1000,7 @@ mod tests {
             registration.clone(),
             create_request.clone(),
             crate::TurnInput::text("park the child turn"),
-            native_scope(crate::ExecutionScope::process(&process_id)),
+            native_process_scope(&process_id),
             cancellation.clone(),
         ));
         tokio::select! {
@@ -1024,7 +1025,7 @@ mod tests {
                 registration,
                 create_request,
                 crate::TurnInput::text("park the child turn"),
-                native_scope(crate::ExecutionScope::process(&process_id)),
+                native_process_scope(&process_id),
                 replay_cancellation,
             )
             .await
@@ -1173,7 +1174,7 @@ mod tests {
                     registration,
                     request,
                     crate::TurnInput::text("park"),
-                    native_scope(crate::ExecutionScope::process("permit-process")),
+                    native_process_scope("permit-process"),
                     cancellation.clone(),
                 ));
                 tokio::select! {

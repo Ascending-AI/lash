@@ -603,7 +603,9 @@ mod tests {
     async fn recording_effect_host_records_selected_scope_and_envelope() {
         let host = RecordingEffectHost::default();
         let scope = ExecutionScope::runtime_operation("trigger:button-1");
-        let scoped = host.scoped(scope.clone()).expect("scoped controller");
+        let scoped = host
+            .scoped(admit(scope.clone()))
+            .expect("scoped controller");
         let envelope = RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 EffectAddress::new(scope.clone(), "trigger:button-1:sleep-effect")

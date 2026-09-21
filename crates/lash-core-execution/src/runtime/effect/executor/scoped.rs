@@ -1,27 +1,42 @@
 use super::*;
 
 impl<'run> ScopedEffectController<'run> {
-    /// This controller bound to another scope.
+    /// This controller bound to another admitted scope.
     ///
-    /// The admitted process ref is deliberately *not* carried over: it names
-    /// the incarnation of the scope being left, and the new scope is a
-    /// different opener (ADR 0099 §1). The one production rescope — a managed
-    /// turn narrowing a session scope to its own turn scope
-    /// (`crates/lash-core/src/runtime/session_manager/turns.rs`) — never starts
-    /// from a process scope, which it passes through untouched.
+    /// A rescope changes the claim address, never the admission: the only
+    /// process target this accepts names the same [`ProcessRef`] the
+    /// controller was already admitted under, and a non-process controller has
+    /// no pin a process target could match, so it cannot rescope into a
+    /// process controller. A same-name successor incarnation is refused rather
+    /// than rebound — ADR 0099 §1 rules that "a retired or mismatched
+    /// incarnation is refused, never rebound to the current process carrying
+    /// the same name". Dropping the pin is fine: a process controller may
+    /// rescope onto a turn or any other unpinned scope, which is what the
+    /// managed turn narrowing a session scope to its own turn scope does.
     pub fn rescope(
         &self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        if let Some(target) = admitted.process_ref()
+            && self.admitted.process_ref() != Some(target)
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+                format!(
+                    "cannot rescope {existing} onto process incarnation {target}: a scoped controller carries its admission and is never repinned",
+                    existing = self.admitted.scope().id(),
+                ),
+            ));
+        }
         match &self.controller {
             ScopedEffectControllerInner::Borrowed(controller) => {
-                ScopedEffectController::borrowed(*controller, scope)
+                ScopedEffectController::borrowed(*controller, admitted)
             }
             ScopedEffectControllerInner::Shared(controller) => {
-                ScopedEffectController::shared(Arc::clone(controller), scope)
+                ScopedEffectController::shared(Arc::clone(controller), admitted)
             }
             ScopedEffectControllerInner::Owned(controller) => {
-                ScopedEffectController::owned(controller.for_scope(scope.clone()), scope)
+                ScopedEffectController::owned(controller.for_scope(admitted.clone()), admitted)
             }
         }
     }
@@ -33,8 +48,7 @@ impl<'run> ScopedEffectController<'run> {
             }
             ScopedEffectControllerInner::Shared(controller) => Ok(ScopedEffectController {
                 controller: ScopedEffectControllerInner::Shared(controller),
-                scope: self.scope,
-                admitted_process: self.admitted_process,
+                admitted: self.admitted,
             }),
         }
     }

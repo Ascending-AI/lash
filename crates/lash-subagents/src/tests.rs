@@ -1289,7 +1289,7 @@ async fn run_seed_probe_inner(
 
     let scoped_effect_controller = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::turn("root", "subagent-test-turn"),
+        lash_core::AdmittedScope::turn("root", "subagent-test-turn"),
     )
     .expect("test execution scope");
     let turn = Box::pin(runtime.run_turn_assembled(

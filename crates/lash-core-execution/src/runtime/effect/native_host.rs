@@ -6,7 +6,7 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectGroupHandle, EffectHost, EffectJournalRetirement,
     ExecutionScope, GroupSettlement, LoserPolicy, NativeRuntimeEffectController, Resolution,
     ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
@@ -276,18 +276,18 @@ impl EffectHost for NativeEffectHost {
     /// the durable hosts read the fence at claim time.
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        ScopedEffectController::shared(self.fenced_controller(scope.clone()), scope)
+        ScopedEffectController::shared(self.fenced_controller(admitted.scope().clone()), admitted)
     }
 
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         Ok(Some(ScopedEffectController::shared(
-            self.fenced_controller(scope.clone()),
-            scope,
+            self.fenced_controller(admitted.scope().clone()),
+            admitted,
         )?))
     }
 
@@ -679,7 +679,7 @@ mod tests {
     async fn scoped_controller_refuses_effects_under_a_retired_scope() {
         let host = NativeEffectHost::default();
         let scope = ExecutionScope::runtime_operation("retired");
-        host.scoped(scope.clone())
+        host.scoped(AdmittedScope::runtime_operation("retired"))
             .expect("scope binds")
             .controller()
             .execute_effect(envelope(&scope, "before"), executor())
@@ -691,7 +691,7 @@ mod tests {
         .await
         .expect("retire the scope");
         let refusal = host
-            .scoped(scope.clone())
+            .scoped(AdmittedScope::runtime_operation("retired"))
             .expect("a retired scope still binds a controller")
             .controller()
             .execute_effect(envelope(&scope, "after"), executor())
@@ -699,7 +699,7 @@ mod tests {
             .expect_err("a retired scope runs nothing");
         assert_eq!(refusal.code, crate::RuntimeErrorCode::EffectScopeRetired);
         let refusal = host
-            .scoped_static(scope.clone())
+            .scoped_static(AdmittedScope::runtime_operation("retired"))
             .expect("scope binds")
             .expect("the native host hands out owned controllers")
             .controller()
@@ -708,7 +708,7 @@ mod tests {
             .expect_err("the owned controller is fenced too");
         assert_eq!(refusal.code, crate::RuntimeErrorCode::EffectScopeRetired);
         let session_scope = ExecutionScope::turn("native-fence-session", "turn-1");
-        host.scoped(session_scope.clone())
+        host.scoped(AdmittedScope::turn("native-fence-session", "turn-1"))
             .expect("session scope binds")
             .controller()
             .execute_effect(envelope(&session_scope, "session"), executor())
@@ -725,21 +725,27 @@ mod tests {
         host.retire_effect_journal(EffectJournalRetirement::process("reused-process"))
             .await
             .expect("prune retires the process scope");
-        host.scoped(scope.clone())
-            .expect("scope binds")
-            .controller()
-            .execute_effect(envelope(&scope, "fenced"), executor())
-            .await
-            .expect_err("a pruned process id runs nothing");
+        host.scoped(AdmittedScope::process(crate::ProcessRef::new(
+            "reused-process",
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )))
+        .expect("scope binds")
+        .controller()
+        .execute_effect(envelope(&scope, "fenced"), executor())
+        .await
+        .expect_err("a pruned process id runs nothing");
         host.reinstate_effect_scope(&scope)
             .await
             .expect("re-registration lifts the fence");
-        host.scoped(scope.clone())
-            .expect("scope binds")
-            .controller()
-            .execute_effect(envelope(&scope, "reinstated"), executor())
-            .await
-            .expect("the re-registered incarnation runs effects");
+        host.scoped(AdmittedScope::process(crate::ProcessRef::new(
+            "reused-process",
+            crate::ProcessIncarnation::from_registration_sequence(2),
+        )))
+        .expect("scope binds")
+        .controller()
+        .execute_effect(envelope(&scope, "reinstated"), executor())
+        .await
+        .expect("the re-registered incarnation runs effects");
         host.await_event_key(
             &scope,
             AwaitEventWaitIdentity::tool_completion("reinstated"),

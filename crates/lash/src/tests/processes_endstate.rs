@@ -2253,7 +2253,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     let first_session = first_core.session(SESSION_ID).open().await?;
     let first_effect_host = first_session.effect_host();
     let first_scoped = first_effect_host
-        .scoped_static(lash_core::ExecutionScope::turn(
+        .scoped_static(lash_core::AdmittedScope::turn(
             SESSION_ID,
             "durable-artifact-outage-turn",
         ))?
@@ -2429,7 +2429,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     };
     let replay_scope = || {
         reopened_effect_host
-            .scoped(lash_core::ExecutionScope::turn(
+            .scoped(lash_core::AdmittedScope::turn(
                 SESSION_ID,
                 "durable-artifact-outage-turn",
             ))

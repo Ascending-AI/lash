@@ -2267,7 +2267,7 @@ async fn emit_test_button_trigger_with_scope(
     );
     let scoped_effect_controller = lash::runtime::ScopedEffectController::shared(
         Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
-        lash::runtime::ExecutionScope::runtime_operation(format!("trigger:{idempotency_key}")),
+        lash::runtime::AdmittedScope::runtime_operation(format!("trigger:{idempotency_key}")),
     )
     .expect("inline trigger occurrence execution scope");
     let mut request = lash::triggers::TriggerOccurrenceRequest::new(

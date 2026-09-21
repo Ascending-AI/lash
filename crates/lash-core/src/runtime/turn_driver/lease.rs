@@ -45,7 +45,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             let (task_controller, task_requests) =
                 crate::runtime::effect::EffectTaskController::scoped(
                     scoped_effect_controller.controller(),
-                    scoped_effect_controller.execution_scope().clone(),
+                    scoped_effect_controller.admitted_scope().clone(),
                 )
                 .map_err(RuntimeEffectControllerError::from)?;
             let (local_executor, update) = super::local_effects::turn_effect_executor(

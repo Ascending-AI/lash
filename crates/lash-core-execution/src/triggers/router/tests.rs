@@ -757,7 +757,7 @@ async fn delivery_refuses_an_occurrence_that_leaves_the_captured_contract() {
     let controller = crate::NativeRuntimeEffectController::default();
     let scoped = crate::ScopedEffectController::borrowed(
         &controller,
-        crate::ExecutionScope::runtime_operation("captured-contract"),
+        crate::AdmittedScope::runtime_operation("captured-contract"),
     )
     .expect("bind scope");
 
@@ -851,7 +851,7 @@ async fn transient_route_failure_retries_the_same_identity_and_revocation_refuse
         let controller = crate::NativeRuntimeEffectController::default();
         let scoped = crate::ScopedEffectController::borrowed(
             &controller,
-            crate::ExecutionScope::runtime_operation("route-restore"),
+            crate::AdmittedScope::runtime_operation("route-restore"),
         )
         .expect("bind scope");
         let occurrence = || {
@@ -967,7 +967,7 @@ async fn trigger_emit_report_records_started_and_already_reserved_deliveries() {
     let controller = crate::NativeRuntimeEffectController::default();
     let scoped_controller = crate::ScopedEffectController::borrowed(
         &controller,
-        crate::ExecutionScope::runtime_operation("trigger-blue-report"),
+        crate::AdmittedScope::runtime_operation("trigger-blue-report"),
     )
     .expect("bind trigger report scope");
 
@@ -1036,7 +1036,7 @@ async fn session_trigger_process_is_observed_by_its_registrant() {
     let controller = crate::NativeRuntimeEffectController::default();
     let scoped_controller = crate::ScopedEffectController::borrowed(
         &controller,
-        crate::ExecutionScope::runtime_operation("session-trigger-blue"),
+        crate::AdmittedScope::runtime_operation("session-trigger-blue"),
     )
     .expect("bind session trigger scope");
 

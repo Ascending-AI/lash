@@ -160,11 +160,17 @@ impl NativeQueuedWorkRunHandle {
             let scope = handle
                 .observe()
                 .queue_drain_scope(format!("{reason}:{}", uuid::Uuid::new_v4()));
-            let scoped = effect_host.scoped(scope).map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
+            let scoped = effect_host
+                .scoped(lash_core::AdmittedScope::unpinned(scope).map_err(|error| {
+                    facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                        error.to_string(),
+                    ))
+                })?)
+                .map_err(|error| {
+                    facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                        error.to_string(),
+                    ))
+                })?;
             let drain = crate::turn::stream_next_queued_prepared_turn(
                 &handle,
                 crate::turn::TurnSinks::default(),
