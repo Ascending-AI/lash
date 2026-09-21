@@ -42,6 +42,7 @@ executes:
 from __future__ import annotations
 
 import argparse
+import ast
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
@@ -51,6 +52,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = ROOT / "crates/lash-conformance/src/macros.rs"
+WORKSPACE_TARGETS = ROOT / "tools/bazel/workspace_targets.bzl"
 RECEIPT_NAME = "law-receipts.txt"
 
 CATALOGUE_ROW = re.compile(r"\(\s*([a-z_][a-z0-9_]*)\s*,\s*\"([^\"]*)\"")
@@ -286,6 +288,110 @@ def resolve_bazel_label(crate_root: Path, target: str) -> list[Path]:
     return [root] if root else []
 
 
+def workspace_test_batches() -> dict[str, list[str]]:
+    """The generated ``WORKSPACE_TEST_BATCHES``: batch label -> member labels.
+
+    A ``lash_batch_test`` target runs a package's plain test binaries inside
+    one test action, so its testlogs entry carries the union of every member's
+    receipts under the batch's own name -- and resolves to no test root of its
+    own. The generated mapping is the only complete list of members; a batch
+    the mapping does not name cannot be censused at all.
+    """
+    match = re.search(
+        r"^WORKSPACE_TEST_BATCHES = (\{.*?^\})$",
+        WORKSPACE_TARGETS.read_text(encoding="utf-8"),
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError("missing generated dict WORKSPACE_TEST_BATCHES")
+    return ast.literal_eval(match.group(1))
+
+
+def resolve_label(label: str) -> list[Path]:
+    """A ``//package:target`` label to its test-root source files.
+
+    Batch members are not confined to ``crates/`` -- the generated mapping
+    carries ``runbooks/`` and ``examples/`` packages too -- so resolution is
+    by label, not by directory convention.
+    """
+    package, _, target = label.partition(":")
+    if not package.startswith("//") or not target:
+        return []
+    return resolve_bazel_label(ROOT / package.removeprefix("//"), target)
+
+
+def census_testlogs(
+    testlogs_dir: Path,
+    batches: dict[str, list[str]],
+    macros: dict[str, Macro],
+    registered: dict[tuple[str, str], set[str]],
+) -> list[str]:
+    """The per-target census over one Bazel testlogs tree.
+
+    A ran target is any directory carrying ``test.log`` or ``test.outputs``;
+    its path relative to the root is its label's package and name, so
+    discovery reaches nested packages (``runbooks/…``, ``examples/…``) the
+    same way it reaches ``crates/…``. A target the generated
+    ``WORKSPACE_TEST_BATCHES`` names as a batch is censused over the union of
+    its members' sources: every member label must resolve to a test root,
+    and a ran target that left receipts it cannot account for is a failure,
+    never a skip.
+    """
+    errors: list[str] = []
+    target_dirs = {
+        marker.parent
+        for marker in testlogs_dir.rglob("*")
+        if marker.name in ("test.log", "test.outputs") and marker.parent.is_dir()
+    }
+    for target_dir in sorted(target_dirs):
+        rel = target_dir.relative_to(testlogs_dir)
+        if len(rel.parts) < 2:
+            continue
+        target_label = f"//{'/'.join(rel.parts[:-1])}:{rel.parts[-1]}"
+        members = batches.get(target_label, [target_label])
+        files: list[Path] = []
+        unresolved: list[str] = []
+        for member in members:
+            member_files = resolve_label(member)
+            if member_files:
+                files.extend(member_files)
+            else:
+                unresolved.append(member)
+        t_observed = bazel_receipts(target_dir)
+        if unresolved and t_observed:
+            errors.append(
+                f"bazel target {target_label} ran and left "
+                f"{len(t_observed)} receipts, but "
+                + (
+                    "no batch member"
+                    if len(unresolved) == len(members)
+                    else f"member(s) {', '.join(sorted(unresolved))}"
+                )
+                + " could be resolved to a test root -- the census cannot "
+                "name the laws those receipts owe"
+            )
+        if not files:
+            continue
+        t_expected = expected_for_files(
+            [f for root_f in files for f in source_files(root_f)], macros
+        )
+        if not t_expected:
+            continue
+        t_missing = sorted(t_expected - t_observed)
+        for law, label in t_missing:
+            errors.append(
+                f"bazel target {target_label} ran but registered law "
+                f"`{law}` (label `{label}`) left no execution receipt"
+            )
+        t_unknown = sorted(p for p in t_observed if p not in registered)
+        for law, label in t_unknown:
+            errors.append(
+                f"bazel target {target_label} receipt for `{law}` (label "
+                f"`{label}`) names no registered law"
+            )
+    return errors
+
+
 def read_receipts(paths: list[Path]) -> set[tuple[str, str]]:
     observed: set[tuple[str, str]] = set()
     for path in paths:
@@ -398,41 +504,13 @@ def main() -> int:
             "macros.rs -- stale or fabricated record"
         )
 
+    batches = workspace_test_batches() if args.bazel_testlogs else {}
     for testlogs in args.bazel_testlogs:
-        crates_dir = Path(testlogs) / "crates"
-        if not crates_dir.is_dir():
-            errors.append(f"{testlogs} has no crates/ testlogs directory")
+        testlogs_dir = Path(testlogs)
+        if not testlogs_dir.is_dir():
+            errors.append(f"{testlogs} is not a testlogs directory")
             continue
-        for pkg_dir in sorted(crates_dir.iterdir()):
-            crate_root = ROOT / "crates" / pkg_dir.name
-            if not pkg_dir.is_dir() or not crate_root.is_dir():
-                continue
-            for target_dir in sorted(pkg_dir.iterdir()):
-                if not target_dir.is_dir():
-                    continue
-                files = resolve_bazel_label(crate_root, target_dir.name)
-                if not files:
-                    continue
-                t_expected = expected_for_files(
-                    [f for root_f in files for f in source_files(root_f)], macros
-                )
-                if not t_expected:
-                    continue
-                t_observed = bazel_receipts(target_dir)
-                t_missing = sorted(t_expected - t_observed)
-                for law, label in t_missing:
-                    errors.append(
-                        f"bazel target //crates/{pkg_dir.name}:{target_dir.name} "
-                        f"ran but registered law `{law}` (label `{label}`) left "
-                        "no execution receipt"
-                    )
-                t_unknown = sorted(p for p in t_observed if p not in registered)
-                for law, label in t_unknown:
-                    errors.append(
-                        f"bazel target //crates/{pkg_dir.name}:{target_dir.name} "
-                        f"receipt for `{law}` (label `{label}`) names no "
-                        "registered law"
-                    )
+        errors.extend(census_testlogs(testlogs_dir, batches, macros, registered))
 
     if errors:
         for error in errors:

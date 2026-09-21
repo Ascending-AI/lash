@@ -157,6 +157,78 @@ class ReceiptTests(unittest.TestCase):
             )
 
 
+class BazelBatchCensusTests(unittest.TestCase):
+    """A `test_batch` target is censused over the union of its members."""
+
+    def setUp(self) -> None:
+        self.macros = MODULE.macro_blocks(MACROS)
+        self.registered = MODULE.registered_pairs(self.macros)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._old_root = MODULE.ROOT
+        MODULE.ROOT = self.root
+
+    def tearDown(self) -> None:
+        MODULE.ROOT = self._old_root
+        self._tmp.cleanup()
+
+    def fixture(self) -> Path:
+        crate = self.root / "crates" / "fakepkg"
+        (crate / "tests").mkdir(parents=True)
+        (crate / "tests" / "laws.rs").write_text(
+            "lash_conformance::plain_suite_tests!({ fixture });\n",
+            encoding="utf-8",
+        )
+        target_dir = self.root / "testlogs" / "crates" / "fakepkg" / "test_batch"
+        (target_dir / "test.outputs").mkdir(parents=True)
+        (target_dir / "test.log").write_text("ok", encoding="utf-8")
+        return target_dir
+
+    def batch(self) -> dict[str, list[str]]:
+        return {"//crates/fakepkg:test_batch": ["//crates/fakepkg:laws__test"]}
+
+    def census(self) -> list[str]:
+        return MODULE.census_testlogs(
+            self.root / "testlogs", self.batch(), self.macros, self.registered
+        )
+
+    def test_batch_member_missing_one_receipt_fails(self) -> None:
+        target_dir = self.fixture()
+        # shared + extra arrive; timed_law's receipt is absent.
+        (target_dir / "test.outputs" / "law-receipts.txt").write_text(
+            "shared_law\tshared\nextra_law\textra\n", encoding="utf-8"
+        )
+        errors = self.census()
+        self.assertTrue(
+            any("`timed_law`" in error for error in errors),
+            f"a member law without a receipt must fail the census: {errors}",
+        )
+
+    def test_batch_member_fully_receipted_passes(self) -> None:
+        target_dir = self.fixture()
+        (target_dir / "test.outputs" / "law-receipts.txt").write_text(
+            "shared_law\tshared\ntimed_law\ttimed\nextra_law\textra\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(self.census(), [])
+
+    def test_unresolvable_ran_target_with_receipts_fails(self) -> None:
+        target_dir = self.fixture()
+        (target_dir / "test.outputs" / "law-receipts.txt").write_text(
+            "shared_law\tshared\n", encoding="utf-8"
+        )
+        errors = MODULE.census_testlogs(
+            self.root / "testlogs",
+            {"//crates/fakepkg:test_batch": ["//crates/fakepkg:gone__test"]},
+            self.macros,
+            self.registered,
+        )
+        self.assertTrue(
+            any("resolved to a test root" in error for error in errors),
+            f"a ran target with receipts it cannot account for must fail: {errors}",
+        )
+
+
 class RealTreeTests(unittest.TestCase):
     """The real macros.rs keeps its delegation invariants under the census."""
 
