@@ -1135,10 +1135,6 @@ fn child_replay_key(group_key: &str, position: usize) -> String {
     format!("{group_key}:child:{position}")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 fn child(
     execution_scope: &ExecutionScope,
     group_key: &str,
@@ -1157,6 +1153,10 @@ fn child(
 /// The replay key lives in the address, so varying the command produces a
 /// child that claims a retained identity while asking for different work —
 /// the shape an authority-leak oracle stages.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn child_with_operation(
     execution_scope: &ExecutionScope,
     group_key: &str,
@@ -1213,6 +1213,10 @@ fn group(
 /// the fence correctly refuses a group header that disagrees; the authority
 /// question lives one level down, in whether the children's requests are the
 /// recorded ones.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn impostor_group(
     execution_scope: &ExecutionScope,
     key: &str,
@@ -1257,10 +1261,6 @@ fn staged_executors() -> &'static StagedGroupExecutors {
     STAGED.get_or_init(StagedGroupExecutors::new)
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn open(
     scoped: &ScopedEffectController<'_>,
     key: &str,
@@ -1280,6 +1280,10 @@ async fn open(
 ///
 /// Split from [`open`] so a law can control the children's requests — an
 /// impostor reopen offers a group the helper cannot build for it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn open_with(
     scoped: &ScopedEffectController<'_>,
     group: RuntimeEffectGroup,
