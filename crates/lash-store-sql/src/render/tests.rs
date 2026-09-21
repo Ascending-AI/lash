@@ -387,6 +387,8 @@ fn malformed_neutral_text_is_refused_rather_than_rendered() {
     );
 }
 
+
+
 #[test]
 fn a_name_the_statement_binds_for_itself_is_not_a_table() {
     let neutral = "WITH scope AS (
@@ -448,6 +450,34 @@ fn every_owned_statement_renders_for_both_backends() {
         VocabularyTerm::new("enqueuing_wake_delivery_state", stub_predicate),
         VocabularyTerm::new("discarded_wake_delivery_state", stub_predicate),
         VocabularyTerm::new("not_enqueued_wake_delivery_state", stub_predicate),
+        VocabularyTerm::new(
+            "accepted_turn_input_state",
+            stub_predicate,
+        ),
+        VocabularyTerm::new(
+            "active_turn_input_state",
+            stub_predicate,
+        ),
+        VocabularyTerm::new(
+            "deferred_next_turn_turn_input_state",
+            stub_predicate,
+        ),
+        VocabularyTerm::new(
+            "nonterminal_turn_input_state",
+            stub_predicate,
+        ),
+        VocabularyTerm::new(
+            "pending_active_turn_input_state",
+            stub_predicate,
+        ),
+        VocabularyTerm::new(
+            "terminal_turn_input_state",
+            stub_predicate,
+        ),
+        VocabularyTerm::new(
+            "undelivered_turn_input_state",
+            stub_predicate,
+        ),
     ]);
 
     for statement in crate::all_statements() {
