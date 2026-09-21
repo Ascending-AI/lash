@@ -340,18 +340,15 @@ impl TurnInputStore for Store {
             .write_flow(move |tx| {
                 let outcome = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
-                    let operation_key = lash_core::OperationId::turn(
-                        &session_id,
-                        &turn_id,
-                        "final",
-                    )
-                    .storage_key()?;
+                    let operation_key =
+                        lash_core::OperationId::turn(&session_id, &turn_id, "final")
+                            .storage_key()?;
                     let committed = tx
                         .query_row(
                             crate::session_sql::session_sql()
-                        .turn_commits
-                        .exists_for_turn
-                        .sql(),
+                                .turn_commits
+                                .exists_for_turn
+                                .sql(),
                             params![session_id.as_str(), operation_key],
                             |row| row.get::<_, bool>(0),
                         )
@@ -377,12 +374,12 @@ impl TurnInputStore for Store {
                                 &session_id,
                                 &turn_id,
                             )? {
-                                lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
-                                    StoreError::checked_monotonic_increment(
-                                        "turn_cancel_intent_revision",
-                                        revision,
-                                    )?
-                                }
+                                lash_core::TurnCancelIntentSnapshot::Present {
+                                    revision, ..
+                                } => StoreError::checked_monotonic_increment(
+                                    "turn_cancel_intent_revision",
+                                    revision,
+                                )?,
                                 lash_core::TurnCancelIntentSnapshot::Absent => {
                                     return Err(StoreError::Backend(
                                         "turn cancel request disappeared during escalation"
@@ -400,11 +397,7 @@ impl TurnInputStore for Store {
                                     .cancel_requests
                                     .advance_intent_revision
                                     .sql(),
-                                params![
-                                    session_id.as_str(),
-                                    turn_id.as_str(),
-                                    revision,
-                                ],
+                                params![session_id.as_str(), turn_id.as_str(), revision,],
                             )
                             .map_err(sqlite_error)?;
                         }

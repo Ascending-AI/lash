@@ -92,18 +92,45 @@ connection with no registry bound from guessing.
 """
 
 [[cross_family]]
+statement = "wake_redelivery_fence.insert_from_claimed_batch"
+owner = "crates/lash-sqlite-store/src/process_registry/sql.rs"
+touches = ["queued_work_batches", "queued_work_items"]
+reason = """
+SQLite raises a process's wake-redelivery fence out of the settling batch that
+woke it, in one statement, under the write lock the commit already holds: the
+wake identity is inside the batch's first item, and reading it separately would
+open a window between the read and the fence. The fence is the process family's
+table and the batch is the turn-ingress family's, so the process family owns
+the statement and reads across. PostgreSQL has to take the wake source's
+advisory lock between the two, so it reads the batch's source key and head
+payload through the turn-ingress family's own statements and writes the fence
+on its own.
+"""
+
+[[cross_family]]
 statement = "session_core.delete_process_session_rows"
 owner = "crates/lash-postgres-store/src/postgres/session_sql.rs"
-touches = ["wake_allocation_floors", "wake_redelivery_fences"]
+touches = [
+    "pending_turn_inputs",
+    "queued_work_batches",
+    "queued_work_items",
+    "session_execution_leases",
+    "turn_cancel_closure_authorizations",
+    "turn_cancel_requests",
+    "turn_cancellation_bindings",
+    "wake_allocation_floors",
+    "wake_redelivery_fences",
+]
 reason = """
 The process prune deletes a batch of sessions' rows from every table a session
 owns, in one statement, because the parts would race: twelve deletes keyed by
 the same session array, and a writer landing between two of them would leave a
 session whose queue is gone and whose metadata is not. Two of the twelve
 tables belong to the process family — a session's wake redelivery fences and
-the allocation floors targeting it — and they go with the session that owns
-them, so the session-core family owns the whole cascade and deletes from the
-process family's tables inside it. SQLite's session delete is per session and
+the allocation floors targeting it — and seven to the turn-ingress family: its
+queue, its inputs, its lane lease and its cancellation facts. They all go with
+the session that owns them, so the session-core family owns the whole cascade
+and deletes from the other two families' tables inside it. SQLite's session delete is per session and
 issues the named per-table deletes in sequence under `BEGIN IMMEDIATE`, which
 is the same atomicity without the CTE.
 """
@@ -3244,20 +3271,6 @@ statement = "turn_ingress.checkpoint_work_pending_before_completion"
 backends = ["sqlite", "postgres"]
 kind = "SKIP LOCKED; JSON extraction; server clock"
 reason = "The other checkpoint of turn_ingress.checkpoint_work_pending_after_work."
-
-[[dialect_only]]
-statement = "turn_ingress.record_wake_fence_from_claim"
-backends = ["sqlite"]
-kind = "INSERT then SELECT in one statement"
-reason = """
-SQLite reads a settling batch's wake identity and raises the process's
-redelivery fence in one statement, under the write lock it already holds.
-PostgreSQL has to take the wake source's advisory lock between the read and the
-write, so it reads the two facts it needs — turn_ingress
-select_claimed_batch_source_key and select_claimed_batch_head_payload — and
-writes the fence separately.
-"""
-
 [[dialect_only]]
 statement = "turn_ingress.select_claimed_batch_source_key"
 backends = ["postgres"]
