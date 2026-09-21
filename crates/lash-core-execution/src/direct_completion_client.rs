@@ -237,7 +237,15 @@ impl<'run> DirectCompletionClient<'run> {
                 Err(crate::PluginError::Session(message.clone()))
             }
             #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestFn(invoke) => invoke(request, usage_source.to_string()),
+            DirectCompletionSource::TestFn(invoke) => {
+                let completion = invoke(request, usage_source.to_string())?;
+                // The test source answers the call the runtime source would
+                // have made, so it feeds the bound usage ledger the same way:
+                // a fixture asserting capture of managed-LLM spend exercises
+                // the real recording path rather than a second one.
+                self.record_usage(&completion.llm_call, &completion.usage);
+                Ok(completion)
+            }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestLlmFn(_) => Err(crate::PluginError::Session(
                 "text direct completions are unavailable in this test context".to_string(),
@@ -298,7 +306,11 @@ impl<'run> DirectCompletionClient<'run> {
                 "direct LLM completions are unavailable in this test context".to_string(),
             )),
             #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestLlmFn(invoke) => invoke(request, usage_source.to_string()),
+            DirectCompletionSource::TestLlmFn(invoke) => {
+                let completion = invoke(request, usage_source.to_string())?;
+                self.record_usage(&completion.llm_call, &completion.usage);
+                Ok(completion)
+            }
         }
     }
 

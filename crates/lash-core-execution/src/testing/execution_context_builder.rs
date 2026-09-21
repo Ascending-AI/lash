@@ -17,8 +17,12 @@ pub struct TestExecutionContextBuilder<'run> {
     session_id: SessionId,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
+    tool_registry: Option<Arc<crate::ToolRegistry>>,
     trigger_router: Option<crate::TriggerRouter>,
     processes: Arc<dyn crate::ProcessService>,
+    process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
+    process_engines: crate::ProcessEngineRegistry,
+    direct_completions: Option<crate::DirectCompletionClient<'run>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     session_host_mode: TestSessionHostMode,
@@ -67,8 +71,12 @@ impl<'run> TestExecutionContextBuilder<'run> {
             session_id: SessionId::from("test-session"),
             provider: Arc::new(EmptyToolProvider),
             tool_catalog: crate::ToolCatalog::from_tool_definitions(Vec::new()),
+            tool_registry: None,
             trigger_router: None,
             processes: Arc::new(crate::UnavailableProcessService),
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
+            direct_completions: None,
             process_env_store: Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
@@ -104,6 +112,11 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
+    pub fn tool_registry(mut self, tool_registry: Arc<crate::ToolRegistry>) -> Self {
+        self.tool_registry = Some(tool_registry);
+        self
+    }
+
     pub fn trigger_router(mut self, trigger_router: Option<crate::TriggerRouter>) -> Self {
         self.trigger_router = trigger_router;
         self
@@ -111,6 +124,27 @@ impl<'run> TestExecutionContextBuilder<'run> {
 
     pub fn processes(mut self, processes: Arc<dyn crate::ProcessService>) -> Self {
         self.processes = processes;
+        self
+    }
+
+    pub fn process_definitions(
+        mut self,
+        process_definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
+    ) -> Self {
+        self.process_definitions = Some(process_definitions);
+        self
+    }
+
+    pub fn process_engines(mut self, process_engines: crate::ProcessEngineRegistry) -> Self {
+        self.process_engines = process_engines;
+        self
+    }
+
+    pub fn direct_completions(
+        mut self,
+        direct_completions: crate::DirectCompletionClient<'run>,
+    ) -> Self {
+        self.direct_completions = Some(direct_completions);
         self
     }
 
@@ -183,11 +217,14 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
-    /// Only lash-core's own `cfg(test)` binary needs this: its builtin factory
-    /// list already carries a protocol factory, so a context built there must
-    /// not add the code protocol on top. Outside that binary the default is the
-    /// only correct choice, and the setter does not exist.
-    #[cfg(test)]
+    /// Overrides the factories the context's plugin session is built from.
+    ///
+    /// A caller outside lash-core's own `cfg(test)` binary — conformance laws,
+    /// say — must pass `test_code_protocol_factories()` plus its additions so
+    /// the session still carries a protocol. Inside that binary the builtin
+    /// factory list already carries one, so passing another would double-claim
+    /// the protocol-session capability.
+    #[cfg(any(test, feature = "testing"))]
     pub fn plugin_factories(
         mut self,
         factories: Vec<Arc<dyn crate::plugin::PluginFactory>>,
@@ -270,11 +307,11 @@ impl<'run> TestExecutionContextBuilder<'run> {
         };
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
-            process_definitions: None,
-            process_engines: crate::ProcessEngineRegistry::default(),
+            process_definitions: self.process_definitions,
+            process_engines: self.process_engines,
             plugins,
             tools: self.provider,
-            tool_registry: None,
+            tool_registry: self.tool_registry,
             tool_catalog: Arc::new(self.tool_catalog),
             sessions,
             session_lifecycle,
@@ -282,9 +319,11 @@ impl<'run> TestExecutionContextBuilder<'run> {
             processes: self.processes,
             trigger_router: self.trigger_router,
             effect_controller,
-            direct_completions: crate::DirectCompletionClient::unavailable(
-                "direct completions are unavailable in this test context",
-            ),
+            direct_completions: self.direct_completions.unwrap_or_else(|| {
+                crate::DirectCompletionClient::unavailable(
+                    "direct completions are unavailable in this test context",
+                )
+            }),
             parent_invocation: self.dispatch_parent_invocation,
             execution_env_spec: self.execution_env_spec.clone(),
             session_id: self.session_id,

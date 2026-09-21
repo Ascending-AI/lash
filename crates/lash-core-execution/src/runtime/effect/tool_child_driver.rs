@@ -368,11 +368,11 @@ pub(crate) async fn run_tool_child(
     let settlement = ToolSettlement {
         version: super::tool_settlement::TOOL_SETTLEMENT_VERSION,
         possession: started_processes(&intent_outcomes),
+        model_return: resolve_model_return(&dispatch, request, &outcome, &intent_outcomes).await,
         intent_outcomes,
         triggers: dispatch.trigger_outcomes.drain(),
         checkpoint_messages: dispatch.checkpoint_messages.drain(),
         usage: usage_ledger.take(),
-        model_return: resolve_model_return(&dispatch, request, &outcome).await,
     };
     Ok(RuntimeEffectOutcome::ToolInvocation {
         outcome: Box::new(outcome),
@@ -635,6 +635,7 @@ async fn resolve_model_return(
     dispatch: &ToolDispatchContext<'_>,
     request: &ToolChildRequest,
     outcome: &ToolDispatchOutcome,
+    intent_outcomes: &[crate::ToolIntentExecutionOutcome],
 ) -> crate::ModelToolReturn {
     let mut model_return = match dispatch
         .plugins
@@ -665,6 +666,15 @@ async fn resolve_model_return(
         &outcome.record.output,
         &mut model_return,
     );
+    // The same addenda the session path appends in `complete_tool_call`: the
+    // realized intents are part of the presentation the model sees, so the
+    // recorded return carries them rather than leaving incorporation to
+    // recompute them.
+    for intent_outcome in intent_outcomes {
+        model_return.parts.push(crate::ModelToolReturnPart::text(
+            intent_outcome.model_addendum(),
+        ));
+    }
     model_return
 }
 

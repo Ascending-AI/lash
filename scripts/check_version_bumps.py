@@ -66,13 +66,20 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
-    # FIG-2266: ADR 0099 sections 6 and 13 mint the facts a tool child of a
-    # durable effect group carries on its outcome. A new durable format, not a
-    # rename: the capture had no constant before this change, and it is
-    # deliberately separate from the request's so the two lanes do not force
-    # each other's bumps.
-    "crates/lash-core-execution/src/runtime/effect/tool_child_capture.rs:TOOL_CHILD_CAPTURE_VERSION": (
-        "sha256:7322238eb0d7b6057763472cf2d57bc50bb951f421b259a51b3de3cbb472406c"
+    # FIG-2266: ADR 0099 sections 6 and 13 mint the semantic settlement a tool
+    # child of a durable effect group carries on its outcome. A new durable
+    # format, not a rename: the settlement had no constant before this change,
+    # and it is deliberately separate from the request's so the two lanes do
+    # not force each other's bumps.
+    "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_SETTLEMENT_VERSION": (
+        "sha256:2179106acc6968178333ab8b5394bddb35869f8bea95fdd510fe7fb35aa0a9a4"
+    ),
+    # FIG-2266: ADR 0099 section 13 journals the facts one atomic tool attempt
+    # produced on the attempt's own outcome, restored on replay. A new durable
+    # format riding the shared `ToolAttempt` arm, guarded separately from the
+    # settlement because the two carriers move for different reasons.
+    "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_ATTEMPT_CAPTURE_VERSION": (
+        "sha256:a140ed941c1229340032c527adaa1b492e6a1eb9740b8a327f62bec24500ba4a"
     ),
     # FIG-3408: ADR 0099 section 3 mints the retained tool-child request and the
     # invocation-level tool command together, as one new durable format. The
