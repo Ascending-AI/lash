@@ -440,6 +440,113 @@ async fn a_child_runs_under_the_opener_that_admitted_it_not_the_one_reoffering_i
         .expect("the caller closes");
 }
 
+/// The oracle is only worth trusting if it goes red against the leak it
+/// names. The leak is injected here as a resolver double, not a production
+/// edit: `SpyExecutors::reoffering_by_key` answers the driver's
+/// re-resolution asks by replay key alone — "reuse the offered runner
+/// regardless of the retained envelope," the match the retained-envelope
+/// binding exists to stop mattering. It enters through the same
+/// `register_group_executors` staging seam the honest resolvers use, so the
+/// driver under test is byte-identical to the one the green path exercises.
+///
+/// Every assertion of the differential inverts under the mutant: the
+/// impostor-bound runners run, they are handed the *retained* requests, and
+/// a settlement arrives.
+#[tokio::test]
+async fn the_oracle_goes_red_against_a_key_only_resolver() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("two-opener-mutant.db");
+    let prefix = format!("two-opener-mutant-{:x}", fastrand::u64(..));
+    let scope = ExecutionScope::runtime_operation(format!("{prefix}-scope"));
+    let key = format!("{prefix}:group:0");
+    let request_a = request(&profile_a());
+    let request_b = request(&profile_b());
+
+    let entered = Arc::new(AtomicUsize::new(0));
+    crash_opening(
+        &path,
+        &scope,
+        group(&scope, &key, &request_a),
+        vec![parked(&entered), parked(&entered)],
+        &entered,
+        2,
+    );
+    until_leases_lapse(&path, &key).await;
+
+    // Staged runners serve the offered-resolution asks exactly as in the
+    // green path; the mutant answers only the *re-resolution* asks — the
+    // routing questions about the retained children — with impostor-bound
+    // runners.
+    let impostor_runs = Arc::new(AtomicUsize::new(0));
+    let impostor_saw: Arc<Mutex<Vec<String>>> = Arc::default();
+    let spy_b = Arc::new(SpyExecutors::reoffering_by_key(
+        &impostor_runs,
+        &impostor_saw,
+    ));
+    let world_b = world(&path, &spy_b).await;
+    let scoped_b = world_b.scoped(scope.clone()).expect("scope");
+    let mut handle = open(
+        &scoped_b,
+        group(&scope, &key, &request_b),
+        &spy_b,
+        vec![
+            impostor(&impostor_runs, &impostor_saw),
+            impostor(&impostor_runs, &impostor_saw),
+        ],
+    )
+    .await;
+
+    // The green path's assertions invert. First the leak itself: an
+    // impostor-bound runner executes each retained child.
+    tokio::time::timeout(AWAIT_BUDGET, async {
+        while impostor_runs.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(POLL).await;
+        }
+    })
+    .await
+    .expect(
+        "under the key-only mutant an impostor-bound runner runs both \
+         retained children — the oracle's `impostor ran 0 times` assertion \
+         fails here",
+    );
+    // Then its consequence: settlements arrive for children nobody here was
+    // authorized to run.
+    let settlement = tokio::time::timeout(
+        Duration::from_millis(2 * LEASE.as_millis() as u64),
+        scoped_b
+            .controller()
+            .await_next_settlement(&mut handle, CancellationToken::new()),
+    )
+    .await;
+    assert!(
+        settlement.is_ok(),
+        "under the key-only mutant a retained child settles — the oracle's \
+         `no settlement arrives` assertion fails here"
+    );
+    let request_a = serde_json::to_string(&request_a).expect("the retained request serializes");
+    assert_eq!(
+        impostor_saw.lock_recover().clone(),
+        vec![request_a.clone(), request_a],
+        "the impostor-bound runners were handed the retained requests — the \
+         oracle's `impostor was never handed the retained request` assertion \
+         fails here"
+    );
+    // The routing question is the same as the honest path asks; it is the
+    // answer that leaks.
+    assert_eq!(
+        spy_b.asked(),
+        vec![child_key(&key, 0), child_key(&key, 1)],
+        "the mutant answers the same asks — matching on the key alone is the \
+         leak, not the asking"
+    );
+
+    scoped_b
+        .controller()
+        .close_effect_group(handle, RUN)
+        .await
+        .expect("the caller closes");
+}
+
 // =============================================================================
 // Fixtures
 // =============================================================================
@@ -492,6 +599,15 @@ enum SpyAnswer {
     Refuse,
     /// Runs the retained request, records it, and settles.
     Capture(Arc<Mutex<Vec<ToolChildRequest>>>),
+    /// The injected mutant (FIG-3429): answers the routing question by replay
+    /// key alone — an impostor-bound runner for whatever key the driver asks
+    /// about, regardless of which request the retained child carries. Under
+    /// this answer every oracle assertion inverts, which is the red-proof the
+    /// oracle owes before it is trusted.
+    ReofferByKey {
+        runs: Arc<AtomicUsize>,
+        saw: Arc<Mutex<Vec<String>>>,
+    },
 }
 
 /// One opener's resolver, instrumented.
@@ -523,6 +639,21 @@ impl SpyExecutors {
         }
     }
 
+    /// The mutant resolver: "reuses the offered runner" for any key the driver
+    /// re-resolves — the key-only match the retained-envelope binding exists to
+    /// stop mattering. Each re-resolution ask gets a fresh impostor-bound
+    /// runner, so a leak is observable per retained child.
+    fn reoffering_by_key(runs: &Arc<AtomicUsize>, saw: &Arc<Mutex<Vec<String>>>) -> Self {
+        Self {
+            staged: Mutex::new(HashMap::new()),
+            asked: Mutex::new(Vec::new()),
+            answer: SpyAnswer::ReofferByKey {
+                runs: Arc::clone(runs),
+                saw: Arc::clone(saw),
+            },
+        }
+    }
+
     fn asked(&self) -> Vec<String> {
         let mut keys = self.asked.lock_recover().clone();
         keys.sort();
@@ -545,6 +676,7 @@ impl GroupExecutors for SpyExecutors {
         match &self.answer {
             SpyAnswer::Refuse => None,
             SpyAnswer::Capture(captured) => Some(capturing(captured)),
+            SpyAnswer::ReofferByKey { runs, saw } => Some(impostor(runs, saw)),
         }
     }
 }
