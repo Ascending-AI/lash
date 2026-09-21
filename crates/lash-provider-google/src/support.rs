@@ -41,29 +41,4 @@ pub(crate) use lash_sansio::Redacted;
 
 pub(crate) use crate::config::*;
 
-/// Mutable accumulators a single Cloud Code SSE event folds into: the running
-/// full text, the per-event visible/reasoning deltas, the usage snapshot
-/// (normalized plus the raw `usageMetadata` sidecar), optional tool-call and
-/// structured output-part sinks, and the last finish-bearing event.
-pub(crate) struct SseTextPartSink<'a> {
-    pub full: &'a mut String,
-    pub text_deltas: &'a mut Vec<String>,
-    pub reasoning_deltas: &'a mut Vec<String>,
-    pub usage: &'a mut LlmUsage,
-    pub provider_usage: &'a mut Option<Value>,
-    pub execution_evidence: &'a mut Option<ExecutionEvidence>,
-    pub tool_call_parts: Option<&'a mut Vec<LlmOutputPart>>,
-    pub output_parts: Option<&'a mut Vec<LlmOutputPart>>,
-    pub reasoning_stream: Option<ReasoningStreamSink<'a>>,
-    pub finish_event: &'a mut Option<Value>,
-}
-
-#[derive(Default)]
-pub(crate) struct ReasoningStreamState {
-    pub open_output_part_index: Option<usize>,
-}
-
-pub(crate) struct ReasoningStreamSink<'a> {
-    pub state: &'a mut ReasoningStreamState,
-    pub events: &'a mut Vec<LlmStreamEvent>,
-}
+pub(crate) use crate::stream::GoogleStreamState;

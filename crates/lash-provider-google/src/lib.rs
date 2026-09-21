@@ -945,31 +945,24 @@ mod tests {
         // SSE events through process_sse_event and confirm the captured
         // finishReason maps through terminal_reason_from_value (here MAX_TOKENS
         // -> OutputLimit), exactly like the non-streaming path.
-        let mut full = String::new();
-        let mut usage = LlmUsage::default();
-        let mut tool_calls: Vec<LlmOutputPart> = Vec::new();
-        let mut finish_event: Option<serde_json::Value> = None;
+        let mut state = crate::support::GoogleStreamState::default();
         for raw in [
             r#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}"#,
             r#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#,
         ] {
-            GoogleOAuthProvider::for_test()
-                .process_sse_event(
-                    raw,
-                    &mut full,
-                    &mut Vec::new(),
-                    &mut usage,
-                    Some(&mut tool_calls),
-                    &mut finish_event,
-                )
+            state
+                .push_event(&GoogleOAuthProvider::for_test(), raw, None)
                 .expect("sse event");
         }
         assert!(
-            finish_event.is_some(),
+            state.finish_event.is_some(),
             "finishReason event must be captured"
         );
         let terminal_reason = GoogleOAuthProvider::terminal_reason_from_value(
-            finish_event.as_ref().unwrap_or(&serde_json::Value::Null),
+            state
+                .finish_event
+                .as_ref()
+                .unwrap_or(&serde_json::Value::Null),
             &[],
         );
         assert_eq!(terminal_reason, LlmTerminalReason::OutputLimit);
@@ -977,13 +970,7 @@ mod tests {
 
     #[test]
     fn streaming_captures_raw_usage_metadata_sidecar() {
-        let mut full = String::new();
-        let mut text_deltas = Vec::new();
-        let mut reasoning_deltas = Vec::new();
-        let mut usage = LlmUsage::default();
-        let mut provider_usage: Option<Value> = None;
-        let mut execution_evidence = None;
-        let mut finish_event: Option<Value> = None;
+        let mut state = crate::support::GoogleStreamState::default();
         let meta = json!({"promptTokenCount": 6, "candidatesTokenCount": 4});
         for raw in [
             json!({"response":{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}}).to_string(),
@@ -992,63 +979,45 @@ mod tests {
             // sidecar, mirroring the normalized-usage non-zero guard.
             json!({"response":{"usageMetadata": {}}}).to_string(),
         ] {
-            GoogleOAuthProvider::for_test()
-                .process_sse_event_with_text_parts(
-                    &raw,
-                    crate::support::SseTextPartSink {
-                        full: &mut full,
-                        text_deltas: &mut text_deltas,
-                        reasoning_deltas: &mut reasoning_deltas,
-                        usage: &mut usage,
-                        provider_usage: &mut provider_usage,
-                        execution_evidence: &mut execution_evidence,
-                        tool_call_parts: None,
-                        output_parts: None,
-                        reasoning_stream: None,
-                        finish_event: &mut finish_event,
-                    },
-                    None,
-                )
+            state
+                .push_event(&GoogleOAuthProvider::for_test(), &raw, None)
                 .expect("sse event");
         }
-        assert_eq!(provider_usage, Some(meta));
-        assert_eq!(usage.input_tokens, 6);
-        assert_eq!(usage.output_tokens, 4);
+        assert_eq!(state.provider_usage, Some(meta));
+        assert_eq!(state.usage.input_tokens, 6);
+        assert_eq!(state.usage.output_tokens, 4);
     }
 
+    /// Gemini's cumulative thought text: each event repeats the reasoning so
+    /// far plus its new tail. The stream state owns the coalescing, so the
+    /// emitted reasoning deltas carry only the trimmed increments and the
+    /// parts assemble into one reasoning part.
     #[test]
-    fn streaming_populates_reasoning_deltas_without_an_output_part_sink() {
-        let mut full = String::new();
-        let mut text_deltas = Vec::new();
+    fn streaming_trims_cumulative_thought_deltas_across_events() {
+        let provider = GoogleOAuthProvider::for_test();
+        let mut state = crate::support::GoogleStreamState::default();
         let mut reasoning_deltas = Vec::new();
-        let mut usage = LlmUsage::default();
-        let mut provider_usage = None;
-        let mut execution_evidence = None;
-        let mut finish_event = None;
-        GoogleOAuthProvider::for_test()
-            .process_sse_event_with_text_parts(
-                &json!({"response":{"candidates":[{"content":{"parts":[{
-                    "text":"thought",
-                    "thought":true
-                }]}}]}})
-                .to_string(),
-                crate::support::SseTextPartSink {
-                    full: &mut full,
-                    text_deltas: &mut text_deltas,
-                    reasoning_deltas: &mut reasoning_deltas,
-                    usage: &mut usage,
-                    provider_usage: &mut provider_usage,
-                    execution_evidence: &mut execution_evidence,
-                    tool_call_parts: None,
-                    output_parts: None,
-                    reasoning_stream: None,
-                    finish_event: &mut finish_event,
-                },
-                None,
-            )
-            .expect("reasoning event parses");
+        for thought in ["réason ", "réason carefully 😀"] {
+            let raw = json!({"response":{"candidates":[{"content":{"parts":[{
+                "text": thought,
+                "thought": true
+            }]}}]}})
+            .to_string();
+            let deltas = state
+                .push_event(&provider, &raw, None)
+                .expect("thought event parses");
+            reasoning_deltas.extend(deltas.reasoning_deltas);
+        }
 
-        assert_eq!(reasoning_deltas, ["thought"]);
+        assert_eq!(reasoning_deltas, ["réason ", "carefully 😀"]);
+        assert!(
+            matches!(
+                state.output_parts.as_slice(),
+                [LlmOutputPart::Reasoning { text, .. }] if text == "réason carefully 😀"
+            ),
+            "cumulative thought events must coalesce into one reasoning part, got {:?}",
+            state.output_parts
+        );
     }
 
     #[test]
@@ -1421,33 +1390,15 @@ mod tests {
             "content":{"parts":[function_part.clone()]},
             "finishReason":"STOP"
         }]}});
-        let mut full = String::new();
-        let mut text_deltas = Vec::new();
-        let mut reasoning_deltas = Vec::new();
-        let mut usage = LlmUsage::default();
-        let mut provider_usage = None;
-        let mut execution_evidence = None;
-        let mut output_parts = Vec::new();
-        let mut streaming_parts = Vec::new();
-        let mut finish_event = None;
-        GoogleOAuthProvider::for_test()
-            .process_sse_event_with_text_parts(
+        let mut state = crate::support::GoogleStreamState::default();
+        state
+            .push_event(
+                &GoogleOAuthProvider::for_test(),
                 &streaming_event.to_string(),
-                crate::support::SseTextPartSink {
-                    full: &mut full,
-                    text_deltas: &mut text_deltas,
-                    reasoning_deltas: &mut reasoning_deltas,
-                    usage: &mut usage,
-                    provider_usage: &mut provider_usage,
-                    execution_evidence: &mut execution_evidence,
-                    tool_call_parts: Some(&mut streaming_parts),
-                    output_parts: Some(&mut output_parts),
-                    reasoning_stream: None,
-                    finish_event: &mut finish_event,
-                },
                 Some("gemini-test"),
             )
             .expect("streaming function call parses");
+        let streaming_parts = state.tool_call_parts;
         let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
             &json!({"candidates":[{
                 "content":{"parts":[function_part]},

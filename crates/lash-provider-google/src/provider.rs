@@ -181,18 +181,12 @@ impl GoogleOAuthProvider {
             });
         }
 
-        let mut full = String::new();
-        let mut usage = LlmUsage::default();
-        let mut provider_usage: Option<Value> = None;
-        let mut execution_evidence =
+        let mut stream_state = GoogleStreamState::default();
+        stream_state.execution_evidence =
             provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()
             });
-        let mut output_parts: Vec<LlmOutputPart> = Vec::new();
-        let mut tool_call_parts: Vec<LlmOutputPart> = Vec::new();
-        let mut reasoning_stream_state = ReasoningStreamState::default();
-        let mut finish_event: Option<Value> = None;
         let origin_model = request
             .get("model")
             .and_then(Value::as_str)
@@ -206,60 +200,41 @@ impl GoogleOAuthProvider {
             &mut response_metadata,
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "google", raw);
-                let mut text_deltas = Vec::new();
-                let mut reasoning_deltas = Vec::new();
-                let mut reasoning_events = Vec::new();
-                let prev_usage = usage.clone();
-                let prev_execution_evidence = execution_evidence.clone();
-                let first_new_tool_call = tool_call_parts.len();
-                self.process_sse_event_with_text_parts(
-                    raw,
-                    SseTextPartSink {
-                        full: &mut full,
-                        text_deltas: &mut text_deltas,
-                        reasoning_deltas: &mut reasoning_deltas,
-                        usage: &mut usage,
-                        provider_usage: &mut provider_usage,
-                        execution_evidence: &mut execution_evidence,
-                        tool_call_parts: Some(&mut tool_call_parts),
-                        output_parts: Some(&mut output_parts),
-                        reasoning_stream: Some(ReasoningStreamSink {
-                            state: &mut reasoning_stream_state,
-                            events: &mut reasoning_events,
-                        }),
-                        finish_event: &mut finish_event,
-                    },
-                    origin_model.as_deref(),
-                )?;
+                let prev_usage = stream_state.usage.clone();
+                let prev_execution_evidence = stream_state.execution_evidence.clone();
+                let first_new_tool_call = stream_state.tool_call_parts.len();
+                let deltas = stream_state.push_event(self, raw, origin_model.as_deref())?;
                 if let Some(tx) = stream_events.as_ref()
                     && self.options.expose_thinking
                 {
-                    for event in reasoning_events {
+                    for event in deltas.reasoning_events {
                         tx.send(event);
                     }
                 }
                 if let Some(tx) = stream_events.as_ref() {
-                    if usage != prev_usage && usage != LlmUsage::default() {
-                        tx.send(LlmStreamEvent::Usage(usage.clone()));
+                    if stream_state.usage != prev_usage && stream_state.usage != LlmUsage::default()
+                    {
+                        tx.send(LlmStreamEvent::Usage(stream_state.usage.clone()));
                     }
-                    if provider_usage.is_some() {
+                    if stream_state.provider_usage.is_some() {
                         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                            provider_usage: provider_usage.clone(),
-                            execution_evidence: (execution_evidence != prev_execution_evidence)
-                                .then(|| execution_evidence.clone())
+                            provider_usage: stream_state.provider_usage.clone(),
+                            execution_evidence: (stream_state.execution_evidence
+                                != prev_execution_evidence)
+                                .then(|| stream_state.execution_evidence.clone())
                                 .flatten(),
                             ..Default::default()
                         }));
-                    } else if execution_evidence != prev_execution_evidence {
+                    } else if stream_state.execution_evidence != prev_execution_evidence {
                         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                            execution_evidence: execution_evidence.clone(),
+                            execution_evidence: stream_state.execution_evidence.clone(),
                             ..Default::default()
                         }));
                     }
-                    for delta in text_deltas {
+                    for delta in deltas.text_deltas {
                         tx.send(LlmStreamEvent::Delta(delta));
                     }
-                    for part in &tool_call_parts[first_new_tool_call..] {
+                    for part in &stream_state.tool_call_parts[first_new_tool_call..] {
                         tx.send(LlmStreamEvent::Part(part.clone()));
                     }
                 }
@@ -270,15 +245,14 @@ impl GoogleOAuthProvider {
 
         if stream_result.is_ok()
             && self.options.expose_thinking
-            && let Some(index) = reasoning_stream_state.open_output_part_index.take()
-            && let Some(part @ LlmOutputPart::Reasoning { .. }) = output_parts.get(index)
+            && let Some(event) = stream_state.flush_open_reasoning_part()
             && let Some(tx) = stream_events.as_ref()
         {
-            tx.send(LlmStreamEvent::Part(part.clone()));
+            tx.send(event);
         }
 
         let partial_response = || {
-            let mut parts = output_parts.clone();
+            let mut parts = stream_state.output_parts.clone();
             if parts
                 .iter()
                 .filter_map(|part| match part {
@@ -287,23 +261,23 @@ impl GoogleOAuthProvider {
                 })
                 .collect::<String>()
                 .is_empty()
-                && !full.is_empty()
+                && !stream_state.full.is_empty()
             {
                 parts.push(LlmOutputPart::Text {
-                    text: full.clone(),
+                    text: stream_state.full.clone(),
                     response_meta: None,
                 });
             }
-            parts.extend(tool_call_parts.clone());
+            parts.extend(stream_state.tool_call_parts.clone());
             LlmResponse {
                 parts,
-                usage: usage.clone(),
+                usage: stream_state.usage.clone(),
                 terminal_reason: LlmTerminalReason::Unknown,
                 terminal_diagnostic: None,
-                provider_usage: provider_usage.clone(),
+                provider_usage: stream_state.provider_usage.clone(),
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {url} (stream)")),
-                execution_evidence: execution_evidence.clone(),
+                execution_evidence: stream_state.execution_evidence.clone(),
                 generation_disposition,
                 response_metadata: response_metadata.metadata(),
             }
@@ -312,7 +286,7 @@ impl GoogleOAuthProvider {
             return Err(error.with_partial_response(partial_response()));
         }
         if stream_termination == StreamTermination::RequireTerminalEvidence
-            && finish_event.is_none()
+            && stream_state.finish_event.is_none()
         {
             return Err(
                 LlmTransportError::new("Google stream ended without finishReason")
@@ -323,7 +297,7 @@ impl GoogleOAuthProvider {
             );
         }
 
-        let mut parts = output_parts;
+        let mut parts = stream_state.output_parts;
         if parts
             .iter()
             .filter_map(|part| match part {
@@ -332,31 +306,33 @@ impl GoogleOAuthProvider {
             })
             .collect::<String>()
             .is_empty()
-            && !full.is_empty()
+            && !stream_state.full.is_empty()
         {
             parts.push(LlmOutputPart::Text {
-                text: full.clone(),
+                text: stream_state.full.clone(),
                 response_meta: None,
             });
         }
-        parts.extend(tool_call_parts);
+        parts.extend(stream_state.tool_call_parts);
 
         // Mirror the non-streaming path: derive the terminal reason from the
         // last `finishReason` observed across the SSE events. When no event
         // carried one, `terminal_reason_from_value` on a value without a
         // finishReason falls back to ToolUse/Stop from the assembled parts.
-        let terminal_reason =
-            Self::terminal_reason_from_value(finish_event.as_ref().unwrap_or(&Value::Null), &parts);
+        let terminal_reason = Self::terminal_reason_from_value(
+            stream_state.finish_event.as_ref().unwrap_or(&Value::Null),
+            &parts,
+        );
 
         Ok(LlmResponse {
             parts,
-            usage,
+            usage: stream_state.usage,
             terminal_reason,
             terminal_diagnostic: None,
-            provider_usage,
+            provider_usage: stream_state.provider_usage,
             request_body,
             http_summary: Some(format!("HTTP POST {}", url)),
-            execution_evidence,
+            execution_evidence: stream_state.execution_evidence,
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
         })

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use lash_core::llm::types::{
     LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmRole, LlmToolChoice,
-    LlmToolSpec, LlmUsage, ProviderRouteIdentity, ReasoningRetentionCapability,
-    ReasoningRetentionPolicy, ReasoningRetentionSelection,
+    LlmToolSpec, ProviderRouteIdentity, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+    ReasoningRetentionSelection,
 };
 use lash_core::provider::Provider;
 use lash_sansio::sync::MutexExt;
@@ -284,37 +284,19 @@ fn google_signature_only_thought_part_round_trips_from_streaming_and_batch() {
             "content":{"parts":[thought_part.clone()]},
             "finishReason":"STOP"
         }]}});
-        let mut full = String::new();
-        let mut text_deltas = Vec::new();
-        let mut reasoning_deltas = Vec::new();
-        let mut usage = LlmUsage::default();
-        let mut provider_usage = None;
-        let mut execution_evidence = None;
-        let mut output_parts = Vec::new();
-        let mut tool_call_parts = Vec::new();
-        let mut finish_event = None;
-        GoogleOAuthProvider::for_test()
-            .process_sse_event_with_text_parts(
+        let mut state = crate::support::GoogleStreamState::default();
+        let deltas = state
+            .push_event(
+                &GoogleOAuthProvider::for_test(),
                 &streaming_event.to_string(),
-                crate::support::SseTextPartSink {
-                    full: &mut full,
-                    text_deltas: &mut text_deltas,
-                    reasoning_deltas: &mut reasoning_deltas,
-                    usage: &mut usage,
-                    provider_usage: &mut provider_usage,
-                    execution_evidence: &mut execution_evidence,
-                    tool_call_parts: Some(&mut tool_call_parts),
-                    output_parts: Some(&mut output_parts),
-                    reasoning_stream: None,
-                    finish_event: &mut finish_event,
-                },
                 Some("gemini-test"),
             )
             .expect("streaming signature-only thought parses");
         assert!(
-            text_deltas.is_empty() && reasoning_deltas.is_empty(),
+            deltas.text_deltas.is_empty() && deltas.reasoning_deltas.is_empty(),
             "a text-less thought part must not emit visible deltas"
         );
+        let output_parts = state.output_parts;
         let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
             &json!({"candidates":[{
                 "content":{"parts":[thought_part.clone()]},
@@ -373,37 +355,18 @@ fn google_signature_on_function_call_thought_part_yields_only_the_tool_call() {
         "content":{"parts":[part.clone()]},
         "finishReason":"STOP"
     }]}});
-    let mut full = String::new();
-    let mut text_deltas = Vec::new();
-    let mut reasoning_deltas = Vec::new();
-    let mut usage = LlmUsage::default();
-    let mut provider_usage = None;
-    let mut execution_evidence = None;
-    let mut output_parts = Vec::new();
-    let mut tool_call_parts = Vec::new();
-    let mut finish_event = None;
-    GoogleOAuthProvider::for_test()
-        .process_sse_event_with_text_parts(
+    let mut state = crate::support::GoogleStreamState::default();
+    state
+        .push_event(
+            &GoogleOAuthProvider::for_test(),
             &streaming_event.to_string(),
-            crate::support::SseTextPartSink {
-                full: &mut full,
-                text_deltas: &mut text_deltas,
-                reasoning_deltas: &mut reasoning_deltas,
-                usage: &mut usage,
-                provider_usage: &mut provider_usage,
-                execution_evidence: &mut execution_evidence,
-                tool_call_parts: Some(&mut tool_call_parts),
-                output_parts: Some(&mut output_parts),
-                reasoning_stream: None,
-                finish_event: &mut finish_event,
-            },
             Some("gemini-test"),
         )
         .expect("streaming functionCall thought part parses");
     // The streaming sink splits tool calls from the other output parts; both
     // sinks together are what the driver emits for the turn, so a duplicate
     // empty Reasoning part shows up here.
-    let streaming_parts = [output_parts, tool_call_parts].concat();
+    let streaming_parts = [state.output_parts, state.tool_call_parts].concat();
     let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
         &json!({"candidates":[{
             "content":{"parts":[part]},
