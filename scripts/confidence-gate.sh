@@ -2559,6 +2559,60 @@ run_process_lease_preimage_mutation_evidence() {
     -- --locked -p lash-internal-sqlite-store --lib --test conformance lease
 }
 
+run_authority_rebind_mutation_evidence() {
+  step "Tool-child rebind and group settlement authority mutation evidence (${mutation_jobs} concurrent jobs)"
+  require_tool cargo-mutants cargo-mutants 27.1.0
+  local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
+  # FIG-3429: the sites an authority leak must survive to reopen the C1
+  # findings — the rebind checklist that names every inheritable
+  # ToolDispatchContext field, the retained tool-child request a reopen
+  # admits, and the group settlement capture that re-arms retained authority
+  # under a successor opener. A mutant the oracles do not kill is a named
+  # leak, so the lane judges kills, not coverage.
+  build_conformance_helpers
+  # Each sweep's selector is the suite that names the wrong state the mutant
+  # opens — a mutant the selector does not kill is a named leak, not noise.
+  run_mutants_recorded "lash-core-execution rebind checklist" "${out_dir}/mutants-lash-core-execution-rebind-checklist-targeted" \
+    cargo mutants \
+    -p lash-internal-core-execution \
+    --file crates/lash-core-execution/src/tool_dispatch/context.rs \
+    --re 'RebindField::context_field' \
+    --baseline skip \
+    --cargo-arg=--features=testing \
+    --jobs "$mutation_jobs" \
+    --timeout "$timeout" \
+    --minimum-test-timeout 30 \
+    --output "${out_dir}/mutants-lash-core-execution-rebind-checklist-targeted" \
+    -- --locked -p lash-internal-core-execution --lib rebind
+  # `RebindField::disposition` has no viable mutants (RebindDisposition is not
+  # `Default`), so the checklist's other ruling is judged by the two-opener
+  # differential rather than by a vacuous sweep here.
+  run_mutants_recorded "lash-core-execution retained tool-child request" "${out_dir}/mutants-lash-core-execution-tool-child-targeted" \
+    cargo mutants \
+    -p lash-internal-core-execution \
+    --file crates/lash-core-execution/src/runtime/effect/tool_child.rs \
+    --re 'ToolChildScope::validate|ToolChildRequest::validate|with_enclosing_process|with_cancellation_authority|retry_policy|manifest|grant' \
+    --baseline skip \
+    --cargo-arg=--features=testing \
+    --jobs "$mutation_jobs" \
+    --timeout "$timeout" \
+    --minimum-test-timeout 30 \
+    --output "${out_dir}/mutants-lash-core-execution-tool-child-targeted" \
+    -- --locked -p lash-internal-core-execution --lib tool_child
+  run_mutants_recorded "lash-core-execution group reopen settlement capture" "${out_dir}/mutants-lash-core-execution-group-settlement-targeted" \
+    cargo mutants \
+    -p lash-internal-core-execution \
+    --file crates/lash-core-execution/src/runtime/effect/effect_replay_driver/groups.rs \
+    --re 'open_effect_group|resolve_group_children|dispatch_group_children|group_child_finished|retire_group_if_complete|reap_if_complete|await_next_group_settlement|decode_settlement|close_effect_group|accepted_membership|reconstruct_group|replay_keys_of' \
+    --baseline skip \
+    --cargo-arg=--features=testing \
+    --jobs "$mutation_jobs" \
+    --timeout "$timeout" \
+    --minimum-test-timeout 30 \
+    --output "${out_dir}/mutants-lash-core-execution-group-settlement-targeted" \
+    -- --locked -p lash-internal-sqlite-store --test integration store_effect_group_drain
+}
+
 run_lash_sim_runtime_completion_mutation_evidence() {
   step "Lash-sim scheduler/runtime completion mutation evidence (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
@@ -3249,6 +3303,7 @@ if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; the
         run_lash_core_direct_model_mutation_evidence
         run_lash_sim_runtime_completion_mutation_evidence
         run_process_lease_preimage_mutation_evidence
+        run_authority_rebind_mutation_evidence
       else
         run_area_targeted_mutation_evidence
       fi
