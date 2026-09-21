@@ -574,11 +574,15 @@ impl PostgresStorage {
             .after_connect(move |conn, _meta| {
                 Box::pin(async move {
                     if let Some(ms) = lock_ms {
-                        conn.execute(format!("SET lock_timeout = {ms}").as_str())
+                        sqlx::query(connection_sql::connection_sql().set_lock_timeout.sql())
+                            .bind(ms.to_string())
+                            .execute(&mut *conn)
                             .await?;
                     }
                     if let Some(ms) = statement_ms {
-                        conn.execute(format!("SET statement_timeout = {ms}").as_str())
+                        sqlx::query(connection_sql::connection_sql().set_statement_timeout.sql())
+                            .bind(ms.to_string())
+                            .execute(&mut *conn)
                             .await?;
                     }
                     Ok(())
@@ -637,7 +641,7 @@ impl PostgresStorage {
     #[cfg(feature = "testing")]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
         let found_version: Option<i32> =
-            sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
+            sqlx::query_scalar(crate::schema::SELECT_COMPONENT_VERSION)
                 .bind(SCHEMA_COMPONENT)
                 .fetch_optional(&pool)
                 .await
@@ -1095,6 +1099,8 @@ mod artifact_store;
 mod attachments;
 #[path = "postgres/blobs.rs"]
 mod blobs;
+#[path = "postgres/connection_sql.rs"]
+mod connection_sql;
 #[path = "postgres/effect_replay.rs"]
 mod effect_replay;
 #[path = "postgres/evidence_retention.rs"]
@@ -1116,6 +1122,8 @@ mod process_sql;
 mod queued_work;
 #[path = "postgres/release_stamp.rs"]
 mod release_stamp;
+#[cfg(test)]
+mod rendered_statement_sets_tests;
 #[path = "postgres/required_constraints.rs"]
 mod required_constraints;
 #[path = "postgres/runtime_persistence/mod.rs"]

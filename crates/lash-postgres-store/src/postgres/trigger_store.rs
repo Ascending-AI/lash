@@ -411,11 +411,15 @@ impl TriggerStore for PostgresTriggerStore {
             &subscription_key,
         );
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(&subscription_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(&subscription_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
 
         let stored = sqlx::query(sql.receipt.select_by_operation_id.sql())
             .bind(&receipt_id)
@@ -611,11 +615,15 @@ impl TriggerStore for PostgresTriggerStore {
         let sql = trigger_sql();
         let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request);
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(&request.idempotency_key)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(&request.idempotency_key)
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
         let existing = sqlx::query(
             sql.occurrence_postgres
                 .select_record_by_idempotency_key

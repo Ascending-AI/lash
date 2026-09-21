@@ -60,12 +60,16 @@ pub(crate) async fn lock_parent_scope_tx(
     parent: &ParentScope,
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent)?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!("lash-parent-end:{kind}:{id}"))
-        .execute(&mut **tx)
-        .await
-        .map(drop)
-        .map_err(plugin_sqlx_error)
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text
+            .sql(),
+    )
+    .bind(format!("lash-parent-end:{kind}:{id}"))
+    .execute(&mut **tx)
+    .await
+    .map(drop)
+    .map_err(plugin_sqlx_error)
 }
 
 pub(crate) async fn record_tx(

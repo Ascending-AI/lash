@@ -103,6 +103,42 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
+    /// `turn_cancel_affected_inputs` statements. The table has no SQLite half:
+    /// SQLite keeps the same dispositions as one `record_json` document on the
+    /// cancel-request row, so both statements here are PostgreSQL-only by
+    /// construction.
+    pub(crate) struct CancelAffectedInputPostgresStatements @ "turn_cancel_affected_input" {
+        /// Turn `?2` of session `?1`'s recorded dispositions, in the order the
+        /// turn observed them.
+        ///
+        /// `ordinal` is the order and it is a total one — it is the third
+        /// component of the primary key — so no tie needs breaking.
+        select_by_turn = "SELECT input_id, input_json, disposition
+             FROM turn_cancel_affected_inputs
+             WHERE session_id = ?1 AND turn_id = ?2
+             ORDER BY ordinal ASC";
+
+        /// Append input `?3`'s disposition at the next ordinal for turn `?2`
+        /// of session `?1`.
+        ///
+        /// The next ordinal is computed inside the insert rather than read
+        /// first: the caller already holds the cancel-request row's lock, and
+        /// deriving it in one statement is what keeps the ordinal allocation
+        /// and the append in a single round trip.
+        append_at_next_ordinal = "INSERT INTO turn_cancel_affected_inputs (
+                 session_id, turn_id, ordinal, input_id, disposition, input_json
+             )
+             VALUES (
+                 ?1, ?2,
+                 (SELECT COALESCE(MAX(ordinal) + 1, 0)
+                    FROM turn_cancel_affected_inputs
+                   WHERE session_id = ?1 AND turn_id = ?2),
+                 ?3, ?4, ?5
+             )";
+    }
+}
+
+lash_store_sql::statements! {
     /// `turn_cancel_closure_authorizations` statements only PostgreSQL issues.
     pub(crate) struct ClosureAuthorizationPostgresStatements @ "turn_cancel_closure_authorization" {
         /// Turn `?2` of session `?1`'s pinned closure, locked for the caller's

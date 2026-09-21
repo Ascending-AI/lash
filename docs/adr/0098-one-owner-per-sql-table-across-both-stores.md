@@ -7,7 +7,10 @@ builds the crate, the renderer, the manifest and the gate the rest of the arc
 (FIG-3379) uses. Amended by FIG-3399, which adds the vocabulary render axis,
 cross-family ownership, and SQL structure to the gate's reading of a literal.
 Amended by FIG-3406, which makes the SQLite schema a property of the table
-under a deployment layout rather than of the statement.
+under a deployment layout rather than of the statement. **Finalised by FIG-3387**,
+which converts the last unowned tables, deletes the gate's `converted` list and
+makes the gate total over both store crates. The arc's measured outcome is in
+*Consequences*.
 
 ## Context
 
@@ -159,9 +162,9 @@ compares, so the declaration cannot drift from the query, and a family's
 converters find the other families' statements over their tables in one list
 rather than by grepping.
 
-**A repo gate enforces all of it**, scoped by a `converted` list so it is total
-for the families that have moved and silent about the rest until FIG-3387 closes
-it. It refuses a production SQL literal over a converted table outside its owner
+**A repo gate enforces all of it, over both store crates whole (FIG-3387).**
+There is no list of families it is silent about: a family is checked because it
+is declared. It refuses a production SQL literal over an owned table outside its owner
 modules, a duplicated statement text within one backend, a shared statement
 shadowed by a per-backend copy of its name, a dialect-only statement missing
 from the manifest or listed for a backend that does not declare it, a
@@ -170,6 +173,28 @@ module declares, an undeclared cross-family statement, and a statement that
 spells a lifecycle literal over a column its family declares vocabulary-valued
 — which is how this gate and FIG-2844's come to agree rather than merely not
 collide.
+
+FIG-3387 added the rules that make "total" mean what it says. A production
+string literal anywhere under either store crate that *is* a SQL statement — it
+opens with an upper-case SQL statement keyword — and has no declared home is
+refused, which is what finally reaches the SQL the table rules are structurally
+blind to: a pragma, an `ATTACH`, an advisory lock, an isolation level, a server
+clock read, a catalog probe. Those get one **connection module** per backend,
+listed with a reason, and held to two rules of their own: a literal there that
+reaches an owned table is refused, because that statement belongs to the
+table's family, and two with the same text in one store crate are refused,
+which is the duplicate rule applied where it could not previously see. A
+`[[dialect_only]]` entry must carry a short `kind` beside its prose, because a
+census of the dialect-specific surface has to be summable. And a declared
+statement that nothing issues is refused: a statement set holds what the store
+sends, not what it might send.
+
+Rendering is checked by a test rather than only at startup.
+`crates/lash-{sqlite,postgres}-store/src/rendered_statement_sets_tests.rs`
+forces every rendered set — and, on SQLite, every layout — so a statement the
+renderer refuses fails the ordinary unit test. Without it the refusal is a
+`LazyLock` panic at the set's first use, and for PostgreSQL that first use is
+inside a service-backed suite per-PR CI does not run.
 
 It reads a literal as SQL over a table only when the table stands in a relation
 position, after `FROM`, `INTO`, `UPDATE`, `JOIN`, `TABLE` or `TRUNCATE`. A
@@ -247,6 +272,114 @@ That ticket is the one place the prospect round found a genuinely new idea worth
 importing: Temporal decides fencing as lock-then-compare in shared Go code, with
 the dialect contributing only a lock suffix.
 
-The gate is scoped, so it is honest about what it does not yet cover. Until
-FIG-3387, a table outside `converted` may still be spelled anywhere; the gate
-says nothing about it, rather than being weakened to let it pass.
+### What the arc produced (FIG-3387)
+
+Measured on the closing tree, against the `b0b94f1f7` baseline in *Context*.
+
+| | baseline | now |
+|---|---|---|
+| SQLite production statements | 368 (336 distinct) | 399, all distinct |
+| PostgreSQL production statements | 381 (347 distinct) | 410, all distinct |
+| verbatim duplicates within a backend | ~30 each | **0 each**, enforced |
+| identical across backends | 122 | **203**, shared and written once |
+| statements naming no table | uncounted, unowned | 10 SQLite, 17 PostgreSQL, in one module each |
+| tables with one owner | 0 | 55, across 8 families |
+
+The surface did not shrink, and that is the honest headline. It grew by about
+9% per backend while the duplicate count went to zero. Three things account for
+the growth, and each is a statement that existed before and was not countable:
+a read whose filter varied is now one named statement per production shape
+rather than one `format!` with an appended predicate; a statement built per
+schema qualifier is now one rendered set per layout; and the SQL that names no
+table was not in the baseline's count at all because the baseline counted
+statements over tables. What changed is not how much SQL there is but that
+every piece of it has a name, an owner and a reason to differ.
+
+Sharing roughly doubled: 203 of the statements each backend issues are one
+text, written once, rendered twice — against 122 that merely happened to be
+identical before. The prospect round's estimate that roughly 65% of each
+backend was the same query written twice turned out to overstate what is
+*shareable*: 203 of 399 is 51% on SQLite and 50% on PostgreSQL, and the
+remainder is not laziness. It is named, per fork class, below.
+
+One table is deliberately **not** registered, and it is a render-axis
+constraint rather than an exception: `schema_versions` is the one lash table
+whose name is also a *column* of another table
+(`lash_release_stamp.schema_versions`). The renderer rewrites a table name
+wherever the token appears, so registering it prefixes that column too and
+every PostgreSQL open fails with `column "lash_schema_versions" of relation
+"lash_release_stamp" does not exist`. Provisioning owns the stamp; its one read
+is a named constant in `postgres/schema.rs`, which the gate already lists as a
+schema artifact for every family. A future table whose name collides with a
+column of another table has the same two choices — rename one of them, which
+ADR 0098 freezes, or leave the table to its schema artifacts.
+
+### The dialect-specific surface, by reason
+
+279 `[[dialect_only]]` entries, 124 of them naming both backends (the same
+operation, two texts) and 155 naming one (the operation exists on one backend
+only). Counted by `kind` tag, with an entry contributing to each tag it
+carries:
+
+| count | fork class |
+|---|---|
+| 64 | operation exists on one backend only |
+| 44 | head table differs (`session_head` / `sessions`, frozen above) |
+| 37 | `FOR UPDATE` |
+| 33 | boolean representation (`0`/`1` versus `FALSE`/`TRUE`) |
+| 19 | `ON CONFLICT` versus `INSERT OR IGNORE`/`OR REPLACE` |
+| 13 | JSON extraction (`json_extract` versus `->>`) |
+| 12 | table exists on one backend only |
+| 12 | server clock |
+| 12 | list bind (`json_each` versus `unnest`/`= ANY`) |
+| 9 | array parameter |
+| 9 | durable shape (a fact stored differently, frozen) |
+| 8 | `SKIP LOCKED` |
+| 6 | `FOR SHARE` |
+| 6 | bound id list |
+| 5 | JSON pushdown |
+| 4 each | scalar versus optional row; `INDEXED BY`; parameter cast; generated key |
+| 3 each | `RETURNING`; bulk bind |
+| 2 each | result ordering; `FOR KEY SHARE`; JSON assembly |
+| 1 each | ten singletons, including the one remaining CAS predicate (FIG-3381) |
+
+Two readings worth keeping. First, the single largest class — 64 — is not a
+difference in how a query is spelled but an operation one backend simply does
+not have, and the second largest, 44, is a table name ADR 0098 freezes. Neither
+is addressable by any sharing mechanism. Second, the row-lock classes together
+(`FOR UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `SKIP LOCKED`, 53 entries) are the
+cost of PostgreSQL needing explicit locks where every SQLite write path already
+holds `BEGIN IMMEDIATE`; that is the surface FIG-3381's decision layer would
+have to shrink, and it shrank one of them.
+
+Fifteen `[[cross_family]]` entries name the statements that genuinely span
+families, and the gate recomputes each one's `touches` set from the statement
+text, so an entry cannot drift from its query. Five `[[exempt]]` paths and two
+`[[connection]]` modules are the whole of what is allowed to hold SQL without
+owning a table.
+
+### What we did not adopt, and why
+
+Unchanged from *What is deliberately not adopted* above, and every reason was
+verified against a local clone rather than taken from documentation
+(`/workspace/notes/lash/prospect-sql-dual-backend-2026-09-20.md`): sqlx `Any`
+(no SQL translation, nine scalar kinds, no arrays, no compile-time checks); an
+ORM or Diesel `MultiConnection` (Vaultwarden shares 88% this way and has no
+lock-like query at all); `sea-query` for anything safety-relevant (its lock
+clause is a documented no-op on SQLite, so a lock vanishes instead of failing);
+`sqlc` (River's own source calls its SQLite engine "off the charts buggy"); a
+Kine-style struct of overridable query fields (no completeness check — a
+backend that forgets an override inherits a statement that is wrong for it);
+claim logic in PostgreSQL stored functions (moves the fork into the database);
+and templating or string surgery at a fork point, which is the one mechanism
+that makes "similar" statements shareable and the one that makes drift
+invisible.
+
+Two more the arc itself declined. **Closing a gap to make a statement
+shareable** — adding `ON CONFLICT DO NOTHING` to the backend that does not need
+it — was refused every time it came up: it turns a constraint error into a
+silent no-op, which is a semantic change wearing a refactor's clothes.
+**Renaming either durable head table** so the two backends could share their
+head statements would have collapsed 44 forks at a stroke and invalidated every
+existing database; the names stay frozen and the 44 entries are the price,
+written down.

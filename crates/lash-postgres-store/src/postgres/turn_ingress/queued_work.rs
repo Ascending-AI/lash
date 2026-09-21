@@ -16,6 +16,20 @@
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only PostgreSQL issues.
     pub(crate) struct QueuedBatchPostgresStatements @ "queued_work_batch" {
+        /// The next `enqueue_seq` for this table, drawn from the column's own
+        /// sequence before the insert.
+        ///
+        /// `pg_get_serial_sequence` takes its relation as *text*, so this is
+        /// the one statement in the family whose table name is spelled with
+        /// the `lash_` prefix rather than rendered: the renderer rewrites
+        /// table *tokens*, and a name inside a string literal is not one. It
+        /// is still a named statement with one owner, which is what the
+        /// alternative — a literal at the call site — was not.
+        select_next_enqueue_seq = "SELECT nextval(pg_get_serial_sequence(
+                 'lash_queued_work_batches',
+                 'enqueue_seq'
+             ))";
+
         /// Enqueue batch `?2` for session `?3` at sequence `?1`, keeping an
         /// existing batch under the same source key and returning the id that
         /// was written.

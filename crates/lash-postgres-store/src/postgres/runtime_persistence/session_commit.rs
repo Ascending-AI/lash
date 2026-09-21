@@ -49,10 +49,14 @@ impl SessionCommitStore for PostgresSessionStore {
         let session_id = &self.session_id;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         read_session_state_version_tx(&mut tx, session_id, false).await?;
         let Some(meta) = load_session_head_meta_tx(&mut tx, session_id, false).await? else {
             tx.commit().await.map_err(store_sqlx_error)?;
@@ -131,10 +135,14 @@ impl SessionCommitStore for PostgresSessionStore {
         let session_id = &self.session_id;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let row = sqlx::query(session_sql().graph_postgres.select_lookup.sql())
             .bind(node_id)
             .bind(session_id.as_str())

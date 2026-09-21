@@ -8,11 +8,15 @@ pub(crate) async fn lock_session_history_mutation_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 1::bigint))")
-        .bind(session_id.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_session_history
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     Ok(())
 }
 
@@ -24,12 +28,9 @@ pub(crate) async fn lock_session_history_mutations_tx(
         return Ok(());
     }
     sqlx::query(
-        "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
-         FROM (
-             SELECT DISTINCT session_id
-             FROM unnest($1::TEXT[]) AS target(session_id)
-             ORDER BY session_id
-         ) AS ordered",
+        crate::connection_sql::connection_sql()
+            .lock_xact_session_history_batch
+            .sql(),
     )
     .bind(
         session_ids
@@ -160,10 +161,10 @@ async fn enqueue_queued_work_with_outcome_tx(
         None
     };
     let enqueue_seq: i64 = sqlx::query_scalar(
-        "SELECT nextval(pg_get_serial_sequence(
-            'lash_queued_work_batches',
-            'enqueue_seq'
-         ))",
+        crate::turn_ingress::turn_ingress_sql()
+            .queued_batches_postgres
+            .select_next_enqueue_seq
+            .sql(),
     )
     .fetch_one(&mut **tx)
     .await
@@ -258,27 +259,17 @@ async fn lock_process_wake_source_tx(
     // bound this correctness lock locally even when no connection-wide
     // `lock_timeout` was installed. SQLSTATE 55P03 maps to `Contended`.
     sqlx::query(
-        "SELECT set_config(
-             'lock_timeout',
-             CASE
-                 WHEN current_setting('lock_timeout') = '0'
-                   OR current_setting('lock_timeout')::interval > INTERVAL '10 seconds'
-                 THEN '10s'
-                 ELSE current_setting('lock_timeout')
-             END,
-             TRUE
-         )",
+        crate::connection_sql::connection_sql()
+            .clamp_lock_timeout
+            .sql(),
     )
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
     sqlx::query(
-        "SELECT pg_advisory_xact_lock(
-             hashtextextended(
-                 length($1)::TEXT || ':' || $1 || length($2)::TEXT || ':' || $2,
-                 0
-             )
-         )",
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text_pair
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(source_key)

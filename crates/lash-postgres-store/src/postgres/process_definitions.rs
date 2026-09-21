@@ -88,11 +88,15 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
         let fingerprint = definition.fingerprint();
         let now_ms = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(&definition_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(&definition_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
         let existing: Option<(i64, String, String)> =
             sqlx::query_as(process_sql().definition.select_for_cas.sql())
                 .bind(&owner_json)

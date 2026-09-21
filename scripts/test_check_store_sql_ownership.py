@@ -86,21 +86,6 @@ class SeededTree:
         shutil.rmtree(self.directory, ignore_errors=True)
 
 
-# The `converted` list as the manifest spells it. Seeds that turn a family off
-# substitute against this, so adding a family re-points every one of them here
-# rather than in each case.
-CONVERTED_ANCHOR = """converted = [
-    "artifact",
-    "attachment",
-    "effect",
-    "process",
-    "session_core",
-    "trigger",
-    "turn_ingress",
-    "wait",
-]"""
-
-
 class StoreSqlOwnershipGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tree = SeededTree()
@@ -188,6 +173,18 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         )
         self.assert_refused("carries no reason")
 
+    def test_a_manifest_entry_without_a_kind_is_refused(self) -> None:
+        text = self.tree.read("crates/lash-store-sql/dialect-only.toml")
+        marker = 'statement = "effect_replay.renew_lease"'
+        start = text.index(marker)
+        kind_start = text.index("kind =", start)
+        kind_end = text.index("\n", kind_start)
+        self.tree.write(
+            "crates/lash-store-sql/dialect-only.toml",
+            text[:kind_start] + 'kind = ""' + text[kind_end:],
+        )
+        self.assert_refused("carries no `kind`")
+
     def test_a_column_subset_that_is_not_a_named_projection_is_refused(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/src/effect/group.rs",
@@ -227,23 +224,19 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         )
         self.assert_refused("is not one of the column lists")
 
-    def test_a_family_removed_from_converted_makes_the_gate_silent_about_it(self) -> None:
-        self.tree.substitute(
+    def test_a_converted_list_coming_back_is_refused(self) -> None:
+        """The gate is total; a list of families to check is how it stopped being.
+
+        FIG-3387 deleted `converted`. Re-adding it — even spelling every
+        family — would reintroduce the switch that made the gate silent, so
+        the key itself is refused rather than quietly ignored.
+        """
+        text = self.tree.read("crates/lash-store-sql/dialect-only.toml")
+        self.tree.write(
             "crates/lash-store-sql/dialect-only.toml",
-            CONVERTED_ANCHOR,
-            'converted = ["artifact", "attachment", "effect", "process", "session_core"]',
+            'converted = ["artifact"]\n' + text,
         )
-        self.tree.substitute(
-            "crates/lash-sqlite-store/src/retention.rs",
-            "let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);",
-            'let _stray = "SELECT key_id FROM await_event_waits WHERE key_id = ?1";\n'
-            "    let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);",
-        )
-        failures = self.tree.failures()
-        self.assertFalse(
-            any("await_event_waits" in failure for failure in failures),
-            f"the gate is meant to be silent about an unconverted family; got {failures}",
-        )
+        self.assert_refused("`converted` no longer exists")
 
     # --- FIG-3399 -------------------------------------------------------
 
@@ -301,7 +294,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
             'reason = "invented"\n\n'
             '[[cross_family]]\nstatement = "effect_journal.scope_is_quiescent"',
         )
-        self.assert_refused("reaches no converted table outside its own family")
+        self.assert_refused("reaches no owned table outside its own family")
 
     def test_a_statement_spelling_a_vocabulary_literal_itself_is_refused(self) -> None:
         """FIG-2844's rule, held over the statement text this gate parses.
@@ -401,12 +394,20 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         )
         self.assert_refused("attachment_manifest")
 
-    def test_the_gate_was_silent_about_that_literal_before_the_family_converted(self) -> None:
-        """The red side of the case above: the rule, not the seed, is new."""
+    def test_the_finding_above_comes_from_the_table_being_owned(self) -> None:
+        """The red side of the case above: the rule, not the seed, is what fires.
+
+        Dropping `attachment_manifest` from the family's table list is the
+        only way left to make the gate not own that table, and with it gone
+        the same seed is no longer reported as SQL over someone's table. It is
+        still reported — the literal has no owner at all now, which is rule 1b
+        — so the narrow claim is the one asserted: no finding says the table
+        belongs to a family.
+        """
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            CONVERTED_ANCHOR,
-            'converted = ["artifact", "effect", "process", "session_core", "trigger", "wait"]',
+            'tables = ["attachment_manifest", "attachment_condemnations"]',
+            'tables = ["attachment_condemnations"]',
         )
         stray = (
             'const STRAY: &str = "SELECT 1 FROM lash_attachment_manifest '
@@ -417,13 +418,148 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
             "impl PostgresSessionStoreFactory {",
             f"{stray}\nimpl PostgresSessionStoreFactory {{",
         )
-        # Removing the family from `converted` also orphans its manifest
-        # entries, which the gate reports; the claim here is narrower, and it
-        # is the whole claim: the stray literal itself goes unreported.
         self.assertFalse(
-            any("session_factory.rs" in failure for failure in self.tree.failures()),
-            "the gate must be silent about a family that is not in `converted`",
+            any(
+                "belongs to the `attachment` family" in failure
+                for failure in self.tree.failures()
+            ),
+            "the ownership finding must come from the table being owned",
         )
+
+    # --- FIG-3387 -------------------------------------------------------
+
+    def test_sql_naming_no_table_with_no_owner_is_refused(self) -> None:
+        """What makes the gate total: a statement no table rule can see.
+
+        An advisory lock names no relation, so rules 1 and 6 are blind to it.
+        Before FIG-3387 six verbatim copies of this exact text lived in six
+        modules and the gate said nothing about any of them.
+        """
+        self.tree.substitute(
+            "crates/lash-postgres-store/src/postgres/process_helpers.rs",
+            "pub(crate) async fn process_lease_now_epoch_ms_tx(",
+            'const STRAY: &str = "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";\n\n'
+            "pub(crate) async fn process_lease_now_epoch_ms_tx(",
+        )
+        self.assert_refused("a production SQL literal in a store crate has no owner")
+
+    def test_prose_in_a_store_crate_is_not_read_as_a_statement(self) -> None:
+        """The other half of the rule above: it matches statements, not words.
+
+        A literal is a statement when it *opens* with an upper-case SQL
+        keyword. Every one of these was found in the two store crates.
+        """
+        for prose in (
+            "failed to set the lock timeout",
+            "pragma_database_list",
+            "the sweep will delete rows under a retired scope",
+            "insert into the queue",
+        ):
+            self.assertFalse(
+                GATE.is_sql_statement(prose),
+                f"prose read as a statement: {prose!r}",
+            )
+        for sql in (
+            "PRAGMA user_version",
+            "  SELECT 1 FROM sqlite_master",
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+            "ATTACH DATABASE ?1 AS process_registry",
+        ):
+            self.assertTrue(GATE.is_sql_statement(sql), f"real SQL missed: {sql!r}")
+
+    def test_a_statement_nobody_issues_is_refused(self) -> None:
+        """An unissued statement is a deleted call site's leftovers.
+
+        FIG-3387 found one on main — `effect_group_child.count_membership`,
+        declared by the foundation lane and called by nothing — which is what
+        this rule exists to stop happening again.
+        """
+        self.tree.substitute(
+            "crates/lash-store-sql/src/effect/scope_retirement.rs",
+            "crate::statements! {",
+            "crate::statements! {\n"
+            "    /// A statement no caller issues.\n"
+            "    pub struct OrphanStatements @ \"effect_scope_retirement\" {\n"
+            "        /// Nobody calls this.\n"
+            "        count_fig3387_orphans = \"SELECT COUNT(*) FROM effect_scope_retirements\";\n"
+            "    }\n"
+            "}\n\n"
+            "crate::statements! {",
+        )
+        self.assert_refused("is declared and never issued")
+
+    def test_a_duplicated_connection_statement_is_refused(self) -> None:
+        """Rule 2 held over the SQL rule 2 cannot see."""
+        self.tree.substitute(
+            "crates/lash-postgres-store/src/postgres/connection_sql.rs",
+            '        lock_shared_by_pair = "SELECT pg_advisory_lock_shared(?1, ?2)";',
+            '        lock_shared_by_pair = "SELECT pg_advisory_lock_shared(?1, ?2)";\n\n'
+            "        /// A second name for a statement that already has one.\n"
+            '        lock_shared_again = "SELECT pg_advisory_lock_shared(?1,   ?2)";',
+        )
+        self.assert_refused("has the same text as")
+
+    def test_a_connection_module_reaching_an_owned_table_is_refused(self) -> None:
+        """The connection list is for SQL that belongs to no table.
+
+        Without this rule the list would be an exemption: anything at all
+        could be parked in it by calling it connection-scoped.
+        """
+        self.tree.substitute(
+            "crates/lash-postgres-store/src/postgres/connection_sql.rs",
+            '        lock_shared_by_pair = "SELECT pg_advisory_lock_shared(?1, ?2)";',
+            '        lock_shared_by_pair = "SELECT pg_advisory_lock_shared(?1, ?2)";\n\n'
+            "        /// A connection module reaching a table it does not own.\n"
+            '        peek = "SELECT process_id FROM processes WHERE process_id = ?1";',
+        )
+        self.assert_refused("This list is for the SQL that belongs to no table")
+
+    def test_an_undeclared_non_table_literal_inside_an_owner_module_is_refused(self) -> None:
+        """An owner module is not a licence to spell SQL either."""
+        self.tree.substitute(
+            "crates/lash-sqlite-store/src/scope_fence.rs",
+            "fn lift_journal_fences_of_registered_processes(",
+            'const STRAY: &str = "PRAGMA journal_size_limit = 1";\n\n'
+            "fn lift_journal_fences_of_registered_processes(",
+        )
+        self.assert_refused("is not one of its declared statements")
+
+    def test_a_connection_module_without_a_reason_is_refused(self) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"\nreason = """',
+            '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"\n'
+            'reason = ""\nunused = """',
+        )
+        self.assert_refused("carries no reason")
+
+    def test_a_connection_module_listed_twice_is_refused(self) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"',
+            '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"\n'
+            'reason = "a second listing"\n\n'
+            '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"',
+        )
+        self.assert_refused("is listed twice")
+
+    def test_a_connection_module_that_does_not_exist_is_refused(self) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            'path = "crates/lash-sqlite-store/src/connection_sql.rs"',
+            'path = "crates/lash-sqlite-store/src/connection_sql_fig3387.rs"',
+        )
+        self.assert_refused("does not exist")
+
+    def test_a_connection_module_outside_the_store_crates_is_refused(self) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"',
+            '[[connection]]\npath = "crates/lash-sim/src/postgres_replay.rs"\n'
+            'reason = "invented"\n\n'
+            '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"',
+        )
+        self.assert_refused("is outside the store crates")
 
     def test_an_attachment_statement_spelling_an_owner_label_itself_is_refused(self) -> None:
         """`owner_kind` is vocabulary-valued, so the label may only be named.

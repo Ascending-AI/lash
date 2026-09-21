@@ -39,26 +39,16 @@ pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
     }]
 }
 
-/// Whether this connection may write the stamp at all.
+/// Whether this connection may write the stamp at all
+/// (`host_provisioned_mode_needs_no_ddl_privilege`).
 ///
-/// A host-provisioned deployment can admit a role holding nothing but `SELECT`,
-/// and that is a published property of that mode rather than an accident
-/// (`host_provisioned_mode_needs_no_ddl_privilege`). The privilege is therefore
-/// asked for with a catalog read instead of discovered by letting an `INSERT`
-/// raise `42501`: a refused statement would poison the admitting transaction,
-/// so the open would fail rather than proceed unstamped. A reader that cannot
-/// write records no release and the store reports the absence, which is the
-/// honest answer — it did not write these bytes.
+/// A reader that cannot write records no release and the store reports the
+/// absence, which is the honest answer — it did not write these bytes. Why the
+/// privilege is asked for rather than discovered is on the statement.
 async fn stamp_is_writable(tx: &mut Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT CASE
-                  WHEN to_regclass('lash_release_stamp') IS NULL THEN FALSE
-                  ELSE has_table_privilege('lash_release_stamp', 'INSERT')
-                       AND has_table_privilege('lash_release_stamp', 'UPDATE')
-                END",
-    )
-    .fetch_one(&mut **tx)
-    .await
+    sqlx::query_scalar(session_sql().release_stamp.select_is_writable.sql())
+        .fetch_one(&mut **tx)
+        .await
 }
 
 /// Apply the update rule inside the open transaction that just admitted the

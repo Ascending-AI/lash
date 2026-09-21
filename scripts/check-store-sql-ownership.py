@@ -8,17 +8,31 @@ that on its own: a call site can always paste a statement back, a second
 column subset costs nothing to add, and a fork that exists on one backend only
 is invisible until the conformance suite happens to cover it.
 
-This gate is that enforcement, and it is *scoped*: `converted` in
-`crates/lash-store-sql/dialect-only.toml` lists the families that have moved,
-and the gate is total for them and silent about every other table in the
-repository. FIG-3387 closes it over everything.
+This gate is that enforcement, and it is *total* (FIG-3387): every family in
+`crates/lash-store-sql/dialect-only.toml` is checked, and the two store crates
+are scanned whole rather than only for the tables a family happens to name.
+There is no list of families the gate is silent about.
 
-What it refuses, for each converted family:
+What it refuses:
 
-1. **Stray SQL.** A production SQL string literal naming one of the family's
-   tables, in a file that is not one of the family's declared owners, its
-   schema artifacts, or an explicitly exempted source. `#[cfg(test)]` modules
-   and test files are white-box and may spell SQL freely.
+1. **Stray SQL.** A production SQL string literal naming an owned table, in a
+   file that is not one of that family's declared owners, its schema
+   artifacts, or an explicitly exempted source. `#[cfg(test)]` modules and
+   test files are white-box and may spell SQL freely.
+1b. **Unowned SQL inside a store crate.** Anywhere under
+   `crates/lash-sqlite-store/src` or `crates/lash-postgres-store/src`, a
+   production string literal that *is* a SQL statement — it opens with a SQL
+   statement keyword — and is neither a declared statement in an owner module,
+   nor in a listed schema module, nor in a listed `[[connection]]` module, nor
+   exempt. This is what makes the gate total rather than table-shaped: a
+   pragma, an advisory lock or a catalog probe names no table, so rule 1 can
+   never see it.
+1c. **A connection module reaching a table.** A `[[connection]]` module holds
+   the SQL that belongs to no table — pragmas, `ATTACH`, advisory locks,
+   isolation levels, the server clock, catalog probes. A literal there that is
+   SQL over an owned table is refused: that statement belongs to the table's
+   family. Two literals in one store crate's connection modules with the same
+   text are refused too, which is rule 2 held over the SQL rule 2 cannot see.
 2. **A duplicate statement.** Two names whose text is the same, inside one
    backend's statement set (shared plus that backend's dialect-only).
 3. **A shadowed statement.** A name declared both in the shared crate and in a
@@ -26,15 +40,21 @@ What it refuses, for each converted family:
 4. **An unmanifested fork.** A statement declared in a backend and absent from
    `[[dialect_only]]`, an entry whose backends do not match the declarations
    (which is how "exists in one backend only" is named), or an entry with no
-   reason.
+   reason or no `kind`. The `kind` is the short tag the per-reason census of
+   the dialect-specific surface is counted from; prose alone cannot be summed.
 5. **A stray column list.** A projection of two or more columns over a
-   converted table that is not one of the `pub const … &str` column lists its
+   owned table that is not one of the `pub const … &str` column lists its
    table module declares.
 6. **An undeclared cross-family statement.** A statement that is SQL over a
-   converted table belonging to another family, with no `[[cross_family]]`
+   owned table belonging to another family, with no `[[cross_family]]`
    entry naming the tables it reaches and why. A sweep that spans families is
    still owned by exactly one module; the entry is what makes the other
    families' owners able to find it.
+7b. **A statement nobody issues.** A declared statement whose field name
+   appears nowhere else in the repository's Rust. A statement set is not a
+   catalogue of SQL that might be useful: an unissued statement is text the
+   gate holds to every rule above and no caller holds to anything, and it is
+   how a deleted call site leaves its query behind.
 7. **A spelled lifecycle literal.** A statement over a table whose columns
    carry domain vocabulary (`[families.<name>.vocabulary_columns]`) may not
    spell that vocabulary itself — `status IN ('running', …)`. It names the
@@ -43,8 +63,8 @@ What it refuses, for each converted family:
    text this gate parses, so the two gates agree rather than merely not
    colliding.
 
-Rules 1 and 6 read a literal as SQL over a table only when the table stands in
-a *relation position* — after `FROM`, `INTO`, `UPDATE`, `JOIN`, `TABLE` or
+Rules 1, 1c and 6 read a literal as SQL over a table only when the table stands
+in a *relation position* — after `FROM`, `INTO`, `UPDATE`, `JOIN`, `TABLE` or
 `TRUNCATE`. A statement keyword alone matches prose: `"api.sessions.select"`
 and a test name about merging wakes "across processes" are not queries.
 
@@ -78,6 +98,28 @@ SQL_KEYWORDS = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "MERGE", "WI
 # `"triggers.update"` and "must batch compatible wakes across processes" all
 # carry a keyword and a table name and none of them is a statement.
 TABLE_POSITION_KEYWORDS = ("FROM", "INTO", "UPDATE", "JOIN", "TABLE", "TRUNCATE")
+
+# The two crates the gate scans whole. Every production SQL literal under them
+# answers to an owner: a statement set, a schema artifact, a connection module
+# or an exemption.
+STORE_CRATES = ("crates/lash-sqlite-store/src/", "crates/lash-postgres-store/src/")
+
+# The keywords a SQL statement opens with. A literal is read as a statement
+# when it *starts* with one (comments and leading whitespace skipped), which is
+# what separates `"SELECT artifact_bytes FROM …"` from an English sentence that
+# happens to contain the word: prose in this tree opens with a word, not with
+# an upper-case SQL keyword. Upper case is required for the same reason — SQL
+# in this repository is written with upper-case keywords, and `drop` in a
+# sentence is not a statement.
+STATEMENT_OPENERS = (
+    "SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "TRUNCATE", "MERGE", "VALUES",
+    "CREATE", "DROP", "ALTER", "PRAGMA", "SET", "VACUUM", "ANALYZE", "REINDEX",
+    "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE", "LISTEN", "NOTIFY",
+    "EXPLAIN", "GRANT", "REVOKE", "COPY", "ATTACH", "DETACH",
+)
+OPENS_A_STATEMENT = re.compile(
+    r"^\s*(?:--[^\n]*\n\s*)*(?:" + "|".join(STATEMENT_OPENERS) + r")\b"
+)
 
 SET_HEADER = re.compile(
     r"statements!\s*\{(?P<body>)", re.MULTILINE
@@ -233,6 +275,24 @@ def is_sql_over(text: str, table: str) -> bool:
     return (
         re.search(rf"\b(?:{position})\s+(?:LASH_)?{re.escape(table.upper())}\b", upper) is not None
     )
+
+
+def is_sql_statement(text: str) -> bool:
+    """Whether `text` is a SQL statement, whatever it names.
+
+    Rule 1 asks "is this SQL over *this table*"; that question cannot see a
+    pragma, an advisory lock or a catalog probe, because they name no table at
+    all. This is the question that can.
+    """
+    return OPENS_A_STATEMENT.match(text) is not None
+
+
+def store_crate_of(relative: str) -> str | None:
+    """The store crate `relative` belongs to, or `None`."""
+    for crate in STORE_CRATES:
+        if relative.startswith(crate):
+            return crate
+    return None
 
 
 def squeeze(text: str) -> str:
@@ -418,7 +478,12 @@ def projections(sql: str, table: str) -> list[str]:
 def check(root: Path) -> list[str]:
     findings = Findings()
     manifest = tomllib.loads(read_text(root, str(MANIFEST)))
-    converted = manifest["converted"]
+    if "converted" in manifest:
+        findings.refuse(
+            f"{MANIFEST}: `converted` no longer exists. The gate is total over every "
+            "family (FIG-3387); a family is checked because it is declared, not because "
+            "it is listed a second time."
+        )
     families = manifest["families"]
     exempt = {entry["path"]: entry["reason"] for entry in manifest.get("exempt", [])}
     for path, reason in exempt.items():
@@ -430,6 +495,26 @@ def check(root: Path) -> list[str]:
         target = root / path.rstrip("/")
         if not (target.is_dir() if path.endswith("/") else target.is_file()):
             findings.refuse(f"{MANIFEST}: exempted path `{path}` does not exist")
+
+    # Modules that may hold SQL naming no table: pragmas, `ATTACH`, advisory
+    # locks, isolation levels, the server clock, catalog probes. One per
+    # backend, listed with a reason, and held to rules 1c below.
+    connection_modules: dict[str, str] = {}
+    for entry in manifest.get("connection", []):
+        path = entry["path"]
+        if path in connection_modules:
+            findings.refuse(f"{MANIFEST}: connection module `{path}` is listed twice")
+        if not entry.get("reason", "").strip():
+            findings.refuse(f"{MANIFEST}: connection module `{path}` carries no reason")
+        if store_crate_of(path) is None:
+            findings.refuse(
+                f"{MANIFEST}: connection module `{path}` is outside the store crates. The "
+                "exemption for non-runtime sources is `[[exempt]]`; this list is for the "
+                "store crates' own connection-scoped SQL."
+            )
+        elif not (root / path).is_file():
+            findings.refuse(f"{MANIFEST}: connection module `{path}` does not exist")
+        connection_modules[path] = entry.get("reason", "")
 
     def is_exempt(relative: str) -> bool:
         return any(
@@ -462,6 +547,15 @@ def check(root: Path) -> list[str]:
             findings.refuse(f"{MANIFEST}: `{name}` is listed twice")
         if not entry.get("reason", "").strip():
             findings.refuse(f"{MANIFEST}: `{name}` carries no reason")
+        # The short tag beside the prose. The prose says why this statement
+        # forks; the tag is what makes the manifest countable, and a per-reason
+        # census of the dialect-specific surface is the number the arc reports
+        # (FIG-3387). Prose alone cannot be summed.
+        if not entry.get("kind", "").strip():
+            findings.refuse(
+                f"{MANIFEST}: `{name}` carries no `kind`. Name the fork class in a few words "
+                "beside the reason, reusing an existing one where it fits."
+            )
         manifest_entries[name] = entry
 
     claimed_names: set[str] = set()
@@ -469,9 +563,9 @@ def check(root: Path) -> list[str]:
     # Filled per family, consumed by the stray-SQL pass once every family's
     # declarations are known: a family module may legitimately read another
     # family's table (quiescence spans both), so the rule is "inside an owner
-    # module, every SQL literal over a converted table IS a declaration",
+    # module, every SQL literal over an owned table IS a declaration",
     # rather than a per-family path list.
-    converted_tables: dict[str, str] = {}
+    owned_tables: dict[str, str] = {}
     declared_texts: set[str] = set()
     owner_modules: set[str] = set()
     schema_modules: set[str] = set()
@@ -482,10 +576,7 @@ def check(root: Path) -> list[str]:
     # table -> the columns over it whose values are domain vocabulary.
     vocabulary_columns: dict[str, list[str]] = {}
 
-    for family in converted:
-        if family not in families:
-            findings.refuse(f"{MANIFEST}: converted family `{family}` has no `[families.{family}]`")
-            continue
+    for family in sorted(families):
         spec = families[family]
         tables = spec["tables"]
         prefixes = tuple(spec["statement_prefixes"])
@@ -627,7 +718,7 @@ def check(root: Path) -> list[str]:
                 continue
             vocabulary_columns[table] = columns
 
-        converted_tables.update((table, family) for table in tables)
+        owned_tables.update((table, family) for table in tables)
         declarations_by_family.extend((family, declaration) for declaration in all_declarations)
         for declaration in all_declarations:
             declared_texts.add(canonical(declaration.sql))
@@ -641,7 +732,7 @@ def check(root: Path) -> list[str]:
     for family, declaration in declarations_by_family:
         touched = sorted(
             table
-            for table, owner in converted_tables.items()
+            for table, owner in owned_tables.items()
             if owner != family and is_sql_over(declaration.sql, table)
         )
         key = (declaration.name, declaration.path)
@@ -652,7 +743,7 @@ def check(root: Path) -> list[str]:
             if entry is not None:
                 findings.refuse(
                     f"{MANIFEST}: `{declaration.name}` is listed as cross-family for "
-                    f"`{declaration.path}` but reaches no converted table outside its own "
+                    f"`{declaration.path}` but reaches no owned table outside its own "
                     "family. Delete the entry."
                 )
             continue
@@ -667,7 +758,7 @@ def check(root: Path) -> list[str]:
                 continue
             findings.refuse(
                 f"{declaration.path}:{declaration.line}: `{declaration.name}` is SQL over "
-                f"{touched}, which belong to other converted families, and is not declared in "
+                f"{touched}, which belong to other families, and is not declared in "
                 f"{MANIFEST}. A statement that spans families has one owner module and a "
                 "[[cross_family]] entry naming the tables it reaches and why."
             )
@@ -681,6 +772,27 @@ def check(root: Path) -> list[str]:
         findings.refuse(
             f"{MANIFEST}: cross-family entry `{name}` names no declared statement in `{owner}`"
         )
+
+    # 7b. A statement nobody issues.
+    #
+    # A field is read as `.<name>`, so one occurrence anywhere outside the
+    # declaration is enough. The rule is deliberately generous — it refuses
+    # only a name that appears nowhere at all — because the cost of a false
+    # refusal is a lane blocked on a name collision, and the cost of a missed
+    # one is a statement that stays until someone greps for it.
+    rust_corpus = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for base in ("crates", "examples", "runbooks")
+        for path in sorted((root / base).rglob("*.rs"))
+    )
+    for _family, declaration in declarations_by_family:
+        field = declaration.name.rsplit(".", 1)[-1]
+        if f".{field}" not in rust_corpus:
+            findings.refuse(
+                f"{declaration.path}:{declaration.line}: `{declaration.name}` is declared and "
+                "never issued. Delete it, or call it: a statement set holds what the store "
+                "sends, not what it might send."
+            )
 
     # 7. A statement over a vocabulary-valued column may not spell it.
     for _family, declaration in declarations_by_family:
@@ -696,52 +808,89 @@ def check(root: Path) -> list[str]:
                         "vocabulary expand it, so one enum edit still reaches every statement."
                     )
 
-    # 1. Stray SQL, over every converted family at once.
+    # 1, 1b and 1c. One pass over every production source: the repository-wide
+    # rule that no file outside a family's owners spells SQL over its tables,
+    # and — inside the two store crates — the total rule that every SQL literal
+    # has a declared home at all.
+    # text -> where it was first seen, per store crate's connection modules.
+    connection_texts: dict[str, dict[str, str]] = {crate: {} for crate in STORE_CRATES}
     for relative in sorted(production_sources(root)):
         if relative in schema_modules or is_exempt(relative):
             continue
         inside_owner = relative in owner_modules
+        is_connection = relative in connection_modules
+        crate = store_crate_of(relative)
         source = strip_cfg_test((root / relative).read_text(encoding="utf-8"))
         for offset, literal in string_literals(source):
-            for table, family in converted_tables.items():
+            where = f"{relative}:{line_of(source, offset)}"
+            named_a_table = False
+            for table, family in owned_tables.items():
                 if not is_sql_over(literal, table):
                     continue
+                named_a_table = True
                 if inside_owner and canonical(literal) in declared_texts:
                     break
-                where = f"{relative}:{line_of(source, offset)}"
                 if inside_owner:
                     findings.refuse(
-                        f"{where}: a production SQL literal names `{table}` (converted family "
+                        f"{where}: a production SQL literal names `{table}` (family "
                         f"`{family}`) but is not one of this module's declared statements. Every "
-                        "statement over a converted table is named: move it into a "
+                        "statement over an owned table is named: move it into a "
                         "`lash_store_sql::statements!` block."
+                    )
+                elif is_connection:
+                    findings.refuse(
+                        f"{where}: a connection module spells SQL over `{table}`, which belongs "
+                        f"to the `{family}` family. This list is for the SQL that belongs to no "
+                        "table; a statement that reaches one belongs to that table's owner "
+                        "module."
                     )
                 else:
                     findings.refuse(
                         f"{where}: a production SQL literal names `{table}`, which belongs to the "
-                        f"converted `{family}` family. Its statements live in that family's owner "
+                        f"`{family}` family. Its statements live in that family's owner "
                         "modules; call the named statement instead of spelling a new one."
                     )
                 break
+            if crate is None or named_a_table or not is_sql_statement(literal):
+                continue
+            text = canonical(literal)
+            if inside_owner:
+                if text not in declared_texts:
+                    findings.refuse(
+                        f"{where}: a production SQL literal in an owner module is not one of its "
+                        "declared statements. Every statement a store crate issues is named: "
+                        "declare it in a `lash_store_sql::statements!` block, or move it to the "
+                        "connection module if it names no table."
+                    )
+                continue
+            if not is_connection:
+                findings.refuse(
+                    f"{where}: a production SQL literal in a store crate has no owner. A "
+                    "statement over a table belongs to that table's owner module; one that names "
+                    "no table — a pragma, an advisory lock, an isolation level, a catalog probe — "
+                    f"belongs to a `[[connection]]` module listed in {MANIFEST}."
+                )
+                continue
+            seen = connection_texts[crate]
+            if text in seen:
+                findings.refuse(
+                    f"{where}: this connection statement has the same text as {seen[text]}. One "
+                    "statement, one name: call the existing constant instead of writing a second "
+                    "copy."
+                )
+            else:
+                seen[text] = where
 
-    for name in manifest_entries:
-        if name not in claimed_names and any(
-            name.startswith(f"{prefix}.")
-            for family in converted
-            for prefix in families.get(family, {}).get("statement_prefixes", [])
-        ):
+    prefixes = [
+        prefix
+        for family in families.values()
+        for prefix in family.get("statement_prefixes", [])
+    ]
+    for name in sorted(set(manifest_entries) - claimed_names):
+        if any(name.startswith(f"{prefix}.") for prefix in prefixes):
             findings.refuse(f"{MANIFEST}: `{name}` is listed but no store declares it")
-
-    unknown = set(manifest_entries) - claimed_names
-    for name in sorted(unknown):
-        if not any(
-            name.startswith(f"{prefix}.")
-            for family in converted
-            for prefix in families.get(family, {}).get("statement_prefixes", [])
-        ):
-            findings.refuse(
-                f"{MANIFEST}: `{name}` belongs to no converted family's statement prefixes"
-            )
+        else:
+            findings.refuse(f"{MANIFEST}: `{name}` belongs to no family's statement prefixes")
 
     return findings.failures
 
@@ -786,7 +935,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print("store SQL ownership: converted families hold the single-owner layout")
+    print("store SQL ownership: both store crates hold the single-owner layout")
     return 0
 
 

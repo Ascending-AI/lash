@@ -383,10 +383,10 @@ async fn load_turn_cancel_request_in_tx(
         return Ok(None);
     };
     let affected_rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT input_id, input_json, disposition
-         FROM lash_turn_cancel_affected_inputs
-         WHERE session_id = $1 AND turn_id = $2
-         ORDER BY ordinal ASC",
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_affected_inputs_postgres
+            .select_by_turn
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -502,12 +502,10 @@ pub(super) async fn append_turn_cancel_outcome_tx(
         return Ok(());
     }
     sqlx::query(
-        "INSERT INTO lash_turn_cancel_affected_inputs (
-             session_id, turn_id, ordinal, input_id, disposition, input_json
-         )
-         SELECT $1, $2, COALESCE(MAX(ordinal) + 1, 0), $3, $4, $5
-           FROM lash_turn_cancel_affected_inputs
-          WHERE session_id = $1 AND turn_id = $2",
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_affected_inputs_postgres
+            .append_at_next_ordinal
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -949,11 +947,15 @@ pub(super) async fn lock_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0::bigint))")
-        .bind(session_id.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     Ok(())
 }
 

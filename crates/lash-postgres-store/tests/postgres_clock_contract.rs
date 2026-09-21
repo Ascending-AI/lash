@@ -39,6 +39,7 @@ const PROCESS_REGISTRY_LEASES_SOURCE: &str =
     include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
 const EFFECT_REPLAY_SOURCE: &str = include_str!("../src/postgres/effect_replay.rs");
+const CONNECTION_SQL_SOURCE: &str = include_str!("../src/postgres/connection_sql.rs");
 
 fn unique_id(prefix: &str) -> String {
     let nonce = std::time::SystemTime::now()
@@ -339,8 +340,25 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
              after it) must not use the client wall clock (`{read}`)"
         );
     }
+    // The sanctioned read issues a *named* statement rather than a literal
+    // (FIG-3387), so the claim is two links: this body issues
+    // `select_statement_epoch_ms`, and that statement's declared text samples
+    // the server clock. Both are asserted, so neither link can be cut without
+    // this test going red.
     assert!(
-        sanctioned_tail.contains("clock_timestamp()"),
+        sanctioned_tail.contains("select_statement_epoch_ms"),
+        "the sanctioned lease clock read must issue `select_statement_epoch_ms`"
+    );
+    let declaration_start = CONNECTION_SQL_SOURCE
+        .find("select_statement_epoch_ms =")
+        .unwrap_or_else(|| panic!("missing `select_statement_epoch_ms` declaration"));
+    let declaration = &CONNECTION_SQL_SOURCE[declaration_start
+        ..declaration_start
+            + CONNECTION_SQL_SOURCE[declaration_start..]
+                .find(';')
+                .expect("unterminated statement declaration")];
+    assert!(
+        declaration.contains("clock_timestamp()"),
         "the sanctioned lease clock read must sample the PostgreSQL server clock"
     );
 }

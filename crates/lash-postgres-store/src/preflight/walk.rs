@@ -73,15 +73,6 @@ const UNDEFINED_TABLE: &str = "42P01";
 //   `pending` when a claim lapses. Anything else has already left the queue,
 //   and putting it on a drain list would be reporting work that is done.
 
-/// Persisted JSON module artifacts, ordered by their content-addressed module
-/// reference so the walk can resume without a table-sized offset scan.
-const MODULE_ARTIFACT_SQL: &str = "SELECT artifact_ref, artifact_bytes
-     FROM lash_lashlang_artifacts
-     WHERE namespace = $1
-       AND ($2::text IS NULL OR artifact_ref > $2::text)
-     ORDER BY artifact_ref
-     LIMIT $3";
-
 /// Read one page of one surface.
 ///
 /// The entry point [`crate::PostgresStorePreflight`] delegates to; every branch
@@ -116,12 +107,17 @@ async fn scan_module_artifacts(
     pool: &PgPool,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let rows = sqlx::query_as::<_, (String, Vec<u8>)>(MODULE_ARTIFACT_SQL)
-        .bind(MODULE_ARTIFACT_NAMESPACE)
-        .bind(scan.after.clone())
-        .bind(row_limit(scan))
-        .fetch_all(pool)
-        .await;
+    let rows = sqlx::query_as::<_, (String, Vec<u8>)>(
+        crate::artifact_store::artifact_sql()
+            .lashlang_artifacts
+            .list_namespace_page
+            .sql(),
+    )
+    .bind(MODULE_ARTIFACT_NAMESPACE)
+    .bind(scan.after.clone())
+    .bind(row_limit(scan))
+    .fetch_all(pool)
+    .await;
     let rows = match rows {
         Ok(rows) => rows,
         Err(error) => return read_failure(scan.surface, error),
@@ -514,13 +510,17 @@ async fn read_only_snapshot(pool: &PgPool) -> Result<Transaction<'_, Postgres>, 
             backend: "postgres",
             message: error.to_string(),
         })?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| StoreError::StorageFailure {
-            backend: "postgres",
-            message: error.to_string(),
-        })?;
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .begin_repeatable_read_read_only
+            .sql(),
+    )
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| StoreError::StorageFailure {
+        backend: "postgres",
+        message: error.to_string(),
+    })?;
     Ok(transaction)
 }
 

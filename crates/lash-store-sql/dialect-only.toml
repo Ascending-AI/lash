@@ -15,25 +15,20 @@
 #     `[[cross_family]]` entry below naming them and why;
 #   * a statement that spells a lifecycle literal over a column the family
 #     declares as vocabulary-valued, instead of naming it as a
-#     `{{term(column)}}` token the renderer expands.
+#     `{{term(column)}}` token the renderer expands;
+#   * a production SQL literal anywhere under `crates/lash-sqlite-store/src` or
+#     `crates/lash-postgres-store/src` that is not a declared statement, a
+#     schema artifact, a `[[connection]]` module's or exempt — which is what
+#     makes the gate total rather than table-shaped, since a pragma or an
+#     advisory lock names no table for the table rules to catch;
+#   * a `[[connection]]` module's literal that reaches an owned table, or two
+#     of them in one store crate with the same text.
 #
-# `converted` is what makes the gate total for what is converted and silent
-# about what is not. FIG-3387 closes it over every family.
+# The gate is total (FIG-3387). There is no list of families it is silent
+# about: a family is checked because it is declared below.
 
-converted = [
-    "artifact",
-    "attachment",
-    "effect",
-    "process",
-    "session_core",
-    "trigger",
-    "turn_ingress",
-    "wait",
-]
-
-# Production sources that may name a converted family's tables in SQL although
-# they own no statements. Each one needs a reason; the list is not a place to
-# park work.
+# Production sources that may name an owned table in SQL although they own no
+# statements. Each one needs a reason; the list is not a place to park work.
 [[exempt]]
 path = "crates/lash-sim/src/postgres_replay.rs"
 reason = """
@@ -54,6 +49,63 @@ statements are observations of a database lash already wrote, so binding them
 to a family's owner module would make the runbook's evidence depend on the
 layout it is meant to check independently. No production runtime SQL is
 exempted here, and none may be added.
+"""
+
+[[exempt]]
+path = "crates/lash-sqlite-store/src/testing.rs"
+reason = """
+Compiled only under the crate's `testing` feature: deterministic substrate
+faults and DDL-slicing helpers for external test harnesses. Its one `CREATE
+TABLE` is a fixture's, built per table name, and no production build contains
+this module at all.
+"""
+
+[[exempt]]
+path = "crates/lash-postgres-store/src/postgres/testing.rs"
+reason = """
+Compiled only under `test` or the crate's `testing` feature: creates and drops
+throwaway databases so a suite can run against an isolated one. `CREATE
+DATABASE` cannot be parameterised and names no lash table; no production build
+contains this module.
+"""
+
+[[exempt]]
+path = "crates/lash-postgres-store/src/postgres/test_support.rs"
+reason = """
+Compiled only under `test` or the crate's `testing` feature: pins the lease
+clock on a transaction so a suite can move time. It names no lash table, and
+the read side of the same pin — which does live in a production module — is a
+named statement in that backend's connection module.
+"""
+
+# ---------------------------------------------------------------------------
+# Connection modules
+# ---------------------------------------------------------------------------
+#
+# The SQL that belongs to no table: pragmas, `ATTACH`, advisory locks,
+# isolation levels, the server clock, catalog probes. One module per backend,
+# because scattering them is how six verbatim copies of one advisory lock came
+# to exist. A literal here that reaches an owned table is refused — that
+# statement belongs to the table's family — and two with the same text in one
+# store crate are refused as duplicates.
+
+[[connection]]
+path = "crates/lash-sqlite-store/src/connection_sql.rs"
+reason = """
+SQLite's connection-scoped SQL: the open pragmas built from the connection
+policy, the read-only probe's pragmas, the two `ATTACH`es, and the three reads
+of SQLite's own catalog (`sqlite_master`/`sqlite_schema`,
+`pragma_database_list`). None of it is a `statements!` set: a pragma takes no
+bound parameter and no table name, so the renderer has nothing to rewrite.
+"""
+
+[[connection]]
+path = "crates/lash-postgres-store/src/postgres/connection_sql.rs"
+reason = """
+PostgreSQL's connection-scoped SQL: the advisory-lock shapes, the isolation
+levels, the two `set_config` timeouts, the two clock reads and the `CHECK`
+constraint catalog probe. Declared as a `statements!` set so each one is named
+for tracing and rendered once, even though none of them names a table.
 """
 
 # ---------------------------------------------------------------------------
@@ -257,10 +309,23 @@ PostgreSQL's copy of the same forget; see the SQLite entry.
 """
 
 [families.artifact]
-tables = ["blobs", "artifact_refs", "artifact_owners", "artifact_owner_retirements"]
-statement_prefixes = ["blob", "artifact_ref", "artifact_owner", "artifact_owner_retirement"]
+tables = [
+    "blobs",
+    "artifact_refs",
+    "artifact_owners",
+    "artifact_owner_retirements",
+    "lashlang_artifacts",
+]
+statement_prefixes = [
+    "blob",
+    "artifact_ref",
+    "artifact_owner",
+    "artifact_owner_retirement",
+    "lashlang_artifact",
+]
 shared = [
     "crates/lash-store-sql/src/artifact/blobs.rs",
+    "crates/lash-store-sql/src/artifact/lashlang_artifacts.rs",
     "crates/lash-store-sql/src/artifact/refs.rs",
     "crates/lash-store-sql/src/artifact/owners.rs",
     "crates/lash-store-sql/src/artifact/owner_retirements.rs",
@@ -289,6 +354,7 @@ schema = [
 
 [families.artifact.table_modules]
 blobs = "crates/lash-store-sql/src/artifact/blobs.rs"
+lashlang_artifacts = "crates/lash-store-sql/src/artifact/lashlang_artifacts.rs"
 artifact_refs = "crates/lash-store-sql/src/artifact/refs.rs"
 artifact_owners = "crates/lash-store-sql/src/artifact/owners.rs"
 artifact_owner_retirements = "crates/lash-store-sql/src/artifact/owner_retirements.rs"
@@ -543,6 +609,7 @@ tables = [
     "queued_work_items",
     "session_execution_leases",
     "tool_intent_submissions",
+    "turn_cancel_affected_inputs",
     "turn_cancel_requests",
     "turn_cancel_closure_authorizations",
     "turn_cancel_closure_participants",
@@ -556,6 +623,7 @@ statement_prefixes = [
     "queued_work_item",
     "session_execution_lease",
     "tool_intent_submission",
+    "turn_cancel_affected_input",
     "turn_cancel_request",
     "turn_cancel_closure_authorization",
     "turn_cancel_closure_participant",
@@ -564,6 +632,7 @@ statement_prefixes = [
 ]
 shared = [
     "crates/lash-store-sql/src/turn_ingress.rs",
+    "crates/lash-store-sql/src/turn_ingress/cancel_affected_inputs.rs",
     "crates/lash-store-sql/src/turn_ingress/cancel_requests.rs",
     "crates/lash-store-sql/src/turn_ingress/cancellation_bindings.rs",
     "crates/lash-store-sql/src/turn_ingress/closure_authorizations.rs",
@@ -630,6 +699,7 @@ queued_work_batches = "crates/lash-store-sql/src/turn_ingress/queued_batches.rs"
 queued_work_items = "crates/lash-store-sql/src/turn_ingress/queued_items.rs"
 session_execution_leases = "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs"
 tool_intent_submissions = "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs"
+turn_cancel_affected_inputs = "crates/lash-store-sql/src/turn_ingress/cancel_affected_inputs.rs"
 turn_cancel_requests = "crates/lash-store-sql/src/turn_ingress/cancel_requests.rs"
 turn_cancel_closure_authorizations = "crates/lash-store-sql/src/turn_ingress/closure_authorizations.rs"
 turn_cancel_closure_participants = "crates/lash-store-sql/src/turn_ingress/closure_participants.rs"
@@ -894,6 +964,45 @@ list here but no shared statement.
 # ---------------------------------------------------------------------------
 # artifact family
 # ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "lashlang_artifact.insert_bytes"
+backends = ["postgres"]
+kind = "table exists on one backend only"
+reason = """
+`lashlang_artifacts` is PostgreSQL's inline byte store for artifacts. SQLite
+reaches the same bytes through the content-addressed `blobs` table and the
+`artifact_refs` pointer table, so it has no counterpart at all and every
+statement over this table is PostgreSQL-only by construction.
+"""
+
+[[dialect_only]]
+statement = "lashlang_artifact.select_bytes"
+backends = ["postgres"]
+kind = "table exists on one backend only"
+reason = """
+Same table, same reason. One name for one text: the publish path reads the
+bytes back to prove immutability and the get path reads them to serve a
+caller, and before FIG-3387 those were two verbatim copies in one module.
+"""
+
+[[dialect_only]]
+statement = "lashlang_artifact.exists"
+backends = ["postgres"]
+kind = "table exists on one backend only"
+reason = """
+Same table, same reason. The retain path asks only whether the artifact is
+there, so it does not carry the bytes back.
+"""
+
+[[dialect_only]]
+statement = "lashlang_artifact.list_namespace_page"
+backends = ["postgres"]
+kind = "table exists on one backend only"
+reason = """
+Same table, same reason. The preflight walk's page over one namespace; SQLite's
+preflight walks `artifact_refs` into `blobs` instead.
+"""
 
 [[dialect_only]]
 statement = "artifact_ref.insert_pointer"
@@ -1867,8 +1976,24 @@ out of the claimed batch's queued rows with json_extract rather than bound.
 # under `BEGIN IMMEDIATE`.
 
 [[dialect_only]]
+statement = "release_stamp.select_is_writable"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+A host-provisioned PostgreSQL deployment can admit a role holding nothing but
+`SELECT`, so whether the stamp is writable is asked of the catalog before it is
+attempted — a refused `INSERT` would poison the admitting transaction. SQLite
+opens a file it may write by definition and has no privilege question. It is
+also the one statement in this crate that spells the `lash_` prefix rather than
+rendering it: `to_regclass` and `has_table_privilege` take the relation as
+*text*, and the renderer rewrites table tokens, not the contents of a string
+literal.
+"""
+
+[[dialect_only]]
 statement = "checkpoint_blob_ref.delete_unrooted"
 backends = ["sqlite", "postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -1878,6 +2003,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "checkpoint_blob_ref.delete_unrooted_for_checkpoint"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -1890,6 +2016,7 @@ root's edges; the PostgreSQL twin,
 [[dialect_only]]
 statement = "checkpoint_blob_ref.delete_unrooted_for_checkpoints"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -1903,6 +2030,7 @@ path has one root to sever.
 [[dialect_only]]
 statement = "checkpoint_blob_ref.insert_batch"
 backends = ["sqlite", "postgres"]
+kind = "list bind"
 reason = """
 A variable-length list binds as one JSON array through `json_each` on
 SQLite and as a text array through `unnest` / `= ANY(...)` on PostgreSQL.
@@ -1911,6 +2039,7 @@ SQLite and as a text array through `unnest` / `= ANY(...)` on PostgreSQL.
 [[dialect_only]]
 statement = "checkpoint_blob_ref.select_components"
 backends = ["sqlite", "postgres"]
+kind = "list bind"
 reason = """
 A variable-length list binds as one JSON array through `json_each` on
 SQLite and as a text array through `unnest` / `= ANY(...)` on PostgreSQL.
@@ -1922,6 +2051,7 @@ PostgreSQL's delete path enumerates several roots at once.
 [[dialect_only]]
 statement = "deleted_session.exists"
 backends = ["sqlite", "postgres"]
+kind = "scalar versus optional row"
 reason = """
 SQLite reads a row and asks whether one came back;
 PostgreSQL asks `EXISTS(...)` and reads a boolean. The two decoders are
@@ -1931,6 +2061,7 @@ different shapes, so the two texts are.
 [[dialect_only]]
 statement = "deleted_session.insert_batch_from_targets"
 backends = ["postgres"]
+kind = "operation exists on one backend only"
 reason = """
 PostgreSQL only. The process prune
 records permanent identity evidence for a whole batch of process-owned session
@@ -1941,6 +2072,7 @@ per session and has no batch to record.
 [[dialect_only]]
 statement = "deleted_session.insert_from_meta"
 backends = ["sqlite", "postgres"]
+kind = "head table differs; ON CONFLICT"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -1953,6 +2085,7 @@ PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
 [[dialect_only]]
 statement = "deleted_session.insert_root"
 backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
 reason = """
 SQLite writes this through `INSERT OR IGNORE` / `INSERT OR REPLACE`;
 PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
@@ -1962,6 +2095,7 @@ PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
 [[dialect_only]]
 statement = "graph_node.delete_tombstoned_for_session"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -1972,6 +2106,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.delete_tombstoned_reclaimable"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -1982,6 +2117,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.exists_live"
 backends = ["sqlite"]
+kind = "boolean representation; operation exists on one backend only"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -1995,6 +2131,7 @@ answer hold for the rest of the transaction.
 [[dialect_only]]
 statement = "graph_node.exists_reachable"
 backends = ["postgres"]
+kind = "operation exists on one backend only"
 reason = """
 PostgreSQL only, and the other half of its ancestry
 walk: SQLite asks the same three anti-joins inside
@@ -2005,6 +2142,7 @@ row lock ahead of them.
 [[dialect_only]]
 statement = "graph_node.exists_readable_ancestor"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation; scalar versus optional row"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2017,6 +2155,7 @@ the probe in `EXISTS(...)` and reads a boolean where SQLite asks for a row.
 [[dialect_only]]
 statement = "graph_node.insert_batch"
 backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
 SQLite only. One commit's nodes ride as a single JSON
 array through `json_each`, which is how this store avoids a round trip per
@@ -2027,6 +2166,7 @@ form.
 [[dialect_only]]
 statement = "graph_node.lock_live"
 backends = ["postgres"]
+kind = "FOR UPDATE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2037,6 +2177,7 @@ lock.
 [[dialect_only]]
 statement = "graph_node.lock_live_id"
 backends = ["postgres"]
+kind = "FOR UPDATE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2049,6 +2190,7 @@ ahead of the anchor delete, so it reads the id and nothing else.
 [[dialect_only]]
 statement = "graph_node.retire"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2059,6 +2201,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.select_edge"
 backends = ["sqlite"]
+kind = "boolean representation; operation exists on one backend only"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2071,6 +2214,7 @@ SQLite only: PostgreSQL's twin
 [[dialect_only]]
 statement = "graph_node.select_edge_for_share"
 backends = ["postgres"]
+kind = "FOR SHARE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2081,6 +2225,7 @@ lock.
 [[dialect_only]]
 statement = "graph_node.select_frame_body"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2091,6 +2236,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.select_frame_node_id"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2101,6 +2247,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.select_leaf_state"
 backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
 SQLite only. It reads the generation and the
 tombstone together because it must tell a missing leaf from a tombstoned one
@@ -2111,6 +2258,7 @@ both into one absent row, which its caller raises the same refusal for.
 [[dialect_only]]
 statement = "graph_node.select_live_generation"
 backends = ["postgres"]
+kind = "operation exists on one backend only"
 reason = """
 PostgreSQL only; see
 `graph_node.select_leaf_state` for why SQLite reads the tombstone beside the
@@ -2120,6 +2268,7 @@ generation and this does not.
 [[dialect_only]]
 statement = "graph_node.select_lookup"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2130,6 +2279,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.select_occupied"
 backends = ["sqlite", "postgres"]
+kind = "list bind"
 reason = """
 A variable-length list binds as one JSON array through `json_each` on
 SQLite and as a text array through `unnest` / `= ANY(...)` on PostgreSQL.
@@ -2138,6 +2288,7 @@ SQLite and as a text array through `unnest` / `= ANY(...)` on PostgreSQL.
 [[dialect_only]]
 statement = "graph_node.select_owner_generation"
 backends = ["sqlite"]
+kind = "boolean representation; operation exists on one backend only"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2150,6 +2301,7 @@ row-locks the fork point it is about to build a lineage from.
 [[dialect_only]]
 statement = "graph_node.select_owner_generation_for_update"
 backends = ["postgres"]
+kind = "FOR UPDATE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2160,6 +2312,7 @@ lock.
 [[dialect_only]]
 statement = "graph_node.select_parent_facts"
 backends = ["sqlite"]
+kind = "boolean representation; operation exists on one backend only"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2172,6 +2325,7 @@ row-locks the parent for the duration of the commit.
 [[dialect_only]]
 statement = "graph_node.select_parent_facts_for_update"
 backends = ["postgres"]
+kind = "FOR UPDATE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2182,6 +2336,7 @@ lock.
 [[dialect_only]]
 statement = "graph_node.select_parent_for_update"
 backends = ["postgres"]
+kind = "FOR UPDATE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2194,6 +2349,7 @@ see `graph_node.select_retirable_parent` for why SQLite's is one statement.
 [[dialect_only]]
 statement = "graph_node.select_readable"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2204,6 +2360,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.select_readable_to_generation"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2214,6 +2371,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.select_retirable_parent"
 backends = ["sqlite"]
+kind = "boolean representation; operation exists on one backend only"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2229,6 +2387,7 @@ so its walk is `graph_node.select_parent_for_update` plus
 [[dialect_only]]
 statement = "graph_node.select_unreachable_leaves"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2239,6 +2398,7 @@ literal a fork rather than something to template over.
 [[dialect_only]]
 statement = "graph_node.select_unreachable_leaves_batch"
 backends = ["postgres"]
+kind = "boolean representation; operation exists on one backend only"
 reason = """
 `graph_nodes.tombstoned` is an INTEGER on SQLite and a BOOLEAN on
 PostgreSQL, so the reachability predicate this read carries is `tombstoned = 0`
@@ -2253,6 +2413,7 @@ deletes one session at a time.
 [[dialect_only]]
 statement = "release_stamp.select_release"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation; server clock"
 reason = """
 The stamp's singleton key is the integer `1` on SQLite and `TRUE` on
 PostgreSQL, and the write instant is the opening host's clock there and the
@@ -2262,6 +2423,7 @@ server's `clock_timestamp()` here. Nothing about this row renders identically.
 [[dialect_only]]
 statement = "release_stamp.select_stamp"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation; server clock"
 reason = """
 The stamp's singleton key is the integer `1` on SQLite and `TRUE` on
 PostgreSQL, and the write instant is the opening host's clock there and the
@@ -2271,6 +2433,7 @@ server's `clock_timestamp()` here. Nothing about this row renders identically.
 [[dialect_only]]
 statement = "release_stamp.upsert"
 backends = ["sqlite", "postgres"]
+kind = "boolean representation; server clock"
 reason = """
 The stamp's singleton key is the integer `1` on SQLite and `TRUE` on
 PostgreSQL, and the write instant is the opening host's clock there and the
@@ -2280,6 +2443,7 @@ server's `clock_timestamp()` here. Nothing about this row renders identically.
 [[dialect_only]]
 statement = "session_core.delete_process_session_rows"
 backends = ["postgres"]
+kind = "operation exists on one backend only"
 reason = """
 PostgreSQL only, and the one statement
 of this family that is not about a single table: the process prune removes a
@@ -2292,6 +2456,7 @@ same atomicity without the CTE.
 [[dialect_only]]
 statement = "session_head.corrupt_head_json"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2301,6 +2466,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.delete_by_session"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2310,6 +2476,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.insert_fork"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2319,6 +2486,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_checkpoint_roots"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2328,6 +2496,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_fork_points"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2337,6 +2506,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_head_json"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2348,6 +2518,7 @@ takes a row lock (`sessions.select_head_json_for_update`).
 [[dialect_only]]
 statement = "session_head.select_leaf_node_id"
 backends = ["sqlite"]
+kind = "head table differs; operation exists on one backend only"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2359,6 +2530,7 @@ the leaf on its own, where PostgreSQL's reads the whole head meta first.
 [[dialect_only]]
 statement = "session_head.select_meta"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2368,6 +2540,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_readable_range"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2377,6 +2550,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_reclaim"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2386,6 +2560,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_retained_by_leaf"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2395,6 +2570,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_retained_checkpoint"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2404,6 +2580,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_revision"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2413,6 +2590,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.select_sole_bound_session_id"
 backends = ["sqlite"]
+kind = "head table differs; operation exists on one backend only"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2426,6 +2604,7 @@ session id.
 [[dialect_only]]
 statement = "session_head.set_head_json"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2435,6 +2614,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "session_head.upsert"
 backends = ["sqlite"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2449,6 +2629,7 @@ keeps the predicate as its backstop.
 [[dialect_only]]
 statement = "session_meta.exists_materialized"
 backends = ["sqlite", "postgres"]
+kind = "head table differs; scalar versus optional row"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2460,6 +2641,7 @@ union in `EXISTS(...)`.
 [[dialect_only]]
 statement = "session_meta.exists_materialized_or_deleted"
 backends = ["postgres"]
+kind = "operation exists on one backend only"
 reason = """
 PostgreSQL only. Its fork path asks
 "materialized?" and "deleted?" in one round trip before taking any advisory
@@ -2471,6 +2653,7 @@ optimise.
 [[dialect_only]]
 statement = "session_meta.insert"
 backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
 reason = """
 SQLite writes this through `INSERT OR IGNORE` / `INSERT OR REPLACE`;
 PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
@@ -2480,6 +2663,7 @@ PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
 [[dialect_only]]
 statement = "session_meta.select_catalog"
 backends = ["sqlite", "postgres"]
+kind = "head table differs; boolean representation; JSON assembly"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2494,6 +2678,7 @@ would report a session as live in one row and deleted in another.
 [[dialect_only]]
 statement = "session_meta.select_relation"
 backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
 SQLite only: PostgreSQL reads the same projection
 under `FOR SHARE` (`session_meta.select_relation_for_share`), which it needs so
@@ -2503,6 +2688,7 @@ the observer-intent and fork-inheritance reads that follow see the same row.
 [[dialect_only]]
 statement = "session_meta.select_relation_for_share"
 backends = ["postgres"]
+kind = "FOR SHARE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2513,6 +2699,7 @@ lock.
 [[dialect_only]]
 statement = "session_meta.select_sole_relation_for_share"
 backends = ["postgres"]
+kind = "FOR SHARE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2523,6 +2710,7 @@ lock.
 [[dialect_only]]
 statement = "session_meta.select_sole_session_id"
 backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
 SQLite only. It reads two ids to decide
 "exactly one" and then re-reads the row it picked; PostgreSQL reads the whole
@@ -2533,6 +2721,7 @@ relation under a share lock it would rather not take twice
 [[dialect_only]]
 statement = "session_meta.select_state_version_for_update"
 backends = ["postgres"]
+kind = "FOR UPDATE"
 reason = """
 PostgreSQL holds this read across statements with a row lock, which
 `READ COMMITTED` needs and SQLite does not: every SQLite caller of the same
@@ -2546,6 +2735,7 @@ separately rather than built by appending a suffix per call.
 [[dialect_only]]
 statement = "session_meta.upsert"
 backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
 reason = """
 SQLite writes this through `INSERT OR IGNORE` / `INSERT OR REPLACE`;
 PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
@@ -2555,6 +2745,7 @@ PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
 [[dialect_only]]
 statement = "sessions.corrupt_head_json"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2564,6 +2755,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.delete_batch_returning"
 backends = ["postgres"]
+kind = "head table differs; operation exists on one backend only"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2577,6 +2769,7 @@ questions separately would let a commit land between them.
 [[dialect_only]]
 statement = "sessions.delete_by_session"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2586,6 +2779,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.exists_retention_source"
 backends = ["postgres"]
+kind = "head table differs; operation exists on one backend only"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2599,6 +2793,7 @@ re-prove.
 [[dialect_only]]
 statement = "sessions.insert_fork"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2608,6 +2803,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.insert_placeholder"
 backends = ["postgres"]
+kind = "head table differs; operation exists on one backend only"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2621,6 +2817,7 @@ SQLite's single-writer lock needs no placeholder.
 [[dialect_only]]
 statement = "sessions.scan_checkpoints_after"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2632,6 +2829,7 @@ The resuming shape of
 [[dialect_only]]
 statement = "sessions.scan_checkpoints_first_page"
 backends = ["postgres"]
+kind = "head table differs; operation exists on one backend only"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2646,6 +2844,7 @@ family's `blob.select_session_checkpoint_page`.
 [[dialect_only]]
 statement = "sessions.select_checkpoint_roots"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2655,6 +2854,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.select_checkpoints_for_sessions"
 backends = ["postgres"]
+kind = "head table differs; list bind; operation exists on one backend only"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2668,6 +2868,7 @@ the batch shape of the delete path's checkpoint enumeration.
 [[dialect_only]]
 statement = "sessions.select_fork_points"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2677,6 +2878,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.select_head_json_for_update"
 backends = ["postgres"]
+kind = "head table differs; FOR UPDATE"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2690,6 +2892,7 @@ lock.
 [[dialect_only]]
 statement = "sessions.select_meta"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2699,6 +2902,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.select_meta_for_update"
 backends = ["postgres"]
+kind = "head table differs; FOR UPDATE"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2712,6 +2916,7 @@ lock.
 [[dialect_only]]
 statement = "sessions.select_readable_range"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2721,6 +2926,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.select_reclaim"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2730,6 +2936,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.select_retained_checkpoint"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2739,6 +2946,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.select_revision"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2748,6 +2956,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.select_revision_for_update"
 backends = ["postgres"]
+kind = "head table differs; FOR UPDATE"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2761,6 +2970,7 @@ lock.
 [[dialect_only]]
 statement = "sessions.set_head_json"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2770,6 +2980,7 @@ and this statement exists once per backend by construction.
 [[dialect_only]]
 statement = "sessions.upsert_cas"
 backends = ["postgres"]
+kind = "head table differs"
 reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
@@ -2782,6 +2993,7 @@ commit, whose placeholder row is created inside the same transaction.
 [[dialect_only]]
 statement = "turn_commit.delete_retained"
 backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
 SQLite only. It is the no-exclusions shape of the
 retention sweep: SQLite has no spelling for an empty `NOT IN (...)`, so the two
@@ -2793,6 +3005,7 @@ array and needs only
 [[dialect_only]]
 statement = "turn_commit.delete_retained_except_live"
 backends = ["sqlite", "postgres"]
+kind = "list bind"
 reason = """
 A variable-length list binds as one JSON array through `json_each` on
 SQLite and as a text array through `unnest` / `= ANY(...)` on PostgreSQL.
@@ -2804,6 +3017,7 @@ with a non-empty exclusion list; its empty-list twin is
 [[dialect_only]]
 statement = "usage_delta.insert"
 backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
 reason = """
 SQLite writes this through `INSERT OR IGNORE` / `INSERT OR REPLACE`;
 PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
@@ -2820,6 +3034,48 @@ PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
 # different operators. They bind a list differently — a JSON array unpacked
 # with json_each against a real array. And `turn_cancel_requests` has two
 # different durable shapes, which ADR 0098 freezes.
+
+[[dialect_only]]
+statement = "turn_cancel_affected_input.select_by_turn"
+backends = ["postgres"]
+kind = "table exists on one backend only"
+reason = """
+`turn_cancel_affected_inputs` is PostgreSQL's per-input disposition table.
+SQLite keeps the same facts as one `record_json` document on the cancel-request
+row — a durable shape ADR 0098 freezes — so it has no counterpart table and no
+counterpart statement.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_affected_input.append_at_next_ordinal"
+backends = ["postgres"]
+kind = "table exists on one backend only"
+reason = """
+Same table, same reason. The next ordinal is derived inside the insert rather
+than read first: the caller already holds the cancel-request row's lock, so
+deriving it in one statement costs one round trip instead of two.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.select_next_enqueue_seq"
+backends = ["postgres"]
+kind = "generated key"
+reason = """
+PostgreSQL draws `enqueue_seq` from the column's own sequence before the insert
+so the source-key path knows the value it is about to write; SQLite lets the
+row allocate its own. `pg_get_serial_sequence` takes its relation as *text*, so
+this is one of the two statements in the family whose table name is spelled
+with the `lash_` prefix rather than rendered — the renderer rewrites table
+tokens, and a name inside a string literal is not one.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.select_next_enqueue_seq"
+backends = ["postgres"]
+kind = "generated key"
+reason = """
+The batch half of the same fork, for the same two reasons.
+"""
 
 [[dialect_only]]
 statement = "pending_turn_input.insert_new"

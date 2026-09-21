@@ -18,17 +18,25 @@ pub(crate) async fn inspect_required_constraints_under_advisory_lock(
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
     let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
     let inspected = async {
-        sqlx::query("SELECT pg_advisory_lock_shared($1, $2)")
-            .bind(lock_namespace)
-            .bind(lock_key)
-            .execute(&mut connection)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_shared_by_pair
+                .sql(),
+        )
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut connection)
+        .await
+        .map_err(store_sqlx_error)?;
         let mut transaction = connection.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            .execute(&mut *transaction)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read
+                .sql(),
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(store_sqlx_error)?;
         let report = inspect_required_constraints(&mut transaction).await?;
         transaction.commit().await.map_err(store_sqlx_error)?;
         Ok(report)
@@ -59,27 +67,11 @@ pub(crate) async fn inspect_required_constraints(
         .map(|(name, table)| (table.oid(), name.as_str()))
         .collect::<BTreeMap<_, _>>();
     let table_oids = by_oid.keys().copied().collect::<Vec<_>>();
-    let rows = sqlx::query(
-        "SELECT c.conrelid::bigint AS table_oid,
-                c.conname::text AS name,
-                c.convalidated AS validated,
-                COALESCE(
-                    (pg_catalog.to_jsonb(c) ->> 'conenforced')::boolean,
-                    TRUE
-                ) AS enforced,
-                pg_catalog.pg_get_expr(
-                    c.conbin,
-                    c.conrelid,
-                    false
-                ) AS expression
-         FROM pg_catalog.pg_constraint AS c
-         WHERE c.contype = 'c'
-           AND c.conrelid::bigint = ANY($1::bigint[])",
-    )
-    .bind(&table_oids)
-    .fetch_all(&mut *connection)
-    .await
-    .map_err(store_sqlx_error)?;
+    let rows = sqlx::query(crate::connection_sql::SELECT_CHECK_CONSTRAINTS)
+        .bind(&table_oids)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
 
     let mut actual = Vec::new();
     for row in rows {

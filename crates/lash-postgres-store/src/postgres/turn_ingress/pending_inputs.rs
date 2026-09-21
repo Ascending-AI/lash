@@ -9,6 +9,20 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only PostgreSQL issues.
     pub(crate) struct PendingInputPostgresStatements @ "pending_turn_input" {
+        /// The next `enqueue_seq` for this table, drawn from the column's own
+        /// sequence before the insert.
+        ///
+        /// `pg_get_serial_sequence` takes its relation as *text*, so this is
+        /// the one statement in the family whose table name is spelled with
+        /// the `lash_` prefix rather than rendered: the renderer rewrites
+        /// table *tokens*, and a name inside a string literal is not one. It
+        /// is still a named statement with one owner, which is what the
+        /// alternative — a literal at the call site — was not.
+        select_next_enqueue_seq = "SELECT nextval(pg_get_serial_sequence(
+                 'lash_pending_turn_inputs',
+                 'enqueue_seq'
+             ))";
+
         /// Enqueue input `?2` for session `?3` at sequence `?1`.
         ///
         /// PostgreSQL draws `enqueue_seq` from the column's sequence before the

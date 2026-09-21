@@ -499,15 +499,11 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
         let now = self.clock.timestamp_ms();
-        // The sequence is read by name, not through this family's statements:
-        // it is a catalog function over the column's own sequence, not SQL over
-        // the table, and the prefixed name is a render parameter nothing else
-        // here spells.
         let enqueue_seq: i64 = sqlx::query_scalar(
-            "SELECT nextval(pg_get_serial_sequence(
-                'lash_pending_turn_inputs',
-                'enqueue_seq'
-             ))",
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs_postgres
+                .select_next_enqueue_seq
+                .sql(),
         )
         .fetch_one(&mut *tx)
         .await

@@ -445,11 +445,15 @@ pub(crate) async fn lock_scope(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     scope_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-        .bind(scope_id)
-        .bind(SCOPE_LOCK_NAMESPACE)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text_seeded
+            .sql(),
+    )
+    .bind(scope_id)
+    .bind(SCOPE_LOCK_NAMESPACE)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -466,12 +470,16 @@ async fn lock_session(
     let Some(session_id) = session_id else {
         return Ok(());
     };
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-        .bind(session_id.as_str())
-        .bind(SESSION_LOCK_NAMESPACE)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_error)?;
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text_seeded
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(SESSION_LOCK_NAMESPACE)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_error)?;
     Ok(())
 }
 

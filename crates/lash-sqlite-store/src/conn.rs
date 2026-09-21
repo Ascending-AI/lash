@@ -83,7 +83,7 @@ pub enum SqliteSynchronous {
 }
 
 impl SqliteSynchronous {
-    fn as_pragma_value(self) -> &'static str {
+    pub(crate) fn as_pragma_value(self) -> &'static str {
         match self {
             Self::Off => "OFF",
             Self::Normal => "NORMAL",
@@ -125,28 +125,6 @@ impl Default for SqliteConnectionPolicy {
             cache_size: -2_000,
         }
     }
-}
-
-/// PRAGMAs applied on the connection thread immediately after open. WAL is the
-/// reason this crate exists: it uses the `-wal`/`-shm` sidecars and supports
-/// multi-process readers + a single writer, which the prior store's single-file mvcc mode
-/// did not give us across processes.
-fn open_pragmas(policy: SqliteConnectionPolicy) -> String {
-    // The `journal_mode=WAL` conversion is applied separately via
-    // [`set_wal_journal_mode`] because SQLite does *not* invoke the busy handler
-    // for `journal_mode` changes, so concurrent first-openers must retry it by
-    // hand.
-    format!(
-        "PRAGMA busy_timeout={};\
-         PRAGMA synchronous={};\
-         PRAGMA wal_autocheckpoint={};\
-         PRAGMA cache_size={};\
-         PRAGMA foreign_keys=ON;",
-        policy.busy_timeout.as_millis(),
-        policy.synchronous.as_pragma_value(),
-        policy.wal_autocheckpoint_pages,
-        policy.cache_size,
-    )
 }
 
 /// Install the feature-gated SQL statement witness on a freshly opened
@@ -264,7 +242,7 @@ impl SqliteConnection {
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         let inner = AsyncConnection::open(path).await?;
-        let pragmas = open_pragmas(policy);
+        let pragmas = crate::connection_sql::open_pragmas(policy);
         inner
             .call(move |c| {
                 // Install the busy handler through the rusqlite API *before* the
@@ -296,7 +274,7 @@ impl SqliteConnection {
     ) -> tokio_rusqlite::Result<Self> {
         let inner = AsyncConnection::open_in_memory().await?;
         // `:memory:` databases cannot use WAL, so only the tuning pragmas apply.
-        let pragmas = open_pragmas(policy);
+        let pragmas = crate::connection_sql::open_pragmas(policy);
         inner
             .call(move |c| {
                 c.busy_timeout(policy.busy_timeout)?;
@@ -331,8 +309,8 @@ impl SqliteConnection {
         .await?;
         inner
             .call(move |c| {
-                c.busy_timeout(std::time::Duration::from_secs(1))?;
-                c.execute_batch("PRAGMA cache_size = -500;")?;
+                c.busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)?;
+                c.execute_batch(crate::connection_sql::READ_ONLY_PRAGMAS)?;
                 install_perf_statement_witness(c);
                 Ok(())
             })

@@ -43,13 +43,7 @@ pub(crate) async fn reclaim(
         store
             .conn
             .call(move |connection| {
-                connection.execute(
-                    // `ATTACH` names a schema rather than qualifying a table,
-                    // so the renderer has nothing to say about it; the name is
-                    // `Schema::EffectJournal.qualifier()`.
-                    "ATTACH DATABASE ?1 AS effect_journal",
-                    params![path],
-                )
+                connection.execute(crate::connection_sql::ATTACH_EFFECT_JOURNAL, params![path])
             })
             .await
             .map_err(|error| failed_before_any_work(sqlite_error(error)))?;

@@ -42,11 +42,7 @@ pub async fn inspect_required_constraints_at(
         .map_err(sqlite_async_error)?;
     let tables = connection
         .call(|connection| {
-            let mut statement = connection.prepare(
-                "SELECT name, sql
-                 FROM sqlite_schema
-                 WHERE type = 'table' AND sql IS NOT NULL",
-            )?;
+            let mut statement = connection.prepare(crate::connection_sql::SELECT_TABLE_DDL)?;
             statement
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

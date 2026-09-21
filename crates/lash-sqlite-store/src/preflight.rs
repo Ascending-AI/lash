@@ -88,7 +88,10 @@ async fn read_user_version(path: &Path) -> Result<Option<i64>, String> {
             // statement that would write fails here, including the implicit
             // ones a pragma could trigger.
             c.pragma_update(None, "query_only", true)?;
-            let user_version: i64 = c.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            let user_version: i64 =
+                c.query_row(crate::connection_sql::SELECT_USER_VERSION, [], |row| {
+                    row.get(0)
+                })?;
             if user_version != 0 {
                 return Ok(Some(user_version));
             }

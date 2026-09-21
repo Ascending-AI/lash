@@ -567,6 +567,18 @@ enum SchemaMigrationOutcome {
     SourceMismatch { report: SchemaReport },
 }
 
+/// The generation component `$1` is provisioned at, or no row when the
+/// database has never been stamped for it.
+///
+/// It lives here, with the artifact that writes it, rather than in a table
+/// module: `schema_versions` is the one lash table whose *name* is also a
+/// *column* of another table (`lash_release_stamp.schema_versions`), and the
+/// renderer rewrites a table name wherever the token appears, so registering
+/// it would rewrite that column too. Provisioning owns the stamp; the schema
+/// artifacts are the ownership gate's declared home for it.
+pub(crate) const SELECT_COMPONENT_VERSION: &str =
+    "SELECT version FROM lash_schema_versions WHERE component = $1";
+
 async fn apply_schema_migration(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     namespace: &str,
@@ -693,6 +705,7 @@ async fn apply_schema_migration(
                 .map_err(store_sqlx_error)?;
         }
     }
+
     let stamped = sqlx::query(
         "UPDATE lash_schema_versions
          SET version = $1

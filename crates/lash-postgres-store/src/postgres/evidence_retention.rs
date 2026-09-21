@@ -19,10 +19,14 @@ pub(crate) async fn reclaim(
     async {
         let mut tx = factory.pool.begin().await.map_err(store_sqlx_error)?;
         // One cross-worker fence for this host-invoked, atomic multi-phase sweep.
-        sqlx::query("SELECT pg_advisory_xact_lock(715423, 0)")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_evidence_retention
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         // Phase 0: deferred scope retirement (ADR 0049 / ADR 0067). A
         // session-free runtime-operation scope whose operation recorded its
         // receipt is retired once nothing is live under it, under the same
