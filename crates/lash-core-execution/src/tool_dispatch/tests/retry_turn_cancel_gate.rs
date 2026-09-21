@@ -121,6 +121,7 @@ async fn retry_sleep_shape(
         call,
         None,
         ToolRetryPolicy::safe(2, 25, 25),
+        None,
         identity,
         &turn_cancel_wait,
         None,

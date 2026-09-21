@@ -10,6 +10,8 @@ mod group;
 pub mod group_drain;
 mod group_journal;
 use lash_core_store::effect_identity as identity_types;
+mod live_openers;
+pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
 mod native_host;
 mod store_turn_control;
 pub use store_turn_control::bind_store_turn_control_authority;
@@ -17,6 +19,14 @@ mod tool_child;
 pub use tool_child::{
     TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
     ToolChildScope,
+};
+mod tool_child_driver;
+pub(crate) use tool_child_driver::await_journaled_tool_completion;
+pub use tool_child_driver::{ToolChildHost, opener_for_execution_scope};
+mod tool_settlement;
+pub use tool_settlement::{
+    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
+    ToolUsageDelta, ToolUsageLedger,
 };
 mod outcome;
 pub use lash_core_effect::promise_semantics;
@@ -27,7 +37,7 @@ pub use envelope::{
     ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimeLlmCallOutcome, SleepSpec, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
+    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch, ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
@@ -527,6 +537,7 @@ mod tests {
                 intents: crate::ToolIntents::default(),
             }),
             triggers: Vec::new(),
+            capture: None,
         }
         .into_tool_batch_effect()
         .expect_err("tool attempt is not a tool batch outcome");

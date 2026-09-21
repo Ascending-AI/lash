@@ -1018,14 +1018,16 @@ impl RuntimeEffectController for RecordingEffectController {
                     terminal_finish: Some(serde_json::json!("ok")),
                 })),
             }),
-            // Refused rather than given a fabricated outcome. This double has no
-            // handler-level driver (FIG-2266 builds it), and a synthesized
-            // settlement here would be a terminal no effect ever produced.
-            RuntimeEffectCommand::ToolInvocation { .. } => {
-                Err(lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                    "this test double runs no tool invocations",
-                ))
+            // Delegated, exactly like every other command this double records
+            // and runs locally. The handler-level driver (FIG-2266) arrives as
+            // the local executor the host's registered resolver handed out, so
+            // this double no longer has to refuse a tool child for want of one —
+            // and it still synthesizes nothing, which is what made the earlier
+            // refusal right.
+            command @ RuntimeEffectCommand::ToolInvocation { .. } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
+                    .await
             }
             RuntimeEffectCommand::Sleep { .. } => Ok(RuntimeEffectOutcome::Sleep),
             RuntimeEffectCommand::AwaitEvent { .. } => Ok(RuntimeEffectOutcome::AwaitEvent {

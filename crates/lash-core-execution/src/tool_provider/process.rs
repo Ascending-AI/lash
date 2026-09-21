@@ -168,6 +168,11 @@ pub struct InternalProcessAdmin<'run> {
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(super) tool_call_id: Option<String>,
     pub(super) execution_env_spec: crate::ProcessExecutionEnvSpec,
+    /// The realized-start sink a group child's driver drains into its
+    /// settlement's possession. `None` for every other caller — a start an
+    /// orchestrating group child makes must reach its settlement, and this
+    /// buffer is the only channel that crosses the no-attempt-frame boundary.
+    pub(super) orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
 }
 
 impl InternalProcessAdmin<'_> {
@@ -199,9 +204,18 @@ impl InternalProcessAdmin<'_> {
         {
             request.env_spec = Some(self.execution_env_spec.clone());
         }
-        self.processes
+        let view = self
+            .processes
             .start_from_request(&self.session_id, request, self.process_scope())
-            .await
+            .await?;
+        // Captured at the journal boundary the start committed under: a group
+        // child's settlement possession must name every process the body
+        // realized, and an orchestrating body has no attempt frame whose
+        // intent outcomes would carry it.
+        if let Some(starts) = &self.orchestrating_starts {
+            starts.enqueue(view.process_id.clone());
+        }
+        Ok(view)
     }
 
     /// Record the terminal outcome of an Externally-Owned process this session
@@ -447,6 +461,7 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
+            orchestrating_starts: None,
         }
     }
 

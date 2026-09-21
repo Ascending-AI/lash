@@ -17,6 +17,7 @@ mod standard_batch;
 pub mod sync;
 pub mod tool_catalog;
 pub mod tool_contract;
+mod tool_intents;
 pub mod tool_output;
 pub mod turn;
 pub mod turn_driver;

@@ -74,4 +74,24 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// Names the reply the protocol driver materialized, for the boundary's
     /// terminal materialization to recognize by identity.
     pub(super) protocol_reply: machine::ProtocolReplyTracker,
+    /// This turn's registration in the host's live-opener registry
+    /// (ADR 0099 §2, §3, FIG-2266).
+    ///
+    /// Registered the first time the turn builds a tool-execution context and
+    /// re-registered on each later one, so a tool child of a group this turn
+    /// opened borrows the turn's *current* live context. Deregistered when the
+    /// guard drops with the driver, which on today's path is turn end: ADR 0099
+    /// §7's durable live-to-closing transition does not exist yet, and when
+    /// FIG-3410 lands it the deregistration moves to the end of finalization.
+    /// Until then a child whose opener's turn has ended is not runnable here,
+    /// which is the conservative direction — it stays accepted for recovery
+    /// rather than running against a context that is finishing.
+    pub(super) live_opener: std::sync::Mutex<Option<crate::facade_support::LiveOpenerGuard>>,
+    /// The cooperative cancellation signal this turn's effect loop runs under.
+    ///
+    /// The lent opener context carries this token so a tool child's waits are
+    /// cancelled with the turn that opened it (FIG-2266). Set at `run`; a
+    /// registration taken before `run` — impossible today, since the first
+    /// context is built inside the loop — would lend a token nobody cancels.
+    pub(super) cooperative_cancel: CancellationToken,
 }

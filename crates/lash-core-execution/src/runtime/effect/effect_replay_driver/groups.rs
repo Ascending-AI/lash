@@ -330,15 +330,10 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         // children are dispatched and settling, and resolving N executors only
         // to drop them is work whose sole output would be a refusal for a live
         // group. The durable fence below still judges the reopen's shape.
-        //
-        // The position map is built here for the same reason: a child with no
-        // replay key can never be claimed, and that refusal must cost the key
-        // nothing either.
         let prepared = if self.groups.get(group.group_key()).is_some() {
             None
         } else {
-            let replay_keys = replay_keys_of(&group)?;
-            Some((replay_keys, self.resolve_group_children(&group).await?))
+            Some(self.resolve_group_children(&group).await?)
         };
         let record = EffectGroupRecord::from_group(
             &group,
@@ -352,7 +347,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         let offered = accepted_membership(&group, self.clock.timestamp_ms())?;
         let persisted = self.row_store.open_group(&record, &offered).await?;
         fence_reopen(&record, &persisted)?;
-        let Some((offered_replay_keys, offered_executors)) = prepared else {
+        let Some(offered_executors) = prepared else {
             // Already running here. The durable fence above has judged the
             // shape, so there is nothing left to check and nothing to dispatch.
             return Ok(handle);
@@ -376,33 +371,67 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             .row_store
             .read_group_membership(group.group_key())
             .await?;
-        let group = reconstruct_group(&group, retained, self.vocabulary())?;
-        // Re-keyed onto the reconstructed group, not carried over positionally.
-        //
-        // The position map and the executor vector are both indexed by child,
-        // so taking them from a different vector than the one being dispatched
-        // pairs each accepted child with a stranger's runner and leaves
-        // `decode_settlement` unable to map a recorded replay key back to a
-        // position at all. Matching on the replay key instead is what makes the
-        // two vectors commensurable: it is the child's durable identity, so a
-        // caller that offered the accepted children keeps its runners, and a
-        // caller that offered different ones has simply staged nothing for the
-        // children that exist.
-        //
-        // Re-*resolving* is not the fix: the resolution above consumed this
-        // host's staged runners, and asking again would find none. It also
-        // cannot move below the write, because running before the group row
-        // exists is what lets a routing refusal journal nothing.
-        let replay_keys = replay_keys_of(&group)?;
-        let mut offered: HashMap<&str, RuntimeEffectLocalExecutor<'static>> = offered_replay_keys
+        // The retained bytes are the evidence an offered runner must match
+        // before it may run a child: a replay key is the child's durable
+        // identity, not its request's, and two envelopes can share a key while
+        // carrying different recorded authority.
+        let retained_envelopes: HashMap<String, String> = retained
             .iter()
-            .map(String::as_str)
-            .zip(offered_executors)
-            .filter_map(|(key, executor)| executor.map(|executor| (key, executor)))
+            .map(|child| (child.replay_key.clone(), child.envelope_json.clone()))
             .collect();
-        let executors = replay_keys
+        // The offered runners, keyed by replay key and carrying the exact
+        // envelope each was resolved against, so the dispatch below can tell
+        // "same replay key" from "same recorded authority". On a first open
+        // the retained rows are these same envelopes serialized, and an honest
+        // reopen that re-presents the accepted children matches for the same
+        // reason — so a matching offer keeps its staged runners. A reopen
+        // that offered a same-key envelope with different recorded authority
+        // does not match: the offered runner was bound to what the *offered*
+        // request claims, and running it against the retained child would
+        // execute the child under an opener it was not admitted to. That
+        // child is instead re-resolved through this host's resolver against
+        // the *retained* envelope — the same answer the loser drain gets — and
+        // a resolver that cannot run that recorded request answers `None`,
+        // the drain's `NoExecutor` case: an absent recorded opener means no
+        // execution and no fabricated terminal.
+        let mut offered: HashMap<String, (String, RuntimeEffectLocalExecutor<'static>)> = group
+            .children()
             .iter()
-            .map(|key| offered.remove(key.as_str()))
+            .zip(offered_executors)
+            .filter_map(|(child, executor)| executor.map(|executor| (child, executor)))
+            .map(|(child, executor)| {
+                Ok((
+                    child.invocation.replay_key().to_string(),
+                    (
+                        serde_json::to_string(child).map_err(|error| {
+                            group_shape_error(format!(
+                                "a child of durable effect group {} cannot be compared \
+                                 with its retained request: {error}",
+                                group.group_key()
+                            ))
+                        })?,
+                        executor,
+                    ),
+                ))
+            })
+            .collect::<Result<_, RuntimeEffectControllerError>>()?;
+        let group = reconstruct_group(&group, retained, self.vocabulary())?;
+        let replay_keys = replay_keys_of(&group)?;
+        let resolver = self.group_executors()?;
+        let executors = group
+            .children()
+            .iter()
+            .map(|child| {
+                let key = child.invocation.replay_key();
+                match offered.remove(key) {
+                    Some((envelope_json, executor))
+                        if retained_envelopes.get(key) == Some(&envelope_json) =>
+                    {
+                        Some(executor)
+                    }
+                    _ => resolver.executor_for(child),
+                }
+            })
             .collect::<Vec<_>>();
         let dispatched = executors
             .iter()

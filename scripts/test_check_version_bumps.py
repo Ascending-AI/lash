@@ -103,6 +103,53 @@ pub enum ToolRetryStatus {
 }
 """
 
+# The two real surfaces the same `ToolUsageDelta` is guarded under: the
+# settlement carries it and the attempt capture's `usage` list is made of it,
+# and a mutation must trip *both* constants or one carrier decodes a fact the
+# other never versioned.
+TOOL_SETTLEMENT_SURFACES_CONFIG = """
+[[surface]]
+constant = "TOOL_SETTLEMENT_VERSION"
+constant_path = "src/settlement.rs"
+description = "fixture tool-child settlement"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/tool_facts.rs"]
+symbols = ["ToolSettlement", "ToolUsageDelta"]
+
+[[surface]]
+constant = "TOOL_ATTEMPT_CAPTURE_VERSION"
+constant_path = "src/settlement.rs"
+description = "fixture tool-attempt capture"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/tool_facts.rs"]
+symbols = ["ToolAttemptCapture", "ToolUsageDelta"]
+"""
+
+TOOL_SETTLEMENT_SHAPES = """
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolSettlement {
+    pub version: u16,
+    pub usage: Vec<ToolUsageDelta>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolAttemptCapture {
+    pub version: u16,
+    pub usage: Vec<ToolUsageDelta>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolUsageDelta {
+    pub attempt: u32,
+    pub provider_attempt: u32,
+    pub usage: TokenUsage,
+}
+"""
+
 ABILITY_CONFIG = """
 [[surface]]
 constant = "LASHLANG_VM_ABI_VERSION"
@@ -562,6 +609,45 @@ class VersionBumpFixtureTest(unittest.TestCase):
                 )
                 self.assertEqual(result.failures[0].base_version, 10)
                 self.assertEqual(result.failures[0].head_version, 10)
+
+    def test_the_attempt_capture_surface_guards_tool_usage_delta(self) -> None:
+        """`ToolUsageDelta` is the capture's `usage` element, so the capture
+        guard must name it as well as the settlement guard does — a mutation
+        there that tripped only one constant would let one carrier decode a
+        fact the other never versioned (FIG-2266 C1 review)."""
+        surfaces = MODULE.load_config(REAL_CONFIG)
+        for constant in ("TOOL_SETTLEMENT_VERSION", "TOOL_ATTEMPT_CAPTURE_VERSION"):
+            surface = next(
+                surface for surface in surfaces if surface.constant == constant
+            )
+            symbols = {symbol for guard in surface.guards for symbol in guard.symbols}
+            self.assertIn("ToolUsageDelta", symbols, constant)
+
+    def test_a_tool_usage_delta_mutation_demands_both_bumps(self) -> None:
+        """The same type is journaled inside two carriers; mutating it without
+        bumping must fail both surfaces, not just the settlement's."""
+        fixture = FixtureRepository(TOOL_SETTLEMENT_SURFACES_CONFIG)
+        self.addCleanup(fixture.close)
+        fixture.write_file(
+            "src/settlement.rs",
+            "pub const TOOL_SETTLEMENT_VERSION: u16 = 2;\n"
+            "pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 2;\n",
+        )
+        fixture.write_file("src/tool_facts.rs", TOOL_SETTLEMENT_SHAPES)
+        base = fixture.commit("base")
+        fixture.write_file(
+            "src/tool_facts.rs",
+            TOOL_SETTLEMENT_SHAPES.replace("provider_attempt: u32", "provider_attempt: u64"),
+        )
+        head = fixture.commit("retype the usage delta without bumping")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(
+            {failure.surface.constant for failure in result.failures},
+            {"TOOL_SETTLEMENT_VERSION", "TOOL_ATTEMPT_CAPTURE_VERSION"},
+        )
 
     def test_the_vm_abi_surface_covers_every_ability_leaf_host_rs_declares(
         self,

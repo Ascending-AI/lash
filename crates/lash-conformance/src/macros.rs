@@ -1940,6 +1940,52 @@ macro_rules! tool_batch_parallelism_tests {
     };
 }
 
+/// Register the handler-level tool-child invocation laws (FIG-2266, ADR 0099).
+///
+/// The fixture hands back a guard, a session prefix and a
+/// [`ToolChildLawFixture`]: a world factory over one substrate (a law calls it
+/// from a runtime it is about to destroy), a process-registry factory, and the
+/// completion routing the tier records for a deferrable child. Restate is
+/// deliberately absent for the same reason it is absent from the batch law:
+/// it is serial today, and there is no expected-failure mechanism here.
+#[macro_export]
+macro_rules! tool_child_invocation_tests {
+    ($fixture:block) => {
+        $crate::tool_child_invocation_tests!(@catalogue $fixture; [
+            (
+                tool_children_run_through_the_invocation_driver,
+                "tool-child-invocation-driver"
+            ),
+            (
+                an_unregistered_opener_leaves_the_child_accepted,
+                "tool-child-unregistered-opener"
+            ),
+            (
+                a_foreign_opener_cannot_drive_another_openers_child,
+                "tool-child-foreign-opener"
+            ),
+            (
+                a_same_name_process_incarnation_is_not_the_recorded_opener,
+                "tool-child-process-incarnation"
+            ),
+            (
+                a_crashed_child_replays_its_committed_attempts_facts,
+                "tool-child-attempt-capture"
+            ),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, prefix, fixture) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(&fixture, prefix).await;
+            }
+        )*
+    };
+}
+
 /// Register atomic runtime-operation effect-group retirement.
 #[macro_export]
 macro_rules! effect_group_runtime_retirement_tests {

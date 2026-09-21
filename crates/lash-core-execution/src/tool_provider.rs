@@ -446,6 +446,19 @@ pub struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
+    /// The realized-start sink a group child's driver installs so an
+    /// orchestrating body's process starts reach its settlement's possession.
+    /// `None` for every caller that is not a group child — its presence is
+    /// the mark that this context was admitted under a group child's rebound
+    /// dispatch; an ordinary orchestrating run's starts still ride its
+    /// `ToolIntent` records.
+    pub(crate) orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
+    /// The cancellation trio the child was validated to wait under, carried
+    /// whole from its driver. `None` for every caller that is not a group
+    /// child; a nested call must inherit exactly this wait — deriving one
+    /// from the scope alone is always observing, which would wire a child
+    /// admitted with no cooperative authority to a gate it must never see.
+    pub(crate) turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
 }
 
 #[derive(Clone)]
@@ -514,6 +527,8 @@ pub struct ToolContextBuilder<'run> {
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
+    orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
+    turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
 }
 
 impl<'run> ToolContextBuilder<'run> {
@@ -543,6 +558,8 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
             child_execution_trace_hook: None,
+            orchestrating_starts: None,
+            turn_cancel_wait: None,
         }
     }
 
@@ -635,6 +652,27 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
+    /// Installs the realized-start sink an orchestrating group child drains
+    /// into its settlement's possession. Internal: only the tool-child driver
+    /// sets one, which is also what marks the context as admitted under a
+    /// group child's rebound dispatch.
+    pub(crate) fn orchestrating_starts(
+        mut self,
+        buffer: crate::tool_dispatch::OrchestratingStartsBuffer,
+    ) -> Self {
+        self.orchestrating_starts = Some(buffer);
+        self
+    }
+
+    /// Installs the cancellation trio the child waits under, computed once by
+    /// its driver from the recorded cancellation authority. Internal: only
+    /// the tool-child driver sets one, and every nested retry sleep and
+    /// deferred wait inside the child inherits it exactly.
+    pub(crate) fn turn_cancel_wait(mut self, wait: crate::runtime::TurnCancelWait) -> Self {
+        self.turn_cancel_wait = Some(wait);
+        self
+    }
+
     pub fn build(self) -> ToolContext<'run> {
         ToolContext {
             session_id: self.session_id,
@@ -661,6 +699,8 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
+            orchestrating_starts: self.orchestrating_starts,
+            turn_cancel_wait: self.turn_cancel_wait,
         }
     }
 }
@@ -709,6 +749,8 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
+            orchestrating_starts: self.orchestrating_starts.clone(),
+            turn_cancel_wait: self.turn_cancel_wait.clone(),
         })
     }
 
@@ -758,6 +800,8 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
+            orchestrating_starts: None,
+            turn_cancel_wait: None,
         }
     }
 
@@ -824,6 +868,7 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             tool_call_id: self.tool_call_id.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
+            orchestrating_starts: self.orchestrating_starts.clone(),
         }
     }
 
@@ -874,6 +919,16 @@ impl<'run> ToolContext<'run> {
     /// boundary supplied no cancellation scope.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
         self.cancellation_token.as_ref()
+    }
+
+    /// The cancellation trio this context's nested waits inherit, installed
+    /// by the tool-child driver from the child's recorded authority.
+    /// `None` for every context that is not a group child's — the fallback
+    /// callers that reach this accessor only do so under a group-child
+    /// context, so a `None` here degrades to an unobserved wait rather than
+    /// a scope-derived observing one.
+    pub(crate) fn turn_cancel_wait(&self) -> Option<&crate::runtime::TurnCancelWait> {
+        self.turn_cancel_wait.as_ref()
     }
 
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {

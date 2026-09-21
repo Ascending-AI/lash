@@ -84,6 +84,7 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
                             },
                         }),
                         triggers: Vec::new(),
+                        capture: None,
                     })
                 }),
             )

@@ -694,7 +694,7 @@ impl RuntimeTurnDriver<'_> {
         let chronological_projection = read_view.shared_chronological_projection();
         let code_block_graph_key = foreground_exec_graph_key(&invocation);
         let context = self
-            .execution_context(session_event_tx.clone(), chronological_projection)
+            .execution_context(session_event_tx.clone(), event_tx, chronological_projection)
             .map_err(crate::RuntimeEffectControllerError::from)?
             .with_turn_event_sender(turn_event_tx.clone())
             .with_tracing(self.execution_tracing(protocol_iteration))

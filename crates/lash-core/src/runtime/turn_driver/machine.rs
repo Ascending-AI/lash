@@ -47,8 +47,53 @@ impl ProtocolReplyTracker {
     }
 }
 
+/// The effect loop, type-erased.
+///
+/// `run` awaits the loop through this rather than `impl Future` because the
+/// registration the driver holds makes `run`'s state one subtree deeper, and
+/// a caller that spawns a whole queued-work drain (slack-clone's webhook
+/// does) hits the trait solver's recursion limit proving the composite
+/// future `Send`. A `Pin<Box<dyn ..>>` field is a leaf in that proof, so the
+/// effect loop's interior no longer rides on every outer frame.
+type EffectLoop<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<(crate::MessageSequence, usize), RuntimeError>>
+            + Send
+            + 'a,
+    >,
+>;
+
 impl RuntimeTurnDriver<'_> {
+    /// Runs the turn's effect loop and releases the live-opener registration
+    /// before returning, on every exit.
+    ///
+    /// The release cannot wait for the driver's own drop: the registered
+    /// context's event forwarder holds a sender on the very channel the caller
+    /// drains next (`drive_turn_to_completion`), so an opener still registered
+    /// when the run ends would keep that drain — and the turn — open forever.
+    /// This is still "registered until the opener settles" in ADR 0099 §2's
+    /// sense: on today's path the effect loop *is* the turn, and the durable
+    /// live-to-closing transition of §7 does not exist yet.
     pub(in crate::runtime) async fn run(
+        &mut self,
+        messages: crate::MessageSequence,
+        event_tx: mpsc::Sender<RuntimeStreamEvent>,
+        cancel: CancellationToken,
+        run_offset: usize,
+    ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+        self.cooperative_cancel = cancel.clone();
+        // The erasure's reason lives on `EffectLoop`: the alias exists to make
+        // the cut a named decision rather than an incidental annotation.
+        let result = {
+            let effect_loop: EffectLoop<'_> =
+                Box::pin(self.run_effect_loop(messages, event_tx, cancel, run_offset));
+            effect_loop.await
+        };
+        self.live_opener.lock_recover().take();
+        result
+    }
+
+    async fn run_effect_loop(
         &mut self,
         messages: crate::MessageSequence,
         event_tx: mpsc::Sender<RuntimeStreamEvent>,

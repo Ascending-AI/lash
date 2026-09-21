@@ -978,6 +978,7 @@ pub async fn coordinate_tool_provider_with_services(
         call.clone(),
         None,
         crate::ToolRetryPolicy::Never,
+        None,
         crate::tool_dispatch::ToolAttemptEffectIdentity::Batch {
             parent: parent_invocation,
             replay_suffix: call.call_id.clone(),

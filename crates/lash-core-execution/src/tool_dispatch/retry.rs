@@ -257,6 +257,48 @@ pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOu
     ToolOutcome::from_output(output)
 }
 
+/// Settles a tool call that parked and has now been resolved.
+///
+/// Extracted from `RuntimeExecutionContext::pending_completion_dispatch_outcome`
+/// verbatim, because the handler-level invocation driver (ADR 0099 §2,
+/// FIG-2266) awaits its own deferred completions and holds no
+/// `RuntimeExecutionContext` to ask — §3 forbids carrying one across the
+/// handler boundary. Every input this body ever used came from the dispatch
+/// context, so the two callers share one settlement rather than each spelling
+/// the projection, the after-tool hook and the trailing trace attempt.
+pub(crate) async fn settle_completed_pending_tool_call(
+    context: &ToolDispatchContext<'_>,
+    tool_name: String,
+    args: serde_json::Value,
+    resolution: crate::Resolution,
+    resolver: Option<&crate::PendingResolver>,
+    duration_ms: u64,
+    attempts: Vec<lash_trace::TraceRetryAttempt>,
+) -> ToolDispatchOutcome {
+    let output = crate::tool_result::tool_output_from_completion_resolution(resolution, resolver);
+    let result = super::finalize_tool_result_with_execution_context(
+        context,
+        &tool_name,
+        &args,
+        ToolOutcome::from_output(output),
+        duration_ms,
+    )
+    .await;
+    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
+    let mut attempts = attempts;
+    attempts.push(crate::trace::trace_tool_attempt(
+        attempts
+            .len()
+            .saturating_add(1)
+            .try_into()
+            .unwrap_or(u32::MAX),
+        &outcome.record,
+        None,
+    ));
+    outcome.attempts = attempts;
+    outcome
+}
+
 #[cfg(test)]
 mod panic_tests {
     #[test]

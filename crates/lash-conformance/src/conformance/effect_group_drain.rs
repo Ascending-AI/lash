@@ -125,6 +125,7 @@ pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     a_cancel_group_is_never_re_executed_by_the_drain(&make, &prefix).await;
     a_child_this_host_cannot_run_is_reported_not_invented(&make, &prefix).await;
     a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(&make, &prefix).await;
+    a_reopen_offering_a_retained_key_under_a_different_request_lends_nothing(&make, &prefix).await;
 }
 
 /// The drain reclaims groups whose caller is gone, and this process can see
@@ -826,6 +827,120 @@ async fn a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(
     assert_eq!(capable.executions(), vec![child_replay_key(&key, 0)]);
 }
 
+/// A reopen's replay key is the child's durable identity; it is not proof the
+/// offered request is the recorded one (FIG-3429's first finding).
+///
+/// The leak this law names matched runners by key alone: a successor process
+/// offering a *different* request under a retained key had its executor run
+/// the retained child, because the key was all the reopen compared. An
+/// executor resolved for the offered request was bound to that request;
+/// handing it the retained child is how one opener's authority leaks into a
+/// child it was never admitted to. What the reopen may reuse a runner for is
+/// an offered request byte-identical to the recorded one — and anything else
+/// it must ask its resolver about the retained child itself.
+///
+/// The fixture makes the retained children claimable by staging a crash: the
+/// first process claims both children and dies, so the second process reopens
+/// a group whose children hold lapsed claims a takeover can win. Its offered
+/// children carry the *same* replay keys under a different command — same
+/// identity, different request — staged with executors that count every
+/// invocation and log the request they were handed. Its own resolver refuses
+/// every command, so under the leak the staged impostors are the only runners
+/// that could run, and under the binding the only runners left are ones the
+/// resolver produced for the retained children themselves — which is none.
+///
+/// The law asks three things: the impostor executors never run; the resolver
+/// is asked about the *retained* children, once each (a key match would ask it
+/// nothing); and an honest host still finds both children and settles them
+/// exactly once — refusing the impostor cannot strand the queue.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_reopen_offering_a_retained_key_under_a_different_request_lends_nothing(
+    make: &DrainWorldFactory,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "same-key-offer");
+    let scope = scope(prefix, "same-key-offer");
+    orphan_two_losers(make, &key, &scope).await;
+    until_leases_lapse(make, &key).await;
+
+    // The second opener. Its resolver refuses every command, so nothing it can
+    // resolve runs the retained children — whatever ran them would have to be
+    // one of the executors it staged for its *offered* request.
+    let impostor_runs = Arc::new(AtomicUsize::new(0));
+    let impostor_saw: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let refusing = RecordingExecutors::refusing();
+    let world = make(spec(CRASH_LEASE_MS, &refusing)).await;
+    let scoped = world.host.scoped(admit(scope)).expect("scope");
+    let mut handle = open_with(
+        &scoped,
+        impostor_group(scoped.execution_scope(), &key, 2, RUN),
+        vec![
+            impostor(&impostor_runs, &impostor_saw),
+            impostor(&impostor_runs, &impostor_saw),
+        ],
+    )
+    .await;
+
+    // A settle window. Under the leak both children take over their lapsed
+    // claims and the impostor runners settle them; under the binding nothing is
+    // dispatched, so the window expires quietly.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(2 * CRASH_LEASE_MS),
+            scoped
+                .controller()
+                .await_next_settlement(&mut handle, CancellationToken::new()),
+        )
+        .await
+        .is_err(),
+        "no settlement arrives: nothing the second opener resolved may run a \
+         retained child"
+    );
+    assert_eq!(
+        impostor_runs.load(Ordering::SeqCst),
+        0,
+        "an executor bound to the offered request may not run a retained child \
+         under a different request, however equal its replay key"
+    );
+    assert!(
+        impostor_saw.lock_recover().is_empty(),
+        "the impostor was never handed the retained request: {:?}",
+        impostor_saw.lock_recover()
+    );
+    assert_eq!(
+        refusing.asked_about(),
+        vec![child_replay_key(&key, 0), child_replay_key(&key, 1)],
+        "the routing question the reopen asks is about the retained children, \
+         once each — matching on the key alone would ask the resolver nothing"
+    );
+
+    // The queue survives untouched: an honest host still finds both children
+    // and settles them exactly once.
+    let capable = RecordingExecutors::settling();
+    let honest = make(spec(CRASH_LEASE_MS, &capable)).await;
+    let report = drain_until_no_live_lease(&honest, &key).await;
+    assert_eq!(
+        report.settled(),
+        2,
+        "refusing the impostor strands nothing: {report:?}"
+    );
+    assert_eq!(
+        capable.executions(),
+        vec![child_replay_key(&key, 0), child_replay_key(&key, 1)]
+    );
+
+    close(&scoped, handle, RUN)
+        .await
+        .expect("the caller closes");
+}
+
+// =============================================================================
+// Fixtures
+// =============================================================================
+
 const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
 const CANCEL: LoserPolicy = LoserPolicy::Cancel;
 
@@ -1020,14 +1135,33 @@ fn child_replay_key(group_key: &str, position: usize) -> String {
     format!("{group_key}:child:{position}")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 fn child(
     execution_scope: &ExecutionScope,
     group_key: &str,
     position: usize,
+) -> RuntimeEffectEnvelope {
+    child_with_operation(
+        execution_scope,
+        group_key,
+        position,
+        &format!("group-child-{position}"),
+    )
+}
+
+/// A child with the same durable identity under a different request.
+///
+/// The replay key lives in the address, so varying the command produces a
+/// child that claims a retained identity while asking for different work —
+/// the shape an authority-leak oracle stages.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn child_with_operation(
+    execution_scope: &ExecutionScope,
+    group_key: &str,
+    position: usize,
+    operation: &str,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -1040,7 +1174,7 @@ fn child(
             "effect",
         ),
         RuntimeEffectCommand::LanguageRuntimeValue {
-            operation: format!("group-child-{position}"),
+            operation: operation.to_string(),
         },
     )
 }
@@ -1072,6 +1206,47 @@ fn group(
     .expect("a group with at least one child assembles")
 }
 
+/// The same group header over children that share the retained replay keys but
+/// carry different requests.
+///
+/// The header is identical — same scope, key, arity and disposition — because
+/// the fence correctly refuses a group header that disagrees; the authority
+/// question lives one level down, in whether the children's requests are the
+/// recorded ones.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn impostor_group(
+    execution_scope: &ExecutionScope,
+    key: &str,
+    children: usize,
+    disposition: LoserPolicy,
+) -> RuntimeEffectGroup {
+    RuntimeEffectGroup::try_new(
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(execution_scope.clone(), format!("{key}:group"))
+                .expect("valid group address"),
+            RuntimeAttribution::none(),
+            "group",
+        ),
+        key,
+        (0..children)
+            .map(|position| {
+                child_with_operation(
+                    execution_scope,
+                    key,
+                    position,
+                    &format!("impostor-child-{position}"),
+                )
+            })
+            .collect(),
+        GroupWakePolicy::All,
+        disposition,
+    )
+    .expect("a group with at least one child assembles")
+}
+
 /// The executors a law stages for its own *opens*, kept apart from the answers a
 /// host gives the drain.
 ///
@@ -1086,10 +1261,6 @@ fn staged_executors() -> &'static StagedGroupExecutors {
     STAGED.get_or_init(StagedGroupExecutors::new)
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn open(
     scoped: &ScopedEffectController<'_>,
     key: &str,
@@ -1097,12 +1268,30 @@ async fn open(
     disposition: LoserPolicy,
     executors: Vec<RuntimeEffectLocalExecutor<'static>>,
 ) -> EffectGroupHandle {
+    open_with(
+        scoped,
+        group(scoped.execution_scope(), key, children, disposition),
+        executors,
+    )
+    .await
+}
+
+/// Opens a group the law assembled itself, with one staged executor per child.
+///
+/// Split from [`open`] so a law can control the children's requests — an
+/// impostor reopen offers a group the helper cannot build for it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn open_with(
+    scoped: &ScopedEffectController<'_>,
+    group: RuntimeEffectGroup,
+    executors: Vec<RuntimeEffectLocalExecutor<'static>>,
+) -> EffectGroupHandle {
     scoped
         .controller()
-        .open_effect_group(staged_executors().stage(
-            group(scoped.execution_scope(), key, children, disposition),
-            executors,
-        ))
+        .open_effect_group(staged_executors().stage(group, executors))
         .await
         .expect("the group opens")
 }
@@ -1193,6 +1382,34 @@ fn never() -> RuntimeEffectLocalExecutor<'static> {
     RuntimeEffectLocalExecutor::testing(|_| async {
         std::future::pending::<()>().await;
         unreachable!("a never-settling child is never polled to completion")
+    })
+}
+
+/// An executor that must never run: it counts invocations and records the
+/// request it was handed, so a law can name *what* ran a child rather than only
+/// that something did.
+///
+/// The recorded operation is the leak's signature — an impostor staged for
+/// `impostor-child-N` that reports having seen `group-child-N` was bound to one
+/// request and ran another.
+fn impostor(
+    runs: &Arc<AtomicUsize>,
+    saw: &Arc<std::sync::Mutex<Vec<String>>>,
+) -> RuntimeEffectLocalExecutor<'static> {
+    let runs = Arc::clone(runs);
+    let saw = Arc::clone(saw);
+    RuntimeEffectLocalExecutor::testing(move |envelope| {
+        let runs = Arc::clone(&runs);
+        let saw = Arc::clone(&saw);
+        async move {
+            runs.fetch_add(1, Ordering::SeqCst);
+            if let RuntimeEffectCommand::LanguageRuntimeValue { operation } = &envelope.command {
+                saw.lock_recover().push(operation.clone());
+            }
+            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                value: serde_json::json!("impostor"),
+            })
+        }
     })
 }
 

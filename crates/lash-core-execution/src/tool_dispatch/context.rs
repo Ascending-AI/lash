@@ -18,7 +18,7 @@ pub struct CheckpointMessageBuffer {
 }
 
 impl CheckpointMessageBuffer {
-    pub(crate) fn enqueue(&self, messages: Vec<crate::PluginMessage>) {
+    pub fn enqueue(&self, messages: Vec<crate::PluginMessage>) {
         let mut queue = self.queue.lock_recover();
         queue.extend(messages);
     }
@@ -48,12 +48,39 @@ pub struct ToolTriggerOutcomeBuffer {
 }
 
 impl ToolTriggerOutcomeBuffer {
-    pub(crate) fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
+    pub fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
         let mut queue = self.queue.lock_recover();
         queue.push(outcome);
     }
 
-    pub(crate) fn drain(&self) -> Vec<ToolTriggerEffectOutcome> {
+    pub fn drain(&self) -> Vec<ToolTriggerEffectOutcome> {
+        let mut queue = self.queue.lock_recover();
+        queue.drain(..).collect()
+    }
+}
+
+/// The processes an orchestrating tool realized, captured at the start's
+/// journal boundary (ADR 0099 §6).
+///
+/// An orchestrating child runs *outside* an attempt frame, so a process its
+/// body starts never appears in a `ToolIntentExecutionOutcome` — the channel
+/// [`ToolSettlement`](crate::runtime::ToolSettlement) possession reads from.
+/// The orchestrating `InternalProcessAdmin` enqueues each started id here at
+/// the moment the durable start succeeds, and the child's driver drains it
+/// into the settlement's possession, so replay serves the same possession set
+/// the live run produced.
+#[derive(Clone, Default)]
+pub struct OrchestratingStartsBuffer {
+    queue: Arc<Mutex<Vec<crate::ProcessId>>>,
+}
+
+impl OrchestratingStartsBuffer {
+    pub(crate) fn enqueue(&self, process_id: crate::ProcessId) {
+        let mut queue = self.queue.lock_recover();
+        queue.push(process_id);
+    }
+
+    pub(crate) fn drain(&self) -> Vec<crate::ProcessId> {
         let mut queue = self.queue.lock_recover();
         queue.drain(..).collect()
     }

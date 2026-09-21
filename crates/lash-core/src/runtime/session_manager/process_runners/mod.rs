@@ -8,6 +8,12 @@ mod tool;
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContext<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+    /// The process incarnation's live-opener registration (ADR 0099 §3), when
+    /// this host routes tool children and the scope names an opener. Held here
+    /// so `shutdown` releases it *before* awaiting `event_drain`: the
+    /// registration's forwarder holds a clone of the context's `event_tx`, and
+    /// the drain ends only once every sender — including that clone — is gone.
+    live_opener: Option<crate::LiveOpenerGuard>,
     event_drain: tokio::task::JoinHandle<()>,
 }
 
@@ -21,6 +27,7 @@ impl<'run> ProcessRunContext<'run> {
             scoped_effect_controller: None,
             causal_invocation: None,
             dispatch_parent_invocation: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         }
     }
 
@@ -31,8 +38,18 @@ impl<'run> ProcessRunContext<'run> {
     }
 
     pub(in crate::runtime::session_manager::process_runners) async fn shutdown(self) {
-        drop(self.dispatch);
-        let _ = self.event_drain.await;
+        let Self {
+            dispatch,
+            live_opener,
+            event_drain,
+        } = self;
+        // Release the registration first: its `ended` token stops the
+        // child-event forwarder, dropping the last `event_tx` clone, so the
+        // drain below observes the channel closing rather than waiting on a
+        // sender the registration would have held open.
+        drop(live_opener);
+        drop(dispatch);
+        let _ = event_drain.await;
     }
 }
 
@@ -42,6 +59,7 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContex
     scoped_effect_controller: Option<crate::ScopedEffectController<'run>>,
     causal_invocation: Option<crate::RuntimeInvocation>,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
+    cancellation: tokio_util::sync::CancellationToken,
 }
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallRun<'run> {
@@ -86,6 +104,16 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         self
     }
 
+    /// The cooperative signal the lent opener context carries: a tool child's
+    /// waits cancel with the process that opened it (FIG-2266).
+    pub(in crate::runtime::session_manager::process_runners) fn cancellation(
+        mut self,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+
     pub(in crate::runtime::session_manager::process_runners) fn build(
         self,
     ) -> Result<ProcessRunContext<'run>, crate::PluginError> {
@@ -101,6 +129,15 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                 "process run context requires a scoped effect controller".to_string(),
             )
         })?;
+        // Derive the opener before the controller moves into the handle. The
+        // derivation is the one owner derivation (`EffectOpener::for_scope`,
+        // FIG-3417): the admitted scope plus its pinned incarnation, never a
+        // registry lookup — a process scope without one names no opener and
+        // registers nothing, leaving its children accepted rather than run
+        // under a context that cannot claim them.
+        let opener = crate::facade_support::opener_for_execution_scope(
+            scoped_effect_controller.admitted_scope(),
+        );
         let effect_controller =
             crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped_effect_controller);
         let direct_completions = services.direct_completion_client(
@@ -145,8 +182,51 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             turn_context: crate::TurnContext::default(),
             clock: Arc::clone(&self.services.current.host.core.clock),
         });
+        // Publish the process incarnation as a live opener, lending this
+        // dispatch context to the group children it opens (ADR 0099 §3). The
+        // lent `event_tx` is a channel the registration owns — never the
+        // context's own sender — forwarded into that channel so a child that
+        // outlives the registration cannot pin it past `shutdown`'s drain.
+        // Nothing registers when the deployment routes no tool children, the
+        // scope names no opener, or the context cannot be taken to `'static`.
+        let live_opener = opener
+            .zip(
+                self.services
+                    .current
+                    .host
+                    .core
+                    .control
+                    .tool_children
+                    .as_ref(),
+            )
+            .and_then(|(opener, tool_children)| {
+                let (child_event_tx, mut child_event_rx) =
+                    tokio::sync::mpsc::channel::<crate::SessionStreamEvent>(64);
+                let context = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
+                    dispatch.as_ref(),
+                    child_event_tx,
+                    self.cancellation.clone(),
+                )?;
+                let (guard, ended) = tool_children.openers().register(opener, context);
+                let event_tx = dispatch.event_tx.clone();
+                crate::task::spawn(async move {
+                    loop {
+                        tokio::select! {
+                            () = ended.cancelled() => break,
+                            event = child_event_rx.recv() => {
+                                let Some(event) = event else { break };
+                                if event_tx.send(event).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                });
+                Some(guard)
+            });
         Ok(ProcessRunContext {
             dispatch,
+            live_opener,
             event_drain,
         })
     }

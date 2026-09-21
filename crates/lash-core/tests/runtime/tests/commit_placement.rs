@@ -184,31 +184,31 @@ async fn assert_commit_placement(
 
 #[tokio::test]
 async fn durable_journaled_engine_commits_bypass_local_admission() {
-    assert_commit_placement(
+    Box::pin(assert_commit_placement(
         &SessionId::from("engine-commit-placement"),
         Arc::new(JournaledCommitController::<true>::default()),
         0,
-    )
+    ))
     .await;
 }
 
 #[tokio::test]
 async fn native_commits_enter_local_admission() {
-    assert_commit_placement(
+    Box::pin(assert_commit_placement(
         &SessionId::from("native-commit-placement"),
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
         1,
-    )
+    ))
     .await;
 }
 
 #[tokio::test]
 async fn store_journaled_commits_keep_native_admission() {
-    assert_commit_placement(
+    Box::pin(assert_commit_placement(
         &SessionId::from("store-journaled-commit-placement"),
         Arc::new(JournaledCommitController::<false>::default()),
         1,
-    )
+    ))
     .await;
 }
 

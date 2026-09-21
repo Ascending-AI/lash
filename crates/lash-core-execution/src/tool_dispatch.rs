@@ -16,6 +16,7 @@ pub use pending_resolver::arm_pending_resolver;
 pub use attempt_coordinator::{
     BatchIntentDrainGate, IntentDrainGuard, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
+pub use context::OrchestratingStartsBuffer;
 #[cfg(feature = "testing")]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]
@@ -44,6 +45,7 @@ pub use preparation::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use retry::execute_once;
+pub(crate) use retry::settle_completed_pending_tool_call;
 pub(crate) use retry::{
     mark_retry_exhausted, normalized_outcome, resolve_retry_policy, retry_after_ms,
 };

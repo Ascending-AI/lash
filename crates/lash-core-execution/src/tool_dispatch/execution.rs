@@ -317,6 +317,7 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
         prepared,
         execution_grant,
         retry_policy,
+        None,
         super::ToolAttemptEffectIdentity::Scalar {
             parent: context.parent_invocation.clone(),
         },
@@ -440,6 +441,14 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     launch_done(outcome)
 }
 
+/// Executes one atomic tool attempt and reports everything it produced.
+///
+/// The caller installs a fresh `checkpoint_messages` buffer and a per-attempt
+/// usage sink on `context` before calling, so the `ToolAttemptCapture` journaled
+/// with this outcome carries exactly what *this* attempt committed — never a
+/// prefix of a shared buffer a sibling may still be writing into. Consuming the
+/// outcome restores those facts into the caller's own buffers, which is what
+/// makes a journaled replay equivalent to a live execution.
 pub async fn execute_prepared_tool_attempt_effect<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: PreparedToolCall,
@@ -477,7 +486,20 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
         ToolCallLaunch::ControllerAborted(error) => return Err(error),
     };
     let triggers = context.trigger_outcomes.drain();
-    Ok(crate::ToolAttemptEffectOutcome { launch, triggers })
+    let capture = crate::runtime::ToolAttemptCapture {
+        version: crate::runtime::TOOL_ATTEMPT_CAPTURE_VERSION,
+        messages: context.checkpoint_messages.drain(),
+        usage: context
+            .direct_completions
+            .usage_ledger()
+            .map(|ledger| ledger.take())
+            .unwrap_or_default(),
+    };
+    Ok(crate::ToolAttemptEffectOutcome {
+        launch,
+        triggers,
+        capture,
+    })
 }
 
 pub async fn finalize_tool_result_with_execution_context(

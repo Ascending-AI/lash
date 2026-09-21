@@ -2186,6 +2186,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
             )]),
         }),
         triggers: Vec::new(),
+        capture: None,
     };
     let expected_bytes = serde_json::to_vec(&expected).expect("serialize literal intent outcome");
     let first_controller = SqliteRuntimeEffectController::open(&path, scope.clone())

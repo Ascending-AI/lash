@@ -66,6 +66,25 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-2266: ADR 0099 sections 6 and 13 mint the semantic settlement a tool
+    # child of a durable effect group carries on its outcome. A new durable
+    # format, not a rename: the settlement had no constant before this change,
+    # and it is deliberately separate from the request's so the two lanes do
+    # not force each other's bumps. Re-pinned to the reviewed shape after the
+    # hostile-review rounds grew `ToolUsageDelta` (the full usage identity),
+    # `ToolSettlement.usage`, and the guard's full serialized closure — the
+    # pin now covers every nested payload type review approved.
+    "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_SETTLEMENT_VERSION": (
+        "sha256:aedb87be6d8a9e0505a37634d2d2b0f0ed54758856935251eec2878e6f4ab66d"
+    ),
+    # FIG-2266: ADR 0099 section 13 journals the facts one atomic tool attempt
+    # produced on the attempt's own outcome, restored on replay. A new durable
+    # format riding the shared `ToolAttempt` arm, guarded separately from the
+    # settlement because the two carriers move for different reasons. Re-pinned
+    # alongside the settlement for the same closure growth.
+    "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_ATTEMPT_CAPTURE_VERSION": (
+        "sha256:eb503301a493453e2312503176fd7f6a9a24721cb53c398432928c86db28fcec"
+    ),
     # FIG-3408: ADR 0099 section 3 mints the retained tool-child request and the
     # invocation-level tool command together, as one new durable format. The
     # constant has no merge-base value because the surface is new, not renamed.

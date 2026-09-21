@@ -209,6 +209,12 @@ impl TurnCancelWait {
         }
     }
 
+    /// The cooperative cancellation the wait races, for callers that carry
+    /// the trio whole and still need the token alone.
+    pub(crate) fn cancellation(&self) -> &CancellationToken {
+        &self.cancellation
+    }
+
     /// The turn cancellation a process operation observes, if any.
     pub(crate) fn process_turn_cancellation(&self) -> Option<ProcessTurnCancellation> {
         self.observed_scope
@@ -1082,6 +1088,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                 Ok(RuntimeEffectOutcome::ToolAttempt {
                     launch: Box::new(outcome.launch),
                     triggers: outcome.triggers,
+                    capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
                 })
             }
             command => Err(RuntimeEffectControllerError::new(
@@ -1123,8 +1130,13 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             .direct_completions
             .with_tool_attempt_parent_invocation(
                 envelope.invocation.clone().into_runtime_invocation(),
-            );
+            )
+            .with_usage_ledger(crate::runtime::ToolUsageLedger::for_attempt(attempt));
         dispatch.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
+        // Attempt-local buffers: what this attempt commits is drained into the
+        // journaled capture, never read out of a buffer it shares with
+        // anything else.
+        dispatch.checkpoint_messages = crate::tool_dispatch::CheckpointMessageBuffer::default();
         let dispatch = Arc::new(dispatch);
         let tool_context = self.tool_context.with_attempt_dispatch(
             Arc::clone(&dispatch),
@@ -1143,6 +1155,7 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         Ok(RuntimeEffectOutcome::ToolAttempt {
             launch: Box::new(outcome.launch),
             triggers: outcome.triggers,
+            capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
         })
     }
 }
