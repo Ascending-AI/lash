@@ -222,30 +222,6 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
-    name = "lash-core-worker__fv_dca6aea8",
-    build_script = None,
-    crate_features = [
-        "default",
-    ],
-    crate_name = "lash_core_worker",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "testing",
-    ],
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-worker",
-    package_name = "lash-internal-core-worker",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_28e854fb", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_5e7c486a", "//crates/lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_0b86880f", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_b996a40b", "//crates/lash-perf": "//crates/lash-perf:lash-perf__fv_b29efc42", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_b7b4e842", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_8a0a43ef", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_4dc909e9", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_207cbb64", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_78733540"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
     name = "lash-core-worker__fv_e83397fe",
     build_script = None,
     crate_features = [
