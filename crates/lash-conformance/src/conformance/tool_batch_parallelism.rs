@@ -28,6 +28,14 @@
 //! process bridge. A producer contributes its plugin factories and the model
 //! script that issues the plan; everything else is shared.
 //!
+//! One producer needs more than a script: an aggregate that is the body of a
+//! started process is issued by a second, independently written
+//! `call_tool_batch` caller, and reaching it takes a process registry, process
+//! work bound to that registry, the engines the producer's plugins contribute,
+//! and a worker driving the registry while the turn is parked on the process.
+//! The law stands all four up when a producer declares a registry, and a
+//! producer that issues its batch from the turn pays none of it.
+//!
 //! Restate is deliberately not registered: it is serial today
 //! (`RestateRuntimeEffectController::supports_concurrent_effects` is a
 //! hardcoded `false`), and its registration lands red-first with the FIG-3397
@@ -49,6 +57,12 @@ use pretty_assertions::assert_eq;
 /// time out poisons the rendezvous, so every later leaf returns immediately and
 /// the whole law fails in about this long rather than in `n` times this long.
 const RENDEZVOUS_BUDGET: Duration = Duration::from_secs(10);
+
+/// How long one scenario's turn may take before the law gives up on it.
+///
+/// Comfortably above [`RENDEZVOUS_BUDGET`], so a rendezvous that times out is
+/// always reported as the missing overlap it is rather than as a stuck turn.
+const TURN_BUDGET: Duration = Duration::from_secs(60);
 
 /// One leaf of a planned batch.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +140,14 @@ impl ToolBatchPlan {
 /// make the runtime issue one plan as one batch.
 pub type ToolBatchScript = Arc<dyn Fn(&ToolBatchPlan) -> Vec<crate::LlmResponse> + Send + Sync>;
 
+/// A fresh process registry for one scenario, supplied by the tier.
+///
+/// Only a producer whose batch runs *inside a process* needs one. It is a
+/// factory rather than a handle because each scenario opens its own session,
+/// and a durable registry must not carry the previous scenario's rows.
+pub type ToolBatchProcessRegistryFactory =
+    Arc<dyn Fn() -> Arc<dyn crate::ProcessRegistry> + Send + Sync>;
+
 /// A product surface that issues a width-n parallel tool batch.
 ///
 /// The law owns the leaves, the runtime, the tier and every assertion; a
@@ -145,6 +167,14 @@ pub struct ToolBatchProducer {
     /// a tool can; the flag exists for surfaces whose front door is a fixed
     /// shape (a bare aggregate over catalogue leaves).
     pub reaches_relay: bool,
+    /// Present only when the producer's batch is issued from inside a process.
+    ///
+    /// The law then stands the process substrate up itself — the registry this
+    /// factory yields, the process work bound to it, and the engine
+    /// contributions the producer's own plugins declare. A producer that issues
+    /// its batch from the turn leaves this absent, so no tier has to supply a
+    /// process engine it never runs.
+    pub process_registry: Option<ToolBatchProcessRegistryFactory>,
 }
 
 impl std::fmt::Debug for ToolBatchProducer {
@@ -153,6 +183,7 @@ impl std::fmt::Debug for ToolBatchProducer {
             .field("label", &self.label)
             .field("factories", &self.factories.len())
             .field("reaches_relay", &self.reaches_relay)
+            .field("runs_in_a_process", &self.process_registry.is_some())
             .finish()
     }
 }
@@ -191,6 +222,7 @@ pub fn parallel_model_tool_calls_producer() -> ToolBatchProducer {
             }]
         }),
         reaches_relay: true,
+        process_registry: None,
     }
 }
 
@@ -217,6 +249,7 @@ pub fn rlm_promise_all_producer(
             }]
         }),
         reaches_relay: true,
+        process_registry: None,
     }
 }
 
@@ -249,6 +282,74 @@ fn rlm_promise_all_cell(plan: &ToolBatchPlan) -> String {
             plan.relay_args()
         ),
     };
+    format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>")
+}
+
+/// The process bridge's Lashlang aggregate: the same aggregate, but running
+/// inside a started process rather than inside the turn.
+///
+/// The cell defines the aggregate as a process definition and starts it, so the
+/// batch is issued by the process host bridge
+/// (`lash-lashlang-runtime/src/process.rs`, its `call_tool_batch` site) and not
+/// by the cell's own host bridge. That is a second, independently written
+/// `call_tool_batch` caller, which is why it is a producer of this law rather
+/// than a variation of `rlm_promise_all_producer`.
+///
+/// `registry` is the tier's process registry; the law binds the process work to
+/// it and installs the engine contributions the producer's plugins declare.
+pub fn lashlang_process_aggregate_producer(
+    factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    registry: ToolBatchProcessRegistryFactory,
+) -> ToolBatchProducer {
+    ToolBatchProducer {
+        label: "lashlang-process-aggregate".to_string(),
+        factories,
+        script: Arc::new(|plan| {
+            vec![crate::LlmResponse {
+                parts: vec![crate::LlmOutputPart::Text {
+                    text: lashlang_process_aggregate_cell(plan),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..crate::LlmResponse::default()
+            }]
+        }),
+        reaches_relay: true,
+        process_registry: Some(registry),
+    }
+}
+
+/// The cell text [`lashlang_process_aggregate_producer`] issues.
+///
+/// The aggregate is the *process definition*: nothing is awaited in the cell
+/// itself, so the whole width is issued by the process bridge. `finish` closes
+/// the turn on the process's terminal value, for the reason given on
+/// [`rlm_promise_all_cell`].
+fn lashlang_process_aggregate_cell(plan: &ToolBatchPlan) -> String {
+    let aggregate = match plan.via {
+        ToolBatchEntry::Direct => {
+            let calls = plan
+                .leaves
+                .iter()
+                .enumerate()
+                .map(|(position, leaf)| {
+                    format!("    tools.{}({{ position: {position} }})", leaf.tool)
+                })
+                .collect::<Vec<_>>()
+                .join(",\n");
+            format!("  return await Promise.all([\n{calls}\n  ]);")
+        }
+        ToolBatchEntry::Relay => format!(
+            "  return await tools.{}({});",
+            plan.relay_tool,
+            plan.relay_args()
+        ),
+    };
+    let body = format!(
+        "const batch = async () => {{\n{aggregate}\n}};\n\
+         const handle = await processes.start({{ definition: batch }});\n\
+         finish(await handle);"
+    );
     format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>")
 }
 
@@ -712,6 +813,9 @@ struct ScenarioWorld {
     model_calls: Arc<AtomicUsize>,
     effect_host: Arc<dyn crate::EffectHost>,
     session_id: lash_sansio::SessionId,
+    /// The tier's process registry, present only for a producer that issues
+    /// its batch from inside a process.
+    process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
 }
 
 /// Builds a runtime over `effect_host` with the producer's factories plus the
@@ -778,6 +882,7 @@ async fn run_scenario(
         model_calls: Arc::new(AtomicUsize::new(0)),
         effect_host,
         session_id,
+        process_registry: producer.process_registry.as_ref().map(|make| make()),
     };
     drive_turn(&world, producer, plan).await;
     ScenarioObservations {
@@ -889,20 +994,61 @@ async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &
         policy: policy.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    // A producer whose batch runs inside a process needs four things this
+    // runtime otherwise has no reason to own: the engines its own plugins
+    // contribute, a process registry, process work bound to exactly that
+    // registry, and a worker that drives the registry while the turn is parked
+    // on the process. They are installed here and nowhere else, so a producer
+    // that issues its batch from the turn still gets the plain one-turn
+    // fixture.
+    let plugin_host = crate::facade_support::PluginHost::new(world.factories.clone());
+    let mut builder = crate::LashRuntime::builder(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+        crate::testing::runtime_lease_owner(),
+    );
+    let mut process_worker = None;
+    if let Some(registry) = world.process_registry.as_ref() {
+        host = plugin_host
+            .install_process_engine_contributions(host, true)
+            .expect("install the producer's process-engine contributions");
+        // One watch, two consumers: the runtime's process port and the worker
+        // must observe the same registry handle, or the turn parks on a change
+        // feed nothing publishes to.
+        let watched = crate::facade_support::watch_process_registry(Arc::clone(registry));
+        let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+            watched.registry(),
+        )));
+        builder = builder
+            .with_process_registry(Arc::clone(watched.registry()))
+            .with_process_work(crate::ProcessWorkWiring::new(watched.clone(), port));
+        process_worker = Some(
+            lash_core_worker::DurableProcessWorker::new(
+                lash_core_worker::DurableProcessWorkerConfig::new(
+                    Arc::new(crate::facade_support::PluginHost::new(
+                        world.factories.clone(),
+                    )),
+                    host.clone(),
+                    Arc::new(crate::InMemorySessionStoreFactory::new()),
+                    lash_core_worker::WorkerProcessWork::SelfNative(watched),
+                    Arc::new(crate::NoQueuedWork::new()),
+                    crate::testing::runtime_lease_owner(),
+                )
+                .with_session_policy(policy.clone()),
+            )
+            .expect("build the tool-batch parallelism process worker"),
+        );
+    }
     let mut runtime = Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::testing::runtime_lease_owner(),
-        )
-        .with_session_id(&world.session_id)
-        .with_policy(policy)
-        .with_initial_state(state)
-        .with_runtime_host(host)
-        .with_plugin_factories(world.factories.clone())
-        .with_store(Arc::new(crate::InMemorySessionStore::new()))
-        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
-        .build(),
+        builder
+            .with_session_id(&world.session_id)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_runtime_host(host)
+            .with_plugin_host(plugin_host)
+            .with_store(Arc::new(crate::InMemorySessionStore::new()))
+            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .build(),
     )
     .await
     .expect("build the tool-batch parallelism conformance runtime");
@@ -913,19 +1059,49 @@ async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &
         .expect("scope the tool-batch parallelism turn");
     let mut input = crate::TurnInput::text("run the planned batch");
     input.trace_turn_id = Some(turn_id);
-    let turn = runtime
-        .stream_turn(
+    // The worker is driven for as long as the turn runs. A process registered
+    // mid-turn is admitted on the next sweep; the sweep is what turns
+    // `processes.start` into a running process, and without it the turn parks
+    // forever on a handle nothing will settle.
+    let worker_driver = process_worker.map(|worker| {
+        crate::task::spawn(async move {
+            loop {
+                let _ = worker.drive_pending_processes().await;
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+    });
+
+    // The turn is bounded too. A leaf that never starts is reported by the
+    // rendezvous, but a producer whose batch never reaches the leaves at all --
+    // a process that is registered and never run, say -- would otherwise hang
+    // until the harness's own timeout and be read as infrastructure rather than
+    // as the finding it is.
+    let turn = tokio::time::timeout(
+        TURN_BUDGET,
+        runtime.stream_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
+        ),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "the batch turn did not settle within {TURN_BUDGET:?} for session \
+             `{}`: the producer's batch never reached the leaves",
+            world.session_id
         )
-        .await
-        .expect("run the tool-batch parallelism conformance turn");
+    })
+    .expect("run the tool-batch parallelism conformance turn");
     assert!(
         matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
         "the batch turn must finish: {:?}; turn issues: {:?}",
         turn.outcome,
         turn.errors,
     );
+    if let Some(driver) = worker_driver {
+        driver.abort();
+    }
     let _ = &world.state;
 }
 
