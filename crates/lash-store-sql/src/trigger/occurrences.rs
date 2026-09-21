@@ -65,21 +65,34 @@ crate::statements! {
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
-        /// Every occurrence a filter admits: `?1` source type, `?2` source
-        /// key, `?3` inclusive start and `?4` exclusive end of the occurrence
-        /// window, each skipped when bound NULL.
-        ///
-        /// Four optional predicates that both backends used to build — SQLite
-        /// with `push_str`, PostgreSQL with a `QueryBuilder` — over the same
-        /// predicate set and the same order. Unlike the subscription listing
-        /// there is no Rust filter behind this one, so the statement is the
-        /// whole contract: bind NULL and the predicate is not applied.
-        list_filtered = "SELECT occurrence_id, record_json
+        /// Every occurrence in the window `?1`..`?2`, in listing order. The
+        /// general listing: no source predicate to seek on, and no index over
+        /// `occurred_at_ms` alone, so it scans by design.
+        list_all = "SELECT occurrence_id, record_json
              FROM trigger_occurrences
-             WHERE (?1 IS NULL OR source_type = ?1)
-               AND (?2 IS NULL OR source_key = ?2)
-               AND (?3 IS NULL OR occurred_at_ms >= ?3)
-               AND (?4 IS NULL OR occurred_at_ms < ?4)
+             WHERE occurred_at_ms >= ?1
+               AND occurred_at_ms <= ?2
+             ORDER BY occurred_at_ms ASC, occurrence_id ASC";
+
+        /// Every occurrence of source type `?1` in the window `?2`..`?3`.
+        /// Seeks `(source_type, source_key, occurred_at_ms)` on its leading
+        /// column.
+        list_by_source_type = "SELECT occurrence_id, record_json
+             FROM trigger_occurrences
+             WHERE source_type = ?1
+               AND occurred_at_ms >= ?2
+               AND occurred_at_ms <= ?3
+             ORDER BY occurred_at_ms ASC, occurrence_id ASC";
+
+        /// Every occurrence of source `?1`/`?2` in the window `?3`..`?4`.
+        /// Seeks `(source_type, source_key, occurred_at_ms)` on both key
+        /// columns and ranges on the third.
+        list_by_source = "SELECT occurrence_id, record_json
+             FROM trigger_occurrences
+             WHERE source_type = ?1
+               AND source_key = ?2
+               AND occurred_at_ms >= ?3
+               AND occurred_at_ms <= ?4
              ORDER BY occurred_at_ms ASC, occurrence_id ASC";
 
         /// Arm occurrence `?1` for reclamation at `?2`, keeping the first
@@ -88,5 +101,56 @@ crate::statements! {
         arm_reclaimable = "UPDATE trigger_occurrences
              SET reclaimable_at_ms = ?2
              WHERE occurrence_id = ?1 AND reclaimable_at_ms IS NULL";
+    }
+}
+
+/// Which listing statement an occurrence filter is served by.
+///
+/// The same reasoning as [`super::subscriptions::ListShape`]: a listing whose
+/// predicates are optional at the SQL level cannot seek, so each shape an
+/// index serves gets a statement of plain equalities.
+///
+/// The window is not a shape. Both bounds are always bound — an unset start as
+/// `i64::MIN`, an unset end as `i64::MAX` — so the comparison is always a
+/// plain, sargable one against a value, and the third column of
+/// `(source_type, source_key, occurred_at_ms)` is still a range. That makes
+/// the SQL window a closed `[start, end]` over clamped bounds, which is a
+/// superset of the filter's half-open `[start, end)` over the raw `u64` ones;
+/// `TriggerOccurrenceFilter::matches` decides each record afterwards, so the
+/// answer is the filter's own, to the bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListShape {
+    /// Neither source field is set.
+    All,
+    /// Source type alone.
+    BySourceType,
+    /// Source type and source key.
+    BySource,
+}
+
+impl ListShape {
+    /// The shape of a filter that sets the fields these flags describe.
+    ///
+    /// A source key with no source type is not a seek on
+    /// `(source_type, source_key, occurred_at_ms)`, so it is not a shape.
+    #[must_use]
+    pub const fn of(source_type: bool, source_key: bool) -> Self {
+        match (source_type, source_key) {
+            (true, true) => Self::BySource,
+            (true, false) => Self::BySourceType,
+            (false, _) => Self::All,
+        }
+    }
+}
+
+impl OccurrenceStatements {
+    /// The listing statement for `shape`.
+    #[must_use]
+    pub fn list_for(&self, shape: ListShape) -> &crate::Rendered {
+        match shape {
+            ListShape::All => &self.list_all,
+            ListShape::BySourceType => &self.list_by_source_type,
+            ListShape::BySource => &self.list_by_source,
+        }
     }
 }

@@ -14,8 +14,12 @@ use lash_sansio::SessionId;
 use lash_store_sql::Dialect;
 use lash_store_sql::trigger::deliveries::DeliveryStatements;
 use lash_store_sql::trigger::mutation_receipts::MutationReceiptStatements;
-use lash_store_sql::trigger::occurrences::OccurrenceStatements;
-use lash_store_sql::trigger::subscriptions::SubscriptionStatements;
+use lash_store_sql::trigger::occurrences::{
+    ListShape as OccurrenceListShape, OccurrenceStatements,
+};
+use lash_store_sql::trigger::subscriptions::{
+    ListShape as SubscriptionListShape, SubscriptionStatements,
+};
 use std::sync::LazyLock;
 
 lash_store_sql::statements! {
@@ -36,18 +40,30 @@ lash_store_sql::statements! {
              WHERE owner_scope = ?1 AND lifecycle <> 'tombstoned' FOR UPDATE";
 
         /// Every enabled subscription an occurrence of `?1`/`?2` fires at,
-        /// narrowed to owner scope `?3` when the occurrence names a session,
         /// under a share lock.
         ///
         /// `FOR SHARE` is the fork: it stops a concurrent mutation retiring a
         /// subscription between this read and the delivery it reserves.
-        /// SQLite holds the write lock for the whole ingress.
+        /// SQLite holds the write lock for the whole ingress. The predicates
+        /// are plain equalities on both backends, so the read seeks
+        /// `(source_type, source_key, lifecycle)` on all three columns.
         select_enabled_for_source = "SELECT subscription_id, record_json
              FROM trigger_subscriptions
              WHERE lifecycle = 'enabled'
                AND source_type = ?1
                AND source_key = ?2
-               AND owner_scope = COALESCE(?3, owner_scope)
+             ORDER BY owner_scope ASC, subscription_key ASC FOR SHARE";
+
+        /// The same read narrowed to owner scope `?3`, which is what an
+        /// occurrence that names a session fires at. Its own statement rather
+        /// than an optional predicate, for the reason in
+        /// [`lash_store_sql::trigger::subscriptions::ListShape`].
+        select_enabled_for_source_and_owner = "SELECT subscription_id, record_json
+             FROM trigger_subscriptions
+             WHERE lifecycle = 'enabled'
+               AND source_type = ?1
+               AND source_key = ?2
+               AND owner_scope = ?3
              ORDER BY owner_scope ASC, subscription_key ASC FOR SHARE";
 
         /// Every live subscription owned by scope `?1`, under their write
@@ -240,11 +256,11 @@ lash_store_sql::statements! {
 /// Every trigger-family statement, rendered once.
 pub(crate) struct TriggerSql {
     /// `trigger_subscriptions` statements both backends issue verbatim.
-    subscription: SubscriptionStatements,
+    pub(crate) subscription: SubscriptionStatements,
     /// `trigger_subscriptions` statements only PostgreSQL issues.
-    subscription_postgres: SubscriptionPostgresStatements,
+    pub(crate) subscription_postgres: SubscriptionPostgresStatements,
     /// `trigger_occurrences` statements both backends issue verbatim.
-    occurrence: OccurrenceStatements,
+    pub(crate) occurrence: OccurrenceStatements,
     /// `trigger_occurrences` statements only PostgreSQL issues.
     occurrence_postgres: OccurrencePostgresStatements,
     /// `trigger_deliveries` statements both backends issue verbatim.
@@ -275,29 +291,78 @@ static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
 });
 
 /// The trigger-family statements, rendered at first use and never again.
-fn trigger_sql() -> &'static TriggerSql {
+pub(crate) fn trigger_sql() -> &'static TriggerSql {
     &TRIGGER_SQL
 }
 
-/// The rendered subscription listing, for the conformance assertion that the
-/// owner filter is pushed into SQL rather than applied in Rust.
-pub(crate) fn subscription_list_sql() -> &'static str {
-    trigger_sql().subscription.list_filtered.sql()
+/// The rendered listing statement `filter`'s shape is served by, for the
+/// conformance assertion that the owner filter is pushed into SQL rather than
+/// applied in Rust.
+pub(crate) fn subscription_list_sql(filter: &TriggerSubscriptionFilter) -> &'static str {
+    trigger_sql()
+        .subscription
+        .list_for(subscription_list_shape(filter))
+        .sql()
 }
 
-/// The five optional subscription-filter predicates, in the order
-/// `trigger_subscription.list_filtered` binds them. `None` is bound as SQL
-/// NULL, which is how the statement skips a predicate.
-fn subscription_filter_bindings(filter: &TriggerSubscriptionFilter) -> [Option<String>; 5] {
-    [
-        filter.registrant_scope_id.clone(),
-        filter.subscription_key.clone(),
-        filter.source_type.clone(),
-        filter.source_key.clone(),
-        filter
-            .enabled
-            .map(|enabled| if enabled { "enabled" } else { "disabled" }.to_string()),
-    ]
+/// The listing statement shape `filter` is served by.
+pub(crate) fn subscription_list_shape(filter: &TriggerSubscriptionFilter) -> SubscriptionListShape {
+    SubscriptionListShape::of(
+        filter.registrant_scope_id.is_some(),
+        filter.subscription_key.is_some(),
+        filter.source_type.is_some(),
+        filter.source_key.is_some(),
+    )
+}
+
+/// What the subscription listing of `shape` binds, in its parameter order.
+///
+/// Exhaustive over the shape, so a new listing statement cannot be added
+/// without deciding what it binds.
+fn subscription_list_bindings(
+    filter: &TriggerSubscriptionFilter,
+    shape: SubscriptionListShape,
+) -> Vec<String> {
+    let text = |value: &Option<String>| value.clone().unwrap_or_default();
+    match shape {
+        SubscriptionListShape::All => Vec::new(),
+        SubscriptionListShape::ByOwner => vec![text(&filter.registrant_scope_id)],
+        SubscriptionListShape::ByOwnerAndKey => vec![
+            text(&filter.registrant_scope_id),
+            text(&filter.subscription_key),
+        ],
+        SubscriptionListShape::BySourceType => vec![text(&filter.source_type)],
+        SubscriptionListShape::BySource => {
+            vec![text(&filter.source_type), text(&filter.source_key)]
+        }
+    }
+}
+
+/// What the occurrence listing of `shape` binds: its source equalities, then
+/// the window.
+///
+/// The window is always bound — an unset start as `i64::MIN`, an unset end as
+/// `i64::MAX` — so the comparison stays a plain one against a value and the
+/// index range survives. The closed `[start, end]` this produces is a superset
+/// of the filter's half-open `[start, end)`, which
+/// `TriggerOccurrenceFilter::matches` then narrows exactly.
+pub(crate) fn occurrence_list_bindings(
+    filter: &lash_core::TriggerOccurrenceFilter,
+    shape: OccurrenceListShape,
+) -> (Vec<String>, i64, i64) {
+    let text = |value: &Option<String>| value.clone().unwrap_or_default();
+    let keys = match shape {
+        OccurrenceListShape::All => Vec::new(),
+        OccurrenceListShape::BySourceType => vec![text(&filter.source_type)],
+        OccurrenceListShape::BySource => {
+            vec![text(&filter.source_type), text(&filter.source_key)]
+        }
+    };
+    (
+        keys,
+        filter.occurred_at_start_ms.map_or(i64::MIN, clamp_epoch_ms),
+        filter.occurred_at_end_ms.map_or(i64::MAX, clamp_epoch_ms),
+    )
 }
 
 #[async_trait::async_trait]
@@ -471,8 +536,9 @@ impl TriggerStore for PostgresTriggerStore {
         &self,
         filter: TriggerSubscriptionFilter,
     ) -> Result<Vec<TriggerSubscriptionRecord>, PluginError> {
-        let mut query = sqlx::query(trigger_sql().subscription.list_filtered.sql());
-        for binding in subscription_filter_bindings(&filter) {
+        let shape = subscription_list_shape(&filter);
+        let mut query = sqlx::query(trigger_sql().subscription.list_for(shape).sql());
+        for binding in subscription_list_bindings(&filter, shape) {
             query = query.bind(binding);
         }
         let rows = query
@@ -630,20 +696,31 @@ impl TriggerStore for PostgresTriggerStore {
         &self,
         filter: lash_core::TriggerOccurrenceFilter,
     ) -> Result<Vec<TriggerOccurrenceRecord>, PluginError> {
-        let rows = sqlx::query(trigger_sql().occurrence.list_filtered.sql())
-            .bind(filter.source_type.clone())
-            .bind(filter.source_key.clone())
-            .bind(filter.occurred_at_start_ms.map(clamp_epoch_ms))
-            .bind(filter.occurred_at_end_ms.map(clamp_epoch_ms))
+        let shape =
+            OccurrenceListShape::of(filter.source_type.is_some(), filter.source_key.is_some());
+        let (keys, start_ms, end_ms) = occurrence_list_bindings(&filter, shape);
+        let mut query = sqlx::query(trigger_sql().occurrence.list_for(shape).sql());
+        for key in keys {
+            query = query.bind(key);
+        }
+        let rows = query
+            .bind(start_ms)
+            .bind(end_ms)
             .fetch_all(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
-        rows.into_iter()
-            .map(|row| {
-                let json: String = row.get(1);
-                serde_json::from_str(&json).map_err(process_decode_error)
-            })
-            .collect()
+        let mut records = Vec::new();
+        for row in rows {
+            let json: String = row.get(1);
+            // The statement's window is the clamped closed one; the filter's
+            // own half-open bounds, over the raw `u64`s, decide each record.
+            let record: TriggerOccurrenceRecord =
+                serde_json::from_str(&json).map_err(process_decode_error)?;
+            if filter.matches(&record) {
+                records.push(record);
+            }
+        }
+        Ok(records)
     }
 
     async fn list_deliveries_by_occurrence_id(
@@ -964,10 +1041,20 @@ async fn reserve_postgres_deliveries(
         .session_id
         .as_deref()
         .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace());
-    let rows = sqlx::query(sql.subscription_postgres.select_enabled_for_source.sql())
+    let statement = match &owner_scope {
+        Some(_) => {
+            &sql.subscription_postgres
+                .select_enabled_for_source_and_owner
+        }
+        None => &sql.subscription_postgres.select_enabled_for_source,
+    };
+    let mut query = sqlx::query(statement.sql())
         .bind(&occurrence.source_type)
-        .bind(&occurrence.source_key)
-        .bind(owner_scope)
+        .bind(&occurrence.source_key);
+    if let Some(owner_scope) = owner_scope {
+        query = query.bind(owner_scope);
+    }
+    let rows = query
         .fetch_all(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;

@@ -1139,6 +1139,11 @@ mod test_support;
 #[cfg(any(test, feature = "testing"))]
 #[path = "postgres/testing.rs"]
 pub mod testing;
+/// Planner witnesses for the named trigger listings, and the dispatch that
+/// picks them.
+#[cfg(test)]
+#[path = "postgres/trigger_listing_plan_tests.rs"]
+mod trigger_listing_plan_tests;
 #[path = "postgres/trigger_store.rs"]
 mod trigger_store;
 #[path = "postgres/turn_input_settlement.rs"]

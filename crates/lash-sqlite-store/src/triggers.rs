@@ -16,8 +16,12 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_store_sql::trigger::deliveries::DeliveryStatements;
 use lash_store_sql::trigger::mutation_receipts::MutationReceiptStatements;
-use lash_store_sql::trigger::occurrences::OccurrenceStatements;
-use lash_store_sql::trigger::subscriptions::SubscriptionStatements;
+use lash_store_sql::trigger::occurrences::{
+    ListShape as OccurrenceListShape, OccurrenceStatements,
+};
+use lash_store_sql::trigger::subscriptions::{
+    ListShape as SubscriptionListShape, SubscriptionStatements,
+};
 use std::sync::LazyLock;
 
 lash_store_sql::statements! {
@@ -37,18 +41,31 @@ lash_store_sql::statements! {
         select_records_for_prune = "SELECT record_json FROM trigger_subscriptions
              WHERE owner_scope = ?1 AND lifecycle <> 'tombstoned'";
 
-        /// Every enabled subscription an occurrence of `?1`/`?2` fires at,
-        /// narrowed to owner scope `?3` when the occurrence names a session.
+        /// Every enabled subscription an occurrence of `?1`/`?2` fires at.
         ///
-        /// PostgreSQL adds `FOR SHARE` so a concurrent mutation cannot retire
-        /// a subscription between this read and the delivery it reserves.
-        /// SQLite holds the write lock for the whole ingress.
+        /// Plain equalities, so the read seeks
+        /// `(source_type, source_key, lifecycle)` on all three columns — this
+        /// is the ingress path, and it runs once per firing. PostgreSQL adds
+        /// `FOR SHARE` so a concurrent mutation cannot retire a subscription
+        /// between this read and the delivery it reserves; SQLite holds the
+        /// write lock for the whole ingress.
         select_enabled_for_source = "SELECT subscription_id, record_json
              FROM trigger_subscriptions
              WHERE lifecycle = 'enabled'
                AND source_type = ?1
                AND source_key = ?2
-               AND owner_scope = COALESCE(?3, owner_scope)
+             ORDER BY owner_scope ASC, subscription_key ASC";
+
+        /// The same read narrowed to owner scope `?3`, which is what an
+        /// occurrence that names a session fires at. Its own statement rather
+        /// than an optional predicate, for the reason in
+        /// [`lash_store_sql::trigger::subscriptions::ListShape`].
+        select_enabled_for_source_and_owner = "SELECT subscription_id, record_json
+             FROM trigger_subscriptions
+             WHERE lifecycle = 'enabled'
+               AND source_type = ?1
+               AND source_key = ?2
+               AND owner_scope = ?3
              ORDER BY owner_scope ASC, subscription_key ASC";
 
         /// Every subscription in the store, tombstoned ones included.
@@ -305,11 +322,20 @@ fn trigger_sql() -> &'static TriggerSql {
     &TRIGGER_SQL
 }
 
-/// The rendered subscription listing, for the conformance assertion that the
-/// owner filter is pushed into SQL rather than applied in Rust.
-pub(crate) fn subscription_list_sql() -> &'static str {
-    trigger_sql().subscription.list_filtered.sql()
+/// The rendered listing statement `filter`'s shape is served by, for the
+/// conformance assertion that the owner filter is pushed into SQL rather than
+/// applied in Rust.
+pub(crate) fn subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> &'static str {
+    trigger_sql()
+        .subscription
+        .list_for(subscription_list_shape(filter))
+        .sql()
 }
+
+/// Planner witnesses for the named listings, and the dispatch that picks them.
+#[cfg(test)]
+#[path = "triggers/listing_plan_tests.rs"]
+mod listing_plan_tests;
 
 pub struct SqliteTriggerStore {
     conn: SqliteConnection,
@@ -454,27 +480,71 @@ fn trigger_tx_outcome<T>(
     }
 }
 
-/// The five optional subscription-filter predicates, in the order
-/// `trigger_subscription.list_filtered` binds them. A `None` is bound as SQL
-/// NULL, which is how the statement skips a predicate.
-fn subscription_filter_values(
+/// The listing statement shape `filter` is served by.
+fn subscription_list_shape(filter: &lash_core::TriggerSubscriptionFilter) -> SubscriptionListShape {
+    SubscriptionListShape::of(
+        filter.registrant_scope_id.is_some(),
+        filter.subscription_key.is_some(),
+        filter.source_type.is_some(),
+        filter.source_key.is_some(),
+    )
+}
+
+/// What the statement of `shape` binds, in its parameter order.
+///
+/// Exhaustive over the shape, so a new listing statement cannot be added
+/// without deciding what it binds.
+fn subscription_list_values(
     filter: &lash_core::TriggerSubscriptionFilter,
+    shape: SubscriptionListShape,
 ) -> Vec<rusqlite::types::Value> {
-    let optional = |value: Option<String>| match value {
-        Some(value) => rusqlite::types::Value::Text(value),
-        None => rusqlite::types::Value::Null,
+    let text =
+        |value: &Option<String>| rusqlite::types::Value::Text(value.clone().unwrap_or_default());
+    match shape {
+        SubscriptionListShape::All => Vec::new(),
+        SubscriptionListShape::ByOwner => vec![text(&filter.registrant_scope_id)],
+        SubscriptionListShape::ByOwnerAndKey => vec![
+            text(&filter.registrant_scope_id),
+            text(&filter.subscription_key),
+        ],
+        SubscriptionListShape::BySourceType => vec![text(&filter.source_type)],
+        SubscriptionListShape::BySource => {
+            vec![text(&filter.source_type), text(&filter.source_key)]
+        }
+    }
+}
+
+/// What the occurrence listing of `shape` binds, in its parameter order.
+///
+/// The window is always bound: an unset start is `i64::MIN` and an unset end
+/// `i64::MAX`, so the comparison stays a plain one against a value and the
+/// index range survives. The closed `[start, end]` this produces is a superset
+/// of the filter's half-open `[start, end)`, which
+/// `TriggerOccurrenceFilter::matches` then narrows exactly.
+fn occurrence_list_values(
+    filter: &lash_core::TriggerOccurrenceFilter,
+    shape: OccurrenceListShape,
+) -> Vec<rusqlite::types::Value> {
+    let text =
+        |value: &Option<String>| rusqlite::types::Value::Text(value.clone().unwrap_or_default());
+    let mut values = match shape {
+        OccurrenceListShape::All => Vec::new(),
+        OccurrenceListShape::BySourceType => vec![text(&filter.source_type)],
+        OccurrenceListShape::BySource => {
+            vec![text(&filter.source_type), text(&filter.source_key)]
+        }
     };
-    vec![
-        optional(filter.registrant_scope_id.clone()),
-        optional(filter.subscription_key.clone()),
-        optional(filter.source_type.clone()),
-        optional(filter.source_key.clone()),
-        optional(
-            filter
-                .enabled
-                .map(|enabled| if enabled { "enabled" } else { "disabled" }.to_string()),
-        ),
-    ]
+    values.push(rusqlite::types::Value::Integer(
+        filter
+            .occurred_at_start_ms
+            .map_or(i64::MIN, crate::clamp_epoch_ms),
+    ));
+    values.push(rusqlite::types::Value::Integer(
+        filter
+            .occurred_at_end_ms
+            .map_or(i64::MAX, crate::clamp_epoch_ms),
+    ));
+    values
 }
 
 #[async_trait::async_trait]
@@ -666,9 +736,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let values = subscription_filter_values(&filter);
+                    let shape = subscription_list_shape(&filter);
+                    let values = subscription_list_values(&filter, shape);
                     let mut stmt = conn
-                        .prepare(trigger_sql().subscription.list_filtered.sql())
+                        .prepare(trigger_sql().subscription.list_for(shape).sql())
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
@@ -866,24 +937,13 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let optional_text = |value: Option<String>| match value {
-                        Some(value) => rusqlite::types::Value::Text(value),
-                        None => rusqlite::types::Value::Null,
-                    };
-                    let optional_epoch = |value: Option<u64>| match value {
-                        Some(value) => {
-                            rusqlite::types::Value::Integer(crate::clamp_epoch_ms(value))
-                        }
-                        None => rusqlite::types::Value::Null,
-                    };
-                    let values = [
-                        optional_text(filter.source_type.clone()),
-                        optional_text(filter.source_key.clone()),
-                        optional_epoch(filter.occurred_at_start_ms),
-                        optional_epoch(filter.occurred_at_end_ms),
-                    ];
+                    let shape = OccurrenceListShape::of(
+                        filter.source_type.is_some(),
+                        filter.source_key.is_some(),
+                    );
+                    let values = occurrence_list_values(&filter, shape);
                     let mut stmt = conn
-                        .prepare(trigger_sql().occurrence.list_filtered.sql())
+                        .prepare(trigger_sql().occurrence.list_for(shape).sql())
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
@@ -893,7 +953,13 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     let mut records = Vec::new();
                     for row in rows {
                         let (_, json) = row.map_err(process_sqlite_error)?;
-                        records.push(Self::decode_occurrence(json)?);
+                        // The statement's window is the clamped closed one;
+                        // the filter's own half-open bounds, over the raw
+                        // `u64`s, decide each record.
+                        let record = Self::decode_occurrence(json)?;
+                        if filter.matches(&record) {
+                            records.push(record);
+                        }
                     }
                     Ok(records)
                 })())
@@ -1238,20 +1304,22 @@ fn reserve_sqlite_deliveries(
     created_at_ms: u64,
 ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
     let sql = trigger_sql();
-    let owner_scope = match occurrence.session_id.as_deref() {
-        Some(session_id) => rusqlite::types::Value::Text(
-            lash_core::TriggerOwnerScope::session(session_id).namespace(),
-        ),
-        None => rusqlite::types::Value::Null,
-    };
-    let values: Vec<rusqlite::types::Value> = vec![
+    let mut values: Vec<rusqlite::types::Value> = vec![
         occurrence.source_type.clone().into(),
         occurrence.source_key.clone().into(),
-        owner_scope,
     ];
-    let mut stmt = tx
-        .prepare(sql.subscription_sqlite.select_enabled_for_source.sql())
-        .map_err(process_sqlite_error)?;
+    let statement = match occurrence.session_id.as_deref() {
+        Some(session_id) => {
+            values.push(
+                lash_core::TriggerOwnerScope::session(session_id)
+                    .namespace()
+                    .into(),
+            );
+            &sql.subscription_sqlite.select_enabled_for_source_and_owner
+        }
+        None => &sql.subscription_sqlite.select_enabled_for_source,
+    };
+    let mut stmt = tx.prepare(statement.sql()).map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

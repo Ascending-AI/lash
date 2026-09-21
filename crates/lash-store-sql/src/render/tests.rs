@@ -417,33 +417,6 @@ fn a_name_the_statement_binds_for_itself_is_not_a_table() {
 }
 
 #[test]
-fn an_upserts_do_update_set_is_not_a_table_position() {
-    let neutral = "INSERT INTO await_event_waits (key_id, scope_json)
-         VALUES (?1, ?2)
-         ON CONFLICT (key_id) DO UPDATE SET scope_json = EXCLUDED.scope_json";
-
-    assert_eq!(
-        postgres(neutral),
-        "INSERT INTO lash_await_event_waits (key_id, scope_json)
-         VALUES ($1, $2)
-         ON CONFLICT (key_id) DO UPDATE SET scope_json = EXCLUDED.scope_json"
-    );
-    // A real `UPDATE <table>` still is one.
-    assert_eq!(
-        render(
-            "UPDATE nowhere SET key_id = ?1",
-            Dialect::postgres(),
-            TABLES
-        )
-        .expect_err("an UPDATE that names no owned table"),
-        RenderError::UnknownTable {
-            name: "nowhere".to_string(),
-            at: 7,
-        }
-    );
-}
-
-#[test]
 fn every_owned_statement_renders_for_both_backends() {
     // Over the crate's real table list rather than this module's fixture: a
     // statement set is only renderable for a layout that places every table

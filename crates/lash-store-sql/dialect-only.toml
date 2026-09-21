@@ -679,6 +679,17 @@ whole ingress. The optional owner-scope predicate is identical in both.
 """
 
 [[dialect_only]]
+statement = "trigger_subscription.select_enabled_for_source_and_owner"
+backends = ["sqlite", "postgres"]
+kind = "FOR SHARE"
+reason = """
+Same share-lock fork as trigger_subscription.select_enabled_for_source, for the
+occurrence that names a session: the owner scope is its own statement rather
+than an optional predicate, because a predicate that is only sometimes there
+cannot seek an index on either backend.
+"""
+
+[[dialect_only]]
 statement = "trigger_subscription.select_all_for_session_sweep"
 backends = ["sqlite"]
 kind = "operation exists on one backend only"
