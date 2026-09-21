@@ -300,10 +300,17 @@ pub enum ToolSourcePolicy {
 /// config write — carries the persisted surface forward untouched rather than
 /// recording every tool as orphaned or dropping it.
 ///
-/// The mode is a claim, not a fence: it does not prevent a turn from running.
-/// A host that runs a turn on a `PreservePersisted` open executes against
-/// whatever live surface the sources advertise, and the durable snapshot still
-/// reflects the last reconciled open.
+/// The declaration is enforced, not advisory: every turn-execution entry —
+/// direct turns, queued and prepared drives, and the shared logical-turn
+/// funnel — refuses a `PreservePersisted` open with
+/// `RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface` before
+/// admission, because the surface was never reconciled and no
+/// [`ToolSourcePolicy`] was enforced. To run a turn the host must reopen in
+/// [`Reconcile`](Self::Reconcile) mode, which performs the restore, applies
+/// the source policy and rebuilds the catalog. Whole-state replacements
+/// (resident reload, append-receipt replay, rollback) reassert the
+/// per-open preservation marker from the runtime's open configuration so the
+/// durable snapshot cannot be restamped from the unreconciled registry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToolSurfaceOpenMode {
     /// Install the persisted snapshot and rebuild the catalog, reporting any
@@ -311,7 +318,8 @@ pub enum ToolSurfaceOpenMode {
     #[default]
     Reconcile,
     /// Leave the persisted snapshot untouched: no reconcile, no catalog
-    /// rebuild, no report, no warning, and no restamp at commit time.
+    /// rebuild, no report, no warning, no restamp at commit time — and no
+    /// turn execution.
     PreservePersisted,
 }
 

@@ -5,6 +5,7 @@ use super::*;
 use lash_core::ToolProvider as _;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::plugin::StaticPluginFactory;
+use lash_sansio::core_support::MessageSequenceCoreSupport;
 
 const ALPHA_ID: &str = "tool:fig3367_alpha";
 const ALPHA_NAME: &str = "fig3367_alpha";
@@ -373,15 +374,73 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     );
 }
 
+/// Seed the two-tool fixture: a granted open that records a beta opt-out and
+/// parks. Returns the catalog generation the durable snapshot is left at.
+async fn seed_opted_out_session(
+    session_id: &SessionId,
+    store: &Arc<dyn lash_core::RuntimePersistence>,
+) -> u64 {
+    let mut granted = open_runtime(
+        session_id,
+        store,
+        Some(both_tools()),
+        lash_core::ToolSourcePolicy::Tolerate,
+    )
+    .await
+    .expect("granted open");
+    let mut curated = granted.tool_state().expect("live tool state");
+    curated
+        .set_membership(&lash_core::ToolId::from(BETA_ID), false)
+        .expect("opt out beta");
+    Box::pin(granted.apply_tool_state(curated))
+        .await
+        .expect("apply the opt-out");
+    let generation = granted.tool_state().expect("tool state").generation();
+    Box::pin(granted.park())
+        .await
+        .expect("park the granted open");
+    generation
+}
+
+/// The durable reading of the seeded surface: the persisted snapshot carries
+/// the expected generation, alpha is a bound catalog member, beta a bound
+/// opt-out, and nothing is orphaned.
+async fn assert_persisted_surface_unchanged(
+    store: &Arc<dyn lash_core::RuntimePersistence>,
+    generation: u64,
+) {
+    let preserved = persisted_tool_state(store).await;
+    assert_eq!(
+        preserved.generation(),
+        generation,
+        "the durable catalog generation must not move"
+    );
+    let alpha = preserved
+        .get(&lash_core::ToolId::from(ALPHA_ID))
+        .expect("alpha survives");
+    assert!(
+        !alpha.is_orphaned() && alpha.is_member(),
+        "alpha is still a bound catalog member"
+    );
+    let beta = preserved
+        .get(&lash_core::ToolId::from(BETA_ID))
+        .expect("beta survives");
+    assert!(
+        !beta.is_orphaned() && !beta.member,
+        "beta is still a bound opt-out"
+    );
+}
+
 /// The FIG-3353 contract: an open that will not run a turn declares
 /// `PreservePersisted` and cannot touch the durable tool surface at all.
 ///
-/// open with source → open without source under `PreservePersisted` → commit
-/// pending input → open with the source again. The middle open produces no
-/// report and no orphaning; the commit it takes carries the persisted snapshot
-/// forward untouched; the tools are catalog members on the third open.
+/// open with source → open without source under `PreservePersisted` → take a
+/// durable graph-commit append → open with the source again. The middle open
+/// produces no report and no orphaning; the commit it takes carries the
+/// persisted snapshot forward untouched; the tools are catalog members on the
+/// third open.
 #[tokio::test]
-async fn preserve_persisted_open_neither_reconciles_nor_restamps_tool_state() {
+async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
     let session_id = SessionId::from("fig3353-preserve");
     let store = in_memory_store();
 
@@ -494,6 +553,271 @@ async fn preserve_persisted_open_neither_reconciles_nor_restamps_tool_state() {
             .is_some_and(|entry| !entry.member && !entry.is_orphaned()),
         "beta is still the recorded opt-out"
     );
+}
+
+/// The literal FIG-3353 ticket sequence through the real pending-input API:
+/// `enqueue_turn_input` writes a durable admission row on a
+/// `PreservePersisted` open — the row survives and the tool surface is
+/// untouched.
+///
+/// open with source → open without source under `PreservePersisted` →
+/// `enqueue_turn_input` → open with the source again. The pending row is
+/// durable, the catalog generation and curation never moved, and both tools
+/// are catalog members on the third open.
+#[tokio::test]
+async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
+    let session_id = SessionId::from("fig3353-enqueue");
+    let store = in_memory_store();
+    let persisted_generation = seed_opted_out_session(&session_id, &store).await;
+
+    // The enqueue-only open on a core without the sources.
+    let preserve_env = environment_preserving_tools(None, lash_core::ToolSourcePolicy::Tolerate);
+    let enqueue_only = open_runtime_on(&session_id, &store, &preserve_env)
+        .await
+        .expect("enqueue-only open");
+    assert!(enqueue_only.tool_restore_report().is_none());
+
+    // The real pending-input path: a durable admission row, not a graph append.
+    enqueue_only
+        .enqueue_turn_input(
+            lash_core::TurnInput::text("queued while the sources are absent"),
+            lash_core::TurnInputIngress::next_turn(),
+            Some("fig3353-pending-1".to_string()),
+        )
+        .await
+        .expect("enqueue pending input");
+    Box::pin(enqueue_only.park())
+        .await
+        .expect("park the enqueue-only open");
+
+    // The row is durable and undriven.
+    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+        .await
+        .expect("list pending turn inputs");
+    assert_eq!(pending.len(), 1, "exactly one pending row was admitted");
+    assert_eq!(
+        pending[0].input.ingress(),
+        lash_core::TurnInputIngress::NextTurn,
+        "the row waits for the next turn"
+    );
+
+    assert_persisted_surface_unchanged(&store, persisted_generation).await;
+
+    // The source returns: nothing was ever orphaned, so the restore is clean.
+    let regranted = open_runtime(
+        &session_id,
+        &store,
+        Some(both_tools()),
+        lash_core::ToolSourcePolicy::Tolerate,
+    )
+    .await
+    .expect("regranted open");
+    let report = regranted.tool_restore_report().expect("the reopen reports");
+    assert!(report.is_clean(), "nothing was ever orphaned: {report:?}");
+    assert_eq!(
+        report.generation, persisted_generation,
+        "the surface never changed, so the generation never moved"
+    );
+    let regranted_state = regranted.tool_state().expect("regranted tool state");
+    assert!(
+        regranted_state
+            .get(&lash_core::ToolId::from(ALPHA_ID))
+            .is_some_and(|entry| entry.is_member() && !entry.is_orphaned()),
+        "alpha is a catalog member on the third open"
+    );
+    assert!(
+        regranted_state
+            .get(&lash_core::ToolId::from(BETA_ID))
+            .is_some_and(|entry| !entry.member && !entry.is_orphaned()),
+        "beta is still the recorded opt-out"
+    );
+}
+
+/// A `PreservePersisted` open that reloads its resident state from the durable
+/// head must keep the preservation claim: the reload replaces the whole
+/// `RuntimeSessionState`, so the marker is reasserted from the open's own
+/// configuration rather than carried by the replaced value.
+#[tokio::test]
+async fn preserve_persisted_open_survives_resident_reload() {
+    let session_id = SessionId::from("fig3353-reload");
+    let store = in_memory_store();
+    let persisted_generation = seed_opted_out_session(&session_id, &store).await;
+
+    let preserve_env = environment_preserving_tools(None, lash_core::ToolSourcePolicy::Tolerate);
+    let mut enqueue_only = open_runtime_on(&session_id, &store, &preserve_env)
+        .await
+        .expect("enqueue-only open");
+
+    // Invalidate the resident session so the next operation takes the durable
+    // reload path — a wholesale `self.state` replacement.
+    lash_core::testing::invalidate_resident_session_state_for_testing(&mut enqueue_only);
+    enqueue_only.stamp_live_plugin_state();
+    Box::pin(
+        enqueue_only.append_session_nodes(lash_core::AppendSessionNodesRequest {
+            operation_id: "fig3353-reload-commit".to_string(),
+            nodes: vec![lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(
+                    lash_core::session_model::MessageRole::User,
+                    "committed after a resident reload",
+                ),
+            )],
+            requires_ancestor_node_id: None,
+        }),
+    )
+    .await
+    .expect("append through the resident reload");
+    Box::pin(enqueue_only.park())
+        .await
+        .expect("park the enqueue-only open");
+
+    assert_persisted_surface_unchanged(&store, persisted_generation).await;
+}
+
+/// A replayed append receipt drives `restore_protocol_session_from_state` —
+/// another wholesale `self.state` replacement followed by
+/// `stamp_live_plugin_state`. The preservation claim must survive it too.
+#[tokio::test]
+async fn preserve_persisted_open_survives_append_receipt_replay() {
+    let session_id = SessionId::from("fig3353-replay");
+    let store = in_memory_store();
+    let persisted_generation = seed_opted_out_session(&session_id, &store).await;
+
+    let preserve_env = environment_preserving_tools(None, lash_core::ToolSourcePolicy::Tolerate);
+    let mut enqueue_only = open_runtime_on(&session_id, &store, &preserve_env)
+        .await
+        .expect("enqueue-only open");
+
+    let request = lash_core::AppendSessionNodesRequest {
+        operation_id: "fig3353-replay-commit".to_string(),
+        nodes: vec![lash_core::SessionAppendNode::message(
+            lash_core::PluginMessage::text(
+                lash_core::session_model::MessageRole::User,
+                "committed once, replayed once",
+            ),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    Box::pin(enqueue_only.append_session_nodes(request.clone()))
+        .await
+        .expect("first append commits");
+    Box::pin(enqueue_only.append_session_nodes(request))
+        .await
+        .expect("the identical append replays its receipt");
+    // A further commit after the replay: the one that would persist the
+    // degraded surface if the marker were lost.
+    enqueue_only.stamp_live_plugin_state();
+    Box::pin(
+        enqueue_only.append_session_nodes(lash_core::AppendSessionNodesRequest {
+            operation_id: "fig3353-after-replay".to_string(),
+            nodes: vec![lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(
+                    lash_core::session_model::MessageRole::User,
+                    "committed after the replay",
+                ),
+            )],
+            requires_ancestor_node_id: None,
+        }),
+    )
+    .await
+    .expect("commit after the replay");
+    Box::pin(enqueue_only.park())
+        .await
+        .expect("park the enqueue-only open");
+
+    assert_persisted_surface_unchanged(&store, persisted_generation).await;
+}
+
+/// `PreservePersisted` is a fence, not a claim: every turn-execution entry —
+/// a direct turn and the prepared/queued drive a worker would take — refuses
+/// before admission, so the unreconciled surface is never executed against
+/// and `ToolSourcePolicy::Require` cannot be bypassed by opening enqueue-only.
+#[tokio::test]
+async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
+    let session_id = SessionId::from("fig3353-refused");
+    let store = in_memory_store();
+    let persisted_generation = seed_opted_out_session(&session_id, &store).await;
+
+    // Require here is the interesting half: the preserve open succeeds because
+    // it never installs, but a turn must not ride that gap past the policy.
+    let preserve_env = environment_preserving_tools(None, lash_core::ToolSourcePolicy::Require);
+    let mut enqueue_only = open_runtime_on(&session_id, &store, &preserve_env)
+        .await
+        .expect("enqueue-only open under Require");
+
+    // Queue a row first, then try the queued-drive path: the refusal must not
+    // settle or drop the pending input.
+    enqueue_only
+        .enqueue_turn_input(
+            lash_core::TurnInput::text("queued under a preserve open"),
+            lash_core::TurnInputIngress::next_turn(),
+            Some("fig3353-queued-1".to_string()),
+        )
+        .await
+        .expect("enqueue pending input");
+
+    let direct = enqueue_only
+        .run_turn_assembled(
+            lash_core::TurnInput::text("run me anyway"),
+            CancellationToken::new(),
+            named_turn_scope(&session_id, &lash_core::TurnId::from("fig3353-direct")),
+        )
+        .await
+        .expect_err("a direct turn on a preserve open is refused");
+    assert_eq!(
+        direct.code,
+        lash_core::RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface,
+    );
+    assert!(direct.code.is_terminal(), "reopen is the only recovery");
+
+    let messages = lash_core::facade_support::MessageSequence::from_owned(vec![Message {
+        id: "fig3353-prepared".to_string(),
+        role: MessageRole::User,
+        parts: vec![Part::text(
+            "fig3353-prepared.p0".to_string(),
+            "drive the queued row anyway".to_string(),
+            None,
+        )]
+        .into(),
+        origin: None,
+    }]);
+    let queued = enqueue_only
+        .stream_prepared_turn(
+            messages,
+            None,
+            None,
+            None,
+            lash_core::TurnContext::default(),
+            Vec::new(),
+            lash_core::TurnId::from("fig3353-queued"),
+            1,
+            &NoopEventSink,
+            &NoopTurnActivitySink,
+            named_turn_scope(&session_id, &lash_core::TurnId::from("fig3353-queued")),
+            CancellationToken::new(),
+            None,
+            None,
+        )
+        .await
+        .expect_err("the queued/prepared drive is refused the same way");
+    assert_eq!(
+        queued.code,
+        lash_core::RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface,
+    );
+
+    Box::pin(enqueue_only.park())
+        .await
+        .expect("park the enqueue-only open");
+
+    // The refused drives left the pending row and the tool surface untouched.
+    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+        .await
+        .expect("list pending turn inputs");
+    assert_eq!(
+        pending.len(),
+        1,
+        "the pending row was never claimed or settled"
+    );
+    assert_persisted_surface_unchanged(&store, persisted_generation).await;
 }
 
 /// A provider that replaced a tool with a new id under the same model-facing

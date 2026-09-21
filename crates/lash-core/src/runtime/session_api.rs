@@ -8,7 +8,47 @@ impl LashRuntime {
         &self.state.session_id
     }
 
+    /// Whether this open declared it will not run a turn (FIG-3353). The host
+    /// configuration is the per-open authority: `RuntimeSessionState` carries
+    /// a copy so cloned states and store-level stamping self-guard, but every
+    /// whole-state replacement rebuilds the field, so the runtime reasserts
+    /// the marker from here at each adoption and stamp boundary.
+    pub(in crate::runtime) fn preserves_persisted_tool_state(&self) -> bool {
+        self.host.core.control.tool_surface_open_mode
+            == crate::ToolSurfaceOpenMode::PreservePersisted
+    }
+
+    /// Reassert the per-open tool-preservation claim onto the resident state
+    /// after a whole-state replacement or before a stamp boundary.
+    pub(in crate::runtime) fn reapply_tool_state_preservation_marker(&mut self) {
+        self.state.preserve_tool_state_snapshot = self.preserves_persisted_tool_state();
+    }
+
+    /// The shared gate for the `PreservePersisted` contract (FIG-3353): an
+    /// open that declared it would not run a turn may never execute one — its
+    /// tool surface was never reconciled and no `ToolSourcePolicy` was
+    /// enforced, so every turn-execution entry refuses before admission.
+    pub(in crate::runtime) fn refuse_turn_execution_on_preserved_tool_surface(
+        &self,
+    ) -> Result<(), RuntimeError> {
+        if self.preserves_persisted_tool_state() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface,
+                format!(
+                    "session `{}` was opened with `ToolSurfaceOpenMode::PreservePersisted` \
+                     (enqueue-only); reopen it in `Reconcile` mode to run a turn",
+                    self.state.session_id
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn stamp_live_plugin_state(&mut self) {
+        // Whole-state replacements (resident reload, append-receipt replay)
+        // rebuild `self.state`; reassert the per-open claim before the flag
+        // is consulted so the durable snapshot is never lost in the gap.
+        self.reapply_tool_state_preservation_marker();
         if let Some(session) = self.session.as_ref() {
             // A `PreservePersisted` open never reconciled its registry, so
             // exporting it would overwrite the durable surface with whatever
@@ -182,6 +222,7 @@ impl LashRuntime {
     /// refreshed from the live session.
     pub async fn export_persisted_state(&mut self) -> Result<RuntimeSessionState, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
+        self.reapply_tool_state_preservation_marker();
         let mut state = self.state.clone();
         if let Some(session) = self.session.as_ref() {
             if !state.preserve_tool_state_snapshot {

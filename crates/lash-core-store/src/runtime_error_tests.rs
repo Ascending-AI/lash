@@ -82,7 +82,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        183,
+        184,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
