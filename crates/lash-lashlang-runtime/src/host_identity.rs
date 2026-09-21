@@ -425,6 +425,51 @@ mod tests {
         );
     }
 
+    /// A queued turn's cell opens on its drain, and two cells of one drain stay
+    /// apart.
+    ///
+    /// A turn started with `drain_id(...)` and no `turn_id(...)` runs its whole
+    /// effect tree — cells included — under `ExecutionScope::QueueDrain`:
+    /// `crates/lash/src/turn.rs`'s `execution_scope` resolves to
+    /// `queue_drain_scope(session, drain_id)` when no turn id exists, and that
+    /// is `ExecutionScope::queue_drain` verbatim
+    /// (`crates/lash-core-store/src/session_state.rs`). The drain is the
+    /// opener, not a container for the turn's; one drain may run several queued
+    /// turns and many cells, so the cell's own replay key is what keeps two of
+    /// them apart (ADR 0099 §1).
+    #[test]
+    fn two_cells_of_one_queued_drain_mint_distinct_identities() {
+        let scope = ExecutionScope::queue_drain("session-1", "drain-3");
+        let opener = cell_opener_for_scope(&scope, None).expect("a queued-work drain is an opener");
+        assert_eq!(opener, EffectOpener::queue_drain("session-1", "drain-3"));
+
+        let site = call_site("resource_operation:aaaa", 1);
+        let first = LashlangHostIdentities::cell(opener.clone(), "exec-code:1");
+        let second = LashlangHostIdentities::cell(opener.clone(), "exec-code:2");
+
+        assert_eq!(
+            first.opener(),
+            second.opener(),
+            "both cells belong to one drain; that is the point"
+        );
+        assert_ne!(
+            first.leaf("tool:send", &site),
+            second.leaf("tool:send", &site),
+            "two cells of one drain must not mint one leaf identity"
+        );
+        assert_ne!(
+            first.child("tool:send", &site, 0),
+            second.child("tool:send", &site, 0),
+            "two cells of one drain must not mint one child identity"
+        );
+        assert_ne!(
+            opener,
+            cell_opener_for_scope(&ExecutionScope::turn("session-1", "drain-3"), None)
+                .expect("a turn is an opener"),
+            "a drain is not a turn that happens to spell its id"
+        );
+    }
+
     /// Two reaches of one aggregate are separated by the site occurrence the
     /// VM counted, and the leaves of one reach by their position in it.
     #[test]
