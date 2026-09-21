@@ -62,122 +62,19 @@ pub(crate) async fn ensure_session_not_deleted_tx(
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
-macro_rules! transaction_epoch_sql {
-    () => { "COALESCE(NULLIF(current_setting('lash.test_lease_epoch_ms', true), '')::bigint, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))" };
-}
-#[cfg(not(any(test, feature = "testing")))]
-macro_rules! transaction_epoch_sql {
-    () => {
-        "FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)"
-    };
-}
-
-const PENDING_TURN_INPUT_COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id, claim_fencing_token, claim_owner_id, claim_owner_incarnation_id, claim_token, claim_session_lease_generation";
-
-/// Releasing a claim clears the whole four-column identity family in one
-/// motion; `ck_pending_turn_inputs_claim_identity_all_or_none` makes that
-/// all-or-none shape load-bearing, so every release path shares this spelling.
-pub(crate) const TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS: &str = "claim_id = NULL,
-    claim_owner_id = NULL,
-    claim_owner_incarnation_id = NULL,
-    claim_token = NULL,
-    claim_session_lease_generation = 0";
-
-const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = concat!(
-    "session_id = $1
-       AND available_at_ms <= ",
-    transaction_epoch_sql!(),
-    "
-       AND (
-            claim_token IS NULL
-            OR claim_session_lease_generation <> $2
-       )"
-);
-
-fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> String {
-    if boundary == QueuedWorkClaimBoundary::Idle {
-        return format!(
-            "queued_work_head_candidate AS (
-            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
-            FROM (
-                SELECT enqueue_seq AS head_enqueue_seq,
-                       batch_id AS head_batch_id,
-                       delivery_policy AS head_delivery_policy,
-                       claim_id AS head_claim_id
-                FROM lash_queued_work_batches
-                WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
-                ORDER BY enqueue_seq ASC
-                LIMIT 1
-            ) AS unfiltered_head
-         )"
-        );
+/// The claim-candidate scan for `boundary`, rendered once at startup.
+///
+/// The boundary is a closed two-variant choice, so it selects a named statement
+/// rather than splicing a predicate: an optional boundary filter cannot use
+/// `idx_queued_work_batches_ready`, and this query is the claim path's hottest.
+fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> &'static str {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    match boundary {
+        QueuedWorkClaimBoundary::Idle => sql.queued_batches_postgres.claim_candidates_idle.sql(),
+        QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
+            sql.queued_batches_postgres.claim_candidates_boundary.sql()
+        }
     }
-    let epoch_ms = transaction_epoch_sql!();
-    let earliest_safe_boundary = DeliveryPolicy::EarliestSafeBoundary.as_str();
-    format!(
-        "queued_work_unfiltered_head AS (
-            SELECT enqueue_seq AS head_enqueue_seq,
-                   batch_id AS head_batch_id,
-                   delivery_policy AS head_delivery_policy,
-                   claim_id AS head_claim_id
-            FROM lash_queued_work_batches
-            WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
-            ORDER BY enqueue_seq ASC
-            LIMIT 1
-         ),
-         queued_work_head_candidate AS (
-            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
-            FROM (
-                SELECT candidate.enqueue_seq AS head_enqueue_seq,
-                       candidate.batch_id AS head_batch_id,
-                       candidate.delivery_policy AS head_delivery_policy,
-                       candidate.claim_id AS head_claim_id
-                FROM lash_queued_work_batches AS candidate
-                CROSS JOIN queued_work_unfiltered_head AS unfiltered
-                WHERE candidate.session_id = $1
-                  AND candidate.available_at_ms <= {epoch_ms}
-                  AND (
-                       candidate.claim_token IS NULL
-                       OR candidate.claim_session_lease_generation <> $2
-                  )
-                  AND (
-                       (
-                            candidate.enqueue_seq = unfiltered.head_enqueue_seq
-                            AND unfiltered.head_delivery_policy = '{earliest_safe_boundary}'
-                       )
-                       OR (
-                            unfiltered.head_delivery_policy <> '{earliest_safe_boundary}'
-                            AND unfiltered.head_claim_id IS NOT NULL
-                            AND candidate.claim_id IS DISTINCT FROM unfiltered.head_claim_id
-                       )
-                  )
-                ORDER BY candidate.enqueue_seq ASC
-                LIMIT 1
-            ) AS boundary_head
-            WHERE head_delivery_policy = '{earliest_safe_boundary}'
-         )"
-    )
-}
-
-fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> String {
-    let head_candidate = postgres_queued_work_head_candidate_cte(boundary);
-    format!(
-        "WITH {head_candidate}
-         SELECT {QUEUED_WORK_COLUMNS}
-         FROM lash_queued_work_batches
-         CROSS JOIN queued_work_head_candidate
-         WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
-           AND enqueue_seq >= head_enqueue_seq
-           AND (head_claim_id IS NULL OR lash_queued_work_batches.claim_id = head_claim_id)
-         ORDER BY enqueue_seq ASC
-         LIMIT COALESCE((
-             SELECT CASE WHEN head_claim_id IS NULL THEN $3 ELSE 9223372036854775807 END
-             FROM queued_work_head_candidate
-         ), 0)
-         FOR UPDATE OF lash_queued_work_batches SKIP LOCKED",
-        QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-    )
 }
 
 /// Reclaim the ancestry prefix with no live child, session-head root, or
@@ -278,41 +175,33 @@ async fn enqueue_queued_work_with_outcome_tx(
         now,
         Some(enqueue_seq_u64),
     );
-    let inserted_id: Option<String> = sqlx::query_scalar(
-        "INSERT INTO lash_queued_work_batches (
-            enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-            authority_json, merge_key, available_at_ms, enqueued_at_ms
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (session_id, source_key) DO NOTHING
-         RETURNING batch_id",
-    )
-    .bind(enqueue_seq)
-    .bind(&batch_id)
-    .bind(batch.session_id.as_str())
-    .bind(&batch.source_key)
-    .bind(batch.delivery_policy.as_str())
-    .bind(batch.kind().as_str())
-    .bind(encode_json(&batch.authority)?)
-    .bind(&batch.merge_key)
-    .bind(sql_available_at_ms)
-    .bind(now as i64)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let inserted_id: Option<String> =
+        sqlx::query_scalar(sql.queued_batches_postgres.insert_new.sql())
+            .bind(enqueue_seq)
+            .bind(&batch_id)
+            .bind(batch.session_id.as_str())
+            .bind(&batch.source_key)
+            .bind(batch.delivery_policy.as_str())
+            .bind(batch.kind().as_str())
+            .bind(encode_json(&batch.authority)?)
+            .bind(&batch.merge_key)
+            .bind(sql_available_at_ms)
+            .bind(now as i64)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     let Some(inserted_id) = inserted_id else {
         let source_key = batch.source_key.as_deref().ok_or_else(|| {
             StoreError::Backend("queued work insert without source key was ignored".to_string())
         })?;
-        let existing_id: Option<String> = sqlx::query_scalar(
-            "SELECT batch_id FROM lash_queued_work_batches
-             WHERE session_id = $1 AND source_key = $2",
-        )
-        .bind(batch.session_id.as_str())
-        .bind(source_key)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let existing_id: Option<String> =
+            sqlx::query_scalar(sql.queued_batches.select_id_by_source_key.sql())
+                .bind(batch.session_id.as_str())
+                .bind(source_key)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
         let existing_id = existing_id.ok_or_else(|| {
             StoreError::Backend("queued work conflict row disappeared".to_string())
         })?;
@@ -338,17 +227,14 @@ async fn enqueue_queued_work_with_outcome_tx(
     }
     for (index, payload) in batch.payloads.iter().enumerate() {
         let item_id = format!("{batch_id}:item:{index}");
-        sqlx::query(
-            "INSERT INTO lash_queued_work_items (batch_id, item_index, item_id, payload_json)
-             VALUES ($1, $2, $3, $4)",
-        )
-        .bind(&batch_id)
-        .bind(index as i32)
-        .bind(item_id)
-        .bind(encode_json(payload)?)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        sqlx::query(sql.queued_items.insert_new.sql())
+            .bind(&batch_id)
+            .bind(index as i32)
+            .bind(item_id)
+            .bind(encode_json(payload)?)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     }
     let queued = load_queued_batch(tx, &batch_id)
         .await?

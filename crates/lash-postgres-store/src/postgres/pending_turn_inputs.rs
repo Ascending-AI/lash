@@ -4,7 +4,6 @@
 //! backend's `pending_turn_inputs` module. Originated in `session_factory.rs`;
 //! every item keeps its previous path through the crate-root glob.
 
-use crate::runtime_persistence::TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS;
 use crate::*;
 
 #[derive(Clone, Debug)]
@@ -33,6 +32,22 @@ impl PendingTurnInputRow {
             claim_token: self.claim_token.as_deref(),
             claim_session_lease_generation: self.claim_session_lease_generation,
         }
+    }
+
+    /// The decoded lifecycle state this row carries.
+    pub(crate) fn state(&self) -> &lash_core::TurnInputState {
+        &self.state
+    }
+
+    /// Whether a claim token names this row, which is the only way its
+    /// generation means anything.
+    pub(crate) fn is_claimed(&self) -> bool {
+        self.claim_token.is_some()
+    }
+
+    /// The session-execution-lease generation this row's claim is pinned to.
+    pub(crate) fn claim_session_lease_generation(&self) -> u64 {
+        self.claim_session_lease_generation
     }
 }
 
@@ -110,12 +125,10 @@ pub(crate) async fn load_pending_turn_input(
     input_id: &str,
 ) -> Result<Option<lash_core::PendingTurnInput>, StoreError> {
     let row = sqlx::query(
-        "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                claim_owner_id, claim_owner_incarnation_id,
-                claim_token, claim_session_lease_generation
-         FROM lash_pending_turn_inputs
-         WHERE session_id = $1 AND input_id = $2",
+        crate::turn_ingress::turn_ingress_sql()
+            .pending_inputs
+            .select_by_id
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(input_id)
@@ -134,35 +147,34 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
     target: &lash_core::PendingTurnInputCancelTarget,
     for_update: bool,
 ) -> Result<Option<PendingTurnInputRow>, StoreError> {
-    let for_update = if for_update { " FOR UPDATE" } else { "" };
-    let row = match target {
-        lash_core::PendingTurnInputCancelTarget::InputId(input_id) => sqlx::query(&format!(
-            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                        state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                        claim_owner_id, claim_owner_incarnation_id,
-                        claim_token, claim_session_lease_generation
-                 FROM lash_pending_turn_inputs
-                 WHERE session_id = $1 AND input_id = $2{for_update}"
-        ))
-        .bind(session_id.as_str())
-        .bind(input_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?,
-        lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => sqlx::query(&format!(
-            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                        state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                        claim_owner_id, claim_owner_incarnation_id,
-                        claim_token, claim_session_lease_generation
-                 FROM lash_pending_turn_inputs
-                 WHERE session_id = $1 AND source_key = $2{for_update}"
-        ))
-        .bind(session_id.as_str())
-        .bind(source_key)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?,
+    // Two lock regimes, two named statements each: a cancel that is about to
+    // write takes the row lock, a read-only observation must not.
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let statement = match (target, for_update) {
+        (lash_core::PendingTurnInputCancelTarget::InputId(_), false) => {
+            sql.pending_inputs.select_by_id.sql()
+        }
+        (lash_core::PendingTurnInputCancelTarget::InputId(_), true) => {
+            sql.pending_inputs_postgres.select_by_id_for_update.sql()
+        }
+        (lash_core::PendingTurnInputCancelTarget::SourceKey(_), false) => {
+            sql.pending_inputs.select_by_source_key.sql()
+        }
+        (lash_core::PendingTurnInputCancelTarget::SourceKey(_), true) => sql
+            .pending_inputs_postgres
+            .select_by_source_key_for_update
+            .sql(),
     };
+    let key = match target {
+        lash_core::PendingTurnInputCancelTarget::InputId(input_id) => input_id.as_str(),
+        lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => source_key.as_str(),
+    };
+    let row = sqlx::query(statement)
+        .bind(session_id.as_str())
+        .bind(key)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     row.map(pending_turn_input_row).transpose()
 }
 
@@ -215,12 +227,12 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                     claim: pending_turn_input_claim_diagnostics_from_row(&row),
                 });
             }
-            sqlx::query(&format!(
-                "UPDATE lash_pending_turn_inputs
-                 SET state = $3,
-                     {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-                 WHERE session_id = $1 AND input_id = $2"
-            ))
+            sqlx::query(
+                crate::turn_ingress::turn_ingress_sql()
+                    .pending_inputs
+                    .cancel
+                    .sql(),
+            )
             .bind(row.session_id.as_str())
             .bind(row.input_id.as_str())
             .bind(lash_core::TurnInputStateKind::Cancelled.as_str())

@@ -5,23 +5,6 @@
 
 use crate::*;
 
-pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
-    "enqueue_seq",
-    "batch_id",
-    "session_id",
-    "source_key",
-    "delivery_policy",
-    "work_kind",
-    "authority_json",
-    "merge_key",
-    "available_at_ms",
-    "enqueued_at_ms",
-    "claim_fencing_token",
-    "claim_token",
-    "claim_session_lease_generation",
-    "claim_id",
-];
-
 #[derive(Clone, Debug)]
 pub(crate) struct QueuedBatchRow {
     pub(crate) enqueue_seq: u64,
@@ -40,6 +23,19 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) claim_session_lease_generation: u64,
 }
 
+impl QueuedBatchRow {
+    /// The claim columns the shared claimability verdict consults.
+    ///
+    /// Exposed as one value rather than two fields so a call site cannot pass
+    /// a generation that belongs to a different row's token.
+    pub(crate) fn claim_facts(&self) -> lash_core::store_backend_support::WorkRowClaimFacts<'_> {
+        lash_core::store_backend_support::WorkRowClaimFacts {
+            claim_token: self.claim_token.as_deref(),
+            claim_session_lease_generation: self.claim_session_lease_generation,
+        }
+    }
+}
+
 pub(crate) fn claim_candidate_from_row(
     row: &QueuedBatchRow,
     batch: &QueuedWorkBatch,
@@ -54,47 +50,43 @@ pub(crate) fn claim_candidate_from_row(
 
 pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
     let delivery_policy =
-        DeliveryPolicy::from_wire_str(row.get::<String, _>(QUEUED_WORK_COLUMNS[4]).as_str())
+        DeliveryPolicy::from_wire_str(row.get::<String, _>("delivery_policy").as_str())
             .ok_or_else(|| {
                 StoreError::Backend("invalid queued work delivery policy".to_string())
             })?;
-    let kind = QueuedWorkKind::from_wire_str(row.get::<String, _>(QUEUED_WORK_COLUMNS[5]).as_str())
+    let kind = QueuedWorkKind::from_wire_str(row.get::<String, _>("work_kind").as_str())
         .ok_or_else(|| StoreError::Backend("invalid queued work kind".to_string()))?;
-    let authority_json: String = row.get(QUEUED_WORK_COLUMNS[6]);
+    let authority_json: String = row.get("authority_json");
     Ok(QueuedBatchRow {
-        enqueue_seq: u64_from_sql(
-            "QueuedWorkBatch",
-            "enqueue_seq",
-            row.get(QUEUED_WORK_COLUMNS[0]),
-        )?,
-        batch_id: row.get(QUEUED_WORK_COLUMNS[1]),
-        session_id: SessionId::from(row.get::<String, _>(QUEUED_WORK_COLUMNS[2])),
-        source_key: row.get(QUEUED_WORK_COLUMNS[3]),
+        enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq"))?,
+        batch_id: row.get("batch_id"),
+        session_id: SessionId::from(row.get::<String, _>("session_id")),
+        source_key: row.get("source_key"),
         delivery_policy,
         kind,
         authority: store_decode_json(&authority_json, "queued work authority")?,
-        merge_key: row.get(QUEUED_WORK_COLUMNS[7]),
+        merge_key: row.get("merge_key"),
         available_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "available_at_ms",
-            row.get(QUEUED_WORK_COLUMNS[8]),
+            row.get("available_at_ms"),
         )?,
         enqueued_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "enqueued_at_ms",
-            row.get(QUEUED_WORK_COLUMNS[9]),
+            row.get("enqueued_at_ms"),
         )?,
         claim_fencing_token: u64_from_sql(
             "QueuedWorkBatch",
             "claim_fencing_token",
-            row.get(QUEUED_WORK_COLUMNS[10]),
+            row.get("claim_fencing_token"),
         )?,
-        claim_id: row.get(QUEUED_WORK_COLUMNS[13]),
-        claim_token: row.get(QUEUED_WORK_COLUMNS[11]),
+        claim_id: row.get("claim_id"),
+        claim_token: row.get("claim_token"),
         claim_session_lease_generation: u64_from_sql(
             "QueuedWorkBatch",
             "claim_session_lease_generation",
-            row.get(QUEUED_WORK_COLUMNS[12]),
+            row.get("claim_session_lease_generation"),
         )?,
     })
 }
@@ -103,12 +95,12 @@ pub(crate) async fn load_queued_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch_id: &str,
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-    let row = sqlx::query(&format!(
-        "SELECT {QUEUED_WORK_COLUMNS}
-         FROM lash_queued_work_batches
-         WHERE batch_id = $1",
-        QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-    ))
+    let row = sqlx::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .queued_batches
+            .select_by_id
+            .sql(),
+    )
     .bind(batch_id)
     .fetch_optional(&mut **tx)
     .await
@@ -125,10 +117,10 @@ pub(crate) async fn queued_work_batch_from_row(
     row: QueuedBatchRow,
 ) -> Result<QueuedWorkBatch, StoreError> {
     let item_rows = sqlx::query(
-        "SELECT item_id, payload_json
-         FROM lash_queued_work_items
-         WHERE batch_id = $1
-         ORDER BY item_index ASC",
+        crate::turn_ingress::turn_ingress_sql()
+            .queued_items
+            .list_by_batch
+            .sql(),
     )
     .bind(row.batch_id.as_str())
     .fetch_all(&mut **tx)
@@ -164,20 +156,20 @@ pub(crate) async fn ensure_queued_work_completion_tx(
     completed: &QueuedWorkCompletion,
 ) -> Result<(), StoreError> {
     for batch_id in &completed.batch_ids {
-        let authority: Option<(Option<String>, Option<String>, i64)> = sqlx::query_as(
-            "SELECT claim_id, claim_token, claim_session_lease_generation
-             FROM lash_queued_work_batches
-             WHERE session_id = $1
-               AND batch_id = $2
-             LIMIT 1
-             FOR UPDATE",
+        // Lock and read: the row is held `FOR UPDATE` for the rest of the
+        // commit, so it cannot move before the settlement below.
+        let observed: Option<(Option<String>, Option<String>, i64)> = sqlx::query_as(
+            crate::turn_ingress::turn_ingress_sql()
+                .queued_batches_postgres
+                .settlement_facts
+                .sql(),
         )
         .bind(completed.session_id.as_str())
         .bind(batch_id.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        let authority = authority
+        let observed = observed
             .map(|(claim_id, claim_token, generation)| {
                 Ok((
                     claim_id,
@@ -190,26 +182,21 @@ pub(crate) async fn ensure_queued_work_completion_tx(
                 ))
             })
             .transpose()?;
-        let owns_row = authority
-            .as_ref()
-            .is_some_and(|(claim_id, claim_token, _)| {
-                claim_id.as_deref() == Some(completed.claim_id.as_str())
-                    && claim_token.as_deref() == Some(completed.lease_token.as_str())
-            });
-        if !owns_row {
-            return Err(StoreError::QueuedWorkClaimSuperseded {
-                session_id: completed.session_id.clone(),
-                claim_id: completed.claim_id.clone(),
-                row_id: Some(batch_id.as_str().to_string().into_boxed_str()),
-                superseding_claim_id: authority
-                    .as_ref()
-                    .and_then(|(claim_id, _, _)| claim_id.clone())
-                    .map(String::into_boxed_str),
-                superseding_session_lease_generation: authority.as_ref().and_then(
-                    |(claim_id, _, generation)| claim_id.as_ref().map(|_| Box::new(*generation)),
-                ),
-            });
-        }
+        // The shared verdict is the decision: a settlement is authorized only
+        // while the row still carries this claim's id and lease token.
+        lash_core::store_backend_support::require_settleable_queued_work(
+            completed,
+            batch_id.as_str(),
+            observed
+                .as_ref()
+                .map(|(claim_id, claim_token, generation)| {
+                    lash_core::store_backend_support::QueuedWorkSettlementFacts {
+                        claim_id: claim_id.as_deref(),
+                        claim_token: claim_token.as_deref(),
+                        claim_session_lease_generation: *generation,
+                    }
+                }),
+        )?;
     }
     Ok(())
 }

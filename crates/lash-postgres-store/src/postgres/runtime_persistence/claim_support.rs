@@ -8,6 +8,7 @@ pub(super) enum ClaimTransactionOutcome<T> {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn checkpoint_work_pending_postgres(
     pool: &PgPool,
+    injected_lease_epoch: Option<i64>,
     session_id: &SessionId,
     generation: u64,
     turn_id: &TurnId,
@@ -19,45 +20,21 @@ pub(super) async fn checkpoint_work_pending_postgres(
         return Ok(false);
     }
     let mut connection = acquire_runtime_connection(pool).await?;
-    let head_candidate =
-        postgres_queued_work_head_candidate_cte(QueuedWorkClaimBoundary::ActiveTurnCheckpoint);
-    let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql(
-        "ingress_json::jsonb ->> 'min_boundary'",
-        checkpoint,
-    );
-    let admitted_states = lash_core::store_backend_support::state_sql_literal_list(&[
-        lash_core::TurnInputStateKind::PendingActive,
-        lash_core::TurnInputStateKind::Accepted,
-    ]);
-    let sql = format!(
-        "WITH {head_candidate}
-         SELECT (
-            $4 > 0 AND EXISTS (
-                SELECT 1
-                FROM lash_pending_turn_inputs
-                WHERE session_id = $1
-                  AND state IN ({admitted_states})
-                  AND (claim_token IS NULL OR claim_session_lease_generation <> $2)
-                  AND ingress_json::jsonb ->> 'scope' = 'active_turn'
-                  AND ingress_json::jsonb ->> 'turn_id' = $3
-                  AND {admitted_min_boundary}
-                LIMIT 1
-            )
-         ) OR (
-            $5 > 0 AND EXISTS (
-                SELECT 1
-                FROM lash_queued_work_items AS item
-                JOIN queued_work_head_candidate AS head
-                  ON head.head_batch_id = item.batch_id
-                WHERE item.payload_json::jsonb ->> 'type' <> 'session_command'
-                LIMIT 1
-            )
-         )"
-    );
-    sqlx::query_scalar(&sql)
+    // One statement per checkpoint, chosen exhaustively: the admitted
+    // minimum-boundary set is what the checkpoint decides, and an optional
+    // predicate over a bound boundary cannot seek an index.
+    let family = &crate::turn_ingress::turn_ingress_sql().family_postgres;
+    let sql = match checkpoint {
+        lash_core::CheckpointKind::AfterWork => family.checkpoint_work_pending_after_work.sql(),
+        lash_core::CheckpointKind::BeforeCompletion => {
+            family.checkpoint_work_pending_before_completion.sql()
+        }
+    };
+    sqlx::query_scalar(sql)
         .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
         .bind(turn_id.as_str())
+        .bind(injected_lease_epoch)
         .bind(max_inputs as i64)
         .bind(max_batches as i64)
         .fetch_one(&mut *connection)
@@ -83,19 +60,14 @@ pub(super) async fn postgres_refusal_for_empty_scan(
     policy: &QueuedWorkClaimPolicy,
 ) -> Result<TurnWorkEmptyScanDiagnostic, StoreError> {
     let now = postgres_transaction_epoch_ms(tx).await?;
-    let head_rows = sqlx::query(&format!(
-        "SELECT {QUEUED_WORK_COLUMNS}
-         FROM lash_queued_work_batches
-         WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
-         ORDER BY enqueue_seq ASC
-         LIMIT 1",
-        QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-    ))
-    .bind(session_id.as_str())
-    .bind(sql_session_lease_generation(generation)?)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let head_rows = sqlx::query(sql.queued_batches_postgres.select_head_candidate.sql())
+        .bind(session_id.as_str())
+        .bind(now as i64)
+        .bind(sql_session_lease_generation(generation)?)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     if let Some(head_row) = head_rows.into_iter().next() {
         let head_row = queued_batch_row(head_row)?;
         let head_batch = queued_work_batch_from_row(tx, head_row.clone()).await?;
@@ -103,24 +75,14 @@ pub(super) async fn postgres_refusal_for_empty_scan(
         let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
         return Ok(TurnWorkEmptyScanDiagnostic::from(head_prefix));
     }
-    let epoch_ms = transaction_epoch_sql!();
-    let deferred_row_pending: bool = sqlx::query_scalar(&format!(
-        "SELECT EXISTS (
-             SELECT 1
-             FROM lash_queued_work_batches
-             WHERE session_id = $1
-               AND available_at_ms > {epoch_ms}
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> $2
-               )
-         )",
-    ))
-    .bind(session_id.as_str())
-    .bind(sql_session_lease_generation(generation)?)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let deferred_row_pending: bool =
+        sqlx::query_scalar(sql.queued_batches_postgres.exists_deferred.sql())
+            .bind(session_id.as_str())
+            .bind(now as i64)
+            .bind(sql_session_lease_generation(generation)?)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     Ok(TurnWorkEmptyScanDiagnostic::Refused {
         reason: if deferred_row_pending {
             QueuedWorkClaimRefusal::NotYetAvailable
@@ -132,12 +94,14 @@ pub(super) async fn postgres_refusal_for_empty_scan(
 
 // Exact selection passes its full validation span: validate every fencing
 // token before writing, including candidates outside the selected prefix.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn claim_queued_work_rows_postgres(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     now: u64,
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     generation: u64,
+    selected_rows: &[QueuedBatchRow],
     selected_batches: Vec<QueuedWorkBatch>,
     candidates: &[ClaimCandidate],
 ) -> Result<ClaimTransactionOutcome<Option<QueuedWorkClaim>>, StoreError> {
@@ -152,25 +116,32 @@ pub(super) async fn claim_queued_work_rows_postgres(
             .iter()
             .map(|candidate| candidate.claim_fencing_token),
     )?;
-    for (row, sql_fencing_token) in selected_batches
+    for ((row, batch), sql_fencing_token) in selected_rows
         .iter()
+        .zip(selected_batches.iter())
         .zip(sql_fencing_tokens.iter().copied())
     {
+        debug_assert_eq!(row.batch_id.as_str(), &*batch.batch_id);
+        // The candidate row was selected `FOR UPDATE SKIP LOCKED`, so it is
+        // locked to this transaction. The shared verdict decides; the read-side
+        // copy of this predicate stays because it is also the candidate scan's
+        // `ORDER BY … LIMIT` filter.
+        if !lash_core::store_backend_support::queued_work_batch_claimability(
+            row.claim_facts(),
+            generation,
+        )
+        .is_claimable()
+        {
+            return Ok(ClaimTransactionOutcome::Rollback(None));
+        }
         let changed = sqlx::query(
-            "UPDATE lash_queued_work_batches
-             SET claim_id = $3,
-                 claim_token = $4,
-                 claim_fencing_token = $6,
-                 claim_session_lease_generation = $5
-             WHERE session_id = $1
-               AND batch_id = $2
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> $5
-               )",
+            crate::turn_ingress::turn_ingress_sql()
+                .queued_batches
+                .claim
+                .sql(),
         )
         .bind(session_id.as_str())
-        .bind(&*row.batch_id)
+        .bind(row.batch_id.as_str())
         .bind(&lease.claim_id)
         .bind(&lease.lease_token)
         .bind(sql_session_lease_generation(
@@ -181,7 +152,17 @@ pub(super) async fn claim_queued_work_rows_postgres(
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
-        if changed == 0 {
+        // Backstop: the generation predicate stays on the write, but the
+        // verdict above already authorized it over the locked row. A
+        // disagreement is recorded as evidence and then fails closed exactly as
+        // this site always did — the claim transaction rolls back and no claim
+        // is reported.
+        if !lash_core::store_backend_support::fenced_write_applied(
+            lash_core::store_backend_support::FencedWrite::QueuedWorkClaimAcquisition,
+            crate::POSTGRES_BACKEND,
+            row.batch_id.as_str(),
+            changed,
+        ) {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
     }
@@ -202,22 +183,39 @@ pub(super) async fn claim_queued_work_rows_postgres(
 
 pub(super) async fn scan_queued_work_candidates_postgres(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    now: u64,
     session_id: &SessionId,
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
     max_rows: usize,
-) -> Result<(Vec<QueuedWorkBatch>, Vec<ClaimCandidate>), StoreError> {
-    let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
+) -> Result<
+    (
+        Vec<QueuedBatchRow>,
+        Vec<QueuedWorkBatch>,
+        Vec<ClaimCandidate>,
+    ),
+    StoreError,
+> {
+    let rows = sqlx::query(postgres_queued_work_claim_candidates_sql(boundary))
         .bind(session_id.as_str())
+        .bind(now as i64)
         .bind(sql_session_lease_generation(generation)?)
         .bind(claim_scan_limit(max_rows))
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
+    // The scan's SQL predicate and this filter are the same question, and the
+    // shared verdict is the one answer to it: a row already claimed by the
+    // claiming generation is not a candidate (ADR 0029).
     let mut selected = Vec::new();
     for row in rows {
         let row = queued_batch_row(row)?;
-        if row.claim_token.is_none() || row.claim_session_lease_generation != generation {
+        if lash_core::store_backend_support::queued_work_batch_claimability(
+            row.claim_facts(),
+            generation,
+        )
+        .is_claimable()
+        {
             selected.push(row);
         }
     }
@@ -230,7 +228,7 @@ pub(super) async fn scan_queued_work_candidates_postgres(
         .zip(selected_batches.iter())
         .map(|(row, batch)| claim_candidate_from_row(row, batch))
         .collect::<Vec<_>>();
-    Ok((selected_batches, candidates))
+    Ok((selected, selected_batches, candidates))
 }
 
 pub(super) async fn claim_ready_queued_work_postgres_tx(
@@ -246,9 +244,15 @@ pub(super) async fn claim_ready_queued_work_postgres_tx(
     }
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
-    let (mut selected_batches, candidates) =
-        scan_queued_work_candidates_postgres(tx, session_id, generation, boundary, policy.max_rows)
-            .await?;
+    let (selected_rows, mut selected_batches, candidates) = scan_queued_work_candidates_postgres(
+        tx,
+        now,
+        session_id,
+        generation,
+        boundary,
+        policy.max_rows,
+    )
+    .await?;
     let selected_len = match select_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
         TurnWorkClaimPrefix::Selected { len } => len,
         TurnWorkClaimPrefix::Refused { .. } => {
@@ -263,6 +267,7 @@ pub(super) async fn claim_ready_queued_work_postgres_tx(
         session_id,
         owner,
         generation,
+        &selected_rows[..selected_len],
         selected_batches,
         &candidates[..selected_len],
     )
@@ -292,9 +297,10 @@ pub(super) async fn load_turn_cancel_intent_snapshot_tx(
     turn_id: &TurnId,
 ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
     let row: Option<TurnCancelIntentRow> = sqlx::query_as(
-        "SELECT request_id, origin, reason, disposition, mode, intent_revision
-         FROM lash_turn_cancel_requests
-         WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests_postgres
+            .select_request_with_revision_for_update
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -342,9 +348,10 @@ pub(super) async fn load_turn_cancel_intent_snapshot_pg(
 ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
     let row = sqlx::query_as(
-        "SELECT request_id, origin, reason, disposition, mode, intent_revision
-         FROM lash_turn_cancel_requests
-         WHERE session_id = $1 AND turn_id = $2",
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests_postgres
+            .select_request_with_revision
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -360,14 +367,11 @@ async fn load_turn_cancel_request_in_tx(
     turn_id: &TurnId,
     lock_request: bool,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+    let statements = &crate::turn_ingress::turn_ingress_sql().cancel_requests_postgres;
     let metadata_sql = if lock_request {
-        "SELECT request_id, origin, reason, disposition, mode
-         FROM lash_turn_cancel_requests
-         WHERE session_id = $1 AND turn_id = $2 FOR UPDATE"
+        statements.select_request_for_update.sql()
     } else {
-        "SELECT request_id, origin, reason, disposition, mode
-         FROM lash_turn_cancel_requests
-         WHERE session_id = $1 AND turn_id = $2"
+        statements.select_request.sql()
     };
     let row: Option<TurnCancelRequestRow> = sqlx::query_as(metadata_sql)
         .bind(session_id.as_str())
@@ -484,8 +488,10 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     // Lock the request row so concurrent appends serialize on the ordinal
     // next-val; a missing request leaves no evidence to attach to.
     let request_exists: Option<i32> = sqlx::query_scalar(
-        "SELECT 1 FROM lash_turn_cancel_requests
-         WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests_postgres
+            .lock_request
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -547,16 +553,10 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
         StoreError::Backend("turn cancel intent revision exceeds PostgreSQL BIGINT".to_string())
     })?;
     sqlx::query(
-        "INSERT INTO lash_turn_cancel_requests (
-             session_id, turn_id, request_id, origin, reason, disposition, mode, intent_revision
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (session_id, turn_id) DO UPDATE
-         SET request_id = EXCLUDED.request_id,
-             origin = EXCLUDED.origin,
-             reason = EXCLUDED.reason,
-             disposition = EXCLUDED.disposition,
-             mode = EXCLUDED.mode,
-             intent_revision = EXCLUDED.intent_revision",
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests_postgres
+            .upsert_record
+            .sql(),
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -579,19 +579,12 @@ pub(super) async fn orphaned_active_turn_ids_tx(
     scope: lash_core::OrphanedTurnInputScope<'_>,
 ) -> Result<Vec<TurnId>, StoreError> {
     let rows: Vec<(String, String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT state, ingress_json, claim_token, claim_session_lease_generation
-         FROM lash_pending_turn_inputs
-         WHERE session_id = $1 AND state = ANY($2) ORDER BY enqueue_seq ASC
-         FOR UPDATE",
+        crate::turn_ingress::turn_ingress_sql()
+            .pending_inputs_postgres
+            .select_active_turn_claims
+            .sql(),
     )
     .bind(session_id.as_str())
-    .bind(
-        [
-            lash_core::TurnInputStateKind::PendingActive.as_str(),
-            lash_core::TurnInputStateKind::Accepted.as_str(),
-        ]
-        .as_slice(),
-    )
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -643,50 +636,31 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     {
         return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
     }
-    let rows: Vec<(String, String, String, String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT input_id, state, ingress_json, input_json, claim_token, claim_session_lease_generation
-         FROM lash_pending_turn_inputs
-         WHERE session_id = $1 AND state = ANY($2) ORDER BY enqueue_seq ASC
-         FOR UPDATE",
-    )
-    .bind(session_id.as_str())
-    .bind(
-        [
-            lash_core::TurnInputStateKind::PendingActive.as_str(),
-            lash_core::TurnInputStateKind::Accepted.as_str(),
-        ]
-        .as_slice(),
-    )
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let rows = sqlx::query(sql.pending_inputs_postgres.select_active_turn_rows.sql())
+        .bind(session_id.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     let scope = lash_core::OrphanedTurnInputScope::Turn(turn_id);
     let effective =
         settlement.and_then(lash_core::TurnCancelClosureSettlement::effective_cancellation);
     let disposition = effective.map_or(lash_core::TurnCancelDisposition::Defer, |e| e.undelivered);
     let mut repairable = Vec::new();
-    for (input_id, state, ingress_json, input_json, claim_token, claim_generation) in rows {
-        let ingress: lash_core::TurnInputIngress =
-            store_decode_json(&ingress_json, "turn-input ingress")?;
-        let state =
-            lash_core::TurnInputState::from_persisted(&state, ingress).ok_or_else(|| {
-                StoreError::Backend(format!(
-                    "unknown or scope-illegal turn-input state `{state}`"
-                ))
-            })?;
-        let claim_generation = u64_from_sql(
-            "PendingTurnInput",
-            "claim_session_lease_generation",
-            claim_generation,
-        )?;
+    for row in rows {
+        let input_json: String = row.get("input_json");
+        let row = pending_turn_input_row(row)?;
         if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
             scope,
             live_generation,
-            &state,
-            claim_token.is_some(),
-            claim_generation,
+            row.state(),
+            row.is_claimed(),
+            row.claim_session_lease_generation(),
         ) {
-            repairable.push((input_id, store_decode_json(&input_json, "turn input")?));
+            repairable.push((
+                row.input_id.clone(),
+                store_decode_json(&input_json, "turn input")?,
+            ));
         }
     }
     if repairable.is_empty() {
@@ -698,25 +672,23 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     let deferred_ingress = encode_json(&deferred.ingress())?;
     let mut outcome = lash_core::TurnCancelInputOutcome::default();
     for (input_id, payload) in repairable {
-        sqlx::query(&format!(
-            "UPDATE lash_pending_turn_inputs
-         SET state = $3,
-             ingress_json = COALESCE($4, ingress_json),
-             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-         WHERE session_id = $1 AND input_id = $2"
-        ))
-        .bind(session_id.as_str())
-        .bind(&input_id)
-        .bind(match disposition {
-            lash_core::TurnCancelDisposition::Defer => deferred.as_str(),
-            lash_core::TurnCancelDisposition::Drop => {
-                lash_core::TurnInputStateKind::Cancelled.as_str()
+        // Two dispositions, two named statements: deferring rewrites the
+        // ingress so the row stops naming a turn that is over (FIG-1573),
+        // dropping is the cancel this table already has. An optional
+        // `COALESCE($N, ingress_json)` assignment carried both before.
+        match disposition {
+            lash_core::TurnCancelDisposition::Defer => {
+                sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
+                    .bind(session_id.as_str())
+                    .bind(&input_id)
+                    .bind(deferred.as_str())
+                    .bind(deferred_ingress.as_str())
             }
-        })
-        .bind(match disposition {
-            lash_core::TurnCancelDisposition::Defer => Some(deferred_ingress.as_str()),
-            lash_core::TurnCancelDisposition::Drop => None,
-        })
+            lash_core::TurnCancelDisposition::Drop => sqlx::query(sql.pending_inputs.cancel.sql())
+                .bind(session_id.as_str())
+                .bind(&input_id)
+                .bind(lash_core::TurnInputStateKind::Cancelled.as_str()),
+        }
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -747,64 +719,35 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     }
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
-    let active_turn = matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
-    let wanted_state = match &mode {
-        lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-            lash_core::TurnInputStateKind::PendingActive
+    // One named statement per filter shape production takes, picked by an
+    // exhaustive match: a next-turn scan, and an active-turn scan per
+    // checkpoint. The mode used to be spliced into one query-builder statement
+    // with a bound `$N AND state = …` disjunct and an interpolated boundary
+    // predicate, neither of which a planner can seek.
+    let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs_postgres;
+    let mut query = match &mode {
+        lash_core::TurnInputClaimMode::NextTurn => {
+            sqlx::query(statements.claim_candidates_next_turn.sql())
         }
-        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputStateKind::DeferredNextTurn,
+        lash_core::TurnInputClaimMode::ActiveTurn { checkpoint, .. } => match checkpoint {
+            lash_core::CheckpointKind::AfterWork => {
+                sqlx::query(statements.claim_candidates_active_turn_after_work.sql())
+            }
+            lash_core::CheckpointKind::BeforeCompletion => sqlx::query(
+                statements
+                    .claim_candidates_active_turn_before_completion
+                    .sql(),
+            ),
+        },
     };
-    let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(format!(
-        "SELECT {PENDING_TURN_INPUT_COLUMNS}
-         FROM lash_pending_turn_inputs
-         WHERE session_id = "
-    ));
-    let accepted_state = lash_core::store_backend_support::state_sql_literal(
-        lash_core::TurnInputStateKind::Accepted,
-    );
-    query
-        .push_bind(session_id.as_str())
-        .push(" AND (state = ")
-        .push_bind(wanted_state.as_str())
-        .push(" OR (")
-        .push_bind(active_turn)
-        .push(" AND state = ")
-        .push(accepted_state)
-        .push("))")
-        .push(
-            "
-           AND (
-                claim_token IS NULL
-                OR claim_session_lease_generation <> ",
-        )
-        .push_bind(sql_session_lease_generation(generation)?)
-        .push("\n           )");
-    if let lash_core::TurnInputClaimMode::ActiveTurn {
-        turn_id,
-        checkpoint,
-    } = &mode
-    {
-        query
-            .push(" AND ingress_json::jsonb ->> 'scope' = 'active_turn'")
-            .push(" AND ingress_json::jsonb ->> 'turn_id' = ")
-            .push_bind(turn_id.as_str());
-        query.push(format!(
-            " AND {}",
-            lash_core::store_backend_support::admitted_min_boundary_sql(
-                "ingress_json::jsonb ->> 'min_boundary'",
-                *checkpoint,
-            )
-        ));
+    query = query
+        .bind(session_id.as_str())
+        .bind(sql_session_lease_generation(generation)?)
+        .bind(i64::try_from(max_inputs).unwrap_or(i64::MAX));
+    if let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
+        query = query.bind(turn_id.to_string());
     }
-    query
-        .push(" ORDER BY enqueue_seq ASC LIMIT ")
-        .push_bind(i64::try_from(max_inputs).unwrap_or(i64::MAX))
-        .push(" FOR UPDATE SKIP LOCKED");
-    let rows = query
-        .build()
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    let rows = query.fetch_all(&mut **tx).await.map_err(store_sqlx_error)?;
     let selected = rows
         .into_iter()
         .take(max_inputs)
@@ -837,20 +780,10 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
         let changed = sqlx::query(
-            "UPDATE lash_pending_turn_inputs
-             SET state = $3,
-                 claim_id = $4,
-                 claim_owner_id = $5,
-                 claim_owner_incarnation_id = $6,
-                 claim_token = $7,
-                 claim_fencing_token = $9,
-                 claim_session_lease_generation = $8
-             WHERE session_id = $1
-               AND input_id = $2
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> $8
-               )",
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .claim
+                .sql(),
         )
         .bind(session_id.as_str())
         .bind(row.input_id.as_str())
@@ -957,11 +890,10 @@ pub(crate) async fn read_session_execution_lease_unlocked(
     session_id: &SessionId,
 ) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
     let row = sqlx::query(
-        "SELECT lease_owner_id, lease_token, lease_fencing_token,
-                lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id, lease_executor_id, lease_term_ms
-         FROM lash_session_execution_leases
-         WHERE session_id = $1",
+        crate::turn_ingress::turn_ingress_sql()
+            .leases
+            .select_by_session
+            .sql(),
     )
     .bind(session_id.as_str())
     .fetch_optional(&mut **tx)
@@ -976,12 +908,10 @@ pub(crate) async fn load_session_execution_lease_tx(
     session_id: &SessionId,
 ) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
     let row = sqlx::query(
-        "SELECT lease_owner_id, lease_token, lease_fencing_token,
-                lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id, lease_executor_id, lease_term_ms
-         FROM lash_session_execution_leases
-         WHERE session_id = $1
-         FOR UPDATE",
+        crate::turn_ingress::turn_ingress_sql()
+            .leases_postgres
+            .select_by_session_for_update
+            .sql(),
     )
     .bind(session_id.as_str())
     .fetch_optional(&mut **tx)
@@ -1052,35 +982,19 @@ pub(super) async fn acquire_session_execution_lease_tx(
     let expires_at = now.saturating_add(lease_ttl_ms);
     let sql_expires_at = sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
     let sql_lease_term = sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
-    sqlx::query(
-        "INSERT INTO lash_session_execution_leases (
-            session_id, lease_owner_id, lease_owner_incarnation_id, lease_executor_id,
-            lease_token, lease_fencing_token,
-            lease_claimed_at_ms, lease_expires_at_ms, lease_term_ms
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (session_id) DO UPDATE SET
-            lease_owner_id = EXCLUDED.lease_owner_id,
-            lease_owner_incarnation_id = EXCLUDED.lease_owner_incarnation_id,
-            lease_executor_id = EXCLUDED.lease_executor_id,
-            lease_token = EXCLUDED.lease_token,
-            lease_fencing_token = EXCLUDED.lease_fencing_token,
-            lease_claimed_at_ms = EXCLUDED.lease_claimed_at_ms,
-            lease_expires_at_ms = EXCLUDED.lease_expires_at_ms,
-            lease_term_ms = EXCLUDED.lease_term_ms",
-    )
-    .bind(session_id.as_str())
-    .bind(&owner.owner_id)
-    .bind(&owner.incarnation_id)
-    .bind(executor_id)
-    .bind(lease_token)
-    .bind(sql_fencing_token)
-    .bind(now as i64)
-    .bind(sql_expires_at)
-    .bind(sql_lease_term)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.acquire.sql())
+        .bind(session_id.as_str())
+        .bind(&owner.owner_id)
+        .bind(&owner.incarnation_id)
+        .bind(executor_id)
+        .bind(lease_token)
+        .bind(sql_fencing_token)
+        .bind(now as i64)
+        .bind(sql_expires_at)
+        .bind(sql_lease_term)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(SessionExecutionLease {
         session_id: SessionId::from(session_id.to_string()),
         owner: owner.clone(),
@@ -1120,29 +1034,15 @@ pub(super) async fn release_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completion: &SessionExecutionLeaseAuthority,
 ) -> Result<bool, StoreError> {
-    let released = sqlx::query(
-        "UPDATE lash_session_execution_leases
-         SET lease_owner_id = NULL,
-             lease_owner_incarnation_id = NULL,
-             lease_executor_id = NULL,
-             lease_token = NULL,
-             lease_claimed_at_ms = 0,
-             lease_term_ms = 0,
-             lease_expires_at_ms = 0
-         WHERE session_id = $1
-           AND lease_owner_id = $2
-           AND lease_owner_incarnation_id = $3
-           AND lease_executor_id = $4
-           AND lease_token = $5",
-    )
-    .bind(completion.session_id.as_str())
-    .bind(&completion.owner.owner_id)
-    .bind(&completion.owner.incarnation_id)
-    .bind(&completion.executor_id)
-    .bind(&completion.lease_token)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let released = sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.release.sql())
+        .bind(completion.session_id.as_str())
+        .bind(&completion.owner.owner_id)
+        .bind(&completion.owner.incarnation_id)
+        .bind(&completion.executor_id)
+        .bind(&completion.lease_token)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(released.rows_affected() == 1)
 }
 

@@ -112,21 +112,13 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     ) -> Result<Option<bool>, StoreError> {
         lash_core::store::validate_session_id(&request.session_id)?;
         sqlx::query_scalar(
-            "SELECT EXISTS(
-                SELECT 1
-                FROM lash_queued_work_batches qwb
-                WHERE qwb.session_id = $1
-                  AND qwb.available_at_ms <= $2
-            ) OR EXISTS(
-                SELECT 1
-                FROM lash_pending_turn_inputs pti
-                WHERE pti.session_id = $1
-                  AND pti.state = $3
-            )",
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .has_claimable_work
+                .sql(),
         )
         .bind(request.session_id.as_str())
         .bind(now_epoch_ms as i64)
-        .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
         .fetch_one(&self.pool)
         .await
         .map(Some)
@@ -799,9 +791,10 @@ pub(crate) async fn delete_session_tx(
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    for sql in [
-        "DELETE FROM lash_queued_work_items WHERE batch_id IN (SELECT batch_id FROM lash_queued_work_batches WHERE session_id = $1)",
-        "DELETE FROM lash_queued_work_batches WHERE session_id = $1",
+    let turn_ingress = crate::turn_ingress::turn_ingress_sql();
+    for statement in [
+        turn_ingress.queued_items_postgres.delete_by_session.sql(),
+        turn_ingress.queued_batches.delete_by_session.sql(),
         crate::process_sql::process_sql()
             .fence
             .delete_by_session
@@ -810,15 +803,15 @@ pub(crate) async fn delete_session_tx(
             .floor
             .delete_by_session
             .sql(),
-        "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
-        "DELETE FROM lash_turn_cancel_requests WHERE session_id = $1",
+        turn_ingress.pending_inputs.delete_by_session.sql(),
+        turn_ingress.cancel_requests.delete_by_session.sql(),
         // Administration revokes the session's effect authority before store
         // deletion, after which the pinned closure obligation may be retired.
-        "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1",
-        "DELETE FROM lash_turn_cancellation_bindings WHERE session_id = $1",
-        "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
+        turn_ingress.closures.delete_by_session.sql(),
+        turn_ingress.bindings.delete_by_session.sql(),
+        turn_ingress.leases.delete_by_session.sql(),
     ] {
-        sqlx::query(sql)
+        sqlx::query(statement)
             .bind(session_id.as_str())
             .execute(&mut **tx)
             .await

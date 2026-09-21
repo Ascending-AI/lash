@@ -13,11 +13,10 @@ pub(super) async fn admit(
     let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
     let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
     let inserted = sqlx::query(
-        "INSERT INTO lash_tool_intent_submissions (
-            replay_key, session_id, execution_scope_id, tool_call_id,
-            intent_index, kind, payload_hash, submission_json
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (replay_key) DO NOTHING",
+        crate::turn_ingress::turn_ingress_sql()
+            .tool_intents_postgres
+            .insert_new
+            .sql(),
     )
     .bind(&submission.identity.replay_key)
     .bind(submission.identity.session_id.as_str())
@@ -35,7 +34,10 @@ pub(super) async fn admit(
         return Ok(ToolIntentSubmissionAdmission::Admitted);
     }
     let row = sqlx::query(
-        "SELECT submission_json FROM lash_tool_intent_submissions WHERE replay_key = $1",
+        crate::turn_ingress::turn_ingress_sql()
+            .tool_intents
+            .select_by_replay_key
+            .sql(),
     )
     .bind(&submission.identity.replay_key)
     .fetch_one(&mut *tx)
@@ -53,8 +55,10 @@ pub(super) async fn complete(
 ) -> Result<ToolIntentSubmissionRecord, PluginError> {
     let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
     let row = sqlx::query(
-        "SELECT submission_json FROM lash_tool_intent_submissions
-         WHERE replay_key = $1 FOR UPDATE",
+        crate::turn_ingress::turn_ingress_sql()
+            .tool_intents_postgres
+            .select_by_replay_key_for_update
+            .sql(),
     )
     .bind(replay_key)
     .fetch_one(&mut *tx)
@@ -65,7 +69,10 @@ pub(super) async fn complete(
         submission.outcome = Some(outcome);
         let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
         sqlx::query(
-            "UPDATE lash_tool_intent_submissions SET submission_json = $2 WHERE replay_key = $1",
+            crate::turn_ingress::turn_ingress_sql()
+                .tool_intents
+                .update_submission
+                .sql(),
         )
         .bind(replay_key)
         .bind(encoded)

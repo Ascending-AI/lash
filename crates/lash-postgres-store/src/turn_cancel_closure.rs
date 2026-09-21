@@ -14,7 +14,10 @@ pub(crate) async fn retire_scope(
         .await
         .map_err(store_sqlx_error)?;
     let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT session_id, authorization_json FROM lash_turn_cancel_closure_authorizations ORDER BY session_id, turn_id",
+        crate::turn_ingress::turn_ingress_sql()
+            .closures
+            .list_all
+            .sql(),
     )
     .fetch_all(&mut *tx)
     .await
@@ -33,7 +36,10 @@ pub(crate) async fn retire_scope(
         }
     }
     sqlx::query(
-        "INSERT INTO lash_turn_cancel_retired_scopes (scope_id) VALUES ($1) ON CONFLICT DO NOTHING",
+        crate::turn_ingress::turn_ingress_sql()
+            .retired_scopes_postgres
+            .insert_new
+            .sql(),
     )
     .bind(&scope_id)
     .execute(&mut *tx)
@@ -48,7 +54,10 @@ pub(crate) async fn ensure_session_not_pinned_tx(
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     let pending_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1",
+        crate::turn_ingress::turn_ingress_sql()
+            .closures
+            .count_by_session
+            .sql(),
     )
     .bind(session_id.as_str())
     .fetch_one(&mut **tx)
