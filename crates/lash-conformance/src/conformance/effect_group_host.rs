@@ -643,8 +643,32 @@ where
     .await
     .expect("a refused retirement fences nothing: the scope still mints");
 
+    // The forward half of ADR 0099 §3's `ArtifactOwner::Execution` protection.
+    //
+    // A retained request names environment bytes held under
+    // `ArtifactOwner::Execution(scope)`, and §3 protects them "through their
+    // last retained dependency". The mechanism is this refusal: an execution
+    // owner is severed only after the scope's authoritative retirement commits,
+    // and `pending_artifact_owner_retirements` is the queue that drives that
+    // severing. A refused retirement writes no fence, so the scope never
+    // enters that queue and the bytes a live child still needs are unreachable
+    // to reclamation. Asserted rather than assumed, because the whole
+    // protection rests on it.
+    assert!(
+        !host
+            .pending_artifact_owner_retirements()
+            .await
+            .expect("the pending execution-owner queue is readable")
+            .contains(&live_scope),
+        "a scope whose group still has a live child must not be queued for \
+         execution-artifact severing: its retained requests still name those bytes"
+    );
+
     gate.release();
     until(|| gate.finished() == 1).await;
+    // ... and once the scope really is quiescent and retired, the same queue is
+    // what makes the bytes reclaimable. The two assertions are one law: the
+    // protection is a delay, not an exemption.
     // The drain journals the loser's terminal after its executor returns;
     // the gate's counter fires before that write lands, so the retirement
     // is retried until the store proves the scope quiescent.
@@ -670,6 +694,19 @@ where
     assert_eq!(
         deleted, 2,
         "the quiescent retirement reports both settled children"
+    );
+
+    // The other half of the protection: once the retirement has committed, the
+    // scope *is* queued for execution-artifact severing. The environment bytes
+    // a retained request named are reclaimable exactly when no retained request
+    // names them any more, which is what "through the last retained dependency"
+    // means.
+    assert!(
+        host.pending_artifact_owner_retirements()
+            .await
+            .expect("the pending execution-owner queue is readable")
+            .contains(&live_scope),
+        "a retired scope must be queued for execution-artifact severing"
     );
 
     let reader = make();

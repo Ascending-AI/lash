@@ -29,13 +29,13 @@ pub struct EffectGroupShape {
     /// carries as a column, kept for the position lookups every handler already
     /// does without decoding an envelope.
     ///
-    /// `#[serde(default)]` is the one concession to an object written by an
-    /// older deployment: its state predates this field, and a group already
-    /// open when a deployment rolls cannot be re-accepted. An empty membership
-    /// therefore means "recorded before §3", which
-    /// [`validate_wire`](Self::validate_wire) distinguishes from a membership
-    /// that disagrees with the arity.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Required, with no `serde(default)`. An empty membership beside a nonzero
+    /// arity is not "recorded before §3" to be tolerated — it is a shape that
+    /// cannot reconstruct its own children, and
+    /// [`validate_wire`](Self::validate_wire) refuses it like any other
+    /// disagreement. There is no in-flight population to protect: ADR 0099
+    /// records that no production caller of `open_effect_group` exists, so no
+    /// deployment can be holding a group whose state predates this field.
     pub membership: Vec<String>,
 }
 
@@ -91,11 +91,10 @@ impl EffectGroupShape {
                 self.replay_keys.len()
             )));
         }
-        // Empty is "recorded before the membership existed" and is passed
-        // through; any other disagreement is a caller defect that no retry
-        // fixes, refused here rather than left to a handler that would rebuild
-        // the wrong number of children.
-        if !self.membership.is_empty() && self.membership.len() != self.children {
+        // Every disagreement, empty included: a shape that cannot rebuild its
+        // own children is a caller defect no retry fixes, refused once here
+        // rather than left to a handler that would rebuild the wrong number.
+        if self.membership.len() != self.children {
             return Err(TerminalError::new(format!(
                 "effect-group shape declares {} children but retains {} accepted \
                  requests",
