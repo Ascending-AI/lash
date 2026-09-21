@@ -2,31 +2,137 @@ use super::*;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-pub(super) fn rlm_protocol_contract_executions() -> Result<Vec<Value>, FixedScriptRunnerError> {
-    Ok(vec![
-        rlm_natural_prose_finalizes_execution()?,
-        rlm_typed_prose_requires_finish_execution()?,
-        rlm_finish_required_max_turn_stop_execution()?,
-        rlm_exec_error_max_turn_stop_execution()?,
-        rlm_typed_finish_emits_outcome_and_done_execution()?,
-        rlm_finish_required_diagnostic_counts_execution()?,
-        rlm_natural_diagnostic_counts_execution()?,
-        rlm_cell_diagnostic_counts_execution()?,
-        rlm_retired_marker_plain_lashlang_text_execution()?,
-        rlm_lashlang_cell_exec_continues_execution()?,
-        rlm_streamed_lashlang_cell_exec_persists_trajectory_execution()?,
-        rlm_empty_options_natural_default_execution()?,
-        rlm_exec_result_no_tool_call_replay_execution()?,
-        rlm_exec_tool_control_frame_switch_terminal_execution()?,
-        rlm_exec_tool_control_fail_terminal_execution()?,
-        rlm_natural_allows_finish_value_execution()?,
-        rlm_typed_schema_mismatch_repair_loop_execution()?,
-        rlm_typed_schema_any_of_mismatch_execution()?,
-    ])
-}
+pub(super) const RLM_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecutor>] = &[
+    FixedContractRow {
+        semantic_oracle: "rlm.natural_prose_finalizes",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_prose_only_response_finishes_by_default",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_natural_prose_finalizes_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.typed_prose_requires_finish",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_typed_prose_only_response_requests_finish",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_typed_prose_requires_finish_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.finish_required_max_turn_stop",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_prompt",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_finish_required_max_turn_stop_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.exec_error_max_turn_stop",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_retry",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_exec_error_max_turn_stop_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.typed_finish_emits_outcome_and_done",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_typed_finish_emits_outcome_and_done_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.finish_required_diagnostic_counts",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_finish_required_diagnostic_counts_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.natural_diagnostic_counts",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_natural_diagnostic_counts_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.cell_diagnostic_counts",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_cell_diagnostic_counts_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.retired_marker_plain_lashlang_text",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_text",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_retired_marker_plain_lashlang_text_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.lashlang_cell_exec_continues",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_lashlang_cell_exec_continues_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.streamed_lashlang_cell_exec_persists_trajectory",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajectory",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_streamed_lashlang_cell_exec_persists_trajectory_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.empty_options_natural_default",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_empty_turn_options_use_natural_default",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_empty_options_natural_default_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.exec_result_no_tool_call_replay",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_ids",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_exec_result_no_tool_call_replay_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.exec_tool_control_frame_switch_terminal",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_exec_tool_control_frame_switch_terminal_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.exec_tool_control_fail_terminal",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_exec_tool_control_fail_terminal_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.natural_allows_finish_value",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_natural_allows_finish_value",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_natural_allows_finish_value_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.typed_schema_mismatch_repair_loop",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_typed_schema_mismatch_repair_loop_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "rlm.typed_schema_any_of_mismatch",
+        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
+        source_scenario: "rlm_protocol_scenario_typed_schema_mismatch_checks_any_of",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: rlm_typed_schema_any_of_mismatch_execution,
+    },
+];
 
 fn rlm_natural_prose_finalizes_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm natural prose finalizes",
         "hello",
         RlmTermination::Natural,
@@ -36,17 +142,11 @@ fn rlm_natural_prose_finalizes_execution() -> Result<Value, FixedScriptRunnerErr
             RlmContractStep::Llm(vec![rlm_text_part("Hello there!")]),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.natural_prose_finalizes",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_prose_only_response_finishes_by_default",
-        result,
     )
 }
 
 fn rlm_typed_prose_requires_finish_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm typed prose requires finish",
         "hello",
         RlmTermination::FinishRequired { schema: None },
@@ -56,17 +156,11 @@ fn rlm_typed_prose_requires_finish_execution() -> Result<Value, FixedScriptRunne
             RlmContractStep::Llm(vec![rlm_text_part("Hello there!")]),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.typed_prose_requires_finish",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_typed_prose_only_response_requests_finish",
-        result,
     )
 }
 
 fn rlm_finish_required_max_turn_stop_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm finish-required prose max-turn stop",
         "hello",
         RlmTermination::FinishRequired { schema: None },
@@ -75,17 +169,11 @@ fn rlm_finish_required_max_turn_stop_execution() -> Result<Value, FixedScriptRun
         vec![RlmContractStep::Llm(vec![rlm_text_part(
             "plain prose cannot finish finish-required RLM",
         )])],
-    )?;
-    contract_execution_payload(
-        "rlm.finish_required_max_turn_stop",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_prompt",
-        result,
     )
 }
 
 fn rlm_exec_error_max_turn_stop_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm finish-required exec error max-turn stop",
         "run bad code",
         RlmTermination::FinishRequired { schema: None },
@@ -99,17 +187,11 @@ fn rlm_exec_error_max_turn_stop_execution() -> Result<Value, FixedScriptRunnerEr
                 None,
             )),
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.exec_error_max_turn_stop",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_retry",
-        result,
     )
 }
 
 fn rlm_typed_finish_emits_outcome_and_done_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm typed finish emits outcome and done",
         "return typed data",
         RlmTermination::FinishRequired {
@@ -131,51 +213,33 @@ fn rlm_typed_finish_emits_outcome_and_done_execution() -> Result<Value, FixedScr
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!({ "ok": true })))),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.typed_finish_emits_outcome_and_done",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done",
-        result,
     )
 }
 
 fn rlm_finish_required_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm finish-required diagnostic counts",
         "hello",
         RlmTermination::FinishRequired { schema: None },
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part("Hello there!")])],
-    )?;
-    contract_execution_payload(
-        "rlm.finish_required_diagnostic_counts",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts",
-        result,
     )
 }
 
 fn rlm_natural_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm natural diagnostic counts",
         "hello",
         RlmTermination::Natural,
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part("Hello there!")])],
-    )?;
-    contract_execution_payload(
-        "rlm.natural_diagnostic_counts",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts",
-        result,
     )
 }
 
 fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm cell diagnostic counts",
         "run some code",
         RlmTermination::Natural,
@@ -188,19 +252,13 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
             ]),
             RlmContractStep::Exec(rlm_exec_response(&["hi\n"], None, None)),
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.cell_diagnostic_counts",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts",
-        result,
     )
 }
 
 fn rlm_retired_marker_plain_lashlang_text_execution() -> Result<Value, FixedScriptRunnerError> {
     let assistant_prose = "First.";
     let code = "const text = \"%%lashlang is just source here\";\nprint(text);";
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm retired marker plain LashLang text",
         "run some code",
         RlmTermination::Natural,
@@ -209,17 +267,11 @@ fn rlm_retired_marker_plain_lashlang_text_execution() -> Result<Value, FixedScri
         vec![RlmContractStep::Llm(vec![rlm_text_part(
             &rlm_typescript_block_with_prose(assistant_prose, code),
         )])],
-    )?;
-    contract_execution_payload(
-        "rlm.retired_marker_plain_lashlang_text",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_text",
-        result,
     )
 }
 
 fn rlm_lashlang_cell_exec_continues_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm LashLang cell exec continues",
         "run some code",
         RlmTermination::Natural,
@@ -233,18 +285,12 @@ fn rlm_lashlang_cell_exec_continues_execution() -> Result<Value, FixedScriptRunn
             RlmContractStep::Exec(rlm_exec_response(&["hi\n"], None, None)),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.lashlang_cell_exec_continues",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues",
-        result,
     )
 }
 
 fn rlm_streamed_lashlang_cell_exec_persists_trajectory_execution()
 -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm streamed LashLang cell exec persists trajectory",
         "stream and run some code",
         RlmTermination::Natural,
@@ -258,17 +304,11 @@ fn rlm_streamed_lashlang_cell_exec_persists_trajectory_execution()
             RlmContractStep::Exec(rlm_exec_response(&["streamed\n"], None, None)),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.streamed_lashlang_cell_exec_persists_trajectory",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajectory",
-        result,
     )
 }
 
 fn rlm_empty_options_natural_default_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm empty options natural default",
         "finish",
         RlmTermination::Natural,
@@ -281,17 +321,11 @@ fn rlm_empty_options_natural_default_execution() -> Result<Value, FixedScriptRun
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!("done")))),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.empty_options_natural_default",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_empty_turn_options_use_natural_default",
-        result,
     )
 }
 
 fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm exec result no tool-call replay",
         "run a tool",
         RlmTermination::Natural,
@@ -315,12 +349,6 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
                 7,
             )),
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.exec_result_no_tool_call_replay",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_ids",
-        result,
     )
 }
 
@@ -333,7 +361,7 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
     let initial_nodes = vec![lash_core::SessionAppendNode::message(
         lash_core::PluginMessage::text(lash_core::MessageRole::User, "seed"),
     )];
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm exec tool-control frame switch terminal",
         "run a custom frame-switch tool",
         RlmTermination::Natural,
@@ -365,17 +393,11 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
             )),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.exec_tool_control_frame_switch_terminal",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal",
-        result,
     )
 }
 
 fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm exec tool-control fail terminal",
         "run a custom failure tool",
         RlmTermination::Natural,
@@ -408,17 +430,11 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
             )),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.exec_tool_control_fail_terminal",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error",
-        result,
     )
 }
 
 fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm natural allows finish value",
         "return typed data",
         RlmTermination::Natural,
@@ -431,17 +447,11 @@ fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunne
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!({ "ok": true })))),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.natural_allows_finish_value",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_natural_allows_finish_value",
-        result,
     )
 }
 
 fn rlm_typed_schema_mismatch_repair_loop_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm typed schema mismatch repair loop",
         "return typed data",
         RlmTermination::FinishRequired {
@@ -466,17 +476,11 @@ fn rlm_typed_schema_mismatch_repair_loop_execution() -> Result<Value, FixedScrip
             )),
             RlmContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.typed_schema_mismatch_repair_loop",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback",
-        result,
     )
 }
 
 fn rlm_typed_schema_any_of_mismatch_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_rlm_protocol_contract(
+    run_rlm_protocol_contract(
         "rlm typed schema anyOf mismatch",
         "return typed data",
         RlmTermination::FinishRequired {
@@ -493,12 +497,6 @@ fn rlm_typed_schema_any_of_mismatch_execution() -> Result<Value, FixedScriptRunn
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block("finish(true);"))]),
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!(true)))),
         ],
-    )?;
-    contract_execution_payload(
-        "rlm.typed_schema_any_of_mismatch",
-        "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        "rlm_protocol_scenario_typed_schema_mismatch_checks_any_of",
-        result,
     )
 }
 

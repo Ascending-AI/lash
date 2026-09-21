@@ -1,36 +1,75 @@
 use super::*;
 
-pub(super) fn standard_protocol_contract_executions() -> Result<Vec<Value>, FixedScriptRunnerError>
-{
-    Ok(vec![
-        standard_initial_request_projection_execution()?,
-        standard_empty_response_finishes_execution()?,
-        standard_provider_error_without_checkpoint_execution()?,
-        standard_native_tool_loop_reenters_model_execution()?,
-        standard_parallel_tool_results_checkpoint_once_execution()?,
-        standard_tool_failure_feedback_reenters_model_execution()?,
-        standard_streamed_text_finalizes_once_execution()?,
-        standard_max_turn_after_tool_result_execution()?,
-    ])
-}
+pub(super) const STANDARD_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecutor>] = &[
+    FixedContractRow {
+        semantic_oracle: "standard.initial_request_projection",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_projects_initial_request",
+        anchor: FixedContractAnchor::RecordedProvider,
+        execute: standard_initial_request_projection_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "standard.empty_response_finishes",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_empty_model_response_finishes_after_checkpoint",
+        anchor: FixedContractAnchor::RecordedProvider,
+        execute: standard_empty_response_finishes_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "standard.provider_error_without_checkpoint",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_provider_error_stops_without_checkpoint",
+        anchor: FixedContractAnchor::RecordedProviderMutation("rate_limit_error_envelope"),
+        execute: standard_provider_error_without_checkpoint_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "standard.native_tool_loop_reenters_model",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint",
+        anchor: FixedContractAnchor::RecordedToolThenProvider,
+        execute: standard_native_tool_loop_reenters_model_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "standard.parallel_tool_results_checkpoint_once",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_parallel_tool_results_checkpoint_once",
+        anchor: FixedContractAnchor::RecordedToolThenProvider,
+        execute: standard_parallel_tool_results_checkpoint_once_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "standard.tool_failure_feedback_reenters_model",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint",
+        anchor: FixedContractAnchor::RecordedToolThenProvider,
+        execute: standard_tool_failure_feedback_reenters_model_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "standard.streamed_text_finalizes_once",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta",
+        anchor: FixedContractAnchor::RecordedProvider,
+        execute: standard_streamed_text_finalizes_once_execution,
+    },
+    FixedContractRow {
+        semantic_oracle: "standard.max_turns_after_tool_result",
+        source_path: "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
+        source_scenario: "standard_protocol_scenario_max_turns_terminates_after_tool_result",
+        anchor: FixedContractAnchor::RecordedToolThenProvider,
+        execute: standard_max_turn_after_tool_result_execution,
+    },
+];
 
 fn standard_initial_request_projection_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard initial request projection",
         "hello standard protocol",
         None,
         vec![],
-    )?;
-    contract_execution_payload(
-        "standard.initial_request_projection",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_projects_initial_request",
-        result,
     )
 }
 
 fn standard_empty_response_finishes_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard empty provider response finishes",
         "answer with something",
         None,
@@ -41,34 +80,22 @@ fn standard_empty_response_finishes_execution() -> Result<Value, FixedScriptRunn
             },
             StandardContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "standard.empty_response_finishes",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_empty_model_response_finishes_after_checkpoint",
-        result,
     )
 }
 
 fn standard_provider_error_without_checkpoint_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard provider error without checkpoint",
         "trigger provider failure",
         None,
         vec![StandardContractStep::LlmError(
             "upstream provider unavailable",
         )],
-    )?;
-    contract_execution_payload(
-        "standard.provider_error_without_checkpoint",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_provider_error_stops_without_checkpoint",
-        result,
     )
 }
 
 fn standard_native_tool_loop_reenters_model_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard native tool loop reenters model",
         "read file",
         None,
@@ -88,18 +115,12 @@ fn standard_native_tool_loop_reenters_model_execution() -> Result<Value, FixedSc
             )]),
             StandardContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "standard.native_tool_loop_reenters_model",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint",
-        result,
     )
 }
 
 fn standard_parallel_tool_results_checkpoint_once_execution()
 -> Result<Value, FixedScriptRunnerError> {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard parallel tool results checkpoint once",
         "read two files",
         None,
@@ -127,18 +148,12 @@ fn standard_parallel_tool_results_checkpoint_once_execution()
             ]),
             StandardContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "standard.parallel_tool_results_checkpoint_once",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_parallel_tool_results_checkpoint_once",
-        result,
     )
 }
 
 fn standard_tool_failure_feedback_reenters_model_execution() -> Result<Value, FixedScriptRunnerError>
 {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard tool failure feedback reenters model",
         "search docs",
         None,
@@ -160,17 +175,11 @@ fn standard_tool_failure_feedback_reenters_model_execution() -> Result<Value, Fi
             )]),
             StandardContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "standard.tool_failure_feedback_reenters_model",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint",
-        result,
     )
 }
 
 fn standard_streamed_text_finalizes_once_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard streamed text finalizes once",
         "answer directly",
         None,
@@ -181,17 +190,11 @@ fn standard_streamed_text_finalizes_once_execution() -> Result<Value, FixedScrip
             },
             StandardContractStep::Checkpoint,
         ],
-    )?;
-    contract_execution_payload(
-        "standard.streamed_text_finalizes_once",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta",
-        result,
     )
 }
 
 fn standard_max_turn_after_tool_result_execution() -> Result<Value, FixedScriptRunnerError> {
-    let result = run_standard_protocol_contract(
+    run_standard_protocol_contract(
         "standard max turns after tool result",
         "use a tool once",
         Some(1),
@@ -207,12 +210,6 @@ fn standard_max_turn_after_tool_result_execution() -> Result<Value, FixedScriptR
                 "ok",
             )]),
         ],
-    )?;
-    contract_execution_payload(
-        "standard.max_turns_after_tool_result",
-        "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_max_turns_terminates_after_tool_result",
-        result,
     )
 }
 

@@ -9,7 +9,12 @@ thread_local! {
         };
 }
 
+pub(super) type AgentContractRunner =
+    fn(&tokio::runtime::Runtime) -> Result<Value, FixedScriptRunnerError>;
+pub(super) type AgentContractRow = FixedContractRow<AgentContractRunner>;
+
 pub(super) struct AgentContractExecution {
+    pub(super) row: &'static AgentContractRow,
     pub(super) payload: Value,
     pub(super) checkpoint_writes: Vec<CheckpointWriteEvent>,
 }
@@ -68,12 +73,7 @@ finish({
         &expected,
     )
     .await?;
-    contract_execution_payload(
-        "agent.tuple_values_finish_as_json_arrays",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_tuple_values_finish_as_json_arrays",
-        result,
-    )
+    Ok(result)
 }
 
 pub(super) async fn agent_contract_executions()
@@ -90,12 +90,13 @@ pub(super) async fn agent_contract_executions()
                 .build()
                 .map_err(FixedScriptRunnerError::Io)?;
             let mut executions = Vec::new();
-            for contract in FIXED_AGENT_PRODUCT_CONTRACTS {
-                let runner = agent_contract_runner(contract)?;
+            for row in AGENT_CONTRACT_ROWS {
                 let collector = CheckpointWriteCollector::default();
-                let payload = observe_contract_checkpoints(collector.clone(), || runner(&runtime))?;
+                let result =
+                    observe_contract_checkpoints(collector.clone(), || (row.execute)(&runtime))?;
                 executions.push(AgentContractExecution {
-                    payload,
+                    row,
+                    payload: contract_execution_payload(row, result)?,
                     checkpoint_writes: collector.events(),
                 });
             }
@@ -120,8 +121,7 @@ pub fn run_agent_contract_product_stack_probe(
     contract: &str,
     stack_bytes: usize,
 ) -> Result<(), FixedScriptRunnerError> {
-    let contract = contract.to_string();
-    let runner = agent_contract_runner(&contract)?;
+    let runner = agent_contract_row(contract)?.execute;
     run_on_product_stack(
         format!("product-agent-contract-probe-{contract}"),
         stack_bytes,
@@ -135,29 +135,83 @@ pub fn run_agent_contract_product_stack_probe(
     )
 }
 
-type AgentContractRunner = fn(&tokio::runtime::Runtime) -> Result<Value, FixedScriptRunnerError>;
+pub(super) const AGENT_CONTRACT_ROWS: &[AgentContractRow] = &[
+    AgentContractRow {
+        semantic_oracle: "agent.foreground_tool_call_round_trip",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_foreground_labeled_tool_call",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_foreground_tool_call_round_trip,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.started_process_tool_call_graph",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_started_process_labeled_tool_call",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_started_process_tool_call_graph,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.durable_input_suspension_resolution",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_process_durable_input_request_tool",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_durable_input_suspension_resolution,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.started_process_subagent_spawn",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_started_process_labeled_subagent_spawn",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_started_process_subagent_spawn,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.nested_process_start_await",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_nested_process_start_await",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_nested_process_start_await,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.session_turn_process_child",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_session_turn_process_child",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_session_turn_process_child,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.failed_child_preserves_failure_graph",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_failed_child_preserves_failure_graph",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_failed_child_preserves_failure_graph,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.parallel_spawn_and_join",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_parallel_spawn_and_join",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_parallel_spawn_and_join,
+    },
+    AgentContractRow {
+        semantic_oracle: "agent.tuple_values_finish_as_json_arrays",
+        source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
+        source_scenario: "agent_scenario_tuple_values_finish_as_json_arrays",
+        anchor: FixedContractAnchor::ProviderActor,
+        execute: run_agent_tuple_json_array,
+    },
+];
 
-pub(super) fn agent_contract_runner(
+pub(super) fn agent_contract_row(
     contract: &str,
-) -> Result<AgentContractRunner, FixedScriptRunnerError> {
-    match contract {
-        "agent.foreground_tool_call_round_trip" => Ok(run_agent_foreground_tool_call_round_trip),
-        "agent.started_process_tool_call_graph" => Ok(run_agent_started_process_tool_call_graph),
-        "agent.durable_input_suspension_resolution" => {
-            Ok(run_agent_durable_input_suspension_resolution)
-        }
-        "agent.started_process_subagent_spawn" => Ok(run_agent_started_process_subagent_spawn),
-        "agent.nested_process_start_await" => Ok(run_agent_nested_process_start_await),
-        "agent.session_turn_process_child" => Ok(run_agent_session_turn_process_child),
-        "agent.failed_child_preserves_failure_graph" => {
-            Ok(run_agent_failed_child_preserves_failure_graph)
-        }
-        "agent.parallel_spawn_and_join" => Ok(run_agent_parallel_spawn_and_join),
-        "agent.tuple_values_finish_as_json_arrays" => Ok(run_agent_tuple_json_array),
-        other => Err(FixedScriptRunnerError::Assertion(format!(
-            "no replayable fixed Agent contract execution registered for `{other}`"
-        ))),
-    }
+) -> Result<&'static AgentContractRow, FixedScriptRunnerError> {
+    AGENT_CONTRACT_ROWS
+        .iter()
+        .find(|row| row.semantic_oracle == contract)
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Assertion(format!(
+                "no replayable fixed Agent contract execution registered for `{contract}`"
+            ))
+        })
 }
 
 fn run_agent_foreground_tool_call_round_trip(
@@ -245,12 +299,7 @@ finish(value);
                 }),
         "agent foreground tool execution did not record a concrete app_lookup completion",
     )?;
-    contract_execution_payload(
-        "agent.foreground_tool_call_round_trip",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_foreground_labeled_tool_call",
-        result,
-    )
+    Ok(result)
 }
 
 async fn agent_started_process_tool_call_graph_execution() -> Result<Value, FixedScriptRunnerError>
@@ -276,23 +325,13 @@ finish(result);
         Some(Arc::new(ContractAppTools) as Arc<dyn lash_core::ToolProvider>),
     )
     .await?;
-    contract_execution_payload(
-        "agent.started_process_tool_call_graph",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_started_process_labeled_tool_call",
-        result,
-    )
+    Ok(result)
 }
 
 async fn agent_durable_input_suspension_resolution_execution()
 -> Result<Value, FixedScriptRunnerError> {
     let result = facade_agent_durable_input_execution().await?;
-    contract_execution_payload(
-        "agent.durable_input_suspension_resolution",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_process_durable_input_request_tool",
-        result,
-    )
+    Ok(result)
 }
 
 async fn agent_nested_process_start_await_execution() -> Result<Value, FixedScriptRunnerError> {
@@ -320,12 +359,7 @@ finish(result);
         None,
     )
     .await?;
-    contract_execution_payload(
-        "agent.nested_process_start_await",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_nested_process_start_await",
-        result,
-    )
+    Ok(result)
 }
 
 async fn agent_started_process_subagent_spawn_execution() -> Result<Value, FixedScriptRunnerError> {
@@ -360,12 +394,7 @@ finish({ len: chunk.length });
         None,
     )
     .await?;
-    contract_execution_payload(
-        "agent.started_process_subagent_spawn",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_started_process_labeled_subagent_spawn",
-        result,
-    )
+    Ok(result)
 }
 
 async fn agent_session_turn_process_child_execution() -> Result<Value, FixedScriptRunnerError> {
@@ -385,12 +414,7 @@ finish(result);
         &expected,
     )
     .await?;
-    contract_execution_payload(
-        "agent.session_turn_process_child",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_session_turn_process_child",
-        result,
-    )
+    Ok(result)
 }
 
 async fn agent_failed_child_preserves_failure_graph_execution()
@@ -457,12 +481,7 @@ await task.fail({ reason: "parent observed child failure" });
         "graph_facts": graph_facts,
         "failure": failure,
     });
-    contract_execution_payload(
-        "agent.failed_child_preserves_failure_graph",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_failed_child_preserves_failure_graph",
-        payload,
-    )
+    Ok(payload)
 }
 
 async fn agent_parallel_spawn_and_join_execution() -> Result<Value, FixedScriptRunnerError> {
@@ -486,12 +505,7 @@ finish({ joined: [leftValue, rightValue] });
         &expected,
     )
     .await?;
-    contract_execution_payload(
-        "agent.parallel_spawn_and_join",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_parallel_spawn_and_join",
-        result,
-    )
+    Ok(result)
 }
 
 async fn facade_final_value_execution(
