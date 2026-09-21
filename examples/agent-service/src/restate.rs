@@ -402,8 +402,9 @@ mod restate_tests {
     use crate::db::AppDb;
     use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
     use crate::effect_groups::{
-        AgentServiceEffectGroupWorkflow, AgentServiceEffectGroupWorkflowImpl, EffectGroupRunReport,
-        EffectGroupRunTerminal, effect_group_services, get_effect_group, run_effect_group,
+        AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
+        AgentServiceEffectGroupWorkflowImpl, EffectGroupRunReport, EffectGroupRunTerminal,
+        effect_group_services, get_effect_group, run_effect_group,
     };
     use crate::routes::settings;
     use crate::state::AgentServiceDurability;
@@ -512,7 +513,8 @@ mod restate_tests {
         } else {
             local_addr
         };
-        let effect_groups = effect_group_services(ingress_url.clone());
+        let effect_groups =
+            effect_group_services(harness.effect_host.as_ref(), ingress_url.clone());
         let endpoint = restate_sdk::endpoint::Endpoint::builder()
             .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
@@ -851,6 +853,7 @@ mod restate_tests {
         state: AppStateData,
         process_worker: lash::durability::DurableProcessWorker,
         process_deployment: lash_restate::RestateProcessDeployment,
+        effect_host: Arc<lash_restate::RestateEffectHost>,
     }
 
     async fn live_restate_test_state(
@@ -927,6 +930,13 @@ finish("done via Restate E2E");
             ingress_url,
             lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
         );
+        let effect_host = turn_deployment.effect_host();
+        // The worked example keeps its Sleep-only resolver as the deployment's
+        // one answer, so `RuntimeHostConfig::new` installs no tool-child host
+        // here — the same shape the conformance suites use.
+        effect_host
+            .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
+            .expect("register worked effect-group resolver");
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
@@ -953,7 +963,7 @@ finish("done via Restate E2E");
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .process_env_store(process_env_store)
             .trigger_store(trigger_store)
-            .effect_host(turn_deployment.effect_host())
+            .effect_host(effect_host.clone())
             // The `processes` module is catalogue presence, not an ability bit
             // (ADR 0095): the scripted cell below authors `processes.start`.
             .plugin(Arc::new(
@@ -987,6 +997,7 @@ finish("done via Restate E2E");
             state,
             process_worker,
             process_deployment,
+            effect_host,
         }
     }
 

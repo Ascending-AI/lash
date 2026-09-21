@@ -31,6 +31,10 @@ use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
     payload_key, rank_wait_request, ready_wait_request,
 };
+use crate::process::{
+    LashProcessWorkflow, LashProcessWorkflowImpl, RestateProcessCancelRequest, RestateProcessRunner,
+};
+use crate::process_attach::{LashProcessAttach, LashProcessAttachImpl};
 use crate::{
     EffectGroupAdoptRequest, EffectGroupCleanupFacts, EffectGroupDispatchRequest,
     EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadPutRequest,
@@ -43,6 +47,42 @@ use crate::{
     RestateEffectGroupRetryPolicy, RestateEffectGroupServices, RestateEffectHost,
     RestateIngressClient,
 };
+
+/// The endpoint's process runner for the tool-child laws: a tool child's
+/// orchestrating body records its durable starts through the Restate process
+/// surface, so the service must exist for the submission to be a legal
+/// command. What runs the segment is not under test — the same role
+/// `ConformanceExecutors` plays for group children — so the runner settles
+/// every submitted process successfully and lets the workflow write the
+/// terminal into the law's registry.
+struct ToolChildProcessRunner;
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for ToolChildProcessRunner {
+    async fn run_process_segment(
+        &self,
+        _registration: lash_core::ProcessRegistration,
+        _execution_context: lash_core::ProcessExecutionContext,
+        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
+        Ok(lash_core::ProcessRunOutcome::Terminal {
+            output: Box::new(lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::json!({
+                    "runner": "tool-child-conformance"
+                })),
+            )),
+        })
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
 
 #[derive(Default)]
 struct ConformanceExecutors {
@@ -77,22 +117,6 @@ impl GroupExecutors for ConformanceExecutors {
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
         let replay_key = envelope.invocation.replay_key().to_owned();
         if self.mapping_current.load(Ordering::SeqCst) {
-            return self
-                .current
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .and_then(|executors| executors.executor_for(envelope));
-        }
-        // A tool child answers through its handler-level driver, which lives
-        // on the resolved runner — wrapping it in the one-shot staged
-        // executor would strip `tool_child_driver()`. Re-resolution on a
-        // redrive is the correct behaviour anyway: the runner re-captures
-        // whatever opener context is live then.
-        if matches!(
-            envelope.command,
-            RuntimeEffectCommand::ToolInvocation { .. }
-        ) {
             return self
                 .current
                 .lock()
@@ -199,13 +223,42 @@ type GroupHostFactory =
 
 pub(super) struct LiveConformanceHarness {
     ingress_url: String,
+    host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
+    process_registry: Arc<lash_core::TestLocalProcessRegistry>,
     shutdown_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     server: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl LiveConformanceHarness {
+    /// The shared-laws endpoint: the suite's staged resolver is registered on
+    /// the host, so `install_tool_child_host` wins nothing here.
     pub(super) async fn start() -> Self {
+        let executors = Arc::new(ConformanceExecutors::default());
+        let registered = Arc::clone(&executors);
+        Self::start_with(executors, false, move |host| {
+            host.register_group_executors(registered)
+                .expect("register the conformance resolver on the endpoint host")
+        })
+        .await
+    }
+
+    /// The tool-child laws' endpoint: nothing is registered, so the runtime's
+    /// `install_tool_child_host` installs its `ToolChildHost` on this host and
+    /// the endpoint routes `ToolInvocation` children through it — the one
+    /// resolver a deployment has. The endpoint also binds the process surface:
+    /// an orchestrating child's durable start submits `LashProcessWorkflow/run`
+    /// through the handler's context, and a deployment that does not serve it
+    /// makes that submission a permanently failing command.
+    pub(super) async fn start_for_tool_children() -> Self {
+        Self::start_with(Arc::new(ConformanceExecutors::default()), true, |_| {}).await
+    }
+
+    async fn start_with(
+        executors: Arc<ConformanceExecutors>,
+        bind_process_surface: bool,
+        register: impl FnOnce(&RestateEffectHost),
+    ) -> Self {
         let ingress_url = required("RESTATE_INGRESS_URL");
         let admin_url = required("RESTATE_ADMIN_URL");
         let bind_addr = required("EG_RESTATE_ENDPOINT_BIND")
@@ -213,24 +266,38 @@ impl LiveConformanceHarness {
             .expect("valid EG_RESTATE_ENDPOINT_BIND");
         let endpoint_url = required("EG_RESTATE_ENDPOINT_URL");
         let ingress = RestateIngressClient::new(ingress_url.clone());
-        let executors = Arc::new(ConformanceExecutors::default());
+        let host = Arc::new(RestateEffectHost::new_for_test(ingress_url.clone()));
+        register(&host);
         let services = RestateEffectGroupServices::new(
-            Arc::clone(&executors) as Arc<dyn GroupExecutors>,
+            &host,
             ingress,
-            crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
             RestateEffectGroupRetryPolicy::infinite(),
         );
+        let process_registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
         let listener = tokio::net::TcpListener::bind(bind_addr)
             .await
             .expect("bind Restate effect-group endpoint");
-        let endpoint = Endpoint::builder()
+        let mut endpoint = Endpoint::builder()
             .bind(ScopeLivenessProbeImpl.serve())
             .bind(services.index)
             .bind(services.payload)
             .bind(services.dispatch)
             .bind(services.wait.workflow.serve())
-            .bind(services.wait.index.serve())
-            .build();
+            .bind(services.wait.index.serve());
+        if bind_process_surface {
+            endpoint = endpoint
+                .bind(
+                    LashProcessWorkflowImpl::new_for_test(
+                        Arc::new(ToolChildProcessRunner),
+                        Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
+                        Arc::clone(&process_registry)
+                            as Arc<dyn lash_core::ProcessContinuationStore>,
+                    )
+                    .serve(),
+                )
+                .bind(LashProcessAttachImpl.serve());
+        }
+        let endpoint = endpoint.build();
         // The suite binds the same five services the deployment does, and
         // until now asserted none of them. A dropped bind would have surfaced
         // as a 404 partway through a group — after the index had recorded it,
@@ -254,9 +321,35 @@ impl LiveConformanceHarness {
 
         Self {
             ingress_url,
+            host,
             executors,
+            process_registry,
             shutdown_tx: tokio::sync::Mutex::new(Some(shutdown_tx)),
             server: tokio::sync::Mutex::new(Some(server)),
+        }
+    }
+
+    /// The tool-child laws over this endpoint's host.
+    ///
+    /// Every `make_world` call returns the same host — the process is one
+    /// endpoint, as on the in-memory tier — with `drain: None`: Restate
+    /// redrives a child invocation itself, so Lash keeps no drain for the
+    /// laws to walk and the recovery law takes its open-time shape.
+    pub(super) fn tool_child_law_fixture(&self) -> lash_conformance::ToolChildLawFixture {
+        let host = Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>;
+        lash_conformance::ToolChildLawFixture {
+            make_world: Arc::new(move |_spec| {
+                let host = Arc::clone(&host);
+                Box::pin(async move { lash_conformance::ToolChildWorld { host, drain: None } })
+            }),
+            make_registry: Arc::new({
+                let registry = Arc::clone(&self.process_registry);
+                move || {
+                    let registry = Arc::clone(&registry);
+                    Box::pin(async move { registry as Arc<dyn lash_core::ProcessRegistry> })
+                }
+            }),
+            deferrable_routing: lash_conformance::ToolChildDeferrableRouting::Durable,
         }
     }
 
@@ -1011,7 +1104,10 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
             .map(|child| child.invocation.replay_key().to_owned())
             .collect(),
         wait_scope: ExecutionScope::runtime_operation(group_key),
-        membership: Vec::new(),
+        membership: children
+            .iter()
+            .map(|child| serde_json::to_string(child).expect("witness child serializes"))
+            .collect(),
     }
 }
 

@@ -103,8 +103,10 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// the deployment routes no tool children; the scope is not one an opener
     /// is derived from (see
     /// [`opener_for_execution_scope`](crate::facade_support::opener_for_execution_scope));
-    /// or the context cannot be taken to `'static`, which is the same condition
-    /// that would stop a borrowed child outliving the caller that opened it.
+    /// or the host hands out no owned controller for the captured context's
+    /// controller slots — the lend a `'static` capture needs, since the
+    /// opener's own live controller (a Restate handler's `ctx`-bound one)
+    /// cannot outlive its frame.
     fn register_live_opener(
         &self,
         dispatch: &std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
@@ -118,14 +120,22 @@ impl<'run> RuntimeTurnDriver<'run> {
         ) else {
             return;
         };
-        let (child_event_tx, mut child_event_rx) = mpsc::channel::<SessionStreamEvent>(64);
-        let Some(context) = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
-            dispatch.as_ref(),
-            child_event_tx,
-            self.cooperative_cancel.clone(),
-        ) else {
+        let Ok(Some(lent_controller)) = self
+            .host
+            .core
+            .control
+            .effect_host
+            .scoped_static(self.scoped_effect_controller.admitted_scope().clone())
+        else {
             return;
         };
+        let (child_event_tx, mut child_event_rx) = mpsc::channel::<SessionStreamEvent>(64);
+        let context = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
+            dispatch.as_ref(),
+            lent_controller,
+            child_event_tx,
+            self.cooperative_cancel.clone(),
+        );
         let (registration, ended) = tool_children.openers().register(opener, context);
         let stream_event_tx = stream_event_tx.clone();
         crate::task::spawn(async move {

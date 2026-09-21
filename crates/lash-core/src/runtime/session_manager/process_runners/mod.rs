@@ -188,7 +188,10 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         // context's own sender — forwarded into that channel so a child that
         // outlives the registration cannot pin it past `shutdown`'s drain.
         // Nothing registers when the deployment routes no tool children, the
-        // scope names no opener, or the context cannot be taken to `'static`.
+        // scope names no opener, or the host hands out no owned controller to
+        // lend the captured context's controller slots — the lend a `'static`
+        // capture needs, since the runner's own live controller cannot
+        // outlive its frame.
         let live_opener = opener
             .zip(
                 self.services
@@ -200,13 +203,23 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                     .as_ref(),
             )
             .and_then(|(opener, tool_children)| {
+                let lent_controller = self
+                    .services
+                    .current
+                    .host
+                    .core
+                    .control
+                    .effect_host
+                    .scoped_static(dispatch.effect_controller.scoped().admitted_scope().clone())
+                    .ok()??;
                 let (child_event_tx, mut child_event_rx) =
                     tokio::sync::mpsc::channel::<crate::SessionStreamEvent>(64);
                 let context = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
                     dispatch.as_ref(),
+                    lent_controller,
                     child_event_tx,
                     self.cancellation.clone(),
-                )?;
+                );
                 let (guard, ended) = tool_children.openers().register(opener, context);
                 let event_tx = dispatch.event_tx.clone();
                 crate::task::spawn(async move {

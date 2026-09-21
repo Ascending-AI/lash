@@ -502,8 +502,17 @@ fn a_child_whose_opener_is_not_registered_here_is_not_routed() {
         "an unregistered opener is a routing fact, not an executor and not a failure"
     );
 
-    let live = LiveOpenerContext::capture(&lent(), tokio_util::sync::CancellationToken::new())
-        .expect("a shared controller lends a context");
+    let lent_dispatch = lent();
+    let lent_controller = lent_dispatch
+        .effect_controller
+        .scoped()
+        .to_static()
+        .expect("the lent dispatch's controller is 'static");
+    let live = LiveOpenerContext::capture(
+        &lent_dispatch,
+        lent_controller,
+        tokio_util::sync::CancellationToken::new(),
+    );
     let guard = tool_children
         .openers()
         .register(crate::EffectOpener::turn("child-session", "turn"), live);
@@ -1188,8 +1197,17 @@ async fn a_resolved_child_executes_on_the_captured_opener_context() {
             request: Box::new(request),
         },
     );
-    let live = LiveOpenerContext::capture(&lent(), tokio_util::sync::CancellationToken::new())
-        .expect("a shared controller lends a context");
+    let lent_dispatch = lent();
+    let lent_controller = lent_dispatch
+        .effect_controller
+        .scoped()
+        .to_static()
+        .expect("the lent dispatch's controller is 'static");
+    let live = LiveOpenerContext::capture(
+        &lent_dispatch,
+        lent_controller,
+        tokio_util::sync::CancellationToken::new(),
+    );
     let guard = tool_children.openers().register(opener, live);
     let executor =
         super::super::group_drain::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)

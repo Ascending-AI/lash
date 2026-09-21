@@ -359,6 +359,57 @@ impl<'run> ToolDispatchContext<'run> {
             clock: Arc::clone(&self.clock),
         })
     }
+
+    /// This context taken to `'static` with its controller slots lent
+    /// `controller` — the conversion an opener registration performs when the
+    /// dispatch's own controller cannot be taken static.
+    ///
+    /// What is lent is the deployment host's owned controller for the opener's
+    /// admitted scope ([`EffectHost::scoped_static`]), never the opener's live
+    /// handler-bound controller: a Restate handler cannot lend its `ctx`-bound
+    /// controller past its handler, and the group-child driver replaces the
+    /// lent slot at its rebind anyway (`rebind_child_dispatch` overwrites
+    /// `effect_controller` and rebinds `direct_completions` through
+    /// [`DirectCompletionClient::bind_tool_child`]), so no child ever executes
+    /// under it.
+    ///
+    /// [`EffectHost::scoped_static`]: crate::EffectHost::scoped_static
+    /// [`DirectCompletionClient::bind_tool_child`]: crate::DirectCompletionClient::bind_tool_child
+    pub(crate) fn lend_static(
+        &self,
+        controller: crate::ScopedEffectController<'static>,
+    ) -> ToolDispatchContext<'static> {
+        ToolDispatchContext {
+            plugins: Arc::clone(&self.plugins),
+            tools: Arc::clone(&self.tools),
+            tool_registry: self.tool_registry.clone(),
+            tool_catalog: Arc::clone(&self.tool_catalog),
+            sessions: Arc::clone(&self.sessions),
+            session_lifecycle: Arc::clone(&self.session_lifecycle),
+            session_graph: Arc::clone(&self.session_graph),
+            processes: Arc::clone(&self.processes),
+            trigger_router: self.trigger_router.clone(),
+            process_definitions: self.process_definitions.clone(),
+            process_engines: self.process_engines.clone(),
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(
+                controller.clone(),
+            ),
+            direct_completions: self.direct_completions.lend_static(
+                crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
+            ),
+            parent_invocation: self.parent_invocation.clone(),
+            execution_env_spec: self.execution_env_spec.clone(),
+            session_id: self.session_id.clone(),
+            agent_frame_id: self.agent_frame_id.clone(),
+            event_tx: self.event_tx.clone(),
+            checkpoint_messages: self.checkpoint_messages.clone(),
+            trigger_outcomes: self.trigger_outcomes.clone(),
+            attachment_store: Arc::clone(&self.attachment_store),
+            attachment_source_policy: Arc::clone(&self.attachment_source_policy),
+            turn_context: self.turn_context.clone(),
+            clock: Arc::clone(&self.clock),
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

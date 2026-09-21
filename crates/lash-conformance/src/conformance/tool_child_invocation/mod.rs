@@ -42,10 +42,11 @@
 //!
 //! The tier arrives as a host factory: two calls are two views of one
 //! substrate (for the SQL tiers, two connections over one store; for the
-//! in-memory reference host, the same object, whose substrate is the
-//! process). Restate is not registered here for the same reason it is absent
-//! from the batch law: it reports `supports_concurrent_effects() == false`
-//! today, and no expected-failure mechanism exists or may be added.
+//! in-memory reference host and for Restate, the same object, whose substrate
+//! is the process — one endpoint in Restate's case). Restate registers
+//! through the live e2e recipe (`conformance_and_poison.rs`) with `drain:
+//! None`: Restate redrives the child invocation itself and keeps no
+//! Lash-owned drain, so the laws take their open-time shape there.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -96,9 +97,10 @@ pub struct ToolChildWorld {
     pub host: Arc<dyn crate::EffectHost>,
     /// The group drain over the same journal, where the tier keeps one. `None`
     /// on the in-memory reference host, which journals nothing across a
-    /// process boundary and so has nothing to drain; the recovery law reads
-    /// this to decide which half of the routing contract the tier can speak
-    /// to.
+    /// process boundary and so has nothing to drain, and on Restate, which
+    /// redrives the child invocation itself and keeps no Lash-owned drain;
+    /// the recovery law reads this to decide which half of the routing
+    /// contract the tier can speak to.
     pub drain: Option<Arc<dyn crate::testing::conformance_support::StoreEffectGroupDrain>>,
 }
 
@@ -1001,13 +1003,17 @@ fn register_opener(
     let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
         .expect("the opener's scope and incarnation agree");
     let dispatch = opener_dispatch(host, &admitted, provider, registry, process_env_store);
+    let lent_controller = host
+        .scoped_static(admitted)
+        .expect("the host lends a scoped controller")
+        .expect("this host hands out owned scoped controllers");
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
     let context = crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(
         &dispatch,
+        lent_controller,
         event_tx,
         cooperative,
-    )
-    .expect("the law's dispatch context is 'static");
+    );
     let (guard, ended) = installed.openers().register(opener, context);
     // The registration owns the sender's lifetime: the forwarder ends when the
     // entry leaves the registry, not when the channel's last clone drops.

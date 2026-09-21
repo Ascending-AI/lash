@@ -40,7 +40,6 @@ use crate::durable_wait::{
     LashDurableWaitWorkflowImpl, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
     RestateDurableWaitResolveRequest, durable_wait_index_object_key, restate_await_event_key,
 };
-use crate::ingress::RestateAuthorityId;
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
 const PAYLOAD_STATE_KEY: &str = "effect-group/v1/payload";
@@ -104,24 +103,26 @@ impl RestateEffectGroupRetryPolicy {
 }
 
 impl RestateEffectGroupServices {
-    /// `authority_id` is the deployment's durable-authority identity: the
-    /// child handler binds its runtime controller with it, so it must be the
-    /// same id the deployment's `RestateEffectHost` and turn/process
-    /// controllers use — await-event keys and the cancellation binding a tool
-    /// child's recorded request is validated against are both derived from it.
+    /// `host` is the deployment's `RestateEffectHost`: the endpoint routes
+    /// children through the resolver registered on it — its `ToolChildHost`
+    /// when the runtime installs one, or the embedder's own registered
+    /// resolver — and binds each child handler's controller with the host's
+    /// authority. By construction there is one resolver and one authority:
+    /// await-event keys and the cancellation binding a tool child's recorded
+    /// request is validated against derive from the same id the deployment's
+    /// turn/process controllers use.
     pub fn new(
-        executors: Arc<dyn GroupExecutors>,
+        host: &crate::RestateEffectHost,
         ingress: RestateIngressClient,
-        authority_id: RestateAuthorityId,
         infinite_retry_policy: RestateEffectGroupRetryPolicy,
     ) -> Self {
         Self {
             index: EffectGroupIndex,
             payload: EffectGroupPayload,
             dispatch: EffectGroupDispatch {
-                executors,
+                executors: host.group_executors(),
                 ingress,
-                authority_id,
+                authority_id: host.authority_id().clone(),
                 infinite_retry_policy: infinite_retry_policy.0,
             },
             wait: RestateEffectGroupWaitServices::default(),
@@ -769,7 +770,17 @@ impl EffectGroupIndex {
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Json(EffectGroupOpenResponse::Retired));
         }
-        if record.live()?.shape != request.shape {
+        // The reopen fence judges the durable record the same way the journaled
+        // tiers' `fence_reopen` does: child count, wake rule, and declared
+        // disposition are the group's identity. Replay keys and retained
+        // membership are the journal the reopen reads back, not facts the
+        // caller may restate — a reopen that offers different children is a
+        // lawful impostor, and the retained membership is what dispatches.
+        let recorded = &record.live()?.shape;
+        if recorded.children != request.shape.children
+            || recorded.wake != request.shape.wake
+            || recorded.loser_disposition != request.shape.loser_disposition
+        {
             return Ok(Json(EffectGroupOpenResponse::ShapeMismatch));
         }
         Ok(Json(match record.lifecycle {
