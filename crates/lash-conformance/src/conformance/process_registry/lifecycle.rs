@@ -183,3 +183,159 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
         );
     }
 }
+
+/// FIG-3388: both release paths decide through the same verdict, so a
+/// superseded lease can neither release its successor's claim nor complete the
+/// process, and a legitimate release leaves a row holding only the retained
+/// fencing token.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn superseded_process_lease_cannot_release_or_complete(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    const SHORT_TTL_MS: u64 = 20;
+
+    async fn assert_lease_is(
+        registry: &dyn ProcessRegistry,
+        process_id: &ProcessId,
+        expected: &crate::ProcessLease,
+    ) {
+        let stored = registry
+            .get_process_lease(process_id)
+            .await
+            .expect("read current lease")
+            .expect("current lease remains held");
+        assert_eq!(stored.lease_token, expected.lease_token);
+        assert_eq!(stored.fencing_token, expected.fencing_token);
+        assert_eq!(stored.owner.owner_id, expected.owner.owner_id);
+        assert_eq!(stored.owner.incarnation_id, expected.owner.incarnation_id);
+        assert_eq!(stored.expires_at_epoch_ms, expected.expires_at_epoch_ms);
+    }
+
+    let process_id = ProcessId::from("lease-takeover-release");
+    registry
+        .register_process(registration(&process_id))
+        .await
+        .expect("register takeover process");
+
+    // A claims P under L1, stalls past TTL, and B takes over under L2.
+    let owner_a = process_lease_owner("owner-a");
+    let stale = registry
+        .claim_process_lease(&process_id, &owner_a, SHORT_TTL_MS)
+        .await
+        .expect("claim superseded lease")
+        .acquired()
+        .expect("superseded lease acquired");
+    let current = claim_after_expiry(
+        registry.as_ref(),
+        &process_id,
+        &process_lease_owner("owner-b"),
+    )
+    .await;
+    assert!(
+        current.fencing_token > stale.fencing_token,
+        "takeover must advance the retained fencing generation"
+    );
+    assert_ne!(current.lease_token, stale.lease_token);
+
+    // The lease token's durable preimage is
+    // `blake3("{process_id}:{owner_id}:{incarnation_id}:{claimed_at}:{fencing_token}")`
+    // under the `lash-process-lease/v2` domain. Recomputing it here pins the
+    // generation's membership in the preimage — a mint that drops the fencing
+    // token breaks the release backstop's redundancy and must fail this law.
+    let expected_token = lash_sansio::core_support::blake3_domain_hash_hex(
+        "lash-process-lease/v2",
+        format!(
+            "{process_id}:{}:{}:{}:{}",
+            current.owner.owner_id,
+            current.owner.incarnation_id,
+            current.claimed_at_epoch_ms,
+            current.fencing_token,
+        ),
+    );
+    assert_eq!(
+        current.lease_token, expected_token,
+        "the minted lease token must commit to the fencing generation"
+    );
+
+    // A presents L1 to `complete_process_lease`: release is idempotent, so the
+    // stale presentation is ignored and the successor's row is unchanged.
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&stale))
+        .await
+        .expect("stale release is idempotently ignored");
+    assert_lease_is(registry.as_ref(), &process_id, &current).await;
+
+    // A presents L1 to `complete_process_with_lease`: the site's refusal, zero
+    // rows written, and the successor's row still unchanged.
+    let error = registry
+        .complete_process_with_lease(
+            &stale,
+            settled_success(serde_json::json!({"writer": "stale"})),
+        )
+        .await
+        .expect_err("a superseded lease must not complete the process");
+    assert!(
+        matches!(error, crate::PluginError::ProcessLeaseSuperseded { .. }),
+        "stale completion must fail with the site's refusal, got {error:?}"
+    );
+    assert!(
+        !registry
+            .get_process(&process_id)
+            .await
+            .expect("read takeover process")
+            .expect("takeover process exists")
+            .is_terminal(),
+        "a refused completion must not terminate the process"
+    );
+    assert_lease_is(registry.as_ref(), &process_id, &current).await;
+
+    // The legitimate release through `complete_process_lease` leaves a row
+    // holding only the retained fencing token: no holder projects, and the
+    // next claim builds on the retained generation.
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&current))
+        .await
+        .expect("release the successor lease");
+    assert!(
+        registry
+            .get_process_lease(&process_id)
+            .await
+            .expect("read released lease")
+            .is_none(),
+        "a released row must project no holder"
+    );
+    let after_release = registry
+        .claim_process_lease(&process_id, &process_lease_owner("owner-c"), 60_000)
+        .await
+        .expect("claim after release")
+        .acquired()
+        .expect("post-release claim acquired");
+    assert!(
+        after_release.fencing_token > current.fencing_token,
+        "the released row's retained fencing token must fence the next holder"
+    );
+
+    // The same released-row shape through `complete_process_with_lease`.
+    let outcome = registry
+        .complete_process_with_lease(
+            &after_release,
+            settled_success(serde_json::json!({"writer": "owner-c"})),
+        )
+        .await
+        .expect("legitimate leased completion");
+    assert!(matches!(
+        outcome,
+        crate::ProcessCompletionOutcome::Committed(_)
+    ));
+    assert!(
+        registry
+            .get_process_lease(&process_id)
+            .await
+            .expect("read lease after leased completion")
+            .is_none(),
+        "leased completion must leave the same released row"
+    );
+}

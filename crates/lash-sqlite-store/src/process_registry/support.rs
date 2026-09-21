@@ -561,13 +561,26 @@ impl SqliteProcessRegistry {
                 match authorization {
                     ProcessEventWriteAuthorization::Preauthorized => {}
                     ProcessEventWriteAuthorization::Lease(lease) => {
-                        let current = Self::load_process_lease_conn(conn, &process_id)?;
-                        registry_transitions::authorize_process_lease_write(
-                            &process_id,
-                            lease,
-                            current.as_ref(),
+                        // The shared process-lease verdict is the decision
+                        // here (FIG-3388): the write flow's lock is already
+                        // held and the release statement's predicate backstops
+                        // this call.
+                        let current = Self::load_process_lease_row_conn(conn, &process_id)?;
+                        let verdict = lash_core::store_backend_support::process_lease_verdict(
+                            current
+                                .as_ref()
+                                .map(registry_transitions::ProcessLeaseRow::facts),
+                            lash_core::store_backend_support::ProcessLeaseAuthority {
+                                lease_token: &lease.lease_token,
+                                fencing_token: lease.fencing_token,
+                            },
                             occurred_at_ms,
-                        )?;
+                        );
+                        if !verdict.is_current() {
+                            return Err(lash_core::PluginError::ProcessLeaseSuperseded {
+                                process_id,
+                            });
+                        }
                     }
                 }
                 conn.execute(
@@ -721,10 +734,14 @@ impl SqliteProcessRegistry {
         Ok(())
     }
 
-    pub(crate) fn load_process_lease_conn(
+    /// The lease row under the write flow's lock, unprojected: the release
+    /// verdict needs the raw holder columns to tell a released row
+    /// (`Released`) from an absent one (`Absent`) and a held row from its
+    /// successor.
+    pub(crate) fn load_process_lease_row_conn(
         conn: &Connection,
         process_id: &ProcessId,
-    ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
+    ) -> Result<Option<registry_transitions::ProcessLeaseRow>, lash_core::PluginError> {
         conn.query_row(
             process_sql().lease_sqlite.select_by_process.sql(),
             params![process_id.as_str()],
@@ -736,13 +753,19 @@ impl SqliteProcessRegistry {
                     fencing_token: row.get(2)?,
                     claimed_at_ms: row.get(3)?,
                     expires_at_ms: row.get(4)?,
-                }
-                .project(process_id))
+                })
             },
         )
         .optional()
-        .map(|lease| lease.flatten())
         .map_err(process_sqlite_error)
+    }
+
+    pub(crate) fn load_process_lease_conn(
+        conn: &Connection,
+        process_id: &ProcessId,
+    ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
+        Ok(Self::load_process_lease_row_conn(conn, process_id)?
+            .and_then(|row| row.project(process_id)))
     }
 
     /// Insert-or-replace the persisted lease row for `process_id` with a fresh

@@ -951,11 +951,10 @@ fn process_lease_names_each_refusal_distinctly() {
 }
 
 #[test]
-fn process_lease_release_needs_the_fencing_token_the_weaker_path_omits() {
-    // FIG-3388: `complete_process_lease` fences on the lease token alone.
-    // This verdict is the destination both release paths call, and it refuses
-    // exactly the case the weaker spelling admits — a reused lease token under
-    // a newer generation.
+fn process_lease_release_needs_the_fencing_token() {
+    // Both release paths decide through this verdict (FIG-3388), and it
+    // refuses a presented lease whose generation the row has moved past — the
+    // case a token-only fence would admit.
     assert_eq!(
         process_lease_verdict(
             Some(process_facts(Some("owner-1"), Some("lease-1"), 6, 9_999)),

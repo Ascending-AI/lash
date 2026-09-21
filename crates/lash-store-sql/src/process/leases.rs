@@ -2,14 +2,8 @@
 //!
 //! Every statement here is a fencing statement, and every one of them is
 //! relocated from its backend with its predicate unchanged (FIG-3384). The
-//! fencing decision itself moves into backend-neutral code under FIG-3381;
-//! until then the predicate is exactly what each backend issued.
-//!
-//! [`LeaseStatements::release_claimed`] and
-//! [`LeaseStatements::release_completed`] fence differently — the second also
-//! compares the fencing token and clears the owner incarnation. That
-//! difference is an open defect, FIG-3388, and is preserved here rather than
-//! reconciled.
+//! fencing decision itself lives in backend-neutral code under FIG-3381; the
+//! predicate on each write is the backstop for that verdict, not the decision.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_leases";
@@ -37,8 +31,7 @@ pub const KEYED_LEASE_COLUMNS: &str =
 crate::statements! {
     /// `process_leases` statements both backends issue verbatim.
     ///
-    /// Relocated unchanged; see the module docs for the FIG-3381 and FIG-3388
-    /// boundaries.
+    /// Relocated unchanged; see the module docs for the FIG-3381 boundary.
     pub struct LeaseStatements @ "process_lease" {
         /// Extend `?1`'s lease to `?2` with no fence.
         ///
@@ -50,22 +43,18 @@ crate::statements! {
         renew_fenced = "UPDATE process_leases SET lease_expires_at_ms = ?2
                  WHERE process_id = ?1 AND lease_token = ?3";
 
-        /// Release `?1`'s lease held under token `?2`.
+        /// Release `?1`'s lease held under token `?2` at fencing token `?3`.
         ///
-        /// Fences on the lease token alone and leaves `lease_owner_incarnation_id`
-        /// set. FIG-3388: this and [`LeaseStatements::release_completed`] fence
-        /// differently, and reconciling them is that ticket's, not this one's.
-        release_claimed = "UPDATE process_leases
-                 SET lease_owner_id = NULL, lease_token = NULL,
-                     lease_claimed_at_ms = 0, lease_expires_at_ms = 0
-                 WHERE process_id = ?1 AND lease_token = ?2";
-
-        /// Release `?1`'s lease held under token `?2` at fencing token `?3`,
-        /// on the completion path.
+        /// The one release statement both release paths issue (FIG-3388): the
+        /// shared `process_lease_verdict` is the decision and this predicate is
+        /// its backstop. The `lease_fencing_token` conjunct is strictly
+        /// redundant — the lease token's preimage already commits to the
+        /// generation (`the_lease_token_preimage_is_pinned`) — and stays as
+        /// defence in depth, matching the FIG-3381 backstop ruling.
         ///
-        /// Fences on the token *and* the fencing token, and clears the owner
-        /// incarnation as well. See [`LeaseStatements::release_claimed`].
-        release_completed = "UPDATE process_leases
+        /// A released row keeps only its retained fencing token: every holder
+        /// column clears so a stale incarnation cannot outlive the release.
+        release = "UPDATE process_leases
              SET lease_owner_id = NULL,
                  lease_owner_incarnation_id = NULL,
                  lease_token = NULL,

@@ -165,12 +165,50 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
         &self,
         completion: &ProcessLeaseCompletion,
     ) -> Result<(), PluginError> {
-        sqlx::query(process_sql().lease.release_claimed.sql())
-            .bind(completion.process_id.as_str())
-            .bind(&completion.lease_token)
-            .execute(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
+        // The same release decision `complete_process_with_lease` makes
+        // (FIG-3388): lock the row, run the shared verdict, and let the one
+        // release statement's predicate backstop it. A stale or superseded
+        // presentation is a no-op, not an error — release is idempotent.
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
+        let current = load_process_lease_row_tx(&mut tx, &completion.process_id).await?;
+        let verdict = lash_core::store_backend_support::process_lease_verdict(
+            current
+                .as_ref()
+                .map(registry_transitions::ProcessLeaseRow::facts),
+            lash_core::store_backend_support::ProcessLeaseAuthority {
+                lease_token: &completion.lease_token,
+                fencing_token: completion.fencing_token,
+            },
+            now,
+        );
+        if matches!(
+            verdict,
+            lash_core::store_backend_support::ProcessLeaseVerdict::Current
+                | lash_core::store_backend_support::ProcessLeaseVerdict::Expired
+        ) {
+            // An expired lease still clears: the holder fields belong to the
+            // lapsed claim and the retained fencing token is what a re-claim
+            // builds on.
+            let released = sqlx::query(process_sql().lease.release.sql())
+                .bind(completion.process_id.as_str())
+                .bind(&completion.lease_token)
+                .bind(completion.fencing_token as i64)
+                .execute(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected();
+            lash_core::store_backend_support::require_fenced_write_applied(
+                lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+                crate::POSTGRES_BACKEND,
+                completion.process_id.as_str(),
+                released,
+                || PluginError::ProcessLeaseSuperseded {
+                    process_id: completion.process_id.clone(),
+                },
+            )?;
+        }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(())
     }
 }

@@ -412,6 +412,7 @@ macro_rules! process_registry_tests {
                 (list_processes_filters_by_parent_scope_and_pending_cancel, "parent-scope-cancel-filters"),
                 (process_change_feed_never_misses_concurrent_terminal_writers, "concurrent-terminal-feed"),
                 (process_lease_fencing_contract, "lease-fencing"),
+                (superseded_process_lease_cannot_release_or_complete, "lease-takeover-release"),
                 (process_lease_batch_read_matches_point_reads, "lease-batch-read"),
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (refolded_process_record_matches_hot_projection, "hot-refold"),

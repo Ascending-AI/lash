@@ -257,7 +257,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                          "run_current_postgres_trace_replay_evidence", "run_postgres_conformance"],
             "workers": ["run_restate_postgres_workers_e2e"],
             "coverage": ["run_coverage_blind_spots"],
-            "mutation-core": ["run_lash_core_direct_model_mutation_evidence"],
+            "mutation-core": ["run_lash_core_direct_model_mutation_evidence",
+                              "run_process_lease_preimage_mutation_evidence"],
             "mutation-sim": ["run_lash_sim_runtime_completion_mutation_evidence"],
             "mutation-packages": ["run_mutation_smoke", "run_mutation_full", "finalize_mutation_gate"],
         }

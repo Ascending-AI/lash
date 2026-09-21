@@ -2536,6 +2536,30 @@ run_lash_core_direct_model_mutation_evidence() {
     -- --locked model
 }
 
+run_process_lease_preimage_mutation_evidence() {
+  step "Process-lease token preimage mutation evidence (${mutation_jobs} concurrent jobs)"
+  require_tool cargo-mutants cargo-mutants 27.1.0
+  local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
+  # FIG-3388: the lease token's preimage commits to the fencing generation,
+  # which is what makes the release statement's `lease_fencing_token` conjunct
+  # redundant defence in depth. Mutating `acquired_process_lease` — including
+  # dropping the fencing field from the preimage — must be caught by the
+  # pinned-preimage unit test and the takeover conformance law.
+  build_conformance_helpers
+  run_mutants_recorded "lash-core-execution process-lease token preimage" "${out_dir}/mutants-lash-core-execution-lease-preimage-targeted" \
+    cargo mutants \
+    -p lash-internal-core-execution \
+    --file crates/lash-core-execution/src/runtime/process/registry_transitions.rs \
+    --re 'acquired_process_lease|next_process_lease_fencing_token' \
+    --baseline skip \
+    --cargo-arg=--features=testing \
+    --jobs "$mutation_jobs" \
+    --timeout "$timeout" \
+    --minimum-test-timeout 30 \
+    --output "${out_dir}/mutants-lash-core-execution-lease-preimage-targeted" \
+    -- --locked -p lash-internal-sqlite-store --lib --test conformance lease
+}
+
 run_lash_sim_runtime_completion_mutation_evidence() {
   step "Lash-sim scheduler/runtime completion mutation evidence (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
@@ -3225,6 +3249,7 @@ if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; the
       if [ "$area" = "all" ]; then
         run_lash_core_direct_model_mutation_evidence
         run_lash_sim_runtime_completion_mutation_evidence
+        run_process_lease_preimage_mutation_evidence
       else
         run_area_targeted_mutation_evidence
       fi

@@ -114,15 +114,22 @@ impl ProcessLeaseClaimOutcome {
 pub struct ProcessLeaseCompletion {
     pub process_id: ProcessId,
     pub lease_token: String,
+    /// The fencing generation the presented lease was minted under. The
+    /// release verdict compares it against the row's retained
+    /// `lease_fencing_token` so a superseded generation cannot release its
+    /// successor's lease (FIG-3388).
+    pub fencing_token: u64,
 }
 
 impl ProcessLeaseCompletion {
-    /// Captures the process ID and exact lease token that process-store implementors must present
-    /// to complete or release the claimed execution.
+    /// Captures the process ID, exact lease token and fencing generation that
+    /// process-store implementors must present to complete or release the
+    /// claimed execution.
     pub fn from_lease(lease: &ProcessLease) -> Self {
         Self {
             process_id: lease.process_id.clone(),
             lease_token: lease.lease_token.clone(),
+            fencing_token: lease.fencing_token,
         }
     }
 }

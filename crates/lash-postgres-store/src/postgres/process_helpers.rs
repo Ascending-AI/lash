@@ -357,13 +357,23 @@ pub(crate) async fn apply_process_event_append_tx(
             match authorization {
                 ProcessEventWriteAuthorization::Preauthorized => {}
                 ProcessEventWriteAuthorization::Lease(lease) => {
-                    let current = load_process_lease_tx(tx, &process_id).await?;
-                    registry_transitions::authorize_process_lease_write(
-                        &process_id,
-                        lease,
-                        current.as_ref(),
+                    // The shared process-lease verdict is the decision here
+                    // (FIG-3388): the row is locked by `load_process_lease_row_tx`
+                    // and the release write's predicate backstops this call.
+                    let current = load_process_lease_row_tx(tx, &process_id).await?;
+                    let verdict = lash_core::store_backend_support::process_lease_verdict(
+                        current
+                            .as_ref()
+                            .map(registry_transitions::ProcessLeaseRow::facts),
+                        lash_core::store_backend_support::ProcessLeaseAuthority {
+                            lease_token: &lease.lease_token,
+                            fencing_token: lease.fencing_token,
+                        },
                         occurred_at_ms,
-                    )?;
+                    );
+                    if !verdict.is_current() {
+                        return Err(PluginError::ProcessLeaseSuperseded { process_id });
+                    }
                 }
             }
             sqlx::query(process_sql().event.insert.sql())
@@ -470,10 +480,13 @@ pub(crate) async fn insert_wake_delivery_tx(
     Ok(())
 }
 
-pub(crate) async fn load_process_lease_tx(
+/// The lease row under the `FOR UPDATE` lock, unprojected: the release
+/// verdict needs the raw holder columns to tell a released row (`Released`)
+/// from an absent one (`Absent`) and a held row from its successor.
+pub(crate) async fn load_process_lease_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &ProcessId,
-) -> Result<Option<ProcessLease>, PluginError> {
+) -> Result<Option<registry_transitions::ProcessLeaseRow>, PluginError> {
     let row = sqlx::query(
         process_sql()
             .lease_postgres
@@ -487,15 +500,24 @@ pub(crate) async fn load_process_lease_tx(
     let Some(row) = row else {
         return Ok(None);
     };
-    Ok(registry_transitions::ProcessLeaseRow {
+    Ok(Some(registry_transitions::ProcessLeaseRow {
         owner_id: row.get(0),
         incarnation_id: row.get(5),
         lease_token: row.get(1),
         fencing_token: row.get(2),
         claimed_at_ms: row.get(3),
         expires_at_ms: row.get(4),
-    }
-    .project(process_id))
+    }))
+}
+
+pub(crate) async fn load_process_lease_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    process_id: &ProcessId,
+) -> Result<Option<ProcessLease>, PluginError> {
+    let Some(row) = load_process_lease_row_tx(tx, process_id).await? else {
+        return Ok(None);
+    };
+    Ok(row.project(process_id))
 }
 
 /// Insert-or-replace the persisted lease row for `process_id` with a fresh

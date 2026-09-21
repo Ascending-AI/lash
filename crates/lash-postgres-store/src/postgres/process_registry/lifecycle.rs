@@ -98,7 +98,10 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record });
         }
-        let released = sqlx::query(process_sql().lease.release_completed.sql())
+        // The verdict inside the append sequence authorized this release; the
+        // statement's predicate is the backstop and `require_fenced_write_applied`
+        // returns this site's refusal if it and the locked read ever disagree.
+        let released = sqlx::query(process_sql().lease.release.sql())
             .bind(process_id)
             .bind(&lease.lease_token)
             .bind(lease.fencing_token as i64)
@@ -106,16 +109,15 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected();
-        if released != 1 {
-            // PostgreSQL-only post-write assertion: the row is held under the
-            // `FOR UPDATE` taken by `load_process_lease_tx`, so a fence that
-            // authorized the write above cannot have moved. Preserved as it
-            // shipped rather than mirrored onto SQLite, whose `BEGIN IMMEDIATE`
-            // write lock makes the same guarantee positionally.
-            return Err(PluginError::ProcessLeaseSuperseded {
+        lash_core::store_backend_support::require_fenced_write_applied(
+            lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+            crate::POSTGRES_BACKEND,
+            process_id,
+            released,
+            || PluginError::ProcessLeaseSuperseded {
                 process_id: ProcessId::from(process_id.to_string()),
-            });
-        }
+            },
+        )?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
     }
