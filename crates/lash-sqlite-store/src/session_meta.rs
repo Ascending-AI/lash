@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_sql::session_sql;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -67,14 +68,6 @@ pub(crate) fn decode_catalog_relation(
     .relation)
 }
 
-const SELECT_COLUMNS: &str = "session_id, relation_kind, parent_session_id,
-    caused_by_kind, caused_by_session_id, caused_by_turn_id,
-    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_occurrence_id,
-    caused_by_subscription_id, caused_by_subscription_incarnation,
-    caused_by_subscription_revision, caused_by_node_id, source_session_id,
-    source_node_id, observer_inheritance_kind";
-
 pub(crate) fn write_session_meta(
     conn: &Connection,
     meta: &SessionMeta,
@@ -83,48 +76,8 @@ pub(crate) fn write_session_meta(
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = match mode {
-        SessionMetaWrite::Insert => {
-            "INSERT OR IGNORE INTO session_meta
-             (session_id, session_state_version, relation_kind, parent_session_id,
-              caused_by_kind, caused_by_session_id, caused_by_turn_id,
-              caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES (?1, ?20, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)"
-        }
-        SessionMetaWrite::Replace => {
-            "INSERT INTO session_meta
-             (session_id, session_state_version, relation_kind, parent_session_id,
-              caused_by_kind, caused_by_session_id, caused_by_turn_id,
-              caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES (?1, ?20, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)
-             ON CONFLICT(session_id) DO UPDATE SET
-               relation_kind = excluded.relation_kind,
-               parent_session_id = excluded.parent_session_id,
-               caused_by_kind = excluded.caused_by_kind,
-               caused_by_session_id = excluded.caused_by_session_id,
-               caused_by_turn_id = excluded.caused_by_turn_id,
-               caused_by_effect_id = excluded.caused_by_effect_id,
-               caused_by_call_id = excluded.caused_by_call_id,
-               caused_by_process_id = excluded.caused_by_process_id,
-               caused_by_process_event_sequence = excluded.caused_by_process_event_sequence,
-               caused_by_occurrence_id = excluded.caused_by_occurrence_id,
-               caused_by_subscription_id = excluded.caused_by_subscription_id,
-               caused_by_subscription_incarnation = excluded.caused_by_subscription_incarnation,
-               caused_by_subscription_revision = excluded.caused_by_subscription_revision,
-               caused_by_node_id = excluded.caused_by_node_id,
-               source_session_id = excluded.source_session_id,
-               source_node_id = excluded.source_node_id,
-               observer_inheritance_kind = excluded.observer_inheritance_kind"
-        }
+        SessionMetaWrite::Insert => session_sql().meta_sqlite.insert.sql(),
+        SessionMetaWrite::Replace => session_sql().meta_sqlite.upsert.sql(),
     };
     let changed = conn
         .execute(
@@ -156,21 +109,16 @@ pub(crate) fn write_session_meta(
     if changed == 0 {
         return Ok(false);
     }
-    for table in [
-        "session_meta_pending_observer_intents",
-        "session_meta_fork_inheritance_processes",
+    for statement in [
+        session_sql().observer_intents.delete_by_session.sql(),
+        session_sql().fork_inheritance.delete_by_session.sql(),
     ] {
-        conn.execute(
-            &format!("DELETE FROM {table} WHERE session_id = ?1"),
-            params![stored.session_id.as_str()],
-        )
-        .map_err(sqlite_error)?;
+        conn.execute(statement, params![stored.session_id.as_str()])
+            .map_err(sqlite_error)?;
     }
     for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
         conn.execute(
-            "INSERT INTO session_meta_pending_observer_intents
-             (session_id, process_index, process_id, process_incarnation, attribution)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            session_sql().observer_intents.insert.sql(),
             params![
                 stored.session_id.as_str(),
                 SessionMetaCodec::write_index(
@@ -185,12 +133,7 @@ pub(crate) fn write_session_meta(
         )
         .map_err(sqlite_error)?;
     }
-    write_process_list(
-        conn,
-        "session_meta_fork_inheritance_processes",
-        &stored.session_id,
-        &stored.fork_inheritance_processes,
-    )?;
+    write_fork_inheritance_processes(conn, &stored.session_id, &stored.fork_inheritance_processes)?;
     Ok(true)
 }
 
@@ -204,8 +147,7 @@ pub(crate) fn load_recorded_lineage(
 ) -> Result<Option<lash_core::SessionLineage>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
-             FROM session_meta WHERE session_id = ?1",
+            session_sql().meta.select_lineage.sql(),
             params![session_id.as_str()],
             |row| {
                 Ok((
@@ -240,7 +182,7 @@ pub(crate) fn load_session_meta(
         session_id.to_string()
     } else {
         let mut stmt = tx
-            .prepare("SELECT session_id FROM session_meta ORDER BY session_id ASC LIMIT 2")
+            .prepare(session_sql().meta_sqlite.select_sole_session_id.sql())
             .map_err(sqlite_error)?;
         let session_ids = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -261,7 +203,7 @@ pub(crate) fn load_session_meta(
     };
     let mut stored = tx
         .query_row(
-            &format!("SELECT {SELECT_COLUMNS} FROM session_meta WHERE session_id = ?1"),
+            session_sql().meta_sqlite.select_relation.sql(),
             params![session_id],
             stored_relation_from_row,
         )
@@ -272,11 +214,7 @@ pub(crate) fn load_session_meta(
         return Ok(None);
     };
     let mut stmt = tx
-        .prepare(
-            "SELECT process_index, process_id, process_incarnation, attribution
-             FROM session_meta_pending_observer_intents
-             WHERE session_id = ?1 ORDER BY process_index",
-        )
+        .prepare(session_sql().observer_intents.select_for_session.sql())
         .map_err(sqlite_error)?;
     let observer_rows = stmt
         .query_map(params![stored.session_id.as_str()], |row| {
@@ -311,27 +249,20 @@ pub(crate) fn load_session_meta(
             },
         );
     }
-    stored.fork_inheritance_processes = read_process_list(
-        &tx,
-        "session_meta_fork_inheritance_processes",
-        &stored.session_id,
-    )?;
+    stored.fork_inheritance_processes = read_fork_inheritance_processes(&tx, &stored.session_id)?;
     let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
     tx.commit().map_err(sqlite_error)?;
     Ok(Some(meta))
 }
 
-fn write_process_list(
+fn write_fork_inheritance_processes(
     conn: &Connection,
-    table: &str,
     session_id: &SessionId,
     process_ids: &[ProcessId],
 ) -> Result<(), StoreError> {
     for (process_index, process_id) in process_ids.iter().enumerate() {
         conn.execute(
-            &format!(
-                "INSERT INTO {table} (session_id, process_index, process_id) VALUES (?1, ?2, ?3)"
-            ),
+            session_sql().fork_inheritance.insert.sql(),
             params![
                 session_id.as_str(),
                 SessionMetaCodec::write_index(SESSION_META_CODEC, process_index, "process")?,
@@ -343,16 +274,12 @@ fn write_process_list(
     Ok(())
 }
 
-fn read_process_list(
+fn read_fork_inheritance_processes(
     conn: &Connection,
-    table: &str,
     session_id: &SessionId,
 ) -> Result<Vec<ProcessId>, StoreError> {
     let mut stmt = conn
-        .prepare(&format!(
-            "SELECT process_index, process_id FROM {table}
-             WHERE session_id = ?1 ORDER BY process_index"
-        ))
+        .prepare(session_sql().fork_inheritance.select_for_session.sql())
         .map_err(sqlite_error)?;
     let rows = stmt
         .query_map(params![session_id.as_str()], |row| {

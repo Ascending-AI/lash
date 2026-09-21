@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
 impl StoreMaintenance for Store {
@@ -14,8 +15,10 @@ impl StoreMaintenance for Store {
                 let terminal_states =
                     lash_core::store_backend_support::terminal_turn_input_states_sql();
                 let removed_node_count = tx.execute(
-                    "DELETE FROM graph_nodes
-                     WHERE session_id = ?1 AND tombstoned = 1",
+                    session_sql()
+                        .graph_sqlite
+                        .delete_tombstoned_for_session
+                        .sql(),
                     params![session_id.as_str()],
                 )?;
                 let removed_pending_turn_input_tombstone_count = tx.execute(

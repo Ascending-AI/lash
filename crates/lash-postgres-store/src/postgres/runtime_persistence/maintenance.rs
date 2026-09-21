@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
 impl StoreMaintenance for PostgresSessionStore {
@@ -30,13 +31,17 @@ impl PostgresSessionStore {
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
-        let removed_node_count =
-            sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
-                .bind(self.session_id.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected() as usize;
+        let removed_node_count = sqlx::query(
+            session_sql()
+                .graph_postgres
+                .delete_tombstoned_for_session
+                .sql(),
+        )
+        .bind(self.session_id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected() as usize;
         let terminal_states = lash_core::store_backend_support::terminal_turn_input_states_sql();
         let delete_pending_turn_inputs = format!(
             "DELETE FROM lash_pending_turn_inputs
@@ -76,14 +81,11 @@ impl PostgresSessionStore {
         // database, so a blob shared across sessions must stay reachable while
         // ANY session references it — scoping roots to one session would delete
         // another session's live checkpoint.
-        let root_refs = sqlx::query_scalar::<_, String>(
-            "SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL
-             UNION
-             SELECT checkpoint_ref FROM lash_node_anchors",
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let root_refs =
+            sqlx::query_scalar::<_, String>(session_sql().head.select_checkpoint_roots.sql())
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
         let root_count = root_refs.len();
         let mut retained = std::collections::BTreeSet::<String>::new();
         for checkpoint_hash in root_refs {
@@ -119,20 +121,10 @@ impl PostgresSessionStore {
         // root's complete outgoing set before hash-ordered blob deletion: a
         // component can sort before its root, and its strict FK must never be
         // weakened to accommodate stale ownership data.
-        sqlx::query(
-            "DELETE FROM lash_checkpoint_blob_refs AS edge
-             WHERE NOT EXISTS (
-                       SELECT 1 FROM lash_sessions AS head
-                       WHERE head.checkpoint_ref = edge.checkpoint_ref
-                   )
-               AND NOT EXISTS (
-                       SELECT 1 FROM lash_node_anchors AS anchor
-                       WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-                   )",
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        sqlx::query(session_sql().checkpoint_edges.delete_unrooted.sql())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let all_hashes = sqlx::query_scalar::<_, String>(
             crate::blobs::blob_sql().shared.select_all_hashes.sql(),
         )

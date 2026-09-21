@@ -1,3 +1,4 @@
+use crate::session_sql::session_sql;
 use crate::*;
 
 pub(crate) async fn enumerate_checkpoint_blob_candidates_tx(
@@ -8,16 +9,11 @@ pub(crate) async fn enumerate_checkpoint_blob_candidates_tx(
     if !checkpoint_refs.is_empty() {
         let checkpoint_ref_vec = checkpoint_refs.iter().cloned().collect::<Vec<_>>();
         candidates.extend(
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT blob_ref
-                 FROM lash_checkpoint_blob_refs
-                 WHERE checkpoint_ref = ANY($1::TEXT[])
-                 ORDER BY blob_ref",
-            )
-            .bind(checkpoint_ref_vec)
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?,
+            sqlx::query_scalar::<_, String>(session_sql().checkpoint_edges.select_components.sql())
+                .bind(checkpoint_ref_vec)
+                .fetch_all(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?,
         );
     }
     Ok(candidates)
@@ -67,16 +63,10 @@ pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
         // a time cannot provide this ordering. Shared live roots keep both
         // their row and projection edges.
         sqlx::query(
-            "DELETE FROM lash_checkpoint_blob_refs AS edge
-             WHERE edge.checkpoint_ref = ANY($1::TEXT[])
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_sessions AS head
-                   WHERE head.checkpoint_ref = edge.checkpoint_ref
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_node_anchors AS anchor
-                   WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-               )",
+            session_sql()
+                .checkpoint_edges
+                .delete_unrooted_for_checkpoints
+                .sql(),
         )
         .bind(checkpoint_ref_vec)
         .execute(&mut **tx)

@@ -21,6 +21,8 @@
 use lash_core::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use crate::session_sql::session_sql;
+
 use crate::schema::{
     EFFECT_SCHEMA_VERSION, PROCESS_SCHEMA_VERSION, SCHEMA_VERSION, SqliteDatabase,
     TRIGGER_SCHEMA_VERSION,
@@ -78,12 +80,9 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<StoreReleaseState> {
         return Ok(StoreReleaseState::Unstamped);
     }
     let row: Option<(String, String, i64)> = conn
-        .query_row(
-            "SELECT release_version, schema_versions, written_at_epoch_ms
-             FROM release_stamp WHERE singleton = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
+        .query_row(session_sql().release_stamp.select_stamp.sql(), [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
         .optional()?;
     let Some((release, schema_versions, written_at_epoch_ms)) = row else {
         return Ok(StoreReleaseState::Unstamped);
@@ -123,7 +122,7 @@ pub(crate) fn read_release(conn: &Connection) -> Option<String> {
 pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     let existing: Option<String> = tx
         .query_row(
-            "SELECT release_version FROM release_stamp WHERE singleton = 1",
+            session_sql().release_stamp.select_release.sql(),
             [],
             |row| row.get(0),
         )
@@ -134,13 +133,7 @@ pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         return Ok(());
     }
     tx.execute(
-        "INSERT INTO release_stamp (
-             singleton, release_version, schema_versions, written_at_epoch_ms
-         ) VALUES (1, ?1, ?2, ?3)
-         ON CONFLICT(singleton) DO UPDATE SET
-             release_version = excluded.release_version,
-             schema_versions = excluded.schema_versions,
-             written_at_epoch_ms = excluded.written_at_epoch_ms",
+        session_sql().release_stamp.upsert.sql(),
         params![
             BUILD_RELEASE,
             StoreReleaseStamp::encode_schema_versions(&build_schema_versions()),

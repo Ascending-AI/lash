@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
@@ -13,10 +14,7 @@ impl SessionCommitStore for Store {
         self.conn
             .call(move |conn| {
                 let exists: bool = conn.query_row(
-                    "SELECT EXISTS(
-                         SELECT 1 FROM runtime_turn_commits
-                         WHERE session_id = ?1 AND turn_id = ?2
-                     )",
+                    session_sql().turn_commits.exists_for_turn.sql(),
                     params![session_id.as_str(), key],
                     |row| row.get(0),
                 )?;
@@ -152,19 +150,7 @@ impl SessionCommitStore for Store {
                 let outcome = (|| {
                     let candidate = tx
                         .query_row(
-                            "SELECT node.node_id, node.parent_node_id, node.node_json,
-                                node.session_id, node.generation
-                         FROM graph_nodes AS node
-                         WHERE node.node_id = ?1 AND node.tombstoned = 0
-                           AND (
-                               node.session_id = ?2
-                               OR EXISTS (
-                                   SELECT 1 FROM fork_lineage AS lineage
-                                   WHERE lineage.session_id = ?2
-                                     AND lineage.ancestor_session_id = node.session_id
-                                     AND node.generation <= lineage.fork_generation
-                               )
-                           )",
+                            session_sql().graph_sqlite.select_lookup.sql(),
                             params![node_id, session_id.as_str()],
                             |row| {
                                 Ok((
@@ -188,30 +174,8 @@ impl SessionCommitStore for Store {
                         return Ok(None);
                     };
                     if owner != session_id {
-                        let mut stmt = tx.prepare(
-                            "WITH readable_sessions(session_id, generation_ceiling) AS (
-                                 SELECT ?1, NULL
-                                 UNION ALL
-                                 SELECT lineage.ancestor_session_id, lineage.fork_generation
-                                 FROM fork_lineage AS lineage
-                                 WHERE lineage.session_id = ?1
-                             )
-                             SELECT head.leaf_node_id, head_node.generation, head_node.tombstoned,
-                                    node.node_id, node.parent_node_id,
-                                    node.generation, node.tombstoned
-                             FROM session_head AS head
-                             LEFT JOIN graph_nodes AS head_node
-                               ON head_node.node_id = head.leaf_node_id
-                             LEFT JOIN readable_sessions AS readable ON TRUE
-                             LEFT JOIN graph_nodes AS node
-                               ON node.session_id = readable.session_id
-                              AND node.generation BETWEEN ?2 AND head_node.generation
-                              AND (
-                                  readable.generation_ceiling IS NULL
-                                  OR node.generation <= readable.generation_ceiling
-                              )
-                             WHERE head.session_id = ?1",
-                        )?;
+                        let mut stmt =
+                            tx.prepare(session_sql().head.select_readable_range.sql())?;
                         let rows = stmt
                             .query_map(params![session_id.as_str(), candidate_generation], |row| {
                                 Ok((
@@ -351,11 +315,7 @@ impl SessionCommitStore for Store {
                             Option<i64>,
                         )> = tx
                             .query_row(
-                                "SELECT turn_commit_hash, result_json,
-                                        request_identity_hash, identity_encoding_version,
-                                        requested_node_count
-                                 FROM runtime_turn_commits
-                                 WHERE session_id = ?1 AND turn_id = ?2",
+                                session_sql().turn_commits.select_receipt.sql(),
                                 params![commit.session_id.as_str(), planner.operation_key()],
                                 |row| {
                                     Ok((
@@ -460,7 +420,7 @@ impl SessionCommitStore for Store {
                         }
                         let final_key = lash_core::OperationId::turn(closure.session_id(), closure.turn_id(), "final").storage_key()?;
                         let committed = tx.query_row(
-                            "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)",
+                            session_sql().turn_commits.exists_for_turn.sql(),
                             params![closure.session_id().as_str(), final_key], |row| row.get::<_, bool>(0),
                         ).map_err(sqlite_error)?;
                         if committed {
@@ -506,8 +466,7 @@ impl SessionCommitStore for Store {
                         .as_deref()
                         .map(|leaf_node_id| {
                             tx.query_row(
-                                "SELECT generation, frame_node_id FROM graph_nodes
-                                 WHERE node_id = ?1 AND tombstoned = 0",
+                                session_sql().graph_sqlite.select_parent_facts.sql(),
                                 params![leaf_node_id],
                                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
                             )
@@ -537,19 +496,7 @@ impl SessionCommitStore for Store {
                         (Some(_), None) => false,
                         (Some(required), Some(parent)) => tx
                             .query_row(
-                                "SELECT 1 FROM graph_nodes AS node
-                                 WHERE node.node_id = ?1
-                                   AND node.tombstoned = 0
-                                   AND node.generation <= ?3
-                                   AND (
-                                       node.session_id = ?2
-                                       OR EXISTS (
-                                           SELECT 1 FROM fork_lineage AS lineage
-                                           WHERE lineage.session_id = ?2
-                                             AND lineage.ancestor_session_id = node.session_id
-                                             AND node.generation <= lineage.fork_generation
-                                       )
-                                   )",
+                                session_sql().graph_sqlite.exists_readable_ancestor.sql(),
                                 params![required, commit.session_id.as_str(), i64::try_from(parent.generation).map_err(|_| {
                                     StoreError::Backend("parent generation does not fit SQLite INTEGER".to_string())
                                 })?],
@@ -642,11 +589,7 @@ impl SessionCommitStore for Store {
 
                     if !commit.usage_deltas.is_empty() {
                         let mut stmt = tx
-                            .prepare(
-                                "INSERT OR IGNORE INTO usage_deltas (
-                                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
-                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                            )
+                            .prepare(session_sql().usage_sqlite.insert.sql())
                             .map_err(sqlite_error)?;
                         for entry in &commit.usage_deltas {
                             let entry_ordinal = i64::try_from(entry.identity.entry_ordinal)
@@ -707,7 +650,7 @@ impl SessionCommitStore for Store {
                     // of this transaction it will not be.
                     let published_revision = tx
                         .query_row(
-                            "SELECT head_revision FROM session_head WHERE session_id = ?1",
+                            session_sql().head.select_revision.sql(),
                             params![commit.session_id.as_str()],
                             |row| row.get::<_, i64>(0),
                         )
@@ -735,9 +678,7 @@ impl SessionCommitStore for Store {
                         }
                     }
                     tx.execute(
-                        "INSERT OR REPLACE INTO session_head
-                         (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        session_sql().head.upsert.sql(),
                         params![
                             meta.session_id.as_str(),
                             encode_json(&meta.payload())?,
@@ -748,7 +689,7 @@ impl SessionCommitStore for Store {
                     )
                     .map_err(sqlite_error)?;
                     tx.execute(
-                        "UPDATE session_meta SET last_commit_at_ms = ?2 WHERE session_id = ?1",
+                        session_sql().meta.touch_last_commit.sql(),
                         params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
                     )
                     .map_err(sqlite_error)?;
@@ -1005,11 +946,7 @@ impl SessionCommitStore for Store {
                         let result_json = encode_json(receipt.result)?;
                         let identity = append_identity_columns(receipt.append_request_identity);
                         tx.execute(
-                            "INSERT INTO runtime_turn_commits (
-                                session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                                request_identity_hash, requested_node_count, identity_encoding_version
-                             )
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            session_sql().turn_commits.insert.sql(),
                             params![
                                 receipt.session_id.as_str(),
                                 receipt.operation_key,
@@ -1033,11 +970,7 @@ impl SessionCommitStore for Store {
                                     batch_id,
                                 )?;
                                 tx.execute(
-                                    "INSERT INTO runtime_turn_commits (
-                                        session_id, turn_id, turn_commit_hash, result_json,
-                                        committed_at_ms, request_identity_hash,
-                                        requested_node_count, identity_encoding_version
-                                     ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL)",
+                                    session_sql().turn_commits.insert_marker.sql(),
                                     params![
                                         commit.session_id.as_str(),
                                         marker,
@@ -1158,10 +1091,7 @@ fn occupied_node_ids_conn(
             StoreError::Backend(format!("failed to encode commit node id batch: {error}"))
         })?;
         let mut statement = tx
-            .prepare(
-                "SELECT node_id FROM graph_nodes
-                 WHERE node_id IN (SELECT value FROM json_each(?1))",
-            )
+            .prepare(session_sql().graph_sqlite.select_occupied.sql())
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map(params![encoded], |row| row.get::<_, String>(0))
@@ -1200,7 +1130,7 @@ fn insert_graph_nodes_conn(
         .chunks(GRAPH_NODE_INSERT_CHUNK_SIZE)
         .zip(facts.chunks(GRAPH_NODE_INSERT_CHUNK_SIZE))
     {
-        let mut bound: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(nodes.len() * 6);
+        let mut rows = Vec::with_capacity(nodes.len());
         for (node, facts) in nodes.iter().zip(facts) {
             let node_json = node.encode_storage_body().map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))
@@ -1208,39 +1138,23 @@ fn insert_graph_nodes_conn(
             let generation = i64::try_from(facts.generation).map_err(|_| {
                 StoreError::Backend("node generation does not fit SQLite INTEGER".to_string())
             })?;
-            bound.push(Box::new(session_id.as_str().to_string()));
-            bound.push(Box::new(node.node_id.as_str().to_string()));
-            bound.push(Box::new(node.parent_node_id.as_deref().map(str::to_string)));
-            bound.push(Box::new(generation));
-            bound.push(Box::new(facts.frame_node_id.as_str().to_string()));
-            bound.push(Box::new(node_json));
+            rows.push(serde_json::json!([
+                session_id.as_str(),
+                node.node_id.as_str(),
+                node.parent_node_id.as_deref(),
+                generation,
+                facts.frame_node_id.as_str(),
+                node_json,
+            ]));
         }
-        let tuples = (0..nodes.len())
-            .map(|index| {
-                let base = index * 6;
-                format!(
-                    "(?{}, ?{}, ?{}, ?{}, ?{}, ?{})",
-                    base + 1,
-                    base + 2,
-                    base + 3,
-                    base + 4,
-                    base + 5,
-                    base + 6,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        let statement = format!(
-            "INSERT INTO graph_nodes
-             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-             VALUES {tuples}"
-        );
-        let bound_refs = bound
-            .iter()
-            .map(|value| value.as_ref() as &dyn rusqlite::ToSql)
-            .collect::<Vec<_>>();
+        let encoded = serde_json::to_string(&rows).map_err(|error| {
+            StoreError::Backend(format!("failed to encode commit node batch: {error}"))
+        })?;
         if tx
-            .execute(&statement, rusqlite::params_from_iter(bound_refs))
+            .execute(
+                session_sql().graph_sqlite.insert_batch.sql(),
+                params![encoded],
+            )
             .is_err()
         {
             insert_graph_nodes_one_at_a_time(tx, session_id, nodes, facts)?;
@@ -1249,10 +1163,10 @@ fn insert_graph_nodes_conn(
     Ok(())
 }
 
-/// Six bound values per node, so this chunk is 3,072 parameters — an order of
-/// magnitude under SQLite's 32,766-parameter ceiling, and far above any
-/// per-commit node count, so the chunking never runs in practice and the ceiling
-/// can never turn a large commit into a silent walk of single-row inserts.
+/// The batch rides as one JSON array bound to a single parameter, so SQLite's
+/// 32,766-parameter ceiling is not in play at all; the chunk bounds the encoded
+/// array's size instead, and sits far above any per-commit node count, so the
+/// chunking never runs in practice.
 const GRAPH_NODE_INSERT_CHUNK_SIZE: usize = 512;
 
 /// Replay a failed node batch row by row so the refusal names the offending row.
@@ -1270,9 +1184,7 @@ fn insert_graph_nodes_one_at_a_time(
             StoreError::Backend(format!("failed to encode graph node body: {err}"))
         })?;
         tx.execute(
-            "INSERT INTO graph_nodes
-             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            session_sql().graph.insert.sql(),
             params![
                 session_id.as_str(),
                 node.node_id.as_str(),

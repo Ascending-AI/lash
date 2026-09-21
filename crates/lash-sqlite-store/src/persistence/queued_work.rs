@@ -723,10 +723,10 @@ impl QueuedWorkStore for Store {
         self.conn
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT EXISTS (
-                        SELECT 1 FROM runtime_turn_commits
-                        WHERE session_id = ?1 AND turn_id = ?2
-                     )",
+                    crate::session_sql::session_sql()
+                        .turn_commits
+                        .exists_for_turn
+                        .sql(),
                     params![session_id.as_str(), marker],
                     |row| row.get(0),
                 )

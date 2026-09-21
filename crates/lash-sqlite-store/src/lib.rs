@@ -133,6 +133,9 @@ mod schema;
 mod schema_fragments;
 mod scope_fence;
 mod session_meta;
+mod session_sql;
+#[cfg(test)]
+mod session_sql_tests;
 #[cfg(any(test, feature = "testing"))]
 mod test_support;
 #[cfg(feature = "testing")]
@@ -439,18 +442,10 @@ impl Store {
             .conn
             .call(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT session_id FROM (
-                         SELECT session_id FROM (
-                             SELECT session_id FROM session_head
-                             LIMIT 2
-                         )
-                         UNION
-                         SELECT session_id FROM (
-                             SELECT session_id FROM session_meta
-                             LIMIT 2
-                         )
-                     )
-                     LIMIT 2",
+                    crate::session_sql::session_sql()
+                        .head
+                        .select_sole_bound_session_id
+                        .sql(),
                 )?;
                 stmt.query_map([], |row| row.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()
@@ -829,7 +824,10 @@ impl SqliteSessionStoreFactory {
             .write_flow(move |tx| {
                 let deleted = tx
                     .query_row(
-                        "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
+                        crate::session_sql::session_sql()
+                            .deleted_sqlite
+                            .exists
+                            .sql(),
                         params![meta.session_id.as_str()],
                         |_| Ok(()),
                     )
@@ -1154,7 +1152,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let session_id = SessionId::from(session_id.to_string());
         conn.call(move |conn| {
             conn.query_row(
-                "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
+                crate::session_sql::session_sql()
+                    .deleted_sqlite
+                    .exists
+                    .sql(),
                 params![session_id.as_str()],
                 |_| Ok(()),
             )
@@ -1222,50 +1223,10 @@ fn list_session_summaries(
     filter: &SessionListFilter,
 ) -> rusqlite::Result<Vec<SessionSummary>> {
     let mut stmt = conn.prepare(
-        "WITH catalog AS (
-             SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
-                    meta.caused_by_kind,
-                    meta.caused_by_session_id, meta.caused_by_turn_id,
-                    meta.caused_by_effect_id, meta.caused_by_call_id,
-                    meta.caused_by_process_id, meta.caused_by_process_event_sequence,
-                    meta.caused_by_occurrence_id, meta.caused_by_subscription_id,
-                    meta.caused_by_subscription_incarnation,
-                    meta.caused_by_subscription_revision, meta.caused_by_node_id,
-                    meta.source_session_id, meta.source_node_id,
-                    meta.observer_inheritance_kind, meta.created_at_ms,
-                    meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted
-             FROM session_meta AS meta
-             LEFT JOIN session_head AS head ON head.session_id = meta.session_id
-             UNION ALL
-             SELECT session_id, COALESCE(relation_kind, 'root'),
-                    parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    created_at_ms, last_commit_at_ms, head_revision, 1
-             FROM deleted_sessions
-         )
-         SELECT catalog.*,
-                CASE WHEN deleted = 1 THEN '[]' ELSE (
-                    SELECT json_group_array(
-                        json_array(process_index, process_id, process_incarnation, attribution)
-                    )
-                    FROM (
-                        SELECT process_index, process_id, process_incarnation, attribution
-                        FROM session_meta_pending_observer_intents
-                        WHERE session_id = catalog.session_id
-                        ORDER BY process_index
-                    )
-                ) END,
-                CASE WHEN deleted = 1 THEN '[]' ELSE (
-                    SELECT json_group_array(json_array(process_index, process_id))
-                    FROM (
-                        SELECT process_index, process_id
-                        FROM session_meta_fork_inheritance_processes
-                        WHERE session_id = catalog.session_id
-                        ORDER BY process_index
-                    )
-                ) END
-         FROM catalog
-         ORDER BY created_at_ms ASC, session_id ASC",
+        crate::session_sql::session_sql()
+            .meta_sqlite
+            .select_catalog
+            .sql(),
     )?;
     let rows = stmt.query_map([], |row| {
         let stored = crate::session_meta::stored_relation_from_row(row)?;

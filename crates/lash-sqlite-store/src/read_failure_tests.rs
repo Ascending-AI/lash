@@ -152,7 +152,10 @@ async fn sqlite_persisted_record_decode_classification() {
 #[test]
 fn turn_failure_settlement_query_filters_receipts_without_evidence() {
     assert!(
-        crate::persistence::LOAD_TURN_FAILURE_SETTLEMENTS_SQL
+        crate::session_sql::session_sql()
+            .turn_commits
+            .select_failure_settlements
+            .sql()
             .contains(r#"result_json LIKE '%"failure_evidence"%'"#),
         "the SQL path must exclude receipts that cannot carry failure evidence"
     );

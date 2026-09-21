@@ -1,107 +1,5 @@
+use crate::session_sql::session_sql;
 use crate::*;
-
-// The session-delete cascade is declared here because this is where it is
-// issued. The statement belongs to the session-core family, which FIG-3382
-// converts; it is named here because two of the twelve tables it deletes from
-// — `wake_redelivery_fences` and `wake_allocation_floors` — belong to the
-// process family, which is converted, and the ownership gate requires every
-// production statement over a converted table to be a named one. FIG-3382
-// takes this declaration over, renames it into the session-core family's
-// prefix, and adds the `[[cross_family]]` entry the gate will then require
-// for the process tables it reaches.
-//
-// It is one statement on purpose: twelve deletes in one round trip, all keyed
-// by the same session array, and splitting them would let a writer land
-// between the parts.
-lash_store_sql::statements! {
-    /// The session-delete cascade. See the module-level note above.
-    pub(crate) struct SessionDeleteStatements @ "wake_redelivery_fence" {
-        /// Delete every row the sessions in `?1` own across the twelve tables
-        /// a session delete reclaims, and report how many rows went.
-        delete_sessions_cascade = "WITH deleted_graph_nodes AS (
-             DELETE FROM graph_nodes
-             WHERE tombstoned = TRUE
-               AND (session_id = ANY(?1)
-                    OR session_id IN (SELECT session_id FROM deleted_sessions))
-             RETURNING node_id
-         ),
-         deleted_queued_work_items AS (
-             DELETE FROM queued_work_items AS item
-             WHERE EXISTS (
-                 SELECT 1 FROM queued_work_batches AS batch
-                 WHERE batch.batch_id = item.batch_id
-                   AND batch.session_id = ANY(?1)
-             )
-             RETURNING item.batch_id
-         ),
-         deleted_queued_work_batches AS (
-             DELETE FROM queued_work_batches
-             WHERE session_id = ANY(?1)
-               AND (SELECT count(*) FROM deleted_queued_work_items) >= 0
-             RETURNING batch_id
-         ),
-         deleted_wake_redelivery_fences AS (
-             DELETE FROM wake_redelivery_fences
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_wake_allocation_floors AS (
-             DELETE FROM wake_allocation_floors
-             WHERE target_session_id = ANY(?1)
-             RETURNING target_session_id
-         ),
-         deleted_pending_turn_inputs AS (
-             DELETE FROM pending_turn_inputs
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancel_requests AS (
-             DELETE FROM turn_cancel_requests
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancel_closures AS (
-             DELETE FROM turn_cancel_closure_authorizations
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancellation_bindings AS (
-             DELETE FROM turn_cancellation_bindings
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_session_execution_leases AS (
-             DELETE FROM session_execution_leases
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_fork_lineage AS (
-             DELETE FROM fork_lineage
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_session_meta AS (
-             DELETE FROM session_meta
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         )
-         SELECT (SELECT count(*) FROM deleted_graph_nodes)
-              + (SELECT count(*) FROM deleted_queued_work_batches)
-              + (SELECT count(*) FROM deleted_wake_redelivery_fences)
-              + (SELECT count(*) FROM deleted_wake_allocation_floors)
-              + (SELECT count(*) FROM deleted_pending_turn_inputs)
-              + (SELECT count(*) FROM deleted_turn_cancel_closures)
-              + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
-              + (SELECT count(*) FROM deleted_session_execution_leases)
-              + (SELECT count(*) FROM deleted_fork_lineage)
-              + (SELECT count(*) FROM deleted_session_meta)";
-    }
-}
-
-static SESSION_DELETE_SQL: std::sync::LazyLock<SessionDeleteStatements> =
-    std::sync::LazyLock::new(|| {
-        SessionDeleteStatements::render(lash_store_sql::Dialect::postgres())
-    });
 
 #[path = "session_factory/artifact_retirement.rs"]
 mod artifact_retirement;
@@ -237,15 +135,11 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
-        sqlx::query_scalar(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-             )",
-        )
-        .bind(session_id.as_str())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|err| err.to_string())
+        sqlx::query_scalar(session_sql().deleted_postgres.exists.sql())
+            .bind(session_id.as_str())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| err.to_string())
     }
 
     async fn delete_session(
@@ -283,28 +177,22 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &source_session_id)
             .await?;
         crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
-        let live_node = sqlx::query_scalar::<_, bool>(
-            "SELECT TRUE FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE
-             FOR UPDATE",
-        )
-        .bind(node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let live_node = sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.lock_live.sql())
+            .bind(node_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         if live_node.is_none() {
             return Err(StoreError::ForkPointNotRetained {
                 node_id: node_id.to_string().into(),
             });
         }
-        if let Some((checkpoint_ref, source_session_id)) = sqlx::query_as::<_, (String, String)>(
-            "SELECT checkpoint_ref, source_session_id
-             FROM lash_node_anchors WHERE node_id = $1",
-        )
-        .bind(node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
+        if let Some((checkpoint_ref, source_session_id)) =
+            sqlx::query_as::<_, (String, String)>(session_sql().anchors.select_by_node.sql())
+                .bind(node_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?
         {
             let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
@@ -328,16 +216,13 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 node_id: node_id.to_string().into(),
             });
         }
-        sqlx::query(
-            "INSERT INTO lash_node_anchors (node_id, checkpoint_ref, source_session_id)
-             VALUES ($1, $2, $3)",
-        )
-        .bind(node_id)
-        .bind(&checkpoint_ref)
-        .bind(source_session_id.as_str())
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        sqlx::query(session_sql().anchors.insert.sql())
+            .bind(node_id)
+            .bind(&checkpoint_ref)
+            .bind(source_session_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core::ForkPoint {
@@ -351,16 +236,12 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn unpin(&self, node_id: &str) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query(
-            "SELECT node_id FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE
-             FOR UPDATE",
-        )
-        .bind(node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let removed = sqlx::query("DELETE FROM lash_node_anchors WHERE node_id = $1")
+        sqlx::query(session_sql().graph_postgres.lock_live_id.sql())
+            .bind(node_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let removed = sqlx::query(session_sql().anchors.delete_by_node.sql())
             .bind(node_id)
             .execute(&mut *tx)
             .await
@@ -378,28 +259,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        let rows = sqlx::query(
-            "SELECT node_id, checkpoint_ref, source_session_id, pinned
-             FROM (
-                 SELECT DISTINCT ON (node_id)
-                        node_id, checkpoint_ref, source_session_id, pinned
-                 FROM (
-                     SELECT node_id, checkpoint_ref, source_session_id,
-                            TRUE AS pinned, 0 AS priority
-                     FROM lash_node_anchors
-                     UNION ALL
-                     SELECT leaf_node_id, checkpoint_ref, session_id,
-                            FALSE AS pinned, 1 AS priority
-                     FROM lash_sessions
-                     WHERE leaf_node_id IS NOT NULL AND checkpoint_ref IS NOT NULL
-                 ) candidates
-                 ORDER BY node_id, priority, source_session_id
-             ) retained
-             ORDER BY node_id",
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let rows = sqlx::query(session_sql().head.select_fork_points.sql())
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let mut points = Vec::with_capacity(rows.len());
         for row in rows {
             let node_id: String = row.get(0);
@@ -424,15 +287,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         // fast path only decides already-materialized targets and permanent
         // tombstones; keep the post-lock checks below for concurrent changes.
         let (exists, deleted) = sqlx::query_as::<_, (bool, bool)>(
-            "SELECT
-                EXISTS(
-                    SELECT 1 FROM lash_sessions WHERE session_id = $1
-                    UNION ALL
-                    SELECT 1 FROM lash_session_meta WHERE session_id = $1
-                ),
-                EXISTS(
-                    SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-                )",
+            session_sql()
+                .meta_postgres
+                .exists_materialized_or_deleted
+                .sql(),
         )
         .bind(request.session_id.as_str())
         .fetch_one(&mut *tx)
@@ -459,31 +317,22 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .await?;
         // Keep the fork fences in the global order: every session advisory
         // fence first, then the retained checkpoint root, then graph and head.
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                 SELECT 1 FROM lash_sessions WHERE session_id = $1
-                 UNION ALL
-                 SELECT 1 FROM lash_session_meta WHERE session_id = $1
-             )",
-        )
-        .bind(request.session_id.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let exists =
+            sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
+                .bind(request.session_id.as_str())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
         if exists {
             return Err(StoreError::ForkSessionAlreadyExists {
                 session_id: request.session_id.clone(),
             });
         }
-        let deleted = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-             )",
-        )
-        .bind(request.session_id.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let deleted = sqlx::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
+            .bind(request.session_id.as_str())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         if deleted {
             return Err(StoreError::SessionDeleted {
                 session_id: request.session_id.clone(),
@@ -491,9 +340,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         }
         crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
         let node_facts = sqlx::query_as::<_, (String, i64)>(
-            "SELECT session_id, generation FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE
-             FOR UPDATE",
+            session_sql()
+                .graph_postgres
+                .select_owner_generation_for_update
+                .sql(),
         )
         .bind(&*request.node_id)
         .fetch_optional(&mut *tx)
@@ -530,10 +380,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let mut expected_generation = fork_generation;
         loop {
             let facts = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
-                "SELECT node_id, parent_node_id, session_id, generation
-                 FROM lash_graph_nodes
-                 WHERE node_id = $1 AND tombstoned = FALSE
-                 FOR SHARE",
+                session_sql().graph_postgres.select_edge_for_share.sql(),
             )
             .bind(&*current_node_id)
             .fetch_optional(&mut *tx)
@@ -596,33 +443,27 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             Some(checkpoint_ref.clone().into()),
             Some(request.node_id.clone()),
         )?;
-        sqlx::query(
-            "INSERT INTO lash_sessions
-             (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
-             VALUES ($1, 0, $2, $3, $4)",
-        )
-        .bind(request.session_id.as_str())
-        .bind(encode_json(&head.payload())?)
-        .bind(&checkpoint_ref)
-        .bind(&*request.node_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        for ancestor in fork_plan.ancestors() {
-            sqlx::query(
-                "INSERT INTO lash_fork_lineage
-                 (session_id, ancestor_session_id, fork_node_id, fork_generation)
-                 VALUES ($1, $2, $3, $4)",
-            )
-            .bind(fork_plan.session_id())
-            .bind(ancestor.ancestor_session_id.as_str())
-            .bind(&*ancestor.fork_node_id)
-            .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
-                StoreError::Backend("fork generation does not fit PostgreSQL BIGINT".to_string())
-            })?)
+        sqlx::query(session_sql().head.insert_fork.sql())
+            .bind(request.session_id.as_str())
+            .bind(encode_json(&head.payload())?)
+            .bind(&checkpoint_ref)
+            .bind(&*request.node_id)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
+        for ancestor in fork_plan.ancestors() {
+            sqlx::query(session_sql().lineage.insert.sql())
+                .bind(fork_plan.session_id())
+                .bind(ancestor.ancestor_session_id.as_str())
+                .bind(&*ancestor.fork_node_id)
+                .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
+                    StoreError::Backend(
+                        "fork generation does not fit PostgreSQL BIGINT".to_string(),
+                    )
+                })?)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
         }
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
@@ -878,54 +719,31 @@ pub(crate) async fn delete_session_tx(
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     crate::turn_cancel_closure::ensure_session_not_pinned_tx(tx, session_id).await?;
-    let materialized = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(
-             SELECT 1 FROM lash_session_meta WHERE session_id = $1
-             UNION ALL
-             SELECT 1 FROM lash_sessions WHERE session_id = $1
-         )",
-    )
-    .bind(session_id.as_str())
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let materialized =
+        sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
+            .bind(session_id.as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     if materialized {
         // Permanent identity evidence for host-facing session ids.
-        sqlx::query(
-            "INSERT INTO lash_deleted_sessions
-             (session_id, created_at_ms, last_commit_at_ms, head_revision,
-              relation_kind, parent_session_id)
-             SELECT meta.session_id, meta.created_at_ms, meta.last_commit_at_ms,
-                    COALESCE(session.head_revision, 0), meta.relation_kind,
-                    meta.parent_session_id
-             FROM lash_session_meta AS meta
-             LEFT JOIN lash_sessions AS session ON session.session_id = meta.session_id
-             WHERE meta.session_id = $1
-             ON CONFLICT (session_id) DO NOTHING",
-        )
-        .bind(session_id.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        sqlx::query(
-            "INSERT INTO lash_deleted_sessions
-             (session_id, created_at_ms, last_commit_at_ms, head_revision,
-              relation_kind, parent_session_id)
-             VALUES ($1, 0, NULL, 0, 'root', NULL)
-             ON CONFLICT (session_id) DO NOTHING",
-        )
-        .bind(session_id.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        sqlx::query(session_sql().deleted_postgres.insert_from_meta.sql())
+            .bind(session_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(session_sql().deleted_postgres.insert_root.sql())
+            .bind(session_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     }
     // Attachment intents are released before the rest of the session store so
     // a failed transaction cannot leave live-looking state without its owner.
     // The session advisory fence stabilizes this head read. Do not take its
     // row lock before the complete hash-sorted blob candidate set below.
     let head = sqlx::query_as::<_, (Option<String>, Option<String>)>(
-        "SELECT leaf_node_id, checkpoint_ref FROM lash_sessions
-         WHERE session_id = $1",
+        session_sql().head.select_reclaim.sql(),
     )
     .bind(session_id.as_str())
     .fetch_optional(&mut **tx)
@@ -946,7 +764,7 @@ pub(crate) async fn delete_session_tx(
     )
     .await?;
     report.enumerated_blob_count = candidates.len();
-    sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
+    sqlx::query(session_sql().head.delete_by_session.sql())
         .bind(session_id.as_str())
         .execute(&mut **tx)
         .await
@@ -955,22 +773,7 @@ pub(crate) async fn delete_session_tx(
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id).await?;
     }
     let unreachable_candidates = sqlx::query_scalar::<_, String>(
-        "SELECT g.node_id FROM lash_graph_nodes AS g
-         WHERE g.session_id = $1 AND g.tombstoned = FALSE
-           AND NOT EXISTS (
-               SELECT 1 FROM lash_graph_nodes AS child
-               WHERE child.parent_node_id = g.node_id
-                 AND child.tombstoned = FALSE
-           )
-           AND NOT EXISTS (
-               SELECT 1 FROM lash_sessions AS head
-               WHERE head.leaf_node_id = g.node_id
-           )
-           AND NOT EXISTS (
-               SELECT 1 FROM lash_node_anchors AS anchor
-               WHERE anchor.node_id = g.node_id
-           )
-         ORDER BY g.generation DESC",
+        session_sql().graph_postgres.select_unreachable_leaves.sql(),
     )
     .bind(session_id.as_str())
     .fetch_all(&mut **tx)
@@ -987,10 +790,10 @@ pub(crate) async fn delete_session_tx(
     // unbindable. Live sessions' rows stay resident for their own vacuum, so
     // this is not a catalog-wide sweep.
     sqlx::query(
-        "DELETE FROM lash_graph_nodes
-         WHERE tombstoned = TRUE
-           AND (session_id = $1
-                OR session_id IN (SELECT session_id FROM lash_deleted_sessions))",
+        session_sql()
+            .graph_postgres
+            .delete_tombstoned_reclaimable
+            .sql(),
     )
     .bind(session_id.as_str())
     .execute(&mut **tx)
@@ -1014,10 +817,21 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1",
         "DELETE FROM lash_turn_cancellation_bindings WHERE session_id = $1",
         "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
-        "DELETE FROM lash_fork_lineage WHERE session_id = $1",
-        "DELETE FROM lash_session_meta WHERE session_id = $1",
     ] {
         sqlx::query(sql)
+            .bind(session_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    // The session-core rows the family owns, named rather than spelled.
+    for statement in [
+        session_sql().lineage.delete_by_session.sql(),
+        session_sql().observer_intents.delete_by_session.sql(),
+        session_sql().fork_inheritance.delete_by_session.sql(),
+        session_sql().meta.delete_by_session.sql(),
+    ] {
+        sqlx::query(statement)
             .bind(session_id.as_str())
             .execute(&mut **tx)
             .await
@@ -1063,10 +877,7 @@ pub(crate) async fn delete_process_sessions_tx(
         crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
         crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
         let checkpoint_refs = sqlx::query_scalar::<_, String>(
-            "SELECT DISTINCT checkpoint_ref
-         FROM lash_sessions
-         WHERE session_id = ANY($1) AND checkpoint_ref IS NOT NULL
-         ORDER BY checkpoint_ref",
+            session_sql().head.select_checkpoints_for_sessions.sql(),
         )
         .bind(&session_id_texts[..])
         .fetch_all(&mut **tx)
@@ -1089,24 +900,10 @@ pub(crate) async fn delete_process_sessions_tx(
 
         // Record permanent identity before deletion so reclaim can see it.
         sqlx::query(
-            "INSERT INTO lash_deleted_sessions
-         (session_id, created_at_ms, last_commit_at_ms, head_revision,
-          relation_kind, parent_session_id)
-         SELECT target.session_id, COALESCE(meta.created_at_ms, 0),
-                meta.last_commit_at_ms, COALESCE(session.head_revision, 0),
-                COALESCE(meta.relation_kind, 'root'), meta.parent_session_id
-         FROM unnest($1::TEXT[]) AS target(session_id)
-         LEFT JOIN lash_session_meta AS meta ON meta.session_id = target.session_id
-         LEFT JOIN lash_sessions AS session ON session.session_id = target.session_id
-         WHERE EXISTS (
-                   SELECT 1 FROM lash_session_meta AS meta
-                   WHERE meta.session_id = target.session_id
-               )
-            OR EXISTS (
-                   SELECT 1 FROM lash_sessions AS session
-                   WHERE session.session_id = target.session_id
-               )
-         ON CONFLICT (session_id) DO NOTHING",
+            session_sql()
+                .deleted_postgres
+                .insert_batch_from_targets
+                .sql(),
         )
         .bind(&session_id_texts[..])
         .execute(&mut **tx)
@@ -1115,29 +912,7 @@ pub(crate) async fn delete_process_sessions_tx(
 
         let (deleted_leaf_node_ids, has_graph_candidates) =
             sqlx::query_as::<_, (Vec<String>, bool)>(
-                "WITH deleted_sessions AS (
-                 DELETE FROM lash_sessions AS session
-                 WHERE session.session_id = ANY($1)
-                 RETURNING session.session_id, session.leaf_node_id
-             )
-             SELECT COALESCE(
-                        array_agg(leaf_node_id ORDER BY session_id)
-                            FILTER (WHERE leaf_node_id IS NOT NULL),
-                        ARRAY[]::TEXT[]
-                    ),
-                    EXISTS (
-                        SELECT 1
-                        FROM lash_graph_nodes AS graph
-                        WHERE graph.tombstoned = FALSE
-                          AND (
-                              graph.session_id = ANY($1)
-                              OR graph.node_id IN (
-                                  SELECT leaf_node_id FROM deleted_sessions
-                                  WHERE leaf_node_id IS NOT NULL
-                              )
-                          )
-                    )
-             FROM deleted_sessions",
+                session_sql().head.delete_batch_returning.sql(),
             )
             .bind(&session_id_texts[..])
             .fetch_one(&mut **tx)
@@ -1150,22 +925,10 @@ pub(crate) async fn delete_process_sessions_tx(
                     .await?;
             }
             let unreachable_candidates = sqlx::query_scalar::<_, String>(
-                "SELECT graph.node_id FROM lash_graph_nodes AS graph
-             WHERE graph.session_id = ANY($1) AND graph.tombstoned = FALSE
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_graph_nodes AS child
-                   WHERE child.parent_node_id = graph.node_id
-                     AND child.tombstoned = FALSE
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_sessions AS head
-                   WHERE head.leaf_node_id = graph.node_id
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_node_anchors AS anchor
-                   WHERE anchor.node_id = graph.node_id
-               )
-             ORDER BY graph.session_id, graph.generation DESC",
+                session_sql()
+                    .graph_postgres
+                    .select_unreachable_leaves_batch
+                    .sql(),
             )
             .bind(&session_id_texts[..])
             .fetch_all(&mut **tx)
@@ -1183,7 +946,7 @@ pub(crate) async fn delete_process_sessions_tx(
         // unbindable, so no session-scoped vacuum could ever reach the row.
         // Live sessions' rows stay resident for their own vacuum, so this is
         // not a catalog-wide sweep.
-        sqlx::query(SESSION_DELETE_SQL.delete_sessions_cascade.sql())
+        sqlx::query(session_sql().core.delete_process_session_rows.sql())
             .bind(&session_id_texts[..])
             .execute(&mut **tx)
             .await

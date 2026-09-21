@@ -85,6 +85,40 @@ and compare it the same way, that struct belongs here (see
 driver that consumes it, leave the type where the driver defines it and let this
 module own only the column order.
 
+### One statement per filter shape, never one with an optional predicate
+
+A read whose filter varies between call sites is **N named statements, one per
+shape a production caller actually issues**, chosen by a small exhaustive
+match. It is never one statement carrying `?2 IS NULL OR column <= ?2` or
+`column = COALESCE(?2, column)`: neither predicate is sargable, so a planner
+cannot use an index for *either* shape, and the read that had a filter pays for
+the read that did not. The session graph is read whole and read up to a
+generation ceiling; the preflight walk reads its first page and then pages
+after a cursor; the retention sweep excludes a list of live keys or excludes
+nothing. Each of those is two statements.
+
+Each named shape gets a query-plan test — `EXPLAIN QUERY PLAN` on SQLite,
+`EXPLAIN` on PostgreSQL — that pins the plan rather than asserting a property
+of it. A pin makes the claim checkable in both directions: a change that turns
+a seek into a scan moves the text, and so does an index that a shape *should*
+now be using and is not. See
+`crates/lash-sqlite-store/src/session_sql_tests.rs`.
+
+### Common table expressions
+
+A statement may bind relations with `WITH`, and read them back in table
+positions: the session catalog, the readable-generation range and the
+process-prune cascade are each one statement with a `WITH` clause, and each is
+one statement precisely because its parts would race. The renderer reads the
+clause, so the names it binds stand in a table position without being tables —
+they carry no schema qualifier and no prefix, because nothing stores them.
+
+One rule: **a bound relation may not be named after a table the crate owns.**
+Both the definition and its uses would render to the same prefixed name as the
+real table, so the statement would still run and a reader could no longer tell
+which relation a position means. The renderer refuses it, naming the
+expression.
+
 ## 3. Name domain vocabulary, never spell it
 
 Some predicates are neither dialect nor prose. `status IN ('running',

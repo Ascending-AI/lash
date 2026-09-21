@@ -1,3 +1,4 @@
+use crate::session_sql::session_sql;
 use crate::*;
 use lash_sansio::SessionId;
 
@@ -53,23 +54,14 @@ pub(crate) async fn retained_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
 ) -> Result<Option<(SessionId, String)>, StoreError> {
-    sqlx::query_as::<_, (String, String)>(
-        "SELECT source_session_id, checkpoint_ref FROM (
-             SELECT source_session_id, checkpoint_ref, 0 AS priority
-             FROM lash_node_anchors WHERE node_id = $1
-             UNION ALL
-             SELECT session_id, checkpoint_ref, 1 AS priority FROM lash_sessions
-             WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
-         ) retained
-         ORDER BY priority, source_session_id LIMIT 1",
-    )
-    .bind(node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map(|row| {
-        row.map(|(session_id, checkpoint_ref)| (SessionId::from(session_id), checkpoint_ref))
-    })
-    .map_err(store_sqlx_error)
+    sqlx::query_as::<_, (String, String)>(session_sql().head.select_retained_checkpoint.sql())
+        .bind(node_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map(|row| {
+            row.map(|(session_id, checkpoint_ref)| (SessionId::from(session_id), checkpoint_ref))
+        })
+        .map_err(store_sqlx_error)
 }
 
 pub(crate) async fn retention_source_holds_checkpoint_tx(
@@ -78,25 +70,13 @@ pub(crate) async fn retention_source_holds_checkpoint_tx(
     source_session_id: &SessionId,
     checkpoint_ref: &str,
 ) -> Result<bool, StoreError> {
-    sqlx::query_scalar(
-        "SELECT EXISTS(
-             SELECT 1 FROM lash_node_anchors
-             WHERE node_id = $1
-               AND source_session_id = $2
-               AND checkpoint_ref = $3
-             UNION ALL
-             SELECT 1 FROM lash_sessions
-             WHERE session_id = $2
-               AND leaf_node_id = $1
-               AND checkpoint_ref = $3
-         )",
-    )
-    .bind(node_id)
-    .bind(source_session_id.as_str())
-    .bind(checkpoint_ref)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)
+    sqlx::query_scalar(session_sql().head.exists_retention_source.sql())
+        .bind(node_id)
+        .bind(source_session_id.as_str())
+        .bind(checkpoint_ref)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)
 }
 
 pub(crate) async fn retained_fork_config_tx(
@@ -108,17 +88,14 @@ pub(crate) async fn retained_fork_config_tx(
         .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
             leaf_node_id: node_id.to_string().into(),
         })?;
-    let row = sqlx::query(
-        "SELECT parent_node_id, node_json FROM lash_graph_nodes
-         WHERE node_id = $1 AND tombstoned = FALSE",
-    )
-    .bind(&frame_node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?
-    .ok_or_else(|| {
-        StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
-    })?;
+    let row = sqlx::query(session_sql().graph_postgres.select_frame_body.sql())
+        .bind(&frame_node_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .ok_or_else(|| {
+            StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
+        })?;
     let parent_node_id = row.get(0);
     let node_json: String = row.get(1);
     lash_core::SessionNodeRecord::decode_storage_body(
@@ -538,17 +515,12 @@ pub(crate) async fn put_checkpoint_tx(
         .values()
         .map(|descriptor| descriptor.blob_ref.as_str())
         .collect::<Vec<_>>();
-    sqlx::query(
-        "INSERT INTO lash_checkpoint_blob_refs (checkpoint_ref, blob_ref)
-         SELECT $1, component_ref
-           FROM unnest($2::text[]) AS component_ref
-         ON CONFLICT (checkpoint_ref, blob_ref) DO NOTHING",
-    )
-    .bind(checkpoint_ref.as_str())
-    .bind(component_refs)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    sqlx::query(session_sql().checkpoint_edges.insert_batch.sql())
+        .bind(checkpoint_ref.as_str())
+        .bind(component_refs)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     Ok((checkpoint_ref, manifest))
 }
 
@@ -628,11 +600,9 @@ pub(crate) async fn load_session_head_meta_tx(
     for_update: bool,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let sql = if for_update {
-        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
-         FROM lash_sessions WHERE session_id = $1 FOR UPDATE"
+        session_sql().head.select_meta_for_update.sql()
     } else {
-        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
-         FROM lash_sessions WHERE session_id = $1"
+        session_sql().head.select_meta.sql()
     };
     let row = sqlx::query(sql)
         .bind(session_id.as_str())
@@ -678,14 +648,11 @@ pub(crate) async fn load_usage_deltas_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
 ) -> Result<Vec<TokenLedgerEntry>, StoreError> {
-    let rows = sqlx::query(
-        "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
-         FROM lash_usage_deltas WHERE session_id = $1 ORDER BY seq ASC",
-    )
-    .bind(session_id.as_str())
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let rows = sqlx::query(session_sql().usage.select_for_session.sql())
+        .bind(session_id.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     rows.into_iter()
         .map(|row| {
             let stored: String = row.get(7);
@@ -715,18 +682,16 @@ pub(crate) async fn load_graph_tx(
     let Some(leaf_node_id) = leaf_node_id else {
         return Ok(lash_core::SessionGraph::default());
     };
-    let leaf_generation = sqlx::query_scalar::<_, i64>(
-        "SELECT generation FROM lash_graph_nodes
-         WHERE node_id = $1 AND tombstoned = FALSE",
-    )
-    .bind(&leaf_node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?
-    .ok_or_else(|| StoreError::StoredDataCorrupt {
-        record_kind: "SessionGraph",
-        message: format!("leaf `{leaf_node_id}` is missing or tombstoned"),
-    })?;
+    let leaf_generation =
+        sqlx::query_scalar::<_, i64>(session_sql().graph_postgres.select_live_generation.sql())
+            .bind(&leaf_node_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .ok_or_else(|| StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: format!("leaf `{leaf_node_id}` is missing or tombstoned"),
+            })?;
     load_readable_graph_tx(tx, session_id, Some(leaf_generation), Some(leaf_node_id)).await
 }
 
@@ -745,28 +710,22 @@ async fn load_readable_graph_tx(
     generation_ceiling: Option<i64>,
     leaf_node_id: Option<String>,
 ) -> Result<lash_core::SessionGraph, StoreError> {
-    let rows = sqlx::query(
-        "SELECT node.node_id, node.parent_node_id, node.node_json,
-                node.generation, node.frame_node_id
-         FROM lash_graph_nodes AS node
-         WHERE node.tombstoned = FALSE
-           AND ($2::BIGINT IS NULL OR node.generation <= $2)
-           AND (
-               node.session_id = $1
-               OR EXISTS (
-                   SELECT 1 FROM lash_fork_lineage AS lineage
-                   WHERE lineage.session_id = $1
-                     AND lineage.ancestor_session_id = node.session_id
-                     AND node.generation <= lineage.fork_generation
-               )
-           )
-         ORDER BY node.generation ASC",
-    )
-    .bind(session_id.as_str())
-    .bind(generation_ceiling)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    // One statement per filter shape, chosen exhaustively: a single statement
+    // carrying `$2::BIGINT IS NULL OR generation <= $2` cannot use an index for
+    // either shape, and this read is the whole session graph.
+    let query = match generation_ceiling {
+        None => sqlx::query(session_sql().graph_postgres.select_readable.sql())
+            .bind(session_id.as_str()),
+        Some(ceiling) => sqlx::query(
+            session_sql()
+                .graph_postgres
+                .select_readable_to_generation
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .bind(ceiling),
+    };
+    let rows = query.fetch_all(&mut **tx).await.map_err(store_sqlx_error)?;
     let mut nodes = Vec::<SessionNodeRecord>::new();
     let mut prior_node_id: Option<String> = None;
     let mut expected_generation = 0_i64;

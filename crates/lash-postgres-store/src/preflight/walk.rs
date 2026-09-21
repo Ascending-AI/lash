@@ -73,18 +73,6 @@ const UNDEFINED_TABLE: &str = "42P01";
 //   `pending` when a claim lapses. Anything else has already left the queue,
 //   and putting it on a drain list would be reporting work that is done.
 
-/// The session scan both deep surfaces share.
-///
-/// `checkpoint_ref IS NOT NULL` is the definition of "has published a checkpoint
-/// root": a session without one has nothing durable at this level, and emitting
-/// a row for it would pad the report with items an operator cannot act on.
-const SESSION_CHECKPOINT_SQL: &str = "SELECT session_id, checkpoint_ref
-     FROM lash_sessions
-     WHERE checkpoint_ref IS NOT NULL
-       AND ($1::text IS NULL OR session_id > $1::text)
-     ORDER BY session_id
-     LIMIT $2";
-
 /// Persisted JSON module artifacts, ordered by their content-addressed module
 /// reference so the walk can resume without a table-sized offset scan.
 const MODULE_ARTIFACT_SQL: &str = "SELECT artifact_ref, artifact_bytes
@@ -463,11 +451,19 @@ async fn fetch_sessions(
     snapshot: &mut Transaction<'_, Postgres>,
     scan: &DurableScan,
 ) -> Result<Vec<SessionCheckpointRow>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, (String, String)>(SESSION_CHECKPOINT_SQL)
-        .bind(scan.after.clone())
-        .bind(row_limit(scan))
-        .fetch_all(&mut **snapshot)
-        .await?;
+    // One statement per filter shape, chosen exhaustively. A single statement
+    // carrying `$1::text IS NULL OR session_id > $1::text` cannot seek on
+    // `session_id`, so every page of the walk this exists to bound would scan
+    // the whole table.
+    let sql = crate::session_sql::session_sql();
+    let query = match scan.after.as_deref() {
+        None => sqlx::query_as::<_, (String, String)>(sql.head.scan_checkpoints_first_page.sql())
+            .bind(row_limit(scan)),
+        Some(after) => sqlx::query_as::<_, (String, String)>(sql.head.scan_checkpoints_after.sql())
+            .bind(after.to_string())
+            .bind(row_limit(scan)),
+    };
+    let rows = query.fetch_all(&mut **snapshot).await?;
     Ok(rows
         .into_iter()
         .map(|(session_id, checkpoint_ref)| SessionCheckpointRow {

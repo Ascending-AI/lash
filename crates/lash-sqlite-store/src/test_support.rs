@@ -18,7 +18,10 @@ impl StoreTestSupport for Store {
         self.conn
             .write(move |tx| {
                 let head_json: String = tx.query_row(
-                    "SELECT head_json FROM session_head WHERE session_id = ?1",
+                    crate::session_sql::session_sql()
+                        .head
+                        .select_head_json
+                        .sql(),
                     params![session_id.as_str()],
                     |row| row.get(0),
                 )?;
@@ -40,7 +43,7 @@ impl StoreTestSupport for Store {
                 let head_json = serde_json::to_string(&head)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 tx.execute(
-                    "UPDATE session_head SET head_json = ?2 WHERE session_id = ?1",
+                    crate::session_sql::session_sql().head.set_head_json.sql(),
                     params![session_id.as_str(), head_json],
                 )?;
                 Ok(())
@@ -57,11 +60,17 @@ impl StoreTestSupport for Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "UPDATE session_meta SET session_state_version = ?2 WHERE session_id = ?1",
+                    crate::session_sql::session_sql()
+                        .meta
+                        .set_state_version
+                        .sql(),
                     params![session_id.as_str(), i64::from(version)],
                 )?;
                 tx.execute(
-                    "UPDATE session_head SET head_json = '{not-current-json' WHERE session_id = ?1",
+                    crate::session_sql::session_sql()
+                        .head
+                        .corrupt_head_json
+                        .sql(),
                     params![session_id.as_str()],
                 )?;
                 Ok(())

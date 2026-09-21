@@ -267,18 +267,43 @@ def spelled_vocabulary_literals(sql: str, column: str) -> list[str]:
     return found
 
 
+def close_brace(source: str, start: int) -> int:
+    """The offset just past the `}` that closes the brace opened before `start`.
+
+    Braces inside a Rust string literal do not count. A statement may
+    legitimately carry one — `head_json = '{not-current-json'` is the payload
+    a corruption probe writes — and counting it swallowed every later
+    `statements!` block in the same file, silently attributing its statements
+    to the wrong family.
+    """
+    cursor = start
+    depth = 1
+    while cursor < len(source) and depth > 0:
+        character = source[cursor]
+        if character == '"':
+            cursor += 1
+            while cursor < len(source):
+                if source[cursor] == "\\":
+                    cursor += 2
+                    continue
+                if source[cursor] == '"':
+                    break
+                cursor += 1
+            cursor += 1
+            continue
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+        cursor += 1
+    return cursor
+
+
 def parse_statement_sets(source: str, path: str) -> list[Declaration]:
     """Every statement declared by a `statements!` block in `source`."""
     declarations: list[Declaration] = []
     for opening in re.finditer(r"statements!\s*\{", source):
-        cursor = opening.end()
-        depth = 1
-        while cursor < len(source) and depth > 0:
-            if source[cursor] == "{":
-                depth += 1
-            elif source[cursor] == "}":
-                depth -= 1
-            cursor += 1
+        cursor = close_brace(source, opening.end())
         block = source[opening.end() : cursor - 1]
         header = STRUCT_HEADER.search(block)
         if header is None:
@@ -324,9 +349,32 @@ FROM_TABLE = re.compile(r"\bFROM\s+(?P<table>\w+)", re.IGNORECASE)
 # column list at all.
 DELETE_BEFORE_FROM = re.compile(r"\bDELETE\s*$", re.IGNORECASE)
 SELECT_KEYWORD = re.compile(r"\bSELECT\b", re.IGNORECASE)
+# A `FROM` that belongs to a `DELETE` is not a projection's. Inside a CTE chain
+# a `DELETE FROM t` can follow an earlier `SELECT`, and pairing the two reads
+# the whole chain between them as a column list.
+NOT_A_PROJECTION_KEYWORD = re.compile(r"\b(?:DELETE|INSERT|UPDATE|TRUNCATE)\b", re.IGNORECASE)
 INSERT_COLUMNS = re.compile(
     r"\bINSERT\s+INTO\s+(?P<table>\w+)\s*\((?P<columns>[^)]*)\)", re.IGNORECASE | re.DOTALL
 )
+
+
+def top_level_comma(columns: str) -> bool:
+    """Whether `columns` lists two or more columns.
+
+    A comma inside parentheses belongs to one expression, not to the list: an
+    aggregate such as `jsonb_agg(jsonb_build_array(a, b, c))` is a single
+    projected value, and reading its arguments as a column list would demand a
+    column-list constant for an expression that projects one column.
+    """
+    depth = 0
+    for character in columns:
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth = max(0, depth - 1)
+        elif character == "," and depth == 0:
+            return True
+    return False
 
 
 def projections(sql: str, table: str) -> list[str]:
@@ -349,10 +397,16 @@ def projections(sql: str, table: str) -> list[str]:
         keywords = list(SELECT_KEYWORD.finditer(sql, 0, match.start()))
         if not keywords:
             continue
+        statements = list(NOT_A_PROJECTION_KEYWORD.finditer(sql, 0, match.start()))
+        if statements and statements[-1].start() > keywords[-1].start():
+            # The nearest statement keyword before this `FROM` writes rather
+            # than reads, so the `FROM` names its target, not a projection's
+            # source.
+            continue
         columns = canonical(sql[keywords[-1].end() : match.start()])
         if columns.upper().startswith("DISTINCT "):
             columns = columns[len("DISTINCT ") :]
-        if "," in columns:
+        if top_level_comma(columns):
             found.append(columns)
     for match in INSERT_COLUMNS.finditer(sql):
         if match.group("table") != table:
@@ -383,14 +437,23 @@ def check(root: Path) -> list[str]:
             for path in exempt
         )
 
-    cross_family: dict[str, dict] = {}
+    # A dialect-only statement exists once per backend under one name, and the
+    # two copies can reach different tables — the durable head is `session_head`
+    # on SQLite and `sessions` on PostgreSQL — so an entry is keyed by the name
+    # AND the owner module that declares it, not by the name alone.
+    cross_family: dict[tuple[str, str], dict] = {}
+    cross_family_names: dict[str, list[dict]] = {}
     for entry in manifest.get("cross_family", []):
         name = entry["statement"]
-        if name in cross_family:
-            findings.refuse(f"{MANIFEST}: cross-family entry `{name}` is listed twice")
+        key = (name, entry["owner"])
+        if key in cross_family:
+            findings.refuse(
+                f"{MANIFEST}: cross-family entry `{name}` is listed twice for `{entry['owner']}`"
+            )
         if not entry.get("reason", "").strip():
             findings.refuse(f"{MANIFEST}: cross-family entry `{name}` carries no reason")
-        cross_family[name] = entry
+        cross_family[key] = entry
+        cross_family_names.setdefault(name, []).append(entry)
 
     manifest_entries: dict[str, dict] = {}
     for entry in manifest.get("dialect_only", []):
@@ -574,24 +637,34 @@ def check(root: Path) -> list[str]:
         schema_modules.update(spec.get("schema", []))
 
     # 6. Cross-family statements, once every family's tables are known.
-    claimed_cross_family: set[str] = set()
+    claimed_cross_family: set[tuple[str, str]] = set()
     for family, declaration in declarations_by_family:
         touched = sorted(
             table
             for table, owner in converted_tables.items()
             if owner != family and is_sql_over(declaration.sql, table)
         )
-        entry = cross_family.get(declaration.name)
+        key = (declaration.name, declaration.path)
+        entry = cross_family.get(key)
         if entry is not None:
-            claimed_cross_family.add(declaration.name)
+            claimed_cross_family.add(key)
         if not touched:
             if entry is not None:
                 findings.refuse(
-                    f"{MANIFEST}: `{declaration.name}` is listed as cross-family but reaches no "
-                    "converted table outside its own family. Delete the entry."
+                    f"{MANIFEST}: `{declaration.name}` is listed as cross-family for "
+                    f"`{declaration.path}` but reaches no converted table outside its own "
+                    "family. Delete the entry."
                 )
             continue
         if entry is None:
+            named = cross_family_names.get(declaration.name, [])
+            if named:
+                findings.refuse(
+                    f"{MANIFEST}: `{declaration.name}` is declared in {declaration.path}, which "
+                    f"no cross-family entry names as its owner (listed: "
+                    f"{sorted(other['owner'] for other in named)})."
+                )
+                continue
             findings.refuse(
                 f"{declaration.path}:{declaration.line}: `{declaration.name}` is SQL over "
                 f"{touched}, which belong to other converted families, and is not declared in "
@@ -599,18 +672,15 @@ def check(root: Path) -> list[str]:
                 "[[cross_family]] entry naming the tables it reaches and why."
             )
             continue
-        if entry["owner"] != declaration.path:
-            findings.refuse(
-                f"{MANIFEST}: `{declaration.name}` names owner `{entry['owner']}` but is declared "
-                f"in {declaration.path}."
-            )
         if sorted(entry["touches"]) != touched:
             findings.refuse(
-                f"{MANIFEST}: `{declaration.name}` touches {touched}, but the cross-family entry "
-                f"lists {sorted(entry['touches'])}."
+                f"{MANIFEST}: `{declaration.name}` in {declaration.path} touches {touched}, but "
+                f"the cross-family entry lists {sorted(entry['touches'])}."
             )
-    for name in sorted(set(cross_family) - claimed_cross_family):
-        findings.refuse(f"{MANIFEST}: cross-family entry `{name}` names no declared statement")
+    for name, owner in sorted(set(cross_family) - claimed_cross_family):
+        findings.refuse(
+            f"{MANIFEST}: cross-family entry `{name}` names no declared statement in `{owner}`"
+        )
 
     # 7. A statement over a vocabulary-valued column may not spell it.
     for _family, declaration in declarations_by_family:

@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_sql::session_sql;
 
 pub(super) fn warn_process_registry_not_wired(path: &'static str) {
     tracing::warn!(
@@ -53,10 +54,7 @@ pub(super) async fn delete_session_from_catalog(
             }
             let existed = tx
                 .query_row(
-                    "SELECT 1 FROM session_meta WHERE session_id = ?1
-                     UNION ALL
-                     SELECT 1 FROM session_head WHERE session_id = ?1
-                     LIMIT 1",
+                    session_sql().meta_sqlite.exists_materialized.sql(),
                     params![session_id.as_str()],
                     |_| Ok(()),
                 )
@@ -71,30 +69,19 @@ pub(super) async fn delete_session_from_catalog(
                 // its tombstoned rows unreachable forever, because the id is
                 // just as unbindable as a host-facing one once deleted.
                 tx.execute(
-                    "INSERT OR IGNORE INTO deleted_sessions
-                     (session_id, created_at_ms, last_commit_at_ms, head_revision,
-                      relation_kind, parent_session_id)
-                     SELECT meta.session_id, meta.created_at_ms, meta.last_commit_at_ms,
-                            COALESCE(head.head_revision, 0), meta.relation_kind,
-                            meta.parent_session_id
-                     FROM session_meta AS meta
-                     LEFT JOIN session_head AS head ON head.session_id = meta.session_id
-                     WHERE meta.session_id = ?1",
+                    session_sql().deleted_sqlite.insert_from_meta.sql(),
                     params![session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
                 tx.execute(
-                    "INSERT OR IGNORE INTO deleted_sessions
-                     (session_id, created_at_ms, last_commit_at_ms, head_revision,
-                      relation_kind, parent_session_id)
-                     VALUES (?1, 0, NULL, 0, 'root', NULL)",
+                    session_sql().deleted_sqlite.insert_root.sql(),
                     params![session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
             }
             let (leaf_node_id, checkpoint_ref) = tx
                 .query_row(
-                    "SELECT leaf_node_id, checkpoint_ref FROM session_head WHERE session_id = ?1",
+                    session_sql().head.select_reclaim.sql(),
                     params![session_id.as_str()],
                     |row| {
                         Ok((
@@ -110,10 +97,7 @@ pub(super) async fn delete_session_from_catalog(
             if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
                 candidates.insert(checkpoint_ref.to_string());
                 let mut stmt = tx
-                    .prepare(
-                        "SELECT blob_ref FROM checkpoint_blob_refs
-                         WHERE checkpoint_ref = ?1 ORDER BY blob_ref",
-                    )
+                    .prepare(session_sql().checkpoint_edges.select_components.sql())
                     .map_err(sqlite_error)?;
                 let rows = stmt
                     .query_map(params![checkpoint_ref], |row| row.get::<_, String>(0))
@@ -140,7 +124,7 @@ pub(super) async fn delete_session_from_catalog(
             }
             report.enumerated_blob_count = candidates.len();
             tx.execute(
-                "DELETE FROM session_head WHERE session_id = ?1",
+                session_sql().head.delete_by_session.sql(),
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
@@ -149,24 +133,7 @@ pub(super) async fn delete_session_from_catalog(
             }
             let unreachable_candidates = {
                 let mut stmt = tx
-                    .prepare(
-                        "SELECT g.node_id FROM graph_nodes AS g
-                         WHERE g.session_id = ?1 AND g.tombstoned = 0
-                           AND NOT EXISTS (
-                               SELECT 1 FROM graph_nodes AS child
-                               WHERE child.parent_node_id = g.node_id
-                                 AND child.tombstoned = 0
-                           )
-                           AND NOT EXISTS (
-                               SELECT 1 FROM session_head AS head
-                               WHERE head.leaf_node_id = g.node_id
-                           )
-                           AND NOT EXISTS (
-                               SELECT 1 FROM node_anchors AS anchor
-                               WHERE anchor.node_id = g.node_id
-                           )
-                         ORDER BY g.generation DESC",
-                    )
+                    .prepare(session_sql().graph_sqlite.select_unreachable_leaves.sql())
                     .map_err(sqlite_error)?;
                 let rows = stmt
                     .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
@@ -184,15 +151,15 @@ pub(super) async fn delete_session_from_catalog(
             // permanently unbindable. Live sessions' rows stay resident for their
             // own vacuum, so this is not a catalog-wide sweep.
             tx.execute(
-                "DELETE FROM graph_nodes
-                 WHERE tombstoned = 1
-                   AND (session_id = ?1
-                        OR session_id IN (SELECT session_id FROM deleted_sessions))",
+                session_sql()
+                    .graph_sqlite
+                    .delete_tombstoned_reclaimable
+                    .sql(),
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             tx.execute(
-                "DELETE FROM fork_lineage WHERE session_id = ?1",
+                session_sql().lineage.delete_by_session.sql(),
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
@@ -218,13 +185,21 @@ pub(super) async fn delete_session_from_catalog(
                 "turn_cancel_closure_authorizations",
                 "turn_cancellation_bindings",
                 "session_execution_leases",
-                "session_meta",
             ] {
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE session_id = ?1"),
                     params![session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
+            }
+            // The session-core rows the family owns, named rather than spelled.
+            for statement in [
+                session_sql().observer_intents.delete_by_session.sql(),
+                session_sql().fork_inheritance.delete_by_session.sql(),
+                session_sql().meta.delete_by_session.sql(),
+            ] {
+                tx.execute(statement, params![session_id.as_str()])
+                    .map_err(sqlite_error)?;
             }
             tx.execute(
                 crate::attachments::attachment_sql()
@@ -240,16 +215,10 @@ pub(super) async fn delete_session_from_catalog(
                 // The root bytes may remain as another root's opaque component;
                 // its projection no longer has a live root owner in that case.
                 tx.execute(
-                    "DELETE FROM checkpoint_blob_refs AS edge
-                     WHERE edge.checkpoint_ref = ?1
-                       AND NOT EXISTS (
-                           SELECT 1 FROM session_head AS head
-                           WHERE head.checkpoint_ref = edge.checkpoint_ref
-                       )
-                       AND NOT EXISTS (
-                           SELECT 1 FROM node_anchors AS anchor
-                           WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-                       )",
+                    session_sql()
+                        .checkpoint_edges
+                        .delete_unrooted_for_checkpoint
+                        .sql(),
                     params![checkpoint_ref],
                 )
                 .map_err(sqlite_error)?;

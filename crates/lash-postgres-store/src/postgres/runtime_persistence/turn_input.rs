@@ -308,7 +308,10 @@ impl TurnInputStore for PostgresSessionStore {
                 .storage_key()?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM lash_runtime_turn_commits WHERE session_id = $1 AND turn_id = $2)",
+            crate::session_sql::session_sql()
+                .turn_commits
+                .exists_for_turn
+                .sql(),
         )
         .bind(address.session_id.as_str())
         .bind(operation_key)
@@ -332,7 +335,10 @@ impl TurnInputStore for PostgresSessionStore {
         let operation_key =
             lash_core::OperationId::turn(session_id, turn_id, "final").storage_key()?;
         let committed: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM lash_runtime_turn_commits WHERE session_id = $1 AND turn_id = $2)",
+            crate::session_sql::session_sql()
+                .turn_commits
+                .exists_for_turn
+                .sql(),
         )
         .bind(session_id.as_str())
         .bind(operation_key)
@@ -599,9 +605,10 @@ impl TurnInputStore for PostgresSessionStore {
     ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let rows = sqlx::query(
-            "SELECT turn_id, result_json
-             FROM lash_runtime_turn_commits
-             WHERE session_id = $1",
+            crate::session_sql::session_sql()
+                .turn_commits
+                .select_all_for_session
+                .sql(),
         )
         .bind(session_id.as_str())
         .fetch_all(&mut *connection)
