@@ -1278,6 +1278,10 @@ jobs:
 
       # The recreation E2E's fixtures are pinned to the newest component
       # generation. Catch a stale pin here rather than one container gate later.
+      # This also sweeps the component-version literals in the Postgres store
+      # test suite and the committed fixtures (FIG-3413): the suites that read
+      # them need a database and are gated off pull requests and the merge
+      # queue, so this is the only job that sees a bump leave one behind.
       - name: Check version-bump recreation fixtures
         run: python3 scripts/check_version_bump_fixtures.py
 

@@ -14,6 +14,19 @@ Every fixture constant here is therefore a projection of ``SCHEMA_MIGRATIONS``,
 and this check recomputes each projection and demands equality.  It reads sources
 only, needs no database, and uses the standard library alone so it can run before
 the Rust toolchain is installed.
+
+The same gap has a second shape, which FIG-3413 pays for: the PostgreSQL store
+test suite and the committed PostgreSQL fixtures carry the component generation
+as *literals*, and every test that can read them needs a live database.  Those
+suites run only on a manual full-profile dispatch (`.github/workflows/ci.yml`,
+`Test Postgres store`, gated `github.event_name != 'pull_request' && !=
+'merge_group'`), so a bump that leaves a literal behind is green on the pull
+request, green in the merge queue, and red afterwards — which is exactly what
+#1796 did when it moved the component 105 -> 106 and left
+``postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_configured``
+asserting 105.  ``COMPONENT_VERSION_PINS`` below sweeps those literals out of
+the tree and demands each equal the declared constant, so the stale pin is
+refused here, on every pull request, without a database.
 """
 
 from __future__ import annotations
@@ -32,6 +45,66 @@ MIGRATIONS_SOURCE = "crates/lash-postgres-store/src/postgres/schema/migrations.r
 RENDERERS_SOURCE = "crates/lash-postgres-store/src/postgres/schema.rs"
 FIXTURE_SOURCE = "runbooks/restate-postgres-workers/src/bin/version_bump.rs"
 GATE_SOURCE = "scripts/version-bump-recreation-e2e.sh"
+
+
+@dataclass(frozen=True)
+class PinFamily:
+    """One sweep for component-generation literals no per-PR test can reach.
+
+    The sweep is a derivation over a directory, never a hand-kept list of
+    files: a pin that moves to a sibling test or a new committed fixture is
+    still swept, and a pin that is deleted outright leaves its family empty,
+    which is an undecidable check rather than a silent pass.
+    """
+
+    name: str
+    root: str
+    glob: str
+    pattern: re.Pattern[str]
+    remedy: str
+
+
+# Both PostgreSQL fixture catalogs stamp `lash_schema_versions` with the
+# generation their regeneration ran under, and the durable-read manifest records
+# it as JSON. Restoring either into a build at another generation does not reach
+# the payload-level law the fixture exists to witness: the store refuses the
+# catalog at open, or the suite's own tripwire assertion fails first.
+COMPONENT_VERSION_PINS = (
+    PinFamily(
+        name="PostgreSQL store test component pin",
+        root="crates/lash-postgres-store/tests",
+        glob="**/*.rs",
+        pattern=re.compile(r"PostgresStorage::schema_version\(\),\s*(\d+)\s*\)"),
+        remedy=(
+            "move the literal with the bump and regenerate the fixture it pins "
+            "(LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p "
+            "lash-internal-postgres-store --test durable_read_fixture "
+            "regenerate_postgres_prior_component_fixture_catalog -- --ignored --exact)"
+        ),
+    ),
+    PinFamily(
+        name="committed PostgreSQL fixture catalog stamp",
+        root="fixtures",
+        glob="**/*.sql",
+        pattern=re.compile(
+            r"lash_schema_versions VALUES \('lash-postgres-store',\s*(\d+)\)"
+        ),
+        remedy=(
+            "regenerate the committed dump under LASH_REGENERATE_DURABLE_READ_FIXTURES=1; "
+            "a dump stamped at another generation is refused at open"
+        ),
+    ),
+    PinFamily(
+        name="committed PostgreSQL fixture version manifest",
+        root="fixtures",
+        glob="**/version.json",
+        pattern=re.compile(r'"schema":\s*(\d+)'),
+        remedy=(
+            "regenerate the durable-read fixture; the manifest is written from "
+            "PostgresStorage::schema_version() and is what assert_fixture_version reads"
+        ),
+    ),
+)
 
 # Each refusal marker must identify exactly one of the gate's error renderers, so
 # a marker constant is bound to the function whose prose it is meant to select.
@@ -275,6 +348,35 @@ def parse_migrations(text: str) -> tuple[Migration, ...]:
     return migrations
 
 
+def sweep_pins(repo: Path, family: PinFamily) -> tuple[tuple[str, int, int], ...]:
+    """Every `(path, line, version)` literal the family's sweep finds.
+
+    Decoding uses ``surrogateescape``: a committed ``pg_dump`` is text this
+    check must read exactly, and a lossy decode could silently rewrite the
+    bytes around a pin rather than fail.
+    """
+    found: list[tuple[str, int, int]] = []
+    for path in sorted((repo / family.root).glob(family.glob)):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="surrogateescape")
+        except OSError as error:
+            raise CheckError(f"cannot read {path}: {error}") from error
+        relative = path.relative_to(repo).as_posix()
+        for match in family.pattern.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            found.append((relative, line, int(match.group(1))))
+    if not found:
+        raise CheckError(
+            f"{family.root}/{family.glob}: the {family.name} sweep matched nothing. "
+            "Either the pin was deleted -- which retires a law the trunk-only "
+            "PostgreSQL suites rely on -- or its shape moved and this sweep has to "
+            "learn the new one; an empty sweep may not pass silently"
+        )
+    return tuple(found)
+
+
 def named_set_failure(constant: str, derivation: str, found: tuple[str, ...], expected: tuple[str, ...]) -> str:
     missing = sorted(set(expected) - set(found))
     extra = sorted(set(found) - set(expected))
@@ -515,6 +617,22 @@ def check(repo: Path) -> tuple[bool, str]:
                 f"harness pre-cutover refusal emits {configured_kind!r}"
             )
 
+    # The literals only a database-backed suite can reach. A stale one is not a
+    # late failure but an invisible one: the suites that read them are gated off
+    # pull requests and off the merge queue.
+    pin_count = 0
+    for family in COMPONENT_VERSION_PINS:
+        for relative, line, pinned in sweep_pins(repo, family):
+            pin_count += 1
+            if pinned == component_version:
+                continue
+            failures.append(
+                f"{relative}:{line}: this {family.name} names component {pinned}, but "
+                f"{VERSION_SOURCE} declares {component_version}. No pull-request or "
+                "merge-queue job reads this pin, so nothing else would refuse the bump: "
+                f"{family.remedy}"
+            )
+
     if failures:
         return False, "\n".join(
             [
@@ -528,7 +646,8 @@ def check(repo: Path) -> tuple[bool, str]:
         f"{floor.from_version}, {len(migrations)} explicit migrations, "
         f"{len(renderers)} disjoint refusal kinds, {len(declared_indexes)} explicitly "
         f"dropped post-floor indexes, {len(declared_columns)} explicitly dropped "
-        f"post-floor columns, {len(demanded)} asserted checkpoints"
+        f"post-floor columns, {len(demanded)} asserted checkpoints, {pin_count} "
+        "component-version pins"
     )
 
 
