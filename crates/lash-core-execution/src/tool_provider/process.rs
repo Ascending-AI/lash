@@ -169,11 +169,10 @@ pub struct InternalProcessAdmin<'run> {
     pub(super) tool_call_id: Option<String>,
     pub(super) execution_env_spec: crate::ProcessExecutionEnvSpec,
     /// The realized-start sink a group child's driver drains into its
-    /// settlement's possession. Empty for every other caller, so enqueuing is
-    /// a no-op write on a buffer nobody reads — a start an orchestrating
-    /// group child makes must reach its settlement, and this buffer is the
-    /// only channel that crosses the no-attempt-frame boundary.
-    pub(super) orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
+    /// settlement's possession. `None` for every other caller — a start an
+    /// orchestrating group child makes must reach its settlement, and this
+    /// buffer is the only channel that crosses the no-attempt-frame boundary.
+    pub(super) orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
 }
 
 impl InternalProcessAdmin<'_> {
@@ -213,7 +212,9 @@ impl InternalProcessAdmin<'_> {
         // child's settlement possession must name every process the body
         // realized, and an orchestrating body has no attempt frame whose
         // intent outcomes would carry it.
-        self.orchestrating_starts.enqueue(view.process_id.clone());
+        if let Some(starts) = &self.orchestrating_starts {
+            starts.enqueue(view.process_id.clone());
+        }
         Ok(view)
     }
 
@@ -460,7 +461,7 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer::default(),
+            orchestrating_starts: None,
         }
     }
 

@@ -70,16 +70,19 @@ REGISTRATION_BASELINES = {
     # child of a durable effect group carries on its outcome. A new durable
     # format, not a rename: the settlement had no constant before this change,
     # and it is deliberately separate from the request's so the two lanes do
-    # not force each other's bumps.
+    # not force each other's bumps. Re-pinned to the reviewed shape after the
+    # hostile-review round grew `ToolUsageDelta` (the full usage identity) and
+    # `ToolSettlement.usage` — the pin now covers the shape review approved.
     "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_SETTLEMENT_VERSION": (
-        "sha256:2179106acc6968178333ab8b5394bddb35869f8bea95fdd510fe7fb35aa0a9a4"
+        "sha256:def312163c6b335a3f1f7dd1421218935c3faf46eb0d50e064e15ea8d1359da0"
     ),
     # FIG-2266: ADR 0099 section 13 journals the facts one atomic tool attempt
     # produced on the attempt's own outcome, restored on replay. A new durable
     # format riding the shared `ToolAttempt` arm, guarded separately from the
-    # settlement because the two carriers move for different reasons.
+    # settlement because the two carriers move for different reasons. Re-pinned
+    # alongside the settlement for the same `ToolUsageDelta` growth.
     "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_ATTEMPT_CAPTURE_VERSION": (
-        "sha256:a140ed941c1229340032c527adaa1b492e6a1eb9740b8a327f62bec24500ba4a"
+        "sha256:7b8f8f20e474133b6bea9d3b94b82d1e1440e68b42ca66668302b3ee7b80edf0"
     ),
     # FIG-3408: ADR 0099 section 3 mints the retained tool-child request and the
     # invocation-level tool command together, as one new durable format. The

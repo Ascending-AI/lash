@@ -146,7 +146,17 @@ impl<'run> OrchestrationContext<'run> {
         // live leaf call runs: preparation, journaled attempts, retry sleeps
         // and a journaled deferred await, all on the child's admitted
         // controller rather than the opener's.
-        let Some(dispatch) = self.context.runtime_dispatch.clone() else {
+        //
+        // The installed starts sink is what marks this context as a group
+        // child's — only the tool-child driver sets one. Any other context
+        // without a runtime execution context is the pre-cutover product
+        // path, which keeps its refusal.
+        let dispatch = if self.context.orchestrating_starts.is_some() {
+            self.context.runtime_dispatch.clone()
+        } else {
+            None
+        };
+        let Some(dispatch) = dispatch else {
             return calls
                 .into_iter()
                 .map(|_| {

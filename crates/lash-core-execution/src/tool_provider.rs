@@ -448,9 +448,11 @@ pub struct ToolContext<'run> {
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
     /// The realized-start sink a group child's driver installs so an
     /// orchestrating body's process starts reach its settlement's possession.
-    /// Empty for every caller that is not a group child; an ordinary
-    /// orchestrating run's starts still ride its `ToolIntent` records.
-    pub(crate) orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
+    /// `None` for every caller that is not a group child — its presence is
+    /// the mark that this context was admitted under a group child's rebound
+    /// dispatch; an ordinary orchestrating run's starts still ride its
+    /// `ToolIntent` records.
+    pub(crate) orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
 }
 
 #[derive(Clone)]
@@ -519,7 +521,7 @@ pub struct ToolContextBuilder<'run> {
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
+    orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
 }
 
 impl<'run> ToolContextBuilder<'run> {
@@ -549,7 +551,7 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
             child_execution_trace_hook: None,
-            orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer::default(),
+            orchestrating_starts: None,
         }
     }
 
@@ -644,12 +646,13 @@ impl<'run> ToolContextBuilder<'run> {
 
     /// Installs the realized-start sink an orchestrating group child drains
     /// into its settlement's possession. Internal: only the tool-child driver
-    /// sets one.
+    /// sets one, which is also what marks the context as admitted under a
+    /// group child's rebound dispatch.
     pub(crate) fn orchestrating_starts(
         mut self,
         buffer: crate::tool_dispatch::OrchestratingStartsBuffer,
     ) -> Self {
-        self.orchestrating_starts = buffer;
+        self.orchestrating_starts = Some(buffer);
         self
     }
 
@@ -778,7 +781,7 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
-            orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer::default(),
+            orchestrating_starts: None,
         }
     }
 
