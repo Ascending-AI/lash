@@ -475,6 +475,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::EBBING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             89,
+            90,
+        ),
+        (
+            crate::DWINDLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            90,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
