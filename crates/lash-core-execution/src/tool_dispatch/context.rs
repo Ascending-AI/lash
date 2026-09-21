@@ -18,7 +18,7 @@ pub struct CheckpointMessageBuffer {
 }
 
 impl CheckpointMessageBuffer {
-    pub(crate) fn enqueue(&self, messages: Vec<crate::PluginMessage>) {
+    pub fn enqueue(&self, messages: Vec<crate::PluginMessage>) {
         let mut queue = self.queue.lock_recover();
         queue.extend(messages);
     }
@@ -48,12 +48,12 @@ pub struct ToolTriggerOutcomeBuffer {
 }
 
 impl ToolTriggerOutcomeBuffer {
-    pub(crate) fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
+    pub fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
         let mut queue = self.queue.lock_recover();
         queue.push(outcome);
     }
 
-    pub(crate) fn drain(&self) -> Vec<ToolTriggerEffectOutcome> {
+    pub fn drain(&self) -> Vec<ToolTriggerEffectOutcome> {
         let mut queue = self.queue.lock_recover();
         queue.drain(..).collect()
     }
