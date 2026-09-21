@@ -35,5 +35,7 @@ mod release_stamp;
 mod session_execution_lease_renewal;
 #[path = "store_effect_group_drain_conformance.rs"]
 mod store_effect_group_drain_conformance;
+#[path = "tool_child_invocation.rs"]
+mod tool_child_invocation;
 #[path = "turn_cancel_receipt_consistency.rs"]
 mod turn_cancel_receipt_consistency;

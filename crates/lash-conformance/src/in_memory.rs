@@ -7,3 +7,4 @@ mod persistence;
 mod process;
 mod registrations;
 mod tool_batch;
+mod tool_child;
