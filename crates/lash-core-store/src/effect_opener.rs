@@ -57,6 +57,25 @@ pub enum EffectOpener {
         /// The turn's durable identity.
         turn_id: TurnId,
     },
+    /// One drain of a session's queued work.
+    ///
+    /// A drain is a lifecycle owner in exactly the sense §1 means: it is
+    /// durable and retry-stable. `drain_id` is the host's idempotency key for
+    /// a retried drain, and `crates/lash/src/turn.rs` makes it the *alternative*
+    /// to a turn id for identifying one physical unit — "keep `drain_id(...)`
+    /// as the durable idempotency key for retried drains, or keep
+    /// `turn_id(...)` as the host-minted physical turn identity" — resolving
+    /// the execution scope to `queue_drain_scope(session, drain_id)` when no
+    /// turn id exists. One drain may run several queued turns, and the opener
+    /// lives until the drain ends, not until the first turn does.
+    QueueDrain {
+        /// The session whose queue is being drained.
+        session_id: SessionId,
+        /// The drain's durable identity. A plain string because no typed id
+        /// exists for it; empty is refused, as `ExecutionScope::validate`
+        /// refuses an empty scope id.
+        drain_id: String,
+    },
     /// One process incarnation. The reusable name alone is not the opener.
     Process {
         /// The name bound to the store-minted incarnation that owns this work.
@@ -71,6 +90,15 @@ impl EffectOpener {
         Self::Turn {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
+        }
+    }
+
+    /// The opener of one queued-work drain.
+    #[must_use]
+    pub fn queue_drain(session_id: impl Into<SessionId>, drain_id: impl Into<String>) -> Self {
+        Self::QueueDrain {
+            session_id: session_id.into(),
+            drain_id: drain_id.into(),
         }
     }
 
@@ -89,7 +117,7 @@ impl EffectOpener {
     #[must_use]
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
-            Self::Turn { session_id, .. } => Some(session_id),
+            Self::Turn { session_id, .. } | Self::QueueDrain { session_id, .. } => Some(session_id),
             Self::Process { .. } => None,
         }
     }
@@ -98,7 +126,7 @@ impl EffectOpener {
     #[must_use]
     pub fn process_ref(&self) -> Option<&ProcessRef> {
         match self {
-            Self::Turn { .. } => None,
+            Self::Turn { .. } | Self::QueueDrain { .. } => None,
             Self::Process { process_ref } => Some(process_ref),
         }
     }
@@ -132,6 +160,10 @@ impl EffectOpener {
                 session_id,
                 turn_id,
             } => format!("turn:{session_id}:{turn_id}"),
+            Self::QueueDrain {
+                session_id,
+                drain_id,
+            } => format!("drain:{session_id}:{drain_id}"),
             Self::Process { process_ref } => format!(
                 "process:{}:incarnation:{}",
                 process_ref.process_id, process_ref.incarnation
@@ -185,6 +217,7 @@ mod tests {
     fn a_rendered_opener_introduces_no_reserved_separator() {
         for opener in [
             EffectOpener::turn("session-1", "turn-7"),
+            EffectOpener::queue_drain("session-1", "drain-3"),
             process_opener("indexer", 3),
         ] {
             let rendered = opener.render();
@@ -197,6 +230,23 @@ mod tests {
                 "`/` splits a stored turn parent scope: {rendered}"
             );
         }
+    }
+
+    /// A drain is its own opener, distinct from any turn it runs.
+    ///
+    /// One drain may run several queued turns, so the drain's opener is not
+    /// the opener of any one of them, and a turn whose ids spell a drain must
+    /// not reach it either.
+    #[test]
+    fn a_drain_is_not_the_turns_it_runs() {
+        let drain = EffectOpener::queue_drain("session-1", "drain-3");
+        assert_ne!(drain, EffectOpener::turn("session-1", "drain-3"));
+        assert_ne!(
+            drain.render(),
+            EffectOpener::turn("session-1", "drain-3").render()
+        );
+        assert_eq!(drain.session_id().map(SessionId::as_str), Some("session-1"));
+        assert!(drain.process_ref().is_none());
     }
 
     /// Kind-tagged on the wire, so a decoded opener cannot change arm.

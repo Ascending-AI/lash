@@ -127,7 +127,14 @@ use super::executor::RuntimeEffectControllerError;
 /// Version 1 is the shape FIG-3408 froze. A reader refuses any other value
 /// rather than defaulting: a request it cannot fully reconstruct is a child it
 /// would run under partial authority, which is worse than refusing to run it.
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 1;
+///
+/// Version 2 adds the queue-drain arm to [`EffectOpener`] (FIG-3394, ADR 0099
+/// §1), which widens `scope.opener`. Nothing persists this shape in production
+/// yet, so the move costs nothing at run time — but the constant moves anyway,
+/// because a version that did not would let a v1 reader decode a v2 request,
+/// find an opener arm it has no branch for, and fail somewhere other than the
+/// boundary. The v1 refusal is kept as its own test.
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 2;
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///
@@ -283,7 +290,9 @@ impl ToolChildScope {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
                 format!(
-                    "retained tool-child request binds opener session `{opener_session}` but                      attributes its work to session `{}`; for a turn opener the two are one                      fact",
+                    "retained tool-child request binds opener session `{opener_session}` but \
+                     attributes its work to session `{}`; a turn opener and a queue-drain \
+                     opener each name their own session, so the two are one fact",
                     self.session_id
                 ),
             ));

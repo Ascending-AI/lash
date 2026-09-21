@@ -104,9 +104,28 @@ turn latency bound follows from the cancel grace.
 
 ### 1. Logical opener identity
 
-**An opener is `Turn(session_id, turn_id)` or `Process(ProcessRef {
-process_id, incarnation })`.** Its identity is stable across worker attempts and
-segments, and it changes on process re-registration. Group identity, retained
+**An opener is `Turn(session_id, turn_id)`, `QueueDrain(session_id, drain_id)`
+or `Process(ProcessRef { process_id, incarnation })`.** Its identity is stable
+across worker attempts and segments, and it changes on process re-registration.
+
+**A queued-work drain is an opener, not a turn's container.** `drain_id` and
+`turn_id` are two ways for a host to identify one physical unit — "keep
+`drain_id(...)` as the durable idempotency key for retried drains, or keep
+`turn_id(...)` as the host-minted physical turn identity"
+(`crates/lash/src/turn.rs`) — and `execution_scope` there resolves to
+`queue_drain_scope(session, drain_id)` when no turn id exists, so a queued
+turn runs its whole effect tree, cells included, under
+`ExecutionScope::QueueDrain`. A drain is durable and retry-stable for the same
+reason a turn is. One drain may run several queued turns, and the drain's
+opener lives until the drain ends rather than until its first turn does, so
+group identity, retained authority, cancellation and retirement bind the drain
+and not the turn inside it. Found by FIG-3394 when a cell of a queued turn was
+refused for naming no opener.
+
+**`SessionDelete` and `RuntimeOperation` scopes are not openers and run no
+cells.** A scope that is none of the three is refused with a typed error rather
+than given an invented identity: widening this set is an amendment to this
+section, which is how the drain arm arrived. Group identity, retained
 authority, cancellation, usage attribution and retirement all bind that exact
 opener. A retired or mismatched incarnation is refused, never rebound to the
 current process carrying the same name.

@@ -17,12 +17,11 @@ use lashlang::LashlangExecutionCallSite;
 
 /// A scope that names no opener this contract can express.
 ///
-/// ADR 0099 §1 knows two openers, a turn and a process incarnation, and
-/// `ExecutionScope` has three more kinds — `QueueDrain`, `SessionDelete` and
-/// `RuntimeOperation` — which ADR 0094 maps to `ParentScope::Host`. No
-/// Lashlang cell or process body runs under one today, so this is a refusal
-/// rather than a fourth arm: widening the opener is a contract decision, and
-/// inventing a turn id here would hide the site that needed it.
+/// ADR 0099 §1 knows three openers — a turn, a queued-work drain and a process
+/// incarnation — and `ExecutionScope` has two more kinds, `SessionDelete` and
+/// `RuntimeOperation`, which run no cells at all. This is a refusal rather
+/// than a fourth arm: widening the opener is a contract decision, and
+/// inventing an identity here would hide the site that needed it.
 #[derive(Debug, thiserror::Error)]
 #[error(
     "lashlang execution has no logical opener: {scope_kind} scope names neither a turn nor a process incarnation"
@@ -31,23 +30,32 @@ pub struct LashlangOpenerError {
     scope_kind: &'static str,
 }
 
-/// The opener a scope names, or a refusal.
+/// The opener a cell's scope names, or a refusal.
+///
+/// A queued turn is a real production shape, not an edge one: a turn started
+/// with `drain_id` and no turn id runs its whole effect tree — cells
+/// included — under `ExecutionScope::QueueDrain` (`crates/lash/src/turn.rs`,
+/// `execution_scope`), so a drain is an opener in its own right.
 ///
 /// A process scope cannot answer here: `ExecutionScope::Process` carries the
 /// reusable name and not the store-minted incarnation, so a process body builds
 /// its opener from the incarnation its run was admitted under instead
 /// ([`LashlangHostIdentities::process_body`]).
-pub fn turn_opener_for_scope(scope: &ExecutionScope) -> Result<EffectOpener, LashlangOpenerError> {
+pub fn cell_opener_for_scope(scope: &ExecutionScope) -> Result<EffectOpener, LashlangOpenerError> {
     match scope {
         ExecutionScope::Turn {
             session_id,
             turn_id,
         } => Ok(EffectOpener::turn(session_id.clone(), turn_id.clone())),
+        ExecutionScope::QueueDrain {
+            session_id,
+            drain_id,
+        } => Ok(EffectOpener::queue_drain(
+            session_id.clone(),
+            drain_id.clone(),
+        )),
         ExecutionScope::Process { .. } => Err(LashlangOpenerError {
             scope_kind: "process",
-        }),
-        ExecutionScope::QueueDrain { .. } => Err(LashlangOpenerError {
-            scope_kind: "queue-drain",
         }),
         ExecutionScope::SessionDelete { .. } => Err(LashlangOpenerError {
             scope_kind: "session-delete",

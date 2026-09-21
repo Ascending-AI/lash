@@ -92,7 +92,7 @@ impl<'run> HostBridge<'run> {
             .and_then(lash_core::RuntimeInvocation::effect_address)
             .ok_or(LashlangCellOpener::NoEffect)
             .and_then(|address| {
-                lash_lashlang_runtime::turn_opener_for_scope(&address.execution_scope)
+                lash_lashlang_runtime::cell_opener_for_scope(&address.execution_scope)
                     .map(|opener| {
                         lash_lashlang_runtime::LashlangHostIdentities::cell(
                             opener,
