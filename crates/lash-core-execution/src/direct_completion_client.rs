@@ -191,15 +191,15 @@ impl<'run> DirectCompletionClient<'run> {
     /// A service that cannot prove it executes under the recorded session and
     /// environment makes this a typed refusal rather than a silent authority
     /// leak.
-    pub fn bind_tool_child(
+    pub fn bind_tool_child<'child>(
         &self,
         session_id: &crate::SessionId,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'static>,
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'child>,
         turn_id: Option<crate::TurnId>,
         parent_invocation: Option<crate::RuntimeInvocation>,
         usage_ledger: crate::runtime::ToolUsageLedger,
-    ) -> Result<DirectCompletionClient<'static>, crate::runtime::RuntimeEffectControllerError> {
+    ) -> Result<DirectCompletionClient<'child>, crate::runtime::RuntimeEffectControllerError> {
         let source = match &self.source {
             DirectCompletionSource::Runtime(source) => {
                 let service = source

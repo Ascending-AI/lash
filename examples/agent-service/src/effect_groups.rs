@@ -132,10 +132,14 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
     }
 }
 
-pub(crate) fn effect_group_services(ingress_url: impl Into<String>) -> RestateEffectGroupServices {
+pub(crate) fn effect_group_services(
+    ingress_url: impl Into<String>,
+    authority_id: lash_restate::RestateAuthorityId,
+) -> RestateEffectGroupServices {
     RestateEffectGroupServices::new(
         Arc::new(AgentServiceEffectGroupExecutors),
         RestateIngressClient::new(ingress_url.into()),
+        authority_id,
         RestateEffectGroupRetryPolicy::infinite(),
     )
 }

@@ -282,6 +282,20 @@ pub trait RuntimeEffectLocalRunner: Send {
         false
     }
 
+    /// The handler-level driver this runner carries, when it is a tool child
+    /// (ADR 0099 §2, FIG-2266).
+    ///
+    /// `execute` runs the runner's whole body to a terminal, which is correct
+    /// only where the runner may build the child's admitted controller itself.
+    /// A tier whose admitted controller is bound to a live handler context
+    /// calls the returned driver with the controller *it* built instead, so
+    /// the driver runs at handler level rather than inside a recorded body.
+    /// `None` is the honest answer for every other kind of runner — leaf
+    /// effects have no handler-level driver to hand out.
+    fn tool_child_driver(&self) -> Option<&dyn super::tool_child_driver::ToolChildDriver> {
+        None
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
@@ -723,6 +737,24 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// returning `None` when the runtime has no configured trace sink.
     pub fn replay_validation_trace(&self) -> Option<&super::RuntimeEffectReplayTrace> {
         self.replay_trace.as_ref()
+    }
+
+    /// The handler-level driver this executor carries, when it is a tool
+    /// child; `None` for every leaf executor (ADR 0099 §2, FIG-2266).
+    ///
+    /// Same answer the resolver gave: this only *reaches* the runner the
+    /// resolver routed — it does not re-decide routing. A tier that drives
+    /// tool children at handler level resolves once through
+    /// [`GroupExecutors::executor_for`](super::group_drain::GroupExecutors::executor_for)
+    /// and reads this.
+    pub fn tool_child_driver(&self) -> Option<&dyn super::tool_child_driver::ToolChildDriver> {
+        match &self.state {
+            RuntimeEffectLocalExecutorState::Runner(runner) => runner.tool_child_driver(),
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
+                runner.tool_child_driver()
+            }
+            RuntimeEffectLocalExecutorState::Target(_) => None,
+        }
     }
 
     /// Executes execute work for effect-host implementors while executing or replaying a runtime

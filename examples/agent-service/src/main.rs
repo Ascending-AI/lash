@@ -471,6 +471,9 @@ async fn async_main() -> anyhow_like::Result<()> {
                 state
                     .restate_ingress_url()
                     .expect("Restate durability configures ingress"),
+                restate_authority_id
+                    .clone()
+                    .expect("Restate durability configures the authority id"),
             );
             let endpoint = restate_sdk::endpoint::Endpoint::builder()
                 .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())

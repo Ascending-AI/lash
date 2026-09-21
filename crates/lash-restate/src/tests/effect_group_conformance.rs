@@ -84,6 +84,22 @@ impl GroupExecutors for ConformanceExecutors {
                 .as_ref()
                 .and_then(|executors| executors.executor_for(envelope));
         }
+        // A tool child answers through its handler-level driver, which lives
+        // on the resolved runner — wrapping it in the one-shot staged
+        // executor would strip `tool_child_driver()`. Re-resolution on a
+        // redrive is the correct behaviour anyway: the runner re-captures
+        // whatever opener context is live then.
+        if matches!(
+            envelope.command,
+            RuntimeEffectCommand::ToolInvocation { .. }
+        ) {
+            return self
+                .current
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .and_then(|executors| executors.executor_for(envelope));
+        }
         if let Some(staged) = self
             .staged
             .lock()
@@ -201,6 +217,7 @@ impl LiveConformanceHarness {
         let services = RestateEffectGroupServices::new(
             Arc::clone(&executors) as Arc<dyn GroupExecutors>,
             ingress,
+            crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
             RestateEffectGroupRetryPolicy::infinite(),
         );
         let listener = tokio::net::TcpListener::bind(bind_addr)

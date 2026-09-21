@@ -1504,19 +1504,22 @@ pub(crate) fn restate_effect_execution(
                 group,
             },
         },
-        // No arm yet, and deliberately not `JournaledRun`. A tool invocation is
-        // ADR 0099 §2's handler-level driver: retry, completion-key derivation
-        // and the deferred await are coordination, and §2 forbids coordination
-        // inside a recorded body ("A recorded body must not emit commands into
-        // an ordinal-addressed journal"). Routing it to a `ctx.run` closure
-        // would be exactly that, so this tier refuses until FIG-2266 builds the
-        // driver. FIG-3408 mints the shape; it does not execute it.
+        // Deliberately not `JournaledRun`, and unreachable on the group path.
+        // A tool invocation is ADR 0099 §2's handler-level driver: retry,
+        // completion-key derivation and the deferred await are coordination,
+        // and §2 forbids coordination inside a recorded body ("A recorded body
+        // must not emit commands into an ordinal-addressed journal"). The
+        // `EffectGroupDispatch::child` handler resolves the `ToolChildDriver`
+        // and drives it at handler level with a ctx-bound admitted controller;
+        // the driver's own atomic effects arrive here individually. This arm
+        // remains the guard for any path that tries to execute the command
+        // itself as one recorded step.
         RuntimeEffectCommand::ToolInvocation { .. } => {
             return Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "restate has no handler-level driver for a tool invocation yet, so the \
-                 command is refused rather than run inside a recorded body, which ADR 0099 \
-                 section 2 forbids for coordination",
+                "a tool invocation is a handler-level driver, not an atomic effect; the \
+                 effect-group child handler drives it, so reaching this controller arm means \
+                 coordination was routed into a recorded body, which ADR 0099 section 2 forbids",
             ));
         }
         RuntimeEffectCommand::Sleep { spec } => {

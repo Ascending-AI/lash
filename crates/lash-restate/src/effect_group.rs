@@ -40,6 +40,7 @@ use crate::durable_wait::{
     LashDurableWaitWorkflowImpl, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
     RestateDurableWaitResolveRequest, durable_wait_index_object_key, restate_await_event_key,
 };
+use crate::ingress::RestateAuthorityId;
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
 const PAYLOAD_STATE_KEY: &str = "effect-group/v1/payload";
@@ -103,9 +104,15 @@ impl RestateEffectGroupRetryPolicy {
 }
 
 impl RestateEffectGroupServices {
+    /// `authority_id` is the deployment's durable-authority identity: the
+    /// child handler binds its runtime controller with it, so it must be the
+    /// same id the deployment's `RestateEffectHost` and turn/process
+    /// controllers use — await-event keys and the cancellation binding a tool
+    /// child's recorded request is validated against are both derived from it.
     pub fn new(
         executors: Arc<dyn GroupExecutors>,
         ingress: RestateIngressClient,
+        authority_id: RestateAuthorityId,
         infinite_retry_policy: RestateEffectGroupRetryPolicy,
     ) -> Self {
         Self {
@@ -114,6 +121,7 @@ impl RestateEffectGroupServices {
             dispatch: EffectGroupDispatch {
                 executors,
                 ingress,
+                authority_id,
                 infinite_retry_policy: infinite_retry_policy.0,
             },
             wait: RestateEffectGroupWaitServices::default(),
