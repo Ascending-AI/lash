@@ -2,6 +2,11 @@
 // Source: https://github.com/boa-dev/boa at 93a9e31a83bbaa15bbd8b687e61639ffc53bbef1; MIT licensed.
 // Local modifications: narrowed Boa's Test262 metadata reader to the fields and errors used by Lash's test runner.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use std::path::Path;
 
 use serde::Deserialize;

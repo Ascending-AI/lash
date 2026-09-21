@@ -1,0 +1,9 @@
+# Crate-local clippy configuration. Clippy stops at the first `clippy.toml`
+# it finds walking up from the manifest directory, so this file shadows the
+# workspace one entirely.
+#
+# lash-sim is a simulation/test harness host: it legitimately reads the filesystem, env, and spawns processes (FIG-2971). The workspace `disallowed-methods` ambient fs/env/process ban
+# therefore does not apply here; the test exemptions below are repeated to
+# match the workspace file.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true

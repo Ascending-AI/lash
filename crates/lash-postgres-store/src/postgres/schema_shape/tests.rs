@@ -1,6 +1,11 @@
 //! Contract tests over both committed artifacts: `schema.sql`, the DDL a host
 //! vendors, and `schema-shape.txt`, the structure every open verifies against.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 use crate::postgres_test_support;
 use lash_sansio::SessionId;

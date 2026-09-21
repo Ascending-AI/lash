@@ -55,6 +55,10 @@ pub(crate) struct ConnectingService {
     pub(crate) stdio_child: Option<StdioChildGuard>,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "spawning the configured MCP stdio server is this plugin's purpose; the host supplies the command (FIG-2971)"
+)]
 pub(crate) fn connect_service(
     server_name: &str,
     config: &McpServerConfig,
@@ -499,6 +503,7 @@ impl Drop for StdioChildGuard {
 /// guard's observable sequence under production timing is pinned here
 /// without any test clock in play.
 #[cfg(all(test, unix))]
+#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {
     use super::*;
     use std::process::{Command, Stdio};

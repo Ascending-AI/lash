@@ -126,11 +126,14 @@ unexpected_cfgs = { level = "deny", check-cfg = [
 
 [workspace.lints.clippy]
 await_holding_lock = "deny"
-# The configured list lives in `crates/lash-core/clippy.toml` and is scoped to
-# that crate on purpose: `lash_core::task::spawn` is core's tracing-context
-# idiom, and hosts, examples and runbooks legitimately call `tokio::spawn`
-# directly (234 call sites outside core). The lint level is workspace-wide so a
-# new entry in that list is enforced everywhere it applies.
+# The configured lists live in `clippy.toml` files: the workspace root file
+# carries the FIG-2971 ambient fs/env/process ban (hosts supply the world;
+# library code takes paths, config, and handles by parameter), and crate-local
+# files in `crates/lash-core*/clippy.toml` additionally ban `tokio::spawn` in
+# favor of `lash_core::task::spawn` for tracing-context propagation. Host and
+# tooling crates (examples/, runbooks/, lash-sim, lash-perf, lash-conformance)
+# shadow the root file with an opt-out `clippy.toml`; sanctioned production
+# call sites carry `#[expect(clippy::disallowed_methods, reason = "...")]`.
 disallowed_methods = "deny"
 # A production panic a reviewer cannot tell apart from a deliberate invariant
 # assertion is the defect these close (FIG-2784). Test code keeps both: the

@@ -16,6 +16,11 @@
 //!     --lib every_converted_statement_keeps_its_rendered_bytes
 //! ```
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use lash_store_sql::Statement;
 
 use crate::scope_fence::Schema;

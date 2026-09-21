@@ -594,6 +594,10 @@ fn existing_tool_output_path(ctx: &ToolResultProjectionContext) -> Option<PathBu
         .map(PathBuf::from)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the spill policy exists to write tool output to the host-supplied spill directory (FIG-2971)"
+)]
 fn spill_tool_output(
     spill: &SpillPolicy,
     tool_name: &str,
@@ -634,6 +638,10 @@ struct SpillFile {
     bytes: u64,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the spill policy exists to manage files in the host-supplied spill directory (FIG-2971)"
+)]
 fn prune_spill_directory(policy: &SpillPolicy, exempt_path: &Path) {
     let Ok(entries) = fs::read_dir(&policy.dir) else {
         return;
@@ -710,6 +718,10 @@ fn is_plugin_spill_file(path: &Path) -> bool {
     digest.len() == 12 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the spill policy exists to write tool output to the host-supplied spill directory (FIG-2971)"
+)]
 fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
     let should_write = match fs::read_to_string(path) {
         Ok(existing) => existing != content,
@@ -886,6 +898,7 @@ fn batch_child_args(batch_args: &serde_json::Value, index: usize) -> serde_json:
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {
     use super::*;
     use lash_sansio::SessionId;

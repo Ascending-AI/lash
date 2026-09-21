@@ -162,6 +162,7 @@ pub(super) fn semantic_boundary_request_identity(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod semantic_boundary_request_identity_tests {
     use super::*;
     use crate::store::SemanticBoundaryOperation;

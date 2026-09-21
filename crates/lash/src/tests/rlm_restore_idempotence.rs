@@ -18,6 +18,11 @@
 //! been without the append, and a turn rejected before its commit never hands
 //! its execution to the next ordinary turn (storeless and store-backed).
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::atomic::{AtomicUsize, Ordering};

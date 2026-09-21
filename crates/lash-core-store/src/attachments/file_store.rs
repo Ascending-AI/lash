@@ -1,3 +1,7 @@
+// FIG-2971: FileAttachmentStore is the filesystem-backed attachment
+// store; the host injects `root` and this file is the sanctioned fs site.
+#![allow(clippy::disallowed_methods)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};

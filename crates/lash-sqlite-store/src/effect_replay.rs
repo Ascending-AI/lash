@@ -432,6 +432,10 @@ impl SqliteEffectHost {
         .await
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "replay binding identity is the canonical form of the host-supplied database path (FIG-2971)"
+    )]
     pub async fn open_with_options_and_clock(
         path: &Path,
         options: SqliteEffectReplayOptions,
@@ -528,6 +532,10 @@ impl SqliteRuntimeEffectController {
         .await
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "replay binding identity is the canonical form of the host-supplied database path (FIG-2971)"
+    )]
     pub async fn open_with_options_and_clock(
         path: &Path,
         scope: ExecutionScope,

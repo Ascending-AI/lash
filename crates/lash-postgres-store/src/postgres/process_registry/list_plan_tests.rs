@@ -13,6 +13,11 @@
 //! while a predicate the planner cannot match still falls back to a sequential
 //! scan under the setting, which is exactly the failure this asserts against.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 
 async fn plan_for(filter: &lash_core::ProcessListFilter) -> Option<String> {

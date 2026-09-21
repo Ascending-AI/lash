@@ -16,6 +16,10 @@
 use super::*;
 use lash_sansio::SessionId;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "store identity is the canonical form of the host-supplied catalog path (FIG-2971)"
+)]
 pub(super) fn canonical_catalog_identity(path: &Path) -> PathBuf {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let mut existing = absolute.as_path();
