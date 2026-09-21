@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 143,
+  "cargo_target_count": 144,
   "feature_lane_units": [
     {
       "features": [],
@@ -17368,7 +17368,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 197,
+  "generated_label_count": 198,
   "packages": [
     {
       "declared_features": [
