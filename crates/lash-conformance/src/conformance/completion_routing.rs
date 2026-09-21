@@ -110,12 +110,26 @@ impl IssuanceSpy {
 
 /// The three routing facts a retained child can record, mapped to the
 /// `may_defer` question the issuance gate is actually asked: `Inline` never
-/// needs a key; the two deferring modes always do.
-const MODES: &[(ToolChildCompletionRouting, bool)] = &[
-    (ToolChildCompletionRouting::Inline, false),
-    (ToolChildCompletionRouting::Durable, true),
-    (ToolChildCompletionRouting::ProcessLifetime, true),
-];
+/// needs a key; the two deferring modes always do. `ProcessLifetime` names
+/// its minting authority on this base — the value is not what the pairwise
+/// ruling judges, so the law binds a fixed identity.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn modes() -> [(ToolChildCompletionRouting, bool); 3] {
+    [
+        (ToolChildCompletionRouting::Inline, false),
+        (ToolChildCompletionRouting::Durable, true),
+        (
+            ToolChildCompletionRouting::ProcessLifetime {
+                issuer: crate::TurnControlBindingId::new("lash-conformance-completion-routing")
+                    .expect("a valid binding id"),
+            },
+            true,
+        ),
+    ]
+}
 
 /// Host kinds the pairwise matrix covers. The tier host is whatever the
 /// fixture's `make` produces; the two native hosts pin the capability
@@ -224,14 +238,14 @@ async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
     // that issues deferring keys while naming none is the process-lifetime
     // arm — never a durable routing target.
     let authority = spy.authority();
-    for (mode, may_defer) in MODES {
+    for (mode, may_defer) in modes() {
         let cell = format!("({mode:?} × {})", arm.name);
         // One wait identity per cell: two deferring modes on one host must
         // not share a key, or the second cell would read the first's terminal.
         let wait = AwaitEventWaitIdentity::tool_completion(format!("call-{}-{mode:?}", arm.name));
         let issued_before = spy.issued().len();
         let answer = spy
-            .prepare(&scope, wait.clone(), *may_defer)
+            .prepare(&scope, wait.clone(), may_defer)
             .await
             .expect("preparation answers capability, never an untyped failure");
         let answered = preparation_name(&answer);

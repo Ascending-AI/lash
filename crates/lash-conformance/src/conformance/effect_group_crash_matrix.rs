@@ -428,7 +428,10 @@ async fn crash_at(
                 let scope = crashed_scope.clone();
                 move |world, probe| {
                     Box::pin(async move {
-                        let scoped = world.host.scoped(scope.clone()).expect("scope");
+                        let scoped = world
+                            .host
+                            .scoped(crate::admit(scope.clone()))
+                            .expect("scope");
                         // `never` rather than `settles`: the residue must be
                         // *unsettled* children, and an executor that could
                         // finish would let a fast child journal a terminal
@@ -445,7 +448,7 @@ async fn crash_at(
                         // record, so it succeeding *is* the assertion — and
                         // its settle window expiring proves no rank was
                         // journaled before the process died.
-                        let probe_scoped = probe.host.scoped(scope).expect("scope");
+                        let probe_scoped = probe.host.scoped(crate::admit(scope)).expect("scope");
                         let mut probe_handle =
                             open(&probe_scoped, &key, 2, RUN, vec![never(), never()]).await;
                         assert!(
@@ -471,7 +474,7 @@ async fn crash_at(
                 let scope = crashed_scope.clone();
                 move |world| {
                     Box::pin(async move {
-                        let scoped = world.host.scoped(scope).expect("scope");
+                        let scoped = world.host.scoped(crate::admit(scope)).expect("scope");
                         let entered = Arc::new(AtomicUsize::new(0));
                         let _handle = open(
                             &scoped,
@@ -495,7 +498,7 @@ async fn crash_at(
                 let scope = crashed_scope.clone();
                 move |world, probe| {
                     Box::pin(async move {
-                        let scoped = world.host.scoped(scope).expect("scope");
+                        let scoped = world.host.scoped(crate::admit(scope)).expect("scope");
                         let entered = Arc::new(AtomicUsize::new(0));
                         let _handle =
                             open(&scoped, &key, 2, RUN, vec![settles(0), blocking(&entered)]).await;
@@ -551,11 +554,11 @@ async fn redrive_same_opener(
 ) {
     let capable = RecordingExecutors::settling();
     let world = make(spec(CRASH_LEASE_MS, &capable)).await;
+    let ran: Arc<Mutex<Vec<usize>>> = Arc::default();
     let scoped = world
         .host
-        .scoped(crashed_scope.clone())
+        .scoped(crate::admit(crashed_scope.clone()))
         .expect("the same scope binds");
-    let ran: Arc<Mutex<Vec<usize>>> = Arc::default();
     let mut handle = open(
         &scoped,
         key,
@@ -634,7 +637,7 @@ async fn redrive_different_opener(
     let world = make(spec(CRASH_LEASE_MS, &refusing)).await;
     let scoped = world
         .host
-        .scoped(crashed_scope.clone())
+        .scoped(crate::admit(crashed_scope.clone()))
         .expect("the same scope binds for a different process");
     let mut handle = open_with(
         &scoped,

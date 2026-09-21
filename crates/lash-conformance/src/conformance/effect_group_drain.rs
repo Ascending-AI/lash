@@ -1101,7 +1101,10 @@ pub(crate) async fn until_leases_lapse(make: &DrainWorldFactory, group_key: &str
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(crate) async fn drain_until_no_live_lease(world: &DrainWorld, group_key: &str) -> GroupDrainReport {
+pub(crate) async fn drain_until_no_live_lease(
+    world: &DrainWorld,
+    group_key: &str,
+) -> GroupDrainReport {
     tokio::time::timeout(AWAIT_BUDGET, async {
         loop {
             let report = world
@@ -1495,12 +1498,12 @@ impl RecordingExecutors {
         })
     }
 
-    fn settling() -> Arc<Self> {
+    pub(crate) fn settling() -> Arc<Self> {
         Self::uniform(ExecutorAnswer::Settle)
     }
 
     /// A host that cannot run these commands at all.
-    fn refusing() -> Arc<Self> {
+    pub(crate) fn refusing() -> Arc<Self> {
         Self::uniform(ExecutorAnswer::Refuse)
     }
 
@@ -1520,7 +1523,7 @@ impl RecordingExecutors {
     /// The replay keys this host was *asked* about, sorted, with duplicates
     /// kept — an ask twice is exactly the defect these laws are looking for, so
     /// the multiset is the assertion and a deduplicated set would hide it.
-    fn asked_about(&self) -> Vec<String> {
+    pub(crate) fn asked_about(&self) -> Vec<String> {
         let mut keys = self.asked.lock_recover().clone();
         keys.sort();
         keys
@@ -1533,7 +1536,7 @@ impl RecordingExecutors {
     /// honestly: a pass asks for an executor and then loses the claim, so the ask
     /// happened and the execution did not. Exactly-once is a statement about
     /// this list.
-    fn executions(&self) -> Vec<String> {
+    pub(crate) fn executions(&self) -> Vec<String> {
         let mut keys = self.executed.lock_recover().clone();
         keys.sort();
         keys
