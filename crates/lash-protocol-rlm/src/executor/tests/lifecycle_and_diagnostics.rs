@@ -1065,19 +1065,22 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // bytes. Re-pinned again by FIG-3394, which tags the opener kind: a
         // turn scope is a free-form string that could spell a process opener
         // exactly, so `turn:` is part of the scope rather than decoration.
+        // Re-pinned once more under FIG-3394 when the fixture began naming the
+        // cell it executes: the opener is now the admitted turn address
+        // (`test-session:turn-7`) rather than a fixture-spelled effect key.
         // What the pair asserts is unchanged: the two sides are still equal,
         // which is the trace-sink independence this test exists for; only the
         // derivation both sides share moved.
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:turn:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
+                "lashlang:turn:test-session:turn-7:exec-code:3:resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:turn:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
+                "lashlang:turn:test-session:turn-7:exec-code:3:resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
             )
         );
 
@@ -1091,11 +1094,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/82a5454ce1556089ffd9478e251609f4d811e2e6cfb8669e27ac5a99391f5dfd"
+            "frame-key/v2/1d66c15c4eac2e28bd1aa0e63f8c9fe1539366e1384edf4b2287afb1104a1359"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/82a5454ce1556089ffd9478e251609f4d811e2e6cfb8669e27ac5a99391f5dfd"
+            "frame-key/v2/1d66c15c4eac2e28bd1aa0e63f8c9fe1539366e1384edf4b2287afb1104a1359"
         );
     });
 }
