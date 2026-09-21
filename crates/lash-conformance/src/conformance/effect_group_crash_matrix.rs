@@ -415,6 +415,10 @@ async fn run_cell(
 
 /// Leaves the residue the window names, verified before the process dies where
 /// verification needs a live claimant.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn crash_at(
     make: &DrainWorldFactory,
     window: GroupCrashWindow,
@@ -546,6 +550,10 @@ async fn crash_at(
 /// under the executors this opener staged. A resolver that ran a journaled
 /// child again, or a retained child under the wrong request, would show up in
 /// `ran` as an extra or a wrong position.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn redrive_same_opener(
     make: &DrainWorldFactory,
     window: GroupCrashWindow,
@@ -625,6 +633,10 @@ async fn redrive_same_opener(
 /// ruling predicts nothing runs, every retained child is asked about once,
 /// journaled ranks still replay to the impostor's handle, and an honest host
 /// still finishes the queue.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn redrive_different_opener(
     make: &DrainWorldFactory,
     window: GroupCrashWindow,
@@ -714,6 +726,10 @@ async fn redrive_different_opener(
 /// a rank, `NoExecutor` where a child is waiting, never a fabricated
 /// `is_complete` that would retire the journal of work nobody ran — and a
 /// later wired host settles each unsettled child exactly once.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn redrive_no_opener(make: &DrainWorldFactory, window: GroupCrashWindow, key: &str) {
     let unwired = make(unwired_spec(CRASH_LEASE_MS)).await;
     let report = pass(&unwired, key)

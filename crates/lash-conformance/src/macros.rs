@@ -712,10 +712,6 @@ macro_rules! effect_host_tests {
     ($fixture:block) => {
         $crate::effect_host_tests!(@catalogue $fixture; [
             (effect_host, "effect-host"),
-            (
-                completion_routing_pairwise_refusal,
-                "completion-routing-pairwise"
-            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -736,6 +732,10 @@ macro_rules! effect_host_await_event_tests {
     ($fixture:block) => {
         $crate::effect_host_await_event_tests!(@catalogue $fixture; [
             (effect_host_await_events, "effect-host-await-event"),
+            (
+                completion_routing_pairwise_refusal,
+                "completion-routing-pairwise"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

@@ -238,6 +238,10 @@ impl PossessionWorld {
     /// handle. Signal replies routinely carry the target's handle back — the
     /// result is data, not authority, and the kind guard is what stops an echo
     /// from conferring possession of a process the settling run never started.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn settle_signal_echoing_handle(&mut self, opener_name: &'static str, victim: &str) {
         let victim_id = ProcessId::from(victim);
         let victim_record = self
@@ -313,6 +317,10 @@ impl PossessionWorld {
         self.handover(opener_name).await;
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     fn realized_registration(
         &self,
         child_id: &ProcessId,
@@ -357,6 +365,10 @@ impl PossessionWorld {
     /// 4. rows no start channel realized are possessed by nobody;
     /// 5. the registry actually holds every row the ledger claims realized —
     ///    and holds nothing the ledger cannot account for.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn assert_conservation(&self, step: &str) {
         let mut owners: BTreeMap<ProcessId, Vec<&'static str>> = BTreeMap::new();
         for (name, opener) in &self.openers {
@@ -399,7 +411,7 @@ impl PossessionWorld {
                 "[{step}] {process_id} was never realized by any run but is possessed"
             );
         }
-        for (process_id, _) in &self.realized {
+        for process_id in self.realized.keys() {
             assert!(
                 self.host
                     .process_registry

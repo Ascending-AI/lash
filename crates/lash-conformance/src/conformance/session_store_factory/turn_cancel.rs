@@ -79,10 +79,6 @@ async fn authorize_closure(
     authorization
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 fn closure_authorization(
     address: &crate::TurnAddress,
     admitted_scope: crate::ExecutionScope,

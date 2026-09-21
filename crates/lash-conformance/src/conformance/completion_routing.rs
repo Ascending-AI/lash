@@ -273,7 +273,7 @@ async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
         let cell_issued = &spy.issued()[issued_before..];
         assert_eq!(
             cell_issued,
-            &[key.clone()],
+            std::slice::from_ref(&key),
             "{cell}: exactly one key reaches the caller per issued cell"
         );
 
@@ -366,10 +366,6 @@ async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
 /// refuses the pair before asking for a key. The recorded-routing gate that
 /// consumes that signal lands with the C1 fix round (FIG-2266); the signal
 /// being honest is the precondition this oracle guards.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn completion_routing_pairwise_refusal<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
