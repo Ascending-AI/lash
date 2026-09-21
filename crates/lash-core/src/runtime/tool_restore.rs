@@ -43,7 +43,10 @@
 //! [`ToolSurfaceOpenMode::PreservePersisted`](crate::ToolSurfaceOpenMode) and
 //! the open skips the reconcile, the catalog rebuild, this report and its
 //! warning wholesale. The loaded snapshot rides the runtime's commits forward
-//! untouched instead of being restamped from an unreconciled registry.
+//! untouched instead of being restamped from an unreconciled registry, and
+//! every turn-execution entry refuses the open — skipping the installer also
+//! skipped the `ToolSourcePolicy` decision, so a turn there is refused rather
+//! than allowed to run against an unreconciled surface.
 
 use crate::{SessionError, SessionId, ToolRestoreReport, ToolSourcePolicy, ToolState};
 

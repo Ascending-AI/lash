@@ -254,10 +254,24 @@ append pending input on a core that does not carry the session's tool sources.
   movement, and the tools are still catalog members on the next reconciling
   open. The same skip applies to the resident re-sync on such a runtime.
 
-The mode is a claim, not a fence: nothing stops a turn from running on a
-`PreservePersisted` open, and a turn that does run executes against whatever
-live surface the sources advertise while the durable snapshot still reflects
-the last reconciled open. The facade exposes it as
+The declaration is a fence, not merely a claim. Every turn-execution entry —
+direct turns, queued and prepared drives, and the shared logical-turn funnel
+— refuses a `PreservePersisted` open with
+`RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface` before
+admission, because the surface was never reconciled and no `ToolSourcePolicy`
+was enforced: letting a turn run there would both execute against an
+unreconciled registry and bypass `Require`. Reopening in `Reconcile` mode is
+the escalation path; it performs the restore, applies the policy and rebuilds
+the catalog.
+
+Preservation is owned by the runtime's open configuration, not only by the
+resident state. Whole-state replacements — resident reload, append-receipt
+replay, append rollback — rebuild the state wholesale, so the runtime
+reasserts the preservation marker from `tool_surface_open_mode` at each
+adoption and at every stamp boundary; a `PreservePersisted` commit therefore
+carries the loaded snapshot forward even across those replacements.
+
+The facade exposes it as
 `SessionBuilder::enqueue_only()`; below the facade it rides the runtime host
 config (`RuntimeControlConfig::tool_surface_open_mode`), so every construction
 the open performs sees the same choice. Hosts that need durable input without

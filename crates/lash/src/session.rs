@@ -142,7 +142,15 @@ impl SessionBuilder {
     /// lost-tools warning fires. Commits the open takes carry the persisted
     /// surface forward byte-for-byte instead of restamping an unreconciled
     /// registry, so the session's tools are still catalog members on the next
-    /// ordinary open. See
+    /// ordinary open.
+    ///
+    /// The declaration is enforced, not advisory: because the surface was
+    /// never reconciled and no [`ToolSourcePolicy`](lash_core::ToolSourcePolicy)
+    /// was enforced, [`turn`](LashSession::turn),
+    /// [`queued_turn`](LashSession::queued_turn) and every other
+    /// turn-execution entry fail with
+    /// [`RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface`](lash_core::RuntimeErrorCode)
+    /// before admission. Reopen without `enqueue_only` to run a turn. See
     /// [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
     pub fn enqueue_only(mut self) -> Self {
         self.tool_surface_open_mode = Some(lash_core::ToolSurfaceOpenMode::PreservePersisted);

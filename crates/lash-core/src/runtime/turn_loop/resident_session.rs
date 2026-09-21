@@ -543,6 +543,10 @@ impl LashRuntime {
                     )
                 })?;
             self.state = durable_state;
+            // The durable reload replaced the whole resident state; reassert
+            // the per-open `PreservePersisted` claim from host configuration
+            // so later stamps keep the loaded snapshot (FIG-3353).
+            self.reapply_tool_state_preservation_marker();
             self.publish_plugin_tool_access();
             // A successful reload is a full durable adoption: settle the
             // freshness facts so the turn loop does not issue a second

@@ -279,6 +279,9 @@ impl LashRuntime {
         session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
+        // FIG-3353: the shared funnel for every logical turn — an open that
+        // declared it would not run one is refused before any effect.
+        self.refuse_turn_execution_on_preserved_tool_surface()?;
         let (follow_protocol_turn_options, follow_turn_context, supplied_trace_turn_id) =
             start.continuation_state();
         if !supplied_trace_turn_id.is_empty()
