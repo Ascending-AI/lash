@@ -342,6 +342,13 @@ impl LiveConformanceHarness {
                 let host = Arc::clone(&host);
                 Box::pin(async move { lash_conformance::ToolChildWorld { host, drain: None } })
             }),
+            // Deliberately one registry for every scenario, despite
+            // `ToolChildLawFixture::make_registry` promising a fresh one: the
+            // endpoint's LashProcessWorkflow writes the segment terminal into
+            // the registry the orchestrating child's start recorded, so the
+            // dispatched context and the workflow must share this one. Rows
+            // do not collide because scenario prefixes keep process ids
+            // distinct.
             make_registry: Arc::new({
                 let registry = Arc::clone(&self.process_registry);
                 move || {

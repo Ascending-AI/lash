@@ -770,17 +770,7 @@ impl EffectGroupIndex {
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Json(EffectGroupOpenResponse::Retired));
         }
-        // The reopen fence judges the durable record the same way the journaled
-        // tiers' `fence_reopen` does: child count, wake rule, and declared
-        // disposition are the group's identity. Replay keys and retained
-        // membership are the journal the reopen reads back, not facts the
-        // caller may restate — a reopen that offers different children is a
-        // lawful impostor, and the retained membership is what dispatches.
-        let recorded = &record.live()?.shape;
-        if recorded.children != request.shape.children
-            || recorded.wake != request.shape.wake
-            || recorded.loser_disposition != request.shape.loser_disposition
-        {
+        if record.live()?.shape != request.shape {
             return Ok(Json(EffectGroupOpenResponse::ShapeMismatch));
         }
         Ok(Json(match record.lifecycle {
