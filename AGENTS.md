@@ -30,9 +30,6 @@ Everything else is `kiln check`/`kiln test` — cargo on PATH is a cgroup shim
 that does not submit to NativeLink, so every cargo compile is a cold local
 build. Never run cargo before `. ./env.sh`; never set CARGO_* by hand.
 
-
-
-
 ## Commits, PRs, published text
 
 Never a Claude, Anthropic, Codex, or any AI co-author trailer or AI mention in commits, PR bodies, comments, tickets, or teammate-visible text. Attribution is the user alone. Stage exact paths; never `commit -a`.
