@@ -893,7 +893,7 @@ fn unprintable_program_projection_exposes_no_source_spans() {
 
 #[test]
 fn canonical_span_goldens_cover_every_textual_node() {
-    let fixtures: [(&str, &str, &[&str]); 2] = [
+    let fixtures: Vec<(&str, &str, &[&str])> = vec![
         (
             "named-nested-repeated",
             r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});if(true){for(const value of [1]){while(false){await sleep(value);}}}return "done";};"#,
