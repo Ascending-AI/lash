@@ -74,8 +74,12 @@ impl LashRuntime {
             // registry keeps its prior generation/tools and silently diverges from
             // `state`. `restore_state` accepts the snapshot's generation, so a
             // surface that reached generation >= 2 restores cleanly; live
-            // changes bump once so the next commit captures them.
-            if let Some(tool_state) = state.tool_state_snapshot().cloned() {
+            // changes bump once so the next commit captures them. A
+            // `PreservePersisted` open skips this reconcile entirely
+            // (FIG-3353): the snapshot stays durable truth untouched.
+            if !self.preserves_persisted_tool_state()
+                && let Some(tool_state) = state.tool_state_snapshot().cloned()
+            {
                 let registry = session.plugins().tool_registry();
                 let report = crate::runtime::tool_restore::install_persisted_tool_state(
                     registry.as_ref(),
@@ -96,6 +100,10 @@ impl LashRuntime {
             self.tool_restore_report = installed_tool_restore;
         }
         self.state = state;
+        // Whole-state adoption rebuilds the marker field; reassert the
+        // per-open `PreservePersisted` claim from host configuration
+        // (FIG-3353).
+        self.reapply_tool_state_preservation_marker();
         self.publish_plugin_tool_access();
         Ok(())
     }
@@ -384,6 +392,10 @@ impl LashRuntime {
         execution_before_append: Option<crate::plugin::HydratedExecutionState>,
     ) -> Result<(), SessionError> {
         self.state = state;
+        // Receipt replay and append rollback adopt a whole replacement state;
+        // reassert the per-open `PreservePersisted` claim so the stamp below
+        // cannot export the unreconciled registry (FIG-3353).
+        self.reapply_tool_state_preservation_marker();
         self.publish_plugin_tool_access();
         let state_for_restore = self.state.clone();
         let mut restored_capture = None;

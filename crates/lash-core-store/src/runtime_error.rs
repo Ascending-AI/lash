@@ -58,6 +58,13 @@ pub enum RuntimeErrorCode {
     /// history; an operator must restore the application records before
     /// redriving the same turn.
     TurnInputRedriveSetUnavailable,
+    /// A turn was attempted on a runtime opened with
+    /// `ToolSurfaceOpenMode::PreservePersisted` (FIG-3353). That open declared
+    /// it would not run a turn: its tool surface was never reconciled and no
+    /// `ToolSourcePolicy` was enforced, so no direct or queued turn may
+    /// execute against it. Reopening the session in `Reconcile` mode is the
+    /// recovery; retrying the identical call on this open fails identically.
+    TurnExecutionRequiresReconciledToolSurface,
     /// The store aborted a commit before publication because transactional
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
@@ -421,6 +428,9 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
             Self::TurnInputRedriveSetUnavailable => "turn_input_redrive_set_unavailable",
+            Self::TurnExecutionRequiresReconciledToolSurface => {
+                "turn_execution_requires_reconciled_tool_surface"
+            }
             Self::StoreCommitContended => "store_commit_contended",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
@@ -691,6 +701,7 @@ impl RuntimeErrorCode {
             | Self::MissingExecutionScopeId
             | Self::ExecutionScopeTurnIdMismatch
             | Self::TurnInputRedriveSetUnavailable
+            | Self::TurnExecutionRequiresReconciledToolSurface
             | Self::QueuedWorkRowExceedsContextWindow
             | Self::StoreCommitNodeBudgetExceeded
             | Self::StoreCommitByteBudgetExceeded
@@ -869,6 +880,7 @@ impl RuntimeErrorCode {
         Self::SessionExecutionLaneBusy,
         Self::TurnInputSettlementSuperseded,
         Self::TurnInputRedriveSetUnavailable,
+        Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
@@ -1061,6 +1073,9 @@ impl RuntimeErrorCode {
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
             "turn_input_redrive_set_unavailable" => Self::TurnInputRedriveSetUnavailable,
+            "turn_execution_requires_reconciled_tool_surface" => {
+                Self::TurnExecutionRequiresReconciledToolSurface
+            }
             "store_commit_contended" => Self::StoreCommitContended,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
