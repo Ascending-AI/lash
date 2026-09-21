@@ -38,7 +38,12 @@ pub struct RuntimeObservation {
     pub revision: SessionRevision,
     pub cursor: SessionCursor,
     pub read_view: crate::SessionReadView,
-    pub persisted_state: super::RuntimeSessionState,
+    /// The session's current durable frame identity at publication time.
+    /// Together with `session_id` it is the scope root the frame-scoped
+    /// process listing and host probes build from.
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
+    /// The committed turn index at publication time.
+    pub turn_index: usize,
     pub usage_report: super::SessionUsageReport,
     pub tool_state: Option<crate::ToolState>,
     /// The session's active tool catalog, or the capture error. One field —
@@ -50,6 +55,10 @@ pub struct RuntimeObservation {
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
     pub queue_store: Option<Arc<dyn crate::RuntimePersistence>>,
     pub queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    /// Fingerprint of the resident authority at publication time, compared
+    /// across publishes to detect revision-stable resident changes without
+    /// retaining the resident state itself.
+    authority_fingerprint: Vec<u8>,
 }
 
 impl RuntimeObservation {
@@ -59,8 +68,8 @@ impl RuntimeObservation {
         previous: Option<&RuntimeObservation>,
         revision: SessionRevision,
         read_view: crate::SessionReadView,
-        persisted_state: super::RuntimeSessionState,
         usage_report: super::SessionUsageReport,
+        authority_fingerprint: Vec<u8>,
     ) -> Self {
         let tool_catalog = runtime
             .active_tool_catalog_shared()
@@ -116,7 +125,8 @@ impl RuntimeObservation {
             revision,
             cursor,
             read_view,
-            persisted_state,
+            current_frame_node_id: runtime.state.current_frame_node_id.clone(),
+            turn_index: runtime.state.turn_index,
             usage_report,
             tool_state,
             tool_catalog,
@@ -127,6 +137,7 @@ impl RuntimeObservation {
                 .as_ref()
                 .and_then(|session| session.history_store()),
             queued_work: Arc::clone(runtime.host.queued_work()),
+            authority_fingerprint,
         }
     }
 
@@ -155,6 +166,18 @@ impl RuntimeObservation {
 
     pub fn process_scope_id(&self) -> crate::SessionScopeId {
         self.process_scope().id()
+    }
+
+    /// Build the execution scope for a turn in this session from the
+    /// published identity.
+    pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> crate::ExecutionScope {
+        crate::ExecutionScope::turn(self.session_id.as_ref(), turn_id)
+    }
+
+    /// Build the execution scope for a queued-work drain in this session
+    /// from the published identity.
+    pub fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
+        crate::ExecutionScope::queue_drain(self.session_id.as_ref(), drain_id)
     }
 
     pub async fn query_plugin(
@@ -204,7 +227,7 @@ impl RuntimeObservation {
     ) -> Vec<ProcessHandleView> {
         let root_scope = self.process_scope();
         let mut entries = list_scope_process_handles(executor, &root_scope, mode).await;
-        if let Some(agent_frame_id) = self.persisted_state.current_frame_node_id.as_ref() {
+        if let Some(agent_frame_id) = self.current_frame_node_id.as_ref() {
             let frame_scope = crate::SessionScope::for_agent_frame(
                 self.session_id.as_ref(),
                 agent_frame_id.clone(),
@@ -228,26 +251,26 @@ impl RuntimeObservation {
 )]
 fn export_observation_state(
     runtime: &LashRuntime,
-) -> (
-    super::RuntimeSessionState,
-    crate::SessionReadView,
-    super::SessionUsageReport,
-) {
+) -> (crate::SessionReadView, super::SessionUsageReport, Vec<u8>) {
     // Observation publication is synchronous. When resident state has been
     // invalidated, project only the already-adopted durable snapshot; never
     // recapture live plugin/tool state before the async reload gate runs.
-    let mut state = runtime.export_persistence_state();
     let read_view = runtime
         .read_view()
         .expect("resident runtime state is normalized before observation publication");
     let shared_ledger = runtime.shared_token_ledger.lock_recover();
+    let mut token_ledger = runtime.state.token_ledger.clone();
     let mut saturated = false;
     for entry in shared_ledger.iter().cloned() {
-        saturated |= super::merge_ledger_entry_saturating(&mut state.token_ledger, entry.entry);
+        saturated |= super::merge_ledger_entry_saturating(&mut token_ledger, entry.entry);
     }
     let usage_report =
-        super::SessionUsageReport::from_entries_with_saturation(&state.token_ledger, saturated);
-    (state, read_view, usage_report)
+        super::SessionUsageReport::from_entries_with_saturation(&token_ledger, saturated);
+    (
+        read_view,
+        usage_report,
+        authority_fingerprint(&runtime.state, &token_ledger),
+    )
 }
 
 async fn list_scope_process_handles(
@@ -295,15 +318,15 @@ impl RuntimeHandle {
         let revision = SessionRevision::from_runtime(&runtime);
         let cursor =
             live_replay_store.current_cursor(&SessionId::from(runtime.session_id()), revision);
-        let (state, read_view, usage_report) = export_observation_state(&runtime);
+        let (read_view, usage_report, authority_fingerprint) = export_observation_state(&runtime);
         let observation = RuntimeObservation::from_runtime(
             &runtime,
             cursor,
             None,
             revision,
             read_view,
-            state,
             usage_report,
+            authority_fingerprint,
         );
         Self {
             runtime: Arc::new(Mutex::new(runtime)),
@@ -350,24 +373,21 @@ impl RuntimeHandle {
         let turn_id = (previous.revision != revision)
             .then(|| runtime.last_committed_turn_id_for_revision(revision))
             .flatten();
-        let (state, read_view, usage_report) = export_observation_state(runtime);
+        let (read_view, usage_report, authority_fingerprint) = export_observation_state(runtime);
         let mut next = RuntimeObservation::from_runtime(
             runtime,
             previous.cursor.clone(),
             Some(previous.as_ref()),
             revision,
             read_view.clone(),
-            state,
             usage_report,
+            authority_fingerprint,
         );
         let payload = if previous.revision < revision {
             Some(SessionObservationEventPayload::Committed {
                 read_view: read_view.clone(),
             })
-        } else if force_resident
-            || authority_fingerprint(&previous.persisted_state)
-                != authority_fingerprint(&next.persisted_state)
-        {
+        } else if force_resident || previous.authority_fingerprint != next.authority_fingerprint {
             Some(SessionObservationEventPayload::ResidentChanged {
                 read_view: read_view.clone(),
             })
@@ -379,9 +399,8 @@ impl RuntimeHandle {
         };
 
         let mut drafts = Vec::with_capacity(2);
-        if previous.persisted_state.current_frame_node_id
-            != next.persisted_state.current_frame_node_id
-            && let Some(frame_id) = next.persisted_state.current_frame_node_id.clone()
+        if previous.current_frame_node_id != next.current_frame_node_id
+            && let Some(frame_id) = next.current_frame_node_id.clone()
         {
             drafts.push(LiveReplayEventDraft::new(
                 None::<String>,
@@ -724,14 +743,37 @@ impl RuntimeHandle {
     clippy::expect_used,
     reason = "crate-owned state encodes into an in-memory buffer"
 )]
-fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
-    let mut persisted_node_ids = state.persisted_node_ids.iter().collect::<Vec<_>>();
-    persisted_node_ids.sort_unstable();
+fn authority_fingerprint(
+    state: &super::RuntimeSessionState,
+    token_ledger: &[crate::TokenLedgerEntry],
+) -> Vec<u8> {
+    // The resident graph contributes its shape, not its serialized nodes:
+    // graph bodies are immutable durable history, and every production
+    // mutation moves the leaf, the node count, or another covered field, so
+    // serializing the node bodies per publish would re-pay an O(graph) cost
+    // for no added signal. `persisted_node_ids` is folded into an
+    // order-independent digest for the same reason.
+    let persisted_nodes_digest = state.persisted_node_ids.iter().fold(0u64, |digest, id| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(id.as_str(), &mut hasher);
+        digest.wrapping_add(std::hash::Hasher::finish(&hasher))
+    });
     serde_json::to_vec(&(
-        state,
+        &state.session_id,
+        &state.policy,
+        &state.current_frame_node_id,
+        state.session_graph.nodes.len(),
+        &state.session_graph.leaf_node_id,
+        state.turn_index,
+        &state.token_usage,
+        &state.last_prompt_usage,
+        &state.protocol_turn_options,
+        &state.authority,
         &state.checkpoint_components,
+        token_ledger,
+        &state.checkpoint_ref,
         state.head_revision,
-        persisted_node_ids,
+        persisted_nodes_digest,
     ))
     .expect("runtime observation authority must serialize")
 }
@@ -1069,6 +1111,58 @@ mod tests {
             SessionObservationEventPayload::ResidentChanged { .. }
         ));
         assert_eq!(events[1].turn_id, None);
+    }
+
+    #[tokio::test]
+    async fn publication_holds_no_full_state_graph_pin() {
+        let runtime = Box::pin(
+            LashRuntime::builder(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_session_id("graph-pin")
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+            .with_policy(crate::SessionPolicy {
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
+                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            })
+            .build(),
+        )
+        .await
+        .expect("runtime");
+        let handle = RuntimeHandle::new(runtime);
+        let writer = handle.writer();
+        let mut runtime = writer.lock().await;
+
+        // Measure the graph pins each legitimate observation contributor
+        // holds, then require the published observation to contribute
+        // exactly those — no extra full-state holder. One more pin would
+        // force a copy-on-write on every graph mutation until the next
+        // publish.
+        let pinned_with_observation = runtime.state.session_graph.data_strong_count();
+        let read_view = runtime.read_view().expect("read view");
+        let read_view_pins =
+            runtime.state.session_graph.data_strong_count() - pinned_with_observation;
+        drop(read_view);
+        let services = runtime.runtime_session_services().expect("plugin services");
+        let services_pins =
+            runtime.state.session_graph.data_strong_count() - pinned_with_observation;
+        drop(services);
+        // Resident state (1) + read view + plugin query services snapshot.
+        let expected = 1 + read_view_pins + services_pins;
+        assert_eq!(pinned_with_observation, expected);
+
+        switch_test_frame(&mut runtime.state, "first-frame");
+        handle.publish_from(&runtime);
+        assert_eq!(runtime.state.session_graph.data_strong_count(), expected);
+
+        switch_test_frame(&mut runtime.state, "second-frame");
+        handle.publish_from(&runtime);
+        assert_eq!(runtime.state.session_graph.data_strong_count(), expected);
     }
 
     #[tokio::test]

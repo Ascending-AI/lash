@@ -5,7 +5,6 @@ use crate::support::{
     SessionStoreCreateRequest, SessionStoreFactory, async_trait,
 };
 use lash_core::facade_support;
-use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::SessionId;
 
 pub(crate) struct NativeQueuedWorkRunConfig {
@@ -160,7 +159,6 @@ impl NativeQueuedWorkRunHandle {
         loop {
             let scope = handle
                 .observe()
-                .persisted_state
                 .queue_drain_scope(format!("{reason}:{}", uuid::Uuid::new_v4()));
             let scoped = effect_host.scoped(scope).map_err(|error| {
                 facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(

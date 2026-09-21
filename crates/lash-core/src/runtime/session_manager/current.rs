@@ -7,15 +7,26 @@ impl CurrentSessionCapability {
         &self,
         managed: &ManagedSessionCapability,
         session_id: &SessionId,
-    ) -> Option<RuntimeSessionState> {
+    ) -> Result<Option<RuntimeSessionState>, crate::PluginError> {
         if session_id == self.session_id {
-            return Some(self.snapshot.to_runtime_state());
+            return Ok(Some(self.snapshot.to_runtime_state()));
         }
         let runtime = {
             let registry = managed.registry.lock().await;
             registry.get(session_id).cloned()
-        }?;
-        Some(runtime.observe().persisted_state.clone())
+        };
+        let Some(runtime) = runtime else {
+            return Ok(None);
+        };
+        // Session creation is the one path that still wants a full resident
+        // state: ask the runtime for it under the writer gate rather than
+        // reading a published observation.
+        let mut writer = runtime.runtime.lock().await;
+        writer
+            .export_persisted_state()
+            .await
+            .map(Some)
+            .map_err(|err| crate::PluginError::Session(err.to_string()))
     }
 
     pub(in crate::runtime::session_manager) async fn turn_scope_by_id(
@@ -32,7 +43,7 @@ impl CurrentSessionCapability {
             registry.get(session_id).cloned()
         }
         .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        Ok(runtime.observe().persisted_state.turn_scope(turn_id))
+        Ok(runtime.observe().turn_scope(turn_id))
     }
 
     pub(in crate::runtime) async fn current_snapshot_for_store_write(
@@ -57,7 +68,7 @@ impl CurrentSessionCapability {
         session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
         self.resident_state_by_id(managed, session_id)
-            .await
+            .await?
             .map(|state| state.to_snapshot())
             .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))
     }

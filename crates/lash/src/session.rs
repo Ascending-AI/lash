@@ -799,10 +799,7 @@ impl LashSession {
     /// The scope uses the exact store-backed session identity owned by this
     /// facade handle's Session Binding.
     pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash_core::ExecutionScope {
-        lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope(
-            &self.runtime.observe().persisted_state,
-            turn_id,
-        )
+        self.runtime.observe().turn_scope(turn_id)
     }
 
     /// Build the cancellation and terminal-observation address for a turn.
@@ -1141,8 +1138,7 @@ impl LashSession {
         if let Some(slot) = &self.process_phase_probe_slot {
             let observation = self.runtime.observe();
             slot.set_for_session(observation.session_id(), Arc::clone(&probe));
-            if let Some(current_frame) = observation.persisted_state.current_frame_node_id.as_ref()
-            {
+            if let Some(current_frame) = observation.current_frame_node_id.as_ref() {
                 let scope = lash_core::SessionScope::for_agent_frame(
                     observation.session_id(),
                     current_frame.clone(),
