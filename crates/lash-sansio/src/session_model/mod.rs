@@ -244,7 +244,7 @@ impl ConversationRecord {
 /// Token usage statistics from an LLM call.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenUsage {
-    pub input_tokens: i64,
+    pub input: i64,
     pub output_tokens: i64,
     pub cache_read_input_tokens: i64,
     pub cache_write_input_tokens: i64,

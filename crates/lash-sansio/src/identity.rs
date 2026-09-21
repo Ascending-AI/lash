@@ -203,7 +203,7 @@ string_identity!(NodeId, "session-graph node");
 
 string_identity!(
     /// Identity of one queued turn input.
-    InputId,
+    IngressId,
     "turn input"
 );
 

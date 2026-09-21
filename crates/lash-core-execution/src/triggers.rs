@@ -168,7 +168,7 @@ pub enum TriggerDeliveryEmitOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerDeliveryEmitReceipt {
-    pub occurrence_id: String,
+    pub emission_id: String,
     pub subscription_id: String,
     pub process_id: ProcessId,
     pub outcome: TriggerDeliveryEmitOutcome,

@@ -9,7 +9,7 @@ pub struct PluginMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     pub role: MessageRole,
-    pub content: String,
+    pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<MessageOrigin>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -41,7 +41,7 @@ impl fmt::Display for ProcessIncarnation {
 )]
 pub struct ProcessRef {
     pub process_id: ProcessId,
-    pub incarnation: ProcessIncarnation,
+    pub generation: ProcessIncarnation,
 }
 impl ProcessRef {
     /// Pin a reusable process name to one store-minted incarnation.

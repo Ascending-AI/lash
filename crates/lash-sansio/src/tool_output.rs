@@ -67,7 +67,7 @@ pub struct ToolIntentIdentity {
     /// process id for process scope.
     pub execution_scope_id: String,
     pub tool_call_id: String,
-    pub intent_index: u32,
+    pub slot: u32,
     pub replay_key: String,
     /// Replay key of the durable invocation that minted this declaration,
     /// retained so `replay_key` stays re-derivable from the record alone.
@@ -1010,7 +1010,7 @@ impl AttachmentMaterializationNotice {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelToolReturn {
     pub call_id: String,
-    pub tool_name: String,
+    pub callee: String,
     pub parts: Vec<ModelToolReturnPart>,
     /// Admission-time warnings attached without changing the tool's success outcome.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

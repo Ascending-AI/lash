@@ -17,7 +17,7 @@ macro_rules! tool_intent_variants {
             SignalProcess "signal_process",
             CancelProcess "cancel_process",
             EmitProcessEvent "emit_process_event",
-            EmitTrigger "emit_trigger",
+            EmitTrigger "emit_trigger_mutated",
             RegisterProcessDefinition "register_process_definition",
             RegisterTrigger "register_trigger",
         }
