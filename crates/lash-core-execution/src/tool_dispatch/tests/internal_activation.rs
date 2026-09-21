@@ -32,8 +32,14 @@ async fn resumed_internal_process_dispatch_hidden_from_catalog_returns_tool_unav
     assert!(controller.frame_sightings().is_empty());
 
     let tool_context = tool_context_for_prepared(&context, &prepared);
-    let outcome =
-        crate::tool_dispatch::execute_internal_process_tool(&context, prepared, tool_context).await;
+    // Boxed: the future carries the scoped controller, which now also carries
+    // the admitted incarnation (FIG-3394) — past the `large_futures` budget.
+    let outcome = Box::pin(crate::tool_dispatch::execute_internal_process_tool(
+        &context,
+        prepared,
+        tool_context,
+    ))
+    .await;
 
     assert_eq!(
         outcome.record.call_id.as_deref(),
@@ -93,8 +99,14 @@ async fn frameless_internal_record_uses_manifest_name_when_prepared_call_is_rena
     );
     let tool_context = tool_context_for_prepared(&context, &prepared);
 
-    let outcome =
-        crate::tool_dispatch::execute_internal_process_tool(&context, prepared, tool_context).await;
+    // Boxed: the future carries the scoped controller, which now also carries
+    // the admitted incarnation (FIG-3394) — past the `large_futures` budget.
+    let outcome = Box::pin(crate::tool_dispatch::execute_internal_process_tool(
+        &context,
+        prepared,
+        tool_context,
+    ))
+    .await;
 
     assert!(outcome.record.output.is_success());
     assert_eq!(outcome.record.tool, "internal_probe");
