@@ -286,15 +286,24 @@ fn the_aggregate_ledger_restores_journaled_deltas() {
     );
 }
 
-/// Unknown is a value and zero is a false fact (§13, ADR 0032). A provider
-/// attempt reporting no usage contributes no row rather than a zero row.
+/// ADR 0032's two sides in one record: `Some(0)` is not `None`. A provider
+/// attempt that reports zero spend made a statement — billed at zero — and
+/// the ledger keeps it as a fact; only an attempt that reports nothing at
+/// all contributes no row.
 #[test]
-fn the_ledger_never_zero_fills() {
+fn an_explicit_zero_spend_is_a_fact_and_an_absent_report_is_not() {
     let ledger = ToolUsageLedger::new();
-    ledger.record(&call_record("call-a", &[(1, 0)]));
-    assert!(
-        ledger.take().is_empty(),
-        "a call with no known usage must contribute no delta; only an explicit spend closes a hole"
+    ledger.record(&call_record_of(
+        "call-a",
+        vec![
+            attempt_with(1, crate::AttemptOutcome::Completed, Some(0)),
+            attempt_with(2, crate::AttemptOutcome::Failed, None),
+        ],
+    ));
+    assert_eq!(
+        ledger.take(),
+        vec![delta(0, "call-a", 1, TokenUsage::default())],
+        "the zero-spend report emits its delta; the unreported attempt emits none"
     );
 }
 

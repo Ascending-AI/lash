@@ -384,23 +384,21 @@ impl ToolUsageLedger {
     /// attempt's own ordinal: a billed failed attempt and the retry that
     /// succeeded are two facts, never a summed or a lost one. An attempt
     /// whose `usage` is absent — unreported by the provider, aborted before
-    /// the response, or failed before billing — records nothing: unknown is a
-    /// value and zero is a false fact (§13, ADR 0032).
+    /// the response, or failed before billing — records nothing; an attempt
+    /// that reports *zero* is a fact, not a hole: billed-at-zero is a
+    /// statement the provider made, and ADR 0032's `Some(0)` is not `None`
+    /// (§13).
     pub fn record(&self, call_record: &crate::LlmCallRecord) {
         let mut facts = self.facts.lock_recover();
         for attempt in &call_record.attempts {
             let Some(usage) = attempt.usage.as_ref() else {
                 continue;
             };
-            let usage = super::outcome::token_usage_from_llm(usage);
-            if usage == TokenUsage::default() {
-                continue;
-            }
             facts.push(ToolUsageDelta {
                 attempt: self.attempt,
                 llm_call_id: call_record.call_id.clone(),
                 provider_attempt: attempt.ordinal,
-                usage,
+                usage: super::outcome::token_usage_from_llm(usage),
             });
         }
     }

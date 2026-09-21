@@ -209,6 +209,12 @@ impl TurnCancelWait {
         }
     }
 
+    /// The cooperative cancellation the wait races, for callers that carry
+    /// the trio whole and still need the token alone.
+    pub(crate) fn cancellation(&self) -> &CancellationToken {
+        &self.cancellation
+    }
+
     /// The turn cancellation a process operation observes, if any.
     pub(crate) fn process_turn_cancellation(&self) -> Option<ProcessTurnCancellation> {
         self.observed_scope

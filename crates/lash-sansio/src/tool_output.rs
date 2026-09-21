@@ -32,27 +32,8 @@ pub struct ToolCallRecord {
     pub duration_ms: u64,
 }
 
-/// The canonical tool-intent variant set.
-///
-/// This list is the single source of truth for both [`ToolIntentKind`] here and
-/// `ToolIntent` in lash-core: each generates itself by invoking this macro with
-/// its own generator, so neither can carry a variant the other lacks. Adding a
-/// declaration means adding one line here.
-#[macro_export]
-macro_rules! tool_intent_variants {
-    ($generator:ident) => {
-        $generator! {
-            StartProcess "start_process",
-            SignalProcess "signal_process",
-            CancelProcess "cancel_process",
-            EmitProcessEvent "emit_process_event",
-            EmitTrigger "emit_trigger",
-            RegisterProcessDefinition "register_process_definition",
-            RegisterTrigger "register_trigger",
-        }
-    };
-}
-
+/// Generates the canonical tool-intent kind set from the vocabulary in
+/// [`crate::tool_intents`].
 macro_rules! define_tool_intent_kind {
     ($($variant:ident $wire:literal,)*) => {
         /// Literal command kind of one recorded declaration.
@@ -77,7 +58,7 @@ macro_rules! define_tool_intent_kind {
     };
 }
 
-tool_intent_variants!(define_tool_intent_kind);
+crate::tool_intent_variants!(define_tool_intent_kind);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentIdentity {

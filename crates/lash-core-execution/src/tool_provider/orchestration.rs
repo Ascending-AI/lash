@@ -265,15 +265,25 @@ async fn coordinate_nested_tool_batch<'run>(
             &prepared.tool_id,
             grant.as_deref(),
         );
-        let turn_cancel_wait = dispatch.effect_controller.scoped().turn_cancel_wait(
-            body_context
-                .cancellation_token()
-                .cloned()
-                .unwrap_or_default(),
-        );
+        // A nested call waits under exactly the trio the child's driver
+        // computed from the recorded cancellation authority — carried on the
+        // body context for this purpose. Deriving one here from the scope
+        // alone (`ScopedEffectController::turn_cancel_wait` always yields an
+        // observing trio) would wire a child admitted with no cooperative
+        // authority to the host's turn-cancel gate, so a signalled gate could
+        // cancel waits that must ignore it.
+        let turn_cancel_wait = body_context.turn_cancel_wait().cloned().unwrap_or_else(|| {
+            crate::runtime::TurnCancelWait::unobserved(
+                body_context
+                    .cancellation_token()
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        });
         let tool_context = ToolContext::from_dispatch(Arc::clone(dispatch))
             .prepared_call(&prepared)
             .cancellation_token(body_context.cancellation_token().cloned())
+            .turn_cancel_wait(turn_cancel_wait.clone())
             .enclosing_process(
                 body_context
                     .enclosing_process()

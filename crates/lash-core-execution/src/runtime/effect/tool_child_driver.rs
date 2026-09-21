@@ -197,17 +197,27 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
         let RuntimeEffectCommand::ToolInvocation { request } = &envelope.command else {
             return None;
         };
-        self.openers.context_for(&request.scope.opener)?;
+        let live = self.openers.context_for(&request.scope.opener)?;
         Some(RuntimeEffectLocalExecutor::owned_runner(
-            Box::new(ToolChildRunner { host: self.clone() }),
+            Box::new(ToolChildRunner {
+                host: self.clone(),
+                live,
+            }),
             None,
         ))
     }
 }
 
 /// One routed child, waiting to be handed its envelope.
+///
+/// The runner owns the exact [`LiveOpenerContext`] `executor_for` resolved —
+/// the journaled request was admitted against that context, so execution uses
+/// it rather than asking the registry again: an opener guard dropped between
+/// resolution and execution must not stall the child on a re-registration
+/// nothing guarantees, nor rebind it to a successor opener's context.
 struct ToolChildRunner {
     host: ToolChildHost,
+    live: LiveOpenerContext,
 }
 
 #[async_trait::async_trait]
@@ -222,27 +232,14 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
                 "the tool-child driver was handed an envelope that is not a tool invocation",
             ));
         };
-        // The recorded opener is revalidated here, at the execution boundary:
-        // a runner resolved before the journal's retained membership was read
-        // proves only that *an* opener was live then, and the envelope this
-        // runner now serves is the retained request — so the live context is
-        // derived again from the request's own opener rather than carried over
-        // from resolution. If the opener has stepped down between resolution
-        // and execution this waits for its re-registration — an absent opener
-        // is a routing fact, never a failed terminal the journal keeps.
-        let live = self
-            .host
-            .openers
-            .context_for_or_wait(&request.scope.opener)
-            .await;
         // Boxed: the driver future carries the whole dispatch, and a group
         // child is spawned per member — 21 kB of stack per pending child is a
         // real cost, not a lint's taste.
         Box::pin(run_tool_child(
             &self.host,
-            &live,
+            &self.live,
             &request,
-            live.cancellation().child_token(),
+            self.live.cancellation().child_token(),
         ))
         .await
     }
@@ -451,12 +448,17 @@ pub(crate) async fn run_tool_child(
     // runs outside an attempt frame, so its realized starts have no intent
     // outcome to ride and are captured here instead (ADR 0099 §6).
     let orchestrating_starts = crate::tool_dispatch::OrchestratingStartsBuffer::default();
+    // The cancellation trio is computed once, here, from the *recorded*
+    // authority the validator just authenticated — and carried whole into the
+    // child's context so every retry sleep and deferred wait inside it,
+    // including a nested batch's, waits under exactly this shape (§3).
+    let turn_cancel_wait = child_turn_cancel_wait(&dispatch, request, &cancel);
     // Boxed for the same reason the runner's call is: `drive` holds the
     // coordinator and its attempt machinery live across every await.
     let mut outcome = Box::pin(drive(
         &dispatch,
         request,
-        cancel,
+        turn_cancel_wait,
         orchestrating_starts.clone(),
     ))
     .await?;
@@ -492,67 +494,86 @@ pub(crate) async fn run_tool_child(
 ///
 /// * **Cancellation authority** (ADR 0099 §3): the recorded
 ///   [`TurnControlBindingId`](crate::TurnControlBindingId) is what the
-///   opener's cooperative signal is fenced on, so it must mint to *exactly*
-///   the binding this host's controller derives for the child's admitted
-///   scope — a foreign id means the child would observe a cancellation
-///   channel nothing signals, or none. `None` is legal only where the opener
-///   recorded it: a locally participating controller has no durable address
-///   to signal, so a `None` record on a durable-journaled participant is a
-///   refused inconsistency, not a silent absence of cancellation.
+///   opener's cooperative signal is fenced on, and the matrix is exact —
+///   a durable-journaled participant must record *exactly* the binding this
+///   host derives for the child's admitted scope, and a locally
+///   participating one must record `None`, because a local participant has
+///   no durable address to signal. A `Some` under local participation or a
+///   `None` under durable journaling is a refused inconsistency: the child
+///   would observe a cancellation channel nothing signals, or none.
 /// * **Completion routing** (ADR 0099 §14): `Durable` requires a durable
 ///   await-event resolver behind the child's controller — a host whose
 ///   controller does not identify a durable authority would prepare keys no
-///   resolution can reach. `ProcessLifetime` requires the recorded issuing
-///   registry identity to be *this* host's: a process-lifetime key minted by
-///   another registry is unresolvable here and a fresh one would double
-///   dispatch.
+///   resolution can reach. `ProcessLifetime` is a local-participation
+///   admission only — a durable journal would resolve the key after the
+///   issuing process is gone — and its recorded issuer must be *this*
+///   host's registry identity: a process-lifetime key minted by another
+///   registry is unresolvable here and a fresh one would double dispatch.
 async fn validate_recorded_authorities(
     host: &ToolChildHost,
     controller: &ScopedEffectController<'static>,
     request: &ToolChildRequest,
 ) -> Result<(), RuntimeEffectControllerError> {
+    use crate::runtime::effect::TurnControlParticipation;
     let participation = controller
         .controller()
         .turn_control_participation()
         .await
         .map_err(RuntimeEffectControllerError::from)?;
-    // `None` records that no cooperative authority existed at admission;
-    // there is nothing to re-derive and the child simply is not wired to
-    // the cooperative signal.
-    if let Some(recorded) = request.cancellation_authority.as_ref() {
-        let effect_host = host.effect_host()?;
-        let binding = effect_host
-            .turn_control_binding(controller)
-            .await
-            .map_err(RuntimeEffectControllerError::from)?;
-        if binding.binding_id() != recorded.as_str() {
+    match (request.cancellation_authority.as_ref(), participation) {
+        (Some(recorded), TurnControlParticipation::DurableJournaled) => {
+            let effect_host = host.effect_host()?;
+            let binding = effect_host
+                .turn_control_binding(controller)
+                .await
+                .map_err(RuntimeEffectControllerError::from)?;
+            if binding.binding_id() != recorded.as_str() {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
+                    format!(
+                        "tool child `{}` records cancellation authority `{}` and this host \
+                         derives `{}` for its admitted scope; a foreign binding means the \
+                         cooperative signal it would honour is not the one this opener sends",
+                        request.call.call_id,
+                        recorded.as_str(),
+                        binding.binding_id()
+                    ),
+                ));
+            }
+        }
+        (Some(recorded), TurnControlParticipation::Local) => {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
                 format!(
-                    "tool child `{}` records cancellation authority `{}` and this host \
-                     derives `{}` for its admitted scope; a foreign binding means the \
-                     cooperative signal it would honour is not the one this opener sends",
+                    "tool child `{}` records cancellation authority `{recorded}`, but its \
+                     admitted controller participates in turn control locally; a local \
+                     participant has no durable binding to signal, so the record names an \
+                     authority nothing can honour",
                     request.call.call_id,
-                    recorded.as_str(),
-                    binding.binding_id()
+                    recorded = recorded.as_str(),
                 ),
             ));
         }
-    } else if participation == crate::runtime::effect::TurnControlParticipation::DurableJournaled {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
-            format!(
-                "tool child `{}` records no cancellation authority, but its admitted \
-                 controller participates through a durable journaled binding; the \
-                 cooperative signal exists and the record that omits it is inconsistent",
-                request.call.call_id
-            ),
-        ));
+        (None, TurnControlParticipation::DurableJournaled) => {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
+                format!(
+                    "tool child `{}` records no cancellation authority, but its admitted \
+                     controller participates through a durable journaled binding; the \
+                     cooperative signal exists and the record that omits it is inconsistent",
+                    request.call.call_id
+                ),
+            ));
+        }
+        // `None` records that no cooperative authority existed at admission;
+        // there is nothing to re-derive and the child simply is not wired to
+        // the cooperative signal.
+        (None, TurnControlParticipation::Local) => {}
     }
     match &request.completion_routing {
         crate::runtime::effect::ToolChildCompletionRouting::Inline => {}
         crate::runtime::effect::ToolChildCompletionRouting::Durable => {
-            if participation != crate::runtime::effect::TurnControlParticipation::DurableJournaled
+            if participation != TurnControlParticipation::DurableJournaled
                 || controller
                     .controller()
                     .await_event_authority_binding_id()
@@ -571,13 +592,16 @@ async fn validate_recorded_authorities(
         }
         crate::runtime::effect::ToolChildCompletionRouting::ProcessLifetime { issuer } => {
             let current = host.effect_host()?.turn_control_binding_id();
-            if current != issuer.as_str() {
+            if participation != TurnControlParticipation::Local || current != issuer.as_str() {
                 return Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
                     format!(
                         "tool child `{}` was admitted under a process-lifetime key issued by \
-                         registry `{issuer}` and this host is registry `{current}`; the \
-                         recorded key is unresolvable here and a fresh one would double dispatch",
+                         registry `{issuer}`; this host is registry `{current}` with \
+                         {participation:?} turn-control participation — a process-lifetime \
+                         key resolves only while its issuing local registry lives, so a \
+                         durable journal or a foreign issuer makes it unresolvable here and \
+                         a fresh one would double dispatch",
                         request.call.call_id,
                         issuer = issuer.as_str(),
                     ),
@@ -597,10 +621,15 @@ async fn validate_recorded_authorities(
 async fn drive(
     dispatch: &Arc<ToolDispatchContext<'static>>,
     request: &ToolChildRequest,
-    cancel: CancellationToken,
+    turn_cancel_wait: crate::runtime::TurnCancelWait,
     orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
-    let tool_context = child_tool_context(dispatch, request, &cancel, orchestrating_starts);
+    let tool_context = child_tool_context(
+        dispatch,
+        request,
+        turn_cancel_wait.clone(),
+        orchestrating_starts,
+    );
     // The orchestrating lane is a catalog lane: only a child the Tool Catalog
     // itself admitted may run a handler-level body with no attempt frame. A
     // granted call names its own authority, and running a grant's call under
@@ -620,7 +649,6 @@ async fn drive(
         .await);
     }
 
-    let turn_cancel_wait = child_turn_cancel_wait(dispatch, request, &cancel);
     let executor_context = tool_context.clone();
     let executor_dispatch = Arc::clone(dispatch);
     let coordinated = Box::pin(crate::tool_dispatch::coordinate_tool_invocation(
@@ -670,14 +698,15 @@ async fn drive(
 fn child_tool_context(
     dispatch: &Arc<ToolDispatchContext<'static>>,
     request: &ToolChildRequest,
-    cancel: &CancellationToken,
+    turn_cancel_wait: crate::runtime::TurnCancelWait,
     orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
 ) -> crate::ToolContext<'static> {
     let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch))
         .prepared_call(&request.call)
-        .cancellation_token(Some(cancel.clone()))
+        .cancellation_token(Some(turn_cancel_wait.cancellation().clone()))
         .parent_invocation(request.attempt_identity.parent_invocation().cloned())
-        .orchestrating_starts(orchestrating_starts);
+        .orchestrating_starts(orchestrating_starts)
+        .turn_cancel_wait(turn_cancel_wait);
     if let Some(process_ref) = request.enclosing_process.as_ref() {
         builder = builder.enclosing_process(Some(process_ref.process_id.clone()));
     }

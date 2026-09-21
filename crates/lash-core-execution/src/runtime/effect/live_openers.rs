@@ -198,10 +198,6 @@ impl std::fmt::Debug for LiveOpenerContext {
 #[derive(Default)]
 pub struct LiveOpenerRegistry {
     openers: Mutex<HashMap<EffectOpener, LiveOpenerEntry>>,
-    /// Woken on every registration, so a child routed between its opener's
-    /// deregistration and re-registration can wait for the same opener value
-    /// to come live again rather than failing a routing fact.
-    changed: tokio::sync::Notify,
     /// Monotonic, so a re-registration can be told from the registration it
     /// replaced. Without it a redriven opener's predecessor guard — which may
     /// drop at any moment, since the old worker is winding down concurrently —
@@ -270,7 +266,6 @@ impl LiveOpenerRegistry {
                 _ended: ended.clone().drop_guard(),
             },
         );
-        self.changed.notify_waiters();
         (
             LiveOpenerGuard {
                 registry: Arc::clone(self),
@@ -292,33 +287,6 @@ impl LiveOpenerRegistry {
             .lock_recover()
             .get(opener)
             .map(|entry| entry.context.clone())
-    }
-
-    /// The live context for `opener`, waiting until it registers when this
-    /// host does not have it yet.
-    ///
-    /// Used at the execution boundary, after routing has already run: an
-    /// opener that stepped down between resolution and execution is a child
-    /// whose opener is *coming back* — a redrive re-registers the same
-    /// [`EffectOpener`] value — so the correct answer is to wait for that
-    /// registration rather than fail a routing fact into a journaled
-    /// terminal. A child whose opener never returns waits for the life of the
-    /// process, which is the same bound the group places on any child that is
-    /// running here.
-    pub async fn context_for_or_wait(&self, opener: &EffectOpener) -> LiveOpenerContext {
-        loop {
-            // Register the wait *before* checking: `notify_waiters` wakes only
-            // waiters already enlisted, so a registration landing between the
-            // check and the await would otherwise be missed and the child
-            // would wait for the next registration — possibly forever.
-            let notified = self.changed.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if let Some(context) = self.context_for(opener) {
-                return context;
-            }
-            notified.await;
-        }
     }
 
     /// Whether `opener` is live in this host.
