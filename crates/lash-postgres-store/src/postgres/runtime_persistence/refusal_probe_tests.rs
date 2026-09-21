@@ -26,10 +26,14 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
     ensure_session_execution_lease_tx(&mut tx, &SessionId::from("refusal-probe"), &lease.fence())
         .await
         .unwrap();
+    // The candidate scan binds its ready cutoff now (FIG-3383), from the
+    // transaction timestamp the claim path samples once per transaction.
+    let now = postgres_transaction_epoch_ms(&mut tx).await.unwrap();
     let rows = sqlx::query(postgres_queued_work_claim_candidates_sql(
         QueuedWorkClaimBoundary::Idle,
     ))
     .bind("refusal-probe")
+    .bind(now as i64)
     .bind(sql_session_lease_generation(lease.fencing_token).unwrap())
     .bind(10_i64)
     .fetch_all(&mut *tx)
