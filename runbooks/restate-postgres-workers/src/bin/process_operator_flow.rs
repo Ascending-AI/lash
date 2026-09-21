@@ -431,6 +431,29 @@ impl RuntimeEffectController for JournalController {
         }
         result
     }
+
+    async fn open_effect_group(
+        &self,
+        group: lash::runtime::RuntimeEffectGroup,
+    ) -> Result<lash::runtime::EffectGroupHandle, lash::runtime::RuntimeEffectControllerError> {
+        self.inline.open_effect_group(group).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut lash::runtime::EffectGroupHandle,
+        cancel: lash::CancellationToken,
+    ) -> Result<lash::runtime::GroupSettlement, lash::runtime::RuntimeEffectControllerError> {
+        self.inline.await_next_settlement(handle, cancel).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: lash::runtime::EffectGroupHandle,
+        disposition: lash::runtime::LoserPolicy,
+    ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
+        self.inline.close_effect_group(handle, disposition).await
+    }
 }
 
 /// Every scenario writes a JSONL trace. A drain step that claims it flushed

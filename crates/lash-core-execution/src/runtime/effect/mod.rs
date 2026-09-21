@@ -63,7 +63,7 @@ pub use validation::{
 };
 
 pub use executor::{EffectControllerTaskRequest, ProcessRunner};
-pub use executor::{EffectTaskController, drive_effect_controller_task};
+pub use executor::{EffectTaskController, drive_effect_controller_task, effect_groups_unsupported};
 pub use executor::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use outcome::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,
@@ -113,6 +113,29 @@ mod tests {
             _local_executor: RuntimeEffectLocalExecutor<'_>,
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
             unreachable!("ownership propagation does not execute effects")
+        }
+
+        async fn open_effect_group(
+            &self,
+            _group: crate::RuntimeEffectGroup,
+        ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("ControllerOwnedReplay"))
+        }
+
+        async fn await_next_settlement(
+            &self,
+            _handle: &mut crate::EffectGroupHandle,
+            _cancel: crate::CancellationToken,
+        ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("ControllerOwnedReplay"))
+        }
+
+        async fn close_effect_group(
+            &self,
+            _handle: crate::EffectGroupHandle,
+            _disposition: crate::LoserPolicy,
+        ) -> Result<(), crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("ControllerOwnedReplay"))
         }
     }
 

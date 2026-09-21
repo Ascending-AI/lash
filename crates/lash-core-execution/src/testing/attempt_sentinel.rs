@@ -288,4 +288,27 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         }
         outcome
     }
+
+    async fn open_effect_group(
+        &self,
+        group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        self.inner.open_effect_group(group).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut crate::EffectGroupHandle,
+        cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        self.inner.await_next_settlement(handle, cancel).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: crate::EffectGroupHandle,
+        disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.inner.close_effect_group(handle, disposition).await
+    }
 }

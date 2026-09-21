@@ -672,10 +672,6 @@ where
         false
     }
 
-    fn supports_effect_groups(&self) -> bool {
-        true
-    }
-
     async fn open_effect_group(
         &self,
         group: RuntimeEffectGroup,

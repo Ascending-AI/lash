@@ -497,10 +497,6 @@ impl RuntimeEffectController for FencedRestateController {
         self.controller.supports_concurrent_effects()
     }
 
-    fn supports_effect_groups(&self) -> bool {
-        self.controller.supports_effect_groups()
-    }
-
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,
@@ -1117,10 +1113,6 @@ impl RuntimeEffectController for RestateEffectHostController {
 
     fn supports_concurrent_effects(&self) -> bool {
         false
-    }
-
-    fn supports_effect_groups(&self) -> bool {
-        true
     }
 
     async fn open_effect_group(

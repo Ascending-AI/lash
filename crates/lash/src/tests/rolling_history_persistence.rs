@@ -173,6 +173,37 @@ impl lash_core::RuntimeEffectController for ProjectionReplayController {
         }
         Ok(outcome)
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash_core::RuntimeEffectGroup,
+    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
+    {
+        Err(lash_core::effect_groups_unsupported(
+            "ProjectionReplayController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash_core::EffectGroupHandle,
+        _cancel: lash_core::CancellationToken,
+    ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
+    {
+        Err(lash_core::effect_groups_unsupported(
+            "ProjectionReplayController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash_core::EffectGroupHandle,
+        _disposition: lash_core::LoserPolicy,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "ProjectionReplayController",
+        ))
+    }
 }
 
 fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {

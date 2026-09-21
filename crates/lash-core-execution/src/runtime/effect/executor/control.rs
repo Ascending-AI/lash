@@ -373,44 +373,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
 
-    /// Whether this controller implements durable child completion and
-    /// first-settlement wake (FIG-1416).
-    ///
-    /// Deliberately a different question from
-    /// [`supports_concurrent_effects`](Self::supports_concurrent_effects), which
-    /// asks "may one coordinator issue overlapping *unstructured*
-    /// `execute_effect` calls?". This asks "can this host run a *structured
-    /// group* of children durably and tell me, durably, which settled first?".
-    /// A single-journal-context engine answers no to the first and yes to the
-    /// second — Restate does.
-    ///
-    /// This is checked once at deployment validation rather than per call: the
-    /// group path is the only tool-batch path, so a controller answering `false`
-    /// has no batch path at all, and a host wiring one should learn that at
-    /// startup instead of mid-turn on the first `Promise.all`. It gates
-    /// *admission*, not dispatch.
-    ///
-    /// A host may answer `true` only if it owns a registered
-    /// [`GroupExecutors`](super::super::group_drain::GroupExecutors) resolver,
-    /// because that resolver is where the children's `'static` executors come
-    /// from: a child must be able to outlive its caller to honor
-    /// [`LoserPolicy::RunToCompletion`], and a host with nothing to resolve
-    /// a journaled child's envelope through cannot run one child, let alone
-    /// outlive a caller with it. The capability and the resolver are one
-    /// question and must not drift apart.
-    ///
-    /// It is therefore a **per-deployment fact established at wiring time**:
-    /// before the resolver is registered a host answers `false`, and deployment
-    /// validation reads it after wiring. The coherence law that follows binds the
-    /// whole surface — a host answering `false` refuses `open_effect_group`,
-    /// `await_next_settlement` and `close_effect_group` alike with
-    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
-    /// because a `false` flag beside a method that works, or an `Ok` from a host
-    /// that says it has no groups, is the drift this relation exists to catch.
-    fn supports_effect_groups(&self) -> bool {
-        false
-    }
-
     /// Open — or replay — a group of independently journaled child effects.
     ///
     /// Returns once the group is durably recorded, **not** when a child settles.
@@ -453,10 +415,23 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// case (ADR 0065).
     ///
     /// A host with **no registered resolver at all** is a different fact from a
-    /// child it cannot route, and answers differently: it reports
-    /// `supports_effect_groups() == false` and refuses all three methods with
+    /// child it cannot route, and answers differently: it refuses all three
+    /// methods with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
-    /// which is the flag's coherence law. Such a refusal journals nothing.
+    /// built through
+    /// [`effect_groups_unsupported`](super::effect_groups_unsupported). Such a
+    /// refusal journals nothing.
+    ///
+    /// That refusal is now the *only* way a host says "no groups here". There
+    /// was a `supports_effect_groups()` flag beside these three methods and a
+    /// conformance law binding the two together; FIG-2266 deleted it. A boolean
+    /// added no safety — a host can lie in a flag exactly as easily as in a
+    /// method — and it could not see engine-side deployment facts anyway, so a
+    /// missing service registration surfaced as a true answer to the wrong
+    /// question. What replaces it is wiring: these methods carry no default
+    /// body, so an out-of-tree controller either implements groups or refuses
+    /// them in its own source, and the refusal it must write is the same typed
+    /// error the law used to check for.
     ///
     /// A reopen must be fenced on group shape: a host that finds a recorded group
     /// under this key whose child count or wake rule differs from the group
@@ -470,13 +445,8 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// error.
     async fn open_effect_group(
         &self,
-        _group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::EffectGroupUnsupported,
-            "this effect controller does not implement durable effect groups",
-        ))
-    }
+        group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError>;
 
     /// Await the next settlement in the group's durable settlement order.
     ///
@@ -505,14 +475,9 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// child.
     async fn await_next_settlement(
         &self,
-        _handle: &mut EffectGroupHandle,
-        _cancel: CancellationToken,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::EffectGroupUnsupported,
-            "this effect controller does not implement durable effect groups",
-        ))
-    }
+        handle: &mut EffectGroupHandle,
+        cancel: CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError>;
 
     /// Release the caller's interest in the group.
     ///
@@ -537,14 +502,9 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// healthy replay path.
     async fn close_effect_group(
         &self,
-        _handle: EffectGroupHandle,
-        _disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::EffectGroupUnsupported,
-            "this effect controller does not implement durable effect groups",
-        ))
-    }
+        handle: EffectGroupHandle,
+        disposition: LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError>;
 }
 
 #[cfg(test)]

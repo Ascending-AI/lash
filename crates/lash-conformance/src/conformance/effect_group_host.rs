@@ -480,7 +480,7 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn() -> Host>(
+pub async fn an_unregistered_host_refuses_all_three_from_wiring<F: Fn() -> Host>(
     unwired: &F,
     prefix: &str,
 ) {
@@ -489,12 +489,6 @@ pub async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn(
     let scoped = host
         .scoped(scope(prefix, "unwired"))
         .expect("a scope binds");
-    assert!(
-        !scoped.controller().supports_effect_groups(),
-        "a host with no registered resolver has no runner for any child, so \
-         deployment validation must be told rather than a turn discovering it"
-    );
-
     let key = group_key(prefix, "unwired");
     let staged_group = staged(
         group(scoped.execution_scope(), &key, 1, GroupWakePolicy::All, RUN),
@@ -792,18 +786,10 @@ pub async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn the_capability_flag_and_the_group_surface_agree<F: Fn() -> Host>(
-    make: &F,
-    prefix: &str,
-) {
+pub async fn a_wired_host_serves_all_three_group_methods<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scope = scope(prefix, "flag");
     let scoped = host.scoped(scope.clone()).expect("a scope binds");
-    assert!(
-        scoped.controller().supports_effect_groups(),
-        "a host whose group methods work must say so: the flag gates admission, \
-         and a `false` here means no batch path at all"
-    );
 
     let key = group_key(prefix, "flag");
     let mut handle = open(

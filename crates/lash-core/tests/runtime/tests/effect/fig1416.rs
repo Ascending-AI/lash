@@ -28,15 +28,48 @@ impl RuntimeEffectController for GrouplessEffectController {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.native.execute_effect(envelope, local_executor).await
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        // The refusing side of the typed-refusal-from-wiring law: this double
+        // forwards ordinary effects to a native controller and deliberately
+        // implements no groups, which is now something its source states
+        // rather than something it inherited.
+        Err(lash_core::effect_groups_unsupported(
+            "GrouplessEffectController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash_core::EffectGroupHandle,
+        _cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "GrouplessEffectController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash_core::EffectGroupHandle,
+        _disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "GrouplessEffectController",
+        ))
+    }
 }
 
 /// The other side of the coherence relation: a controller that declares support
 /// and gives all three methods bodies.
 ///
 /// Not a durable host — it journals nothing and settles children immediately —
-/// but it is the *supporting* side of the invariant, and without it the relation
-/// `supports_effect_groups() == !refuses` was only ever asserted at `false ==
-/// !true`, which a flag hard-coded to `false` also satisfies.
+/// but it is the *supporting* side of the invariant, and without it the
+/// one-surface law would only ever be asserted against controllers that refuse,
+/// which a blanket refusal also satisfies.
 #[derive(Default)]
 struct GroupSupportingEffectController {
     native: NativeRuntimeEffectController,
@@ -56,10 +89,6 @@ impl RuntimeEffectController for GroupSupportingEffectController {
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.native.execute_effect(envelope, local_executor).await
-    }
-
-    fn supports_effect_groups(&self) -> bool {
-        true
     }
 
     async fn open_effect_group(
@@ -105,9 +134,9 @@ impl RuntimeEffectController for GroupSupportingEffectController {
 
 /// A resolver that has a runner for every envelope.
 ///
-/// Enough for the coherence law, whose subject is the flag and the refusals
-/// rather than what a child does: a settling child is all that is needed for
-/// "this method is implemented" to be observable.
+/// Enough for the one-surface law, whose subject is which methods refuse rather
+/// than what a child does: a settling child is all that is needed for "this
+/// method is implemented" to be observable.
 struct EveryChildRuns;
 
 impl lash_core::GroupExecutors for EveryChildRuns {
@@ -151,11 +180,6 @@ fn one_child_group() -> lash_core::RuntimeEffectGroup {
 #[tokio::test]
 async fn a_controller_without_group_support_fails_closed_on_every_group_method() {
     let controller = GrouplessEffectController::default();
-    assert!(
-        !controller.supports_effect_groups(),
-        "the capability flag must default to false, so deployment validation \
-         refuses admission rather than discovering the gap mid-turn"
-    );
 
     let group = one_child_group();
     let mut handle = lash_core::EffectGroupHandle::new(&group);
@@ -193,17 +217,25 @@ async fn a_controller_without_group_support_fails_closed_on_every_group_method()
     );
 }
 
-/// The coherence trap the capability flag creates: a host that overrides the
-/// methods but forgets the flag reports "unsupported" while working, and one that
-/// flips the flag but forgets a method fails at run time. Neither is detectable
-/// from a single method, so the invariant is stated as a relation and asserted
-/// against both sides of it.
+/// All three group methods are one surface: a controller implements them
+/// together or refuses them together.
+///
+/// This replaces the `supports_effect_groups()` coherence relation FIG-2266
+/// deleted. That relation compared a boolean against the methods, which caught
+/// a host that flipped one without the other — but it also made "I have not
+/// thought about groups" and "I refuse groups" the same program text, because
+/// the flag defaulted to `false` beside three methods that defaulted to
+/// refusing. A delegating wrapper that forgot to forward therefore looked
+/// *coherent* while denying a capability its inner controller had.
+///
+/// With no defaults left, the surviving invariant is stronger and needs no
+/// flag: whatever a controller answers, it answers with all three. A wrapper
+/// that forwards `open_effect_group` and leaves the other two refusing is the
+/// same bug the old relation existed to catch, and this law still catches it.
 #[tokio::test]
-async fn the_group_capability_flag_and_the_group_methods_must_agree() {
-    /// Asserted over all three methods rather than just `open`: the trap is a
-    /// host that gives one method a body and leaves the others defaulted, which
-    /// a single-method probe reads as coherent.
-    async fn assert_coherent<C: RuntimeEffectController>(controller: &C) {
+async fn the_three_group_methods_answer_as_one_surface() {
+    /// Which of the three refused with the capability code.
+    async fn refusals<C: RuntimeEffectController>(controller: &C) -> [(&'static str, bool); 3] {
         let unsupported = lash_core::RuntimeErrorCode::EffectGroupUnsupported;
         let group = one_child_group();
         let declared = group.loser_disposition();
@@ -226,48 +258,55 @@ async fn the_group_capability_flag_and_the_group_methods_must_agree() {
             .await
             .err()
             .is_some_and(|error| error.code == unsupported);
-
-        for (method, refuses) in [
+        [
             ("open_effect_group", refuses_open),
             ("await_next_settlement", refuses_await),
             ("close_effect_group", refuses_close),
-        ] {
+        ]
+    }
+
+    async fn assert_all<C: RuntimeEffectController>(controller: &C, expected: bool, what: &str) {
+        for (method, refuses) in refusals(controller).await {
             assert_eq!(
-                controller.supports_effect_groups(),
-                !refuses,
-                "supports_effect_groups() must answer true exactly when {method} is \
-                 implemented; a host that flips one without the other either refuses \
-                 work it can do or accepts work it cannot"
+                refuses,
+                expected,
+                "{what}: {method} must {} the capability code like its two \
+                 siblings; a controller that answers one way through one method \
+                 and the other way through another has no single answer to \
+                 whether this deployment does groups",
+                if expected {
+                    "refuse with"
+                } else {
+                    "not refuse with"
+                }
             );
         }
     }
 
-    assert_coherent(&GrouplessEffectController::default()).await;
-    assert_coherent(&GroupSupportingEffectController::default()).await;
+    assert_all(
+        &GrouplessEffectController::default(),
+        true,
+        "a controller that implements no groups",
+    )
+    .await;
+    assert_all(
+        &GroupSupportingEffectController::default(),
+        false,
+        "a controller that implements all three",
+    )
+    .await;
 
-    // The doubles above pin the relation's shape; the tier production actually
-    // reaches is where the flag and the refusals can drift, and it has *two*
-    // states because since FIG-1578 its answer is a per-deployment fact
-    // established at wiring time rather than a constant. Both are asserted
-    // against the same relation: unwired must refuse all three with the
-    // capability code, wired must refuse none of them.
+    // The tier production actually reaches, which since FIG-1578 has two
+    // states: its answer is a per-deployment fact established at wiring time
+    // rather than a constant. Unwired must refuse all three; wired none.
     let unwired = NativeRuntimeEffectController::default();
-    assert!(
-        !unwired.supports_effect_groups(),
-        "a controller with no registered resolver has no runner for any child, \
-         so deployment validation must be told before a group is ever opened"
-    );
-    assert_coherent(&unwired).await;
+    assert_all(&unwired, true, "the native substrate with no resolver").await;
 
     let wired = NativeRuntimeEffectController::default();
     wired
         .register_group_executors(std::sync::Arc::new(EveryChildRuns))
         .expect("a fresh controller has no resolver yet");
-    assert!(
-        wired.supports_effect_groups(),
-        "registering the resolver is what makes the native substrate support groups"
-    );
-    assert_coherent(&wired).await;
+    assert_all(&wired, false, "the native substrate with a resolver").await;
 }
 
 /// Two threads registering *different* resolvers at once: exactly one wins and
@@ -320,10 +359,6 @@ fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
                  typed refusal rather than a silent Ok"
             );
         }
-        assert!(
-            controller.supports_effect_groups(),
-            "the winner's registration stands whatever the losers did"
-        );
     }
 }
 
@@ -352,12 +387,6 @@ async fn a_child_this_host_cannot_route_is_a_shape_refusal_not_an_unsupported_ho
     controller
         .register_group_executors(std::sync::Arc::new(NoChildRuns))
         .expect("a fresh controller has no resolver yet");
-    assert!(
-        controller.supports_effect_groups(),
-        "the flag is about the wiring, not about whether one particular child \
-         happens to be routable"
-    );
-
     let refusal = controller
         .open_effect_group(one_child_group())
         .await

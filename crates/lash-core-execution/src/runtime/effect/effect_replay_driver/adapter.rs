@@ -341,20 +341,6 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         Box::pin(driver.execute_effect(scope, envelope, local_executor)).await
     }
 
-    /// `true` exactly when this host has a registered
-    /// [`GroupExecutors`] resolver.
-    ///
-    /// The group methods below are implemented against the durable journal, so
-    /// the remaining question is where a child's runner comes from: the resolver
-    /// is what supplies the `'static` executors the flag's other half requires,
-    /// since a child must be able to outlive its caller to honor
-    /// [`LoserPolicy::RunToCompletion`](crate::LoserPolicy::RunToCompletion).
-    /// A host with no resolver would admit a group and then have nothing to run
-    /// it with, which is the drift this answer forecloses.
-    fn supports_effect_groups(&self) -> bool {
-        self.replay_driver().supports_effect_groups()
-    }
-
     /// Delegated to the shared driver exactly as `execute_effect` is: the group
     /// host is one implementation over [`EffectReplayRowStore`], and a store
     /// contributes the substrate half of it rather than a second copy of the

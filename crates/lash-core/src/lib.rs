@@ -29,6 +29,10 @@ pub use lash_core_store::chronological;
 pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub(crate) use model_clamp::ModelGenerationClamp;
+/// Re-exported so every `RuntimeEffectController` implementation can spell
+/// `await_next_settlement`'s cancellation parameter without taking a direct
+/// `tokio-util` dependency of its own (FIG-2266).
+pub use tokio_util::sync::CancellationToken;
 /// Panic containment for runtime-owned work.
 ///
 /// The module lives in `lash-core-ids`; this facade re-exports its public
@@ -769,7 +773,7 @@ pub use runtime::{
     WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
     WorkerSlotSupplier, WorkerSweepPolicy, artifact_destination_owner_retired_error,
     artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
-    ensure_process_lease_schema_version,
+    effect_groups_unsupported, ensure_process_lease_schema_version,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]

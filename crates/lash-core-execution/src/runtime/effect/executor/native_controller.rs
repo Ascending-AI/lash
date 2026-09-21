@@ -244,27 +244,6 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         }
     }
 
-    /// `true` exactly when a [`GroupExecutors`] resolver has been registered
-    /// with [`register_group_executors`](Self::register_group_executors): the
-    /// native substrate implements every observable semantic of the contract, and the
-    /// resolver is where the `'static` executors the flag's other half requires
-    /// come from, so a child can outlive its caller.
-    ///
-    /// It is a **per-deployment** fact, established at wiring time: before the
-    /// registration this controller answers `false` and refuses all three group
-    /// methods with
-    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
-    /// which is the coherence law the flag owes. A *per-child* resolver miss on
-    /// a registered controller is a different fact and keeps its own typed
-    /// routing refusal.
-    ///
-    /// The flag is not a durability claim. It asserts that a group opened here
-    /// runs its children durably *for the life of the runtime* and reports
-    /// settlement order as a fact rather than re-racing it.
-    fn supports_effect_groups(&self) -> bool {
-        self.groups.executors.get().is_some()
-    }
-
     /// Refused with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
     /// while no resolver is registered, exactly as
@@ -315,9 +294,7 @@ impl NativeRuntimeEffectController {
 
     /// Register the resolver that says what code runs a grouped child, once.
     ///
-    /// Until this is called the controller answers
-    /// [`supports_effect_groups`](RuntimeEffectController::supports_effect_groups)
-    /// `false` and refuses all three group methods with
+    /// Until this is called the controller refuses all three group methods with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
     /// because the `'static` executors a child needs in order to outlive its
     /// caller have nowhere to come from. A second
@@ -580,9 +557,8 @@ impl NativeEffectGroups {
     ///
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
     /// rather than a shape refusal, because an unwired controller is not a
-    /// controller with a bad group: it is a controller whose
-    /// `supports_effect_groups` answers `false`, and the coherence law says the
-    /// flag and the three methods must agree.
+    /// controller with a bad group: it is a controller that does no groups at
+    /// all, and it answers so through all three methods alike.
     fn registered_executors(
         &self,
     ) -> Result<Arc<dyn GroupExecutors>, RuntimeEffectControllerError> {

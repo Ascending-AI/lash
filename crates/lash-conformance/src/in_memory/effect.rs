@@ -170,11 +170,6 @@ async fn the_native_substrate_supports_groups_through_the_scoped_host_view() {
     let scoped = host
         .scoped(crate::ExecutionScope::runtime_operation(SCOPE))
         .expect("scoped controller");
-    assert!(
-        scoped.controller().supports_effect_groups(),
-        "the scoped view must report the group support its own methods provide"
-    );
-
     let key = "fig1535:scoped";
     let mut handle = scoped
         .controller()

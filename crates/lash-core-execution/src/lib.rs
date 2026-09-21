@@ -16,6 +16,10 @@
 /// directly. Not part of the supported surface.
 #[doc(hidden)]
 pub use async_trait::async_trait;
+/// Re-exported so every `RuntimeEffectController` implementation can spell
+/// `await_next_settlement`'s cancellation parameter without taking a direct
+/// `tokio-util` dependency of its own (FIG-2266).
+pub use tokio_util::sync::CancellationToken;
 
 pub use crate::runtime::concrete_turn_cancellation_authority;
 pub use lash_core_store::attachments;
@@ -798,7 +802,8 @@ pub use runtime::{
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, ensure_process_lease_schema_version,
+    WorkerSlotSupplier, WorkerSweepPolicy, effect_groups_unsupported,
+    ensure_process_lease_schema_version,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

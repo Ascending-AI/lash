@@ -512,10 +512,6 @@ impl RuntimeEffectController for FencedNativeController {
         self.host.execute_effect(envelope, local_executor).await
     }
 
-    fn supports_effect_groups(&self) -> bool {
-        self.host.supports_effect_groups()
-    }
-
     async fn open_effect_group(
         &self,
         group: RuntimeEffectGroup,
@@ -591,12 +587,9 @@ impl RuntimeEffectController for NativeEffectHost {
             .await
     }
 
-    // The group methods below must stay forwarded, never trait-defaulted:
-    // supports_effect_groups() would otherwise advertise a capability the
-    // defaults refuse.
-    fn supports_effect_groups(&self) -> bool {
-        self.controller.supports_effect_groups()
-    }
+    // The group methods below must stay forwarded. Since FIG-2266 they carry
+    // no defaults to fall back to, so forgetting one is a compile error rather
+    // than a host that silently denies a capability its controller has.
 
     async fn open_effect_group(
         &self,

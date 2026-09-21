@@ -459,8 +459,7 @@ impl SqliteEffectHost {
     /// This is the host's one wiring seam: it is supplied here — by the host
     /// that owns those runners — rather than discovered from whatever session is
     /// in scope, and every path resolves through it, the open of a group, a
-    /// retry, and the loser drain alike. Until it is called this host answers
-    /// [`RuntimeEffectController::supports_effect_groups`] `false` and refuses
+    /// retry, and the loser drain alike. Until it is called this host refuses
     /// every group method with
     /// [`EffectGroupUnsupported`](lash_core::RuntimeErrorCode::EffectGroupUnsupported)
     /// rather than journaling a group nothing can run.

@@ -610,11 +610,11 @@ macro_rules! effect_group_host_tests {
     (@catalogue [$($attr:tt)*] $fixture:block) => {
         $crate::effect_group_host_tests!(@expand [$($attr)*] $fixture; [
             (cancel_stops_the_losers, "group-cancel", wired),
-            (an_unregistered_host_reports_no_groups_and_refuses_all_three, "group-unwired", unwired),
+            (an_unregistered_host_refuses_all_three_from_wiring, "group-unwired", unwired),
             (a_refused_open_journals_nothing, "group-refused-open", mixed),
             (a_child_with_no_runner_refuses_the_open_and_refuses_the_retry, "group-no-runner", wired),
             (a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal, "group-lost-runner", wired),
-            (the_capability_flag_and_the_group_surface_agree, "group-capability", wired),
+            (a_wired_host_serves_all_three_group_methods, "group-capability", wired),
             (wrong_scope_groups_are_refused_before_any_child_runs, "group-scope", wired),
             (duplicate_replay_keys_are_refused_before_a_host_sees_them, "group-duplicate-replay", wired),
             (the_first_settlement_wakes_the_caller_while_the_loser_still_runs, "group-first", wired),
