@@ -3,10 +3,20 @@
 //! Overlap is proven by *rendezvous*, never by wall time. Every leaf in a
 //! width-n batch reports that it started and then refuses to produce its answer
 //! until the whole width has reported. A tier that runs the leaves one at a time
-//! cannot get past the first leaf, so it fails on a bounded timeout whose
-//! message names the leaves that never started; a tier that overlaps them
-//! finishes and leaves behind an observation log in which all n starts precede
-//! the first answer.
+//! cannot get past the first leaf, so it deadlocks and fails on the turn's
+//! deadlock budget, whose message names the leaves that never started; a tier
+//! that overlaps them finishes and leaves behind an observation log in which
+//! all n starts precede the first answer.
+//!
+//! No wall-clock appears in that assertion, and none may: the leaves wait on
+//! the rendezvous itself, so under a starved executor — a one-CPU remote
+//! worker, say — the scenario is slow, never wrong (FIG-3423). Two
+//! consequences: a leaf's start is recorded and its `Started` event logged in
+//! one critical section, or a preempted leaf would let the waiters release on
+//! a start the log has not yet shown and the log would read as an answer
+//! preceding a start; and the only clock anywhere is the turn's deadlock
+//! budget, generous by construction, which is what still catches a genuinely
+//! serial tier.
 //!
 //! Three things follow from the same log and are asserted here rather than
 //! re-derived by each backend:
@@ -51,17 +61,13 @@ use lash_sansio::sync::MutexExt as _;
 
 use pretty_assertions::assert_eq;
 
-/// How long one leaf waits for the rest of its batch before the law gives up.
-///
-/// A serial tier burns this once and then short-circuits: the first leaf to
-/// time out poisons the rendezvous, so every later leaf returns immediately and
-/// the whole law fails in about this long rather than in `n` times this long.
-const RENDEZVOUS_BUDGET: Duration = Duration::from_secs(10);
-
 /// How long one scenario's turn may take before the law gives up on it.
 ///
-/// Comfortably above [`RENDEZVOUS_BUDGET`], so a rendezvous that times out is
-/// always reported as the missing overlap it is rather than as a stuck turn.
+/// This is the law's only clock, and it is a deadlock budget, not a scheduling
+/// assumption: a leaf that is merely slow to be scheduled must never fail the
+/// law, so the leaves themselves wait without a wall-clock bound (FIG-3423).
+/// A genuinely serial tier cannot leave its first leaf, so the turn outlasts
+/// nothing useful — the budget's expiry reports the leaves that never started.
 const TURN_BUDGET: Duration = Duration::from_secs(60);
 
 /// One leaf of a planned batch.
@@ -355,11 +361,11 @@ fn lashlang_process_aggregate_cell(plan: &ToolBatchPlan) -> String {
 
 /// The observation log every assertion in this law reads.
 ///
-/// One record per leaf transition, appended under a single lock so the order is
-/// the order the runtime produced, not the order a reader happened to sample.
+/// One record per leaf transition, appended under the rendezvous's single
+/// lock so the order is the order the runtime produced, not the order a
+/// reader happened to sample.
 #[derive(Debug, Default)]
 struct RendezvousLog {
-    events: std::sync::Mutex<Vec<RendezvousEvent>>,
     in_flight: AtomicUsize,
     peak_in_flight: AtomicUsize,
 }
@@ -368,12 +374,21 @@ struct RendezvousLog {
 enum RendezvousEvent {
     Started(String),
     Answered(String),
-    /// The named leaf gave up waiting; the payload is the set of leaves that
-    /// had not started by then.
-    TimedOut {
-        leaf: String,
-        missing: Vec<String>,
-    },
+}
+
+/// What one lock guards together.
+///
+/// `started` and `events` are one critical section by construction: a leaf
+/// counts as started for the waiters only in the same lock acquisition that
+/// appends its `Started` event. Under a starved executor a leaf can be
+/// preempted between two statements — if the two lived under separate locks
+/// the log would show a sibling's `Answered` before the `Started` that
+/// released it, and the law would fail on a schedule it never observed
+/// (FIG-3423).
+#[derive(Debug, Default)]
+struct RendezvousShared {
+    started: Vec<String>,
+    events: Vec<RendezvousEvent>,
 }
 
 /// The rendezvous every leaf of one scenario shares.
@@ -381,9 +396,8 @@ enum RendezvousEvent {
 struct Rendezvous {
     /// Every leaf the scenario plans to run, in plan order.
     expected: Vec<String>,
-    started: std::sync::Mutex<Vec<String>>,
+    shared: std::sync::Mutex<RendezvousShared>,
     notify: tokio::sync::watch::Sender<usize>,
-    poisoned: std::sync::atomic::AtomicBool,
     log: RendezvousLog,
     /// When false the leaves do not wait for one another at all. That is the
     /// serial-safe half of the differential: identical program, identical
@@ -395,36 +409,40 @@ impl Rendezvous {
     fn new(expected: Vec<String>, gated: bool) -> Self {
         Self {
             expected,
-            started: std::sync::Mutex::new(Vec::new()),
+            shared: std::sync::Mutex::new(RendezvousShared::default()),
             notify: tokio::sync::watch::channel(0).0,
-            poisoned: std::sync::atomic::AtomicBool::new(false),
             log: RendezvousLog::default(),
             gated,
         }
     }
 
     fn record_started(&self, leaf: &str) {
-        self.started.lock_recover().push(leaf.to_string());
-        self.log
-            .events
-            .lock_recover()
-            .push(RendezvousEvent::Started(leaf.to_string()));
-        let current = self.log.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-        self.log.peak_in_flight.fetch_max(current, Ordering::SeqCst);
-        let started = self.started.lock_recover().len();
+        let started = {
+            let mut shared = self.shared.lock_recover();
+            shared.started.push(leaf.to_string());
+            shared
+                .events
+                .push(RendezvousEvent::Started(leaf.to_string()));
+            // The in-flight counters ride in the same critical section: a
+            // waiter can only observe a complete `started` while holding this
+            // lock, so the peak is unreachable mid-release.
+            let current = self.log.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.log.peak_in_flight.fetch_max(current, Ordering::SeqCst);
+            shared.started.len()
+        };
         let _ = self.notify.send(started);
     }
 
     fn record_answered(&self, leaf: &str) {
-        self.log.in_flight.fetch_sub(1, Ordering::SeqCst);
-        self.log
+        let mut shared = self.shared.lock_recover();
+        shared
             .events
-            .lock_recover()
             .push(RendezvousEvent::Answered(leaf.to_string()));
+        self.log.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
 
     fn missing(&self, required: &[String]) -> Vec<String> {
-        let started = self.started.lock_recover().clone();
+        let started = self.shared.lock_recover().started.clone();
         required
             .iter()
             .filter(|leaf| !started.contains(leaf))
@@ -432,72 +450,44 @@ impl Rendezvous {
             .collect()
     }
 
+    /// The leaves that reported started, in the order they did.
+    fn started(&self) -> Vec<String> {
+        self.shared.lock_recover().started.clone()
+    }
+
     /// Waits until every leaf in `required` has reported started.
     ///
-    /// Returns `true` when the rendezvous was met. On the bounded timeout it
-    /// records the leaves that never started and poisons the rendezvous, so the
-    /// remaining leaves of a serial tier return at once instead of each burning
-    /// the whole budget.
-    async fn wait_for(&self, leaf: &str, required: &[String]) -> bool {
+    /// There is deliberately no clock here: a leaf whose task has not been
+    /// scheduled yet is indistinguishable from one that can never run, and
+    /// only the turn's deadlock budget may rule between them (FIG-3423). A
+    /// serial tier therefore parks its first leaf until the turn bound fires.
+    async fn wait_for(&self, required: &[String]) {
         if !self.gated {
-            return true;
-        }
-        if self.poisoned.load(Ordering::SeqCst) {
-            return false;
+            return;
         }
         let mut receiver = self.notify.subscribe();
-        let met = tokio::time::timeout(RENDEZVOUS_BUDGET, async {
-            loop {
-                if self.missing(required).is_empty() {
-                    return true;
-                }
-                if self.poisoned.load(Ordering::SeqCst) {
-                    return false;
-                }
-                if receiver.changed().await.is_err() {
-                    return false;
-                }
+        loop {
+            if self.missing(required).is_empty() {
+                return;
             }
-        })
-        .await
-        .unwrap_or(false);
-        if !met {
-            let missing = self.missing(required);
-            self.poisoned.store(true, Ordering::SeqCst);
-            let _ = self.notify.send(self.started.lock_recover().len());
-            self.log
-                .events
-                .lock_recover()
-                .push(RendezvousEvent::TimedOut {
-                    leaf: leaf.to_string(),
-                    missing,
-                });
+            if receiver.changed().await.is_err() {
+                return;
+            }
         }
-        met
     }
 
     fn events(&self) -> Vec<RendezvousEvent> {
-        self.log.events.lock_recover().clone()
+        self.shared.lock_recover().events.clone()
     }
 
     fn peak_in_flight(&self) -> usize {
         self.log.peak_in_flight.load(Ordering::SeqCst)
     }
 
-    /// Every leaf that some waiter reported as never started, in first-seen
-    /// order. This is the message a serial tier fails with.
+    /// Every planned leaf that never reported started, in plan order. This is
+    /// the message a serial tier fails with.
     fn never_started(&self) -> Vec<String> {
-        let mut seen = Vec::new();
-        for event in self.events() {
-            if let RendezvousEvent::TimedOut { missing, .. } = event {
-                for leaf in missing {
-                    if !seen.contains(&leaf) {
-                        seen.push(leaf);
-                    }
-                }
-            }
-        }
-        seen
+        self.missing(&self.expected)
     }
 }
 
@@ -591,9 +581,9 @@ impl crate::ToolProvider for RendezvousLeaves {
             };
             let effect_host = Arc::clone(&self.effect_host);
             crate::task::spawn(async move {
-                let met = rendezvous.wait_for(&name, &required).await;
+                rendezvous.wait_for(&required).await;
                 rendezvous.record_answered(&name);
-                let resolution = crate::Resolution::Ok(leaf_answer(&name, met));
+                let resolution = crate::Resolution::Ok(leaf_answer(&name));
                 let _ = effect_host
                     .await_event_resolver()
                     .resolve_await_event(&key, resolution)
@@ -602,17 +592,16 @@ impl crate::ToolProvider for RendezvousLeaves {
             return crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new());
         }
 
-        let met = rendezvous.wait_for(&name, &required).await;
+        rendezvous.wait_for(&required).await;
         rendezvous.record_answered(&name);
-        crate::ToolOutcome::ok(leaf_answer(&name, met)).into()
+        crate::ToolOutcome::ok(leaf_answer(&name)).into()
     }
 }
 
 /// The answer a leaf returns. It is deliberately identical whether or not the
 /// leaf had to wait, so the serial-versus-concurrent differential compares like
 /// with like: only the schedule differs between the two halves.
-fn leaf_answer(name: &str, met: bool) -> serde_json::Value {
-    let _ = met;
+fn leaf_answer(name: &str) -> serde_json::Value {
     serde_json::json!({ "leaf": name })
 }
 
@@ -753,9 +742,9 @@ impl crate::facade_support::OrchestratingToolImplementation for OrchestratingRen
         let rendezvous = Arc::clone(&self.state.rendezvous.lock_recover());
         rendezvous.record_started(&self.name);
         let required = self.state.required_for(&self.name, &rendezvous);
-        let met = rendezvous.wait_for(&self.name, &required).await;
+        rendezvous.wait_for(&required).await;
         rendezvous.record_answered(&self.name);
-        crate::ToolOutcome::ok(leaf_answer(&self.name, met))
+        crate::ToolOutcome::ok(leaf_answer(&self.name))
     }
 }
 
@@ -936,7 +925,6 @@ impl ScenarioObservations {
             match event {
                 RendezvousEvent::Started(_) => started += 1,
                 RendezvousEvent::Answered(_) => break,
-                RendezvousEvent::TimedOut { .. } => break,
             }
         }
         started
@@ -1072,11 +1060,12 @@ async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &
         })
     });
 
-    // The turn is bounded too. A leaf that never starts is reported by the
-    // rendezvous, but a producer whose batch never reaches the leaves at all --
-    // a process that is registered and never run, say -- would otherwise hang
-    // until the harness's own timeout and be read as infrastructure rather than
-    // as the finding it is.
+    // The turn is bounded, and this is the law's only clock: the leaves wait
+    // on the rendezvous without a wall-clock bound, so this budget bounds a
+    // true deadlock and nothing else (FIG-3423). Its expiry is the report a
+    // serial tier gets — the leaves that never started — and it also catches
+    // a producer whose batch never reached the leaves at all, a process that
+    // is registered and never run, say.
     let turn = tokio::time::timeout(
         TURN_BUDGET,
         runtime.stream_turn(
@@ -1086,10 +1075,14 @@ async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &
     )
     .await
     .unwrap_or_else(|_| {
+        let rendezvous = Arc::clone(&world.state.rendezvous.lock_recover());
         panic!(
-            "the batch turn did not settle within {TURN_BUDGET:?} for session \
-             `{}`: the producer's batch never reached the leaves",
-            world.session_id
+            "the batch did not overlap: the turn did not settle within \
+             {TURN_BUDGET:?} for session `{}`. Leaves that never started: \
+             {:?}; leaves that did start: {:?}",
+            world.session_id,
+            rendezvous.never_started(),
+            rendezvous.started(),
         )
     })
     .expect("run the tool-batch parallelism conformance turn");
