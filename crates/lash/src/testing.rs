@@ -52,6 +52,11 @@ pub use lash_core::testing::behavior_transcript;
 /// a scenario can render durable-write transcript lines from real facts.
 pub use lash_core::testing::checkpoint_observer;
 
+/// Store-construction fixtures shared by kernel tests and certification
+/// scenarios: session-store requests, lease claims, commit helpers, and the
+/// completion-deferral authorization seam.
+pub use lash_core::testing::store_fixtures;
+
 pub mod conformance {
     //! Backend certification: the durable-store laws (re-exported from
     //! `lash-internal-conformance`, including the `Reopenable*` handle pairs a
