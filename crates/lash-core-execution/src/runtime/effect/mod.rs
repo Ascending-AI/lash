@@ -10,6 +10,8 @@ mod group;
 pub mod group_drain;
 mod group_journal;
 use lash_core_store::effect_identity as identity_types;
+mod live_openers;
+pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
 mod native_host;
 mod store_turn_control;
 pub use store_turn_control::bind_store_turn_control_authority;
