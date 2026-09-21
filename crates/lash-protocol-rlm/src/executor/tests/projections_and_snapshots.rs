@@ -942,8 +942,11 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             measured.len()
         );
         assert_eq!(full_state_bytes, 136_711);
-        assert_eq!(minimum, 21_105);
-        assert_eq!(maximum, 21_107);
+        // FIG-3394: the per-commit floor grew by exactly the 278 bytes of the
+        // two deferred-resolution link identities the root now persists; the
+        // flat state, which carries no root, is unchanged.
+        assert_eq!(minimum, 21_383);
+        assert_eq!(maximum, 21_385);
     });
 }
 
