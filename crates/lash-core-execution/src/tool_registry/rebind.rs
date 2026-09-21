@@ -39,7 +39,7 @@ pub(super) fn manifest_with_compact_contract(
     if manifest.compact_contract.is_none()
         && let Some(contract) = source.resolve_contract_by_id(&manifest.id)
     {
-        manifest.compact_contract = Some(contract.compact_contract(&manifest));
+        manifest.compact_contract = Some(contract.compact_contract_shared(&manifest));
     }
     manifest
 }

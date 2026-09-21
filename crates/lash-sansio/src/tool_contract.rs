@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use crate::sync::MutexExt;
 use crate::{SchemaContract, SchemaProjectionOverride};
 
 /// Automatic retry policy for a tool's execution.
@@ -273,7 +277,7 @@ pub struct ToolManifest {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compact_contract: Option<CompactToolContract>,
+    pub compact_contract: Option<Arc<CompactToolContract>>,
     #[serde(default, skip_serializing_if = "is_default_tool_activation")]
     pub activation: ToolActivation,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -295,6 +299,8 @@ pub struct ToolManifest {
 pub struct ToolContract {
     #[serde(skip)]
     identity: Option<ToolContractIdentity>,
+    #[serde(skip)]
+    compact_cache: CompactContractCache,
     #[serde(default = "ToolContract::default_input_schema_contract")]
     pub input_schema: SchemaContract,
     #[serde(default)]
@@ -303,6 +309,38 @@ pub struct ToolContract {
     pub output_contract: ToolOutputContract,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub examples: Vec<String>,
+}
+
+/// Memoized [`CompactToolContract`] projections, keyed by the inputs that
+/// actually shape the compact output (the signature name, the example limit,
+/// and the manifest description). Schema `$ref` resolution behind the compact
+/// contract deep-copies the schema tree; without this memo that copy ran once
+/// per doc render per tool.
+///
+/// Cloning or comparing a contract never carries or observes the memo, so the
+/// cache cannot leak into wire/persisted state or equality semantics.
+#[derive(Debug, Default)]
+struct CompactContractCache(Mutex<BTreeMap<CompactContractKey, Arc<CompactToolContract>>>);
+
+impl Clone for CompactContractCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for CompactContractCache {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for CompactContractCache {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct CompactContractKey {
+    signature_name: String,
+    example_limit: usize,
+    description: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,6 +353,7 @@ impl Default for ToolContract {
     fn default() -> Self {
         Self {
             identity: None,
+            compact_cache: CompactContractCache::default(),
             input_schema: Self::default_input_schema_contract(),
             output_schema: serde_json::Value::Null.into(),
             output_contract: ToolOutputContract::Static,
@@ -381,7 +420,63 @@ impl ToolContract {
         signature_name: &str,
         example_limit: usize,
     ) -> CompactToolContract {
-        CompactToolContract {
+        (*self.compact_contract_shared_with_signature_name_and_example_limit(
+            manifest,
+            signature_name,
+            example_limit,
+        ))
+        .clone()
+    }
+
+    /// Shared handle to the compact projection for `manifest`, memoized on this
+    /// contract. Read-only consumers should prefer this over
+    /// [`ToolContract::compact_contract`] to avoid the deep `serde_json::Value`
+    /// copies behind schema `$ref` resolution.
+    pub fn compact_contract_shared(&self, manifest: &ToolManifest) -> Arc<CompactToolContract> {
+        self.compact_contract_shared_with_signature_name_and_example_limit(
+            manifest,
+            &manifest.name,
+            COMPACT_TOOL_EXAMPLE_LIMIT,
+        )
+    }
+
+    /// Shared handle variant of
+    /// [`ToolContract::compact_contract_with_signature_name`].
+    pub fn compact_contract_shared_with_signature_name(
+        &self,
+        manifest: &ToolManifest,
+        signature_name: &str,
+    ) -> Arc<CompactToolContract> {
+        self.compact_contract_shared_with_signature_name_and_example_limit(
+            manifest,
+            signature_name,
+            COMPACT_TOOL_EXAMPLE_LIMIT,
+        )
+    }
+
+    pub fn compact_contract_shared_with_signature_name_and_example_limit(
+        &self,
+        manifest: &ToolManifest,
+        signature_name: &str,
+        example_limit: usize,
+    ) -> Arc<CompactToolContract> {
+        if signature_name == manifest.name
+            && example_limit == COMPACT_TOOL_EXAMPLE_LIMIT
+            && let Some(stored) = &manifest.compact_contract
+            && stored.name == signature_name
+            && stored.description == manifest.description.trim()
+        {
+            return Arc::clone(stored);
+        }
+        let key = CompactContractKey {
+            signature_name: signature_name.to_string(),
+            example_limit,
+            description: manifest.description.trim().to_string(),
+        };
+        if let Some(hit) = self.compact_cache.0.lock_recover().get(&key) {
+            return Arc::clone(hit);
+        }
+        let computed = Arc::new(CompactToolContract {
             name: signature_name.to_string(),
             signature: self.input_signature_with_name(manifest, signature_name),
             returns: self.output_summary(),
@@ -391,7 +486,12 @@ impl ToolContract {
                 .return_fields(self.output_schema.canonical()),
             description: manifest.description.trim().to_string(),
             examples: compact_examples(&self.examples, example_limit),
-        }
+        });
+        self.compact_cache
+            .0
+            .lock_recover()
+            .insert(key, Arc::clone(&computed));
+        computed
     }
 
     pub fn input_signature(&self, manifest: &ToolManifest) -> String {
@@ -726,7 +826,7 @@ impl ToolDefinition {
     /// the resolved [`ToolContract`].
     pub fn manifest(&self) -> ToolManifest {
         let mut manifest = self.manifest.clone();
-        manifest.compact_contract = Some(self.contract.compact_contract(&manifest));
+        manifest.compact_contract = Some(self.contract.compact_contract_shared(&manifest));
         manifest
     }
 

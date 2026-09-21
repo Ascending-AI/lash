@@ -971,3 +971,82 @@ fn tool_bindings_round_trip_as_opaque_metadata() {
     let decoded: ToolDefinition = serde_json::from_value(encoded).expect("round trip");
     assert_eq!(decoded.manifest.bindings["example.binding"]["name"], "read");
 }
+
+#[test]
+fn compact_contract_shared_memoizes_and_matches_owned() {
+    let tool = ToolDefinition::raw(
+        "tool:search_docs",
+        "search_docs",
+        "Search docs",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": { "$ref": "#/$defs/query" }
+            },
+            "$defs": {
+                "query": { "type": "string", "description": "Search query" }
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "string" }),
+    );
+    let manifest = tool.manifest();
+
+    let owned = tool.contract.compact_contract(&manifest);
+    let shared = tool.contract.compact_contract_shared(&manifest);
+    assert_eq!(owned, *shared);
+
+    let again = tool.contract.compact_contract_shared(&manifest);
+    assert!(std::sync::Arc::ptr_eq(&shared, &again));
+
+    let aliased = tool
+        .contract
+        .compact_contract_shared_with_signature_name(&manifest, "tools.search_docs");
+    assert_eq!(aliased.name, "tools.search_docs");
+    assert_eq!(aliased.signature, "tools.search_docs({ query: str })");
+    assert!(!std::sync::Arc::ptr_eq(&shared, &aliased));
+}
+
+#[test]
+fn compact_contract_shared_reuses_manifest_stored_contract() {
+    let tool = ToolDefinition::raw(
+        "tool:read_file",
+        "read_file",
+        "Read a file",
+        ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "string" }),
+    );
+    let manifest = tool.manifest();
+    let stored = manifest.compact_contract.clone().expect("compact contract");
+
+    let shared = tool.contract.compact_contract_shared(&manifest);
+    assert!(std::sync::Arc::ptr_eq(&stored, &shared));
+}
+
+#[test]
+fn arc_compact_contract_serializes_identically_and_round_trips() {
+    let tool = ToolDefinition::raw(
+        "tool:read_file",
+        "read_file",
+        "Read a file",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"]
+        }),
+        serde_json::json!({ "type": "string" }),
+    );
+    let manifest = tool.manifest();
+    assert!(manifest.compact_contract.is_some());
+
+    let encoded = serde_json::to_value(&manifest).expect("manifest json");
+    assert_eq!(
+        encoded["compact_contract"]["signature"],
+        serde_json::json!("read_file({ path: str })")
+    );
+
+    let bytes = serde_json::to_vec(&manifest).expect("manifest bytes");
+    let decoded: ToolManifest = serde_json::from_slice(&bytes).expect("decode");
+    assert_eq!(decoded, manifest);
+}
