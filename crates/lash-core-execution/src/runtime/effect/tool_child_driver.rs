@@ -314,36 +314,59 @@ pub(crate) fn rebind_child_dispatch(
     Ok(child)
 }
 
-/// The catalog a child is dispatched against: exactly its admitted manifest.
+/// The catalog a child is dispatched against: its admitted manifest pinned at
+/// its own id, plus the lent live entries for every other id.
 ///
 /// ADR 0099 §3 amendment 1: "An ungranted call pins its admitted manifest. A
-/// reopen may not consult the live Tool Catalog … a tool whose retry policy or
-/// argument projection changed between admission and recovery would otherwise
-/// make a recovered child behave unlike the child that was admitted."
+/// reopen may not consult the live Tool Catalog" *for it* — a tool whose
+/// retry policy or argument projection changed between admission and
+/// recovery would otherwise make a recovered child behave unlike the child
+/// that was admitted. The ruling binds the *recorded call*: at this call's
+/// id the catalog answers with the recorded manifest, whatever the live
+/// deployment now says — a changed or removed live entry cannot alter what
+/// the child was admitted to do.
 ///
-/// The manifest is always the recorded one. The **contract** beside it is not:
-/// a contract is schemas and documentation for the tool's code, which §3
-/// amendment 3 puts on the deployment-wiring side along with the code itself,
-/// and it is read during *preparation* — which has already happened, since a
-/// child carries a `PreparedToolCall`. So the live entry's contract is reused
-/// when this deployment still has one, and a default stands in when it does
-/// not; neither can change what the child does.
+/// The other ids are the live catalog, lent unchanged, because a call the
+/// child's orchestrating body issues is a *fresh admission*, not a retained
+/// fact: §3 has nothing recorded to prefer for it, and what admits a new
+/// call at body runtime is what admits any live call — the deployment's
+/// catalog at that moment.
+///
+/// For the recorded manifest the **contract** beside it is not recorded
+/// either: a contract is schemas and documentation for the tool's code, which
+/// §3 amendment 3 puts on the deployment-wiring side along with the code
+/// itself, and it is read during *preparation* — which has already happened,
+/// since a child carries a `PreparedToolCall`. So the live entry's contract
+/// is reused when this deployment still has one, and a default stands in when
+/// it does not; neither can change what the child does.
 fn admitted_catalog(
     lent: &ToolDispatchContext<'static>,
     request: &ToolChildRequest,
 ) -> ToolCatalog {
     let manifest = request.admission.manifest().clone();
-    let contract = lent
+    let recorded_contract = lent
         .tool_catalog
         .tools
         .iter()
         .find(|entry| entry.manifest.id == manifest.id)
-        .map(|entry| Arc::clone(&entry.contract))
-        .unwrap_or_else(|| Arc::new(crate::ToolContract::default()));
-    ToolCatalog::from_tool_definitions(vec![crate::ToolDefinition {
-        manifest,
-        contract: contract.as_ref().clone(),
-    }])
+        .map(|entry| entry.contract.as_ref().clone())
+        .unwrap_or_default();
+    let definitions = std::iter::once(crate::ToolDefinition {
+        manifest: manifest.clone(),
+        contract: recorded_contract,
+    })
+    .chain(
+        lent.tool_catalog
+            .tools
+            .iter()
+            .filter(|entry| entry.manifest.id != manifest.id)
+            .map(|entry| crate::ToolDefinition {
+                manifest: entry.manifest.clone(),
+                contract: entry.contract.as_ref().clone(),
+            }),
+    )
+    .collect();
+    ToolCatalog::from_tool_definitions(definitions)
 }
 
 /// Runs one tool child to a terminal and reports what it produced.
@@ -493,31 +516,28 @@ async fn validate_recorded_authorities(
         .turn_control_participation()
         .await
         .map_err(RuntimeEffectControllerError::from)?;
-    match request.cancellation_authority.as_ref() {
-        Some(recorded) => {
-            let effect_host = host.effect_host()?;
-            let binding = effect_host
-                .turn_control_binding(controller)
-                .await
-                .map_err(RuntimeEffectControllerError::from)?;
-            if binding.binding_id() != recorded.as_str() {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
-                    format!(
-                        "tool child `{}` records cancellation authority `{}` and this host \
-                         derives `{}` for its admitted scope; a foreign binding means the \
-                         cooperative signal it would honour is not the one this opener sends",
-                        request.call.call_id,
-                        recorded.as_str(),
-                        binding.binding_id()
-                    ),
-                ));
-            }
+    // `None` records that no cooperative authority existed at admission;
+    // there is nothing to re-derive and the child simply is not wired to
+    // the cooperative signal.
+    if let Some(recorded) = request.cancellation_authority.as_ref() {
+        let effect_host = host.effect_host()?;
+        let binding = effect_host
+            .turn_control_binding(controller)
+            .await
+            .map_err(RuntimeEffectControllerError::from)?;
+        if binding.binding_id() != recorded.as_str() {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
+                format!(
+                    "tool child `{}` records cancellation authority `{}` and this host \
+                     derives `{}` for its admitted scope; a foreign binding means the \
+                     cooperative signal it would honour is not the one this opener sends",
+                    request.call.call_id,
+                    recorded.as_str(),
+                    binding.binding_id()
+                ),
+            ));
         }
-        // `None` records that no cooperative authority existed at admission;
-        // there is nothing to re-derive and the child simply is not wired to
-        // the cooperative signal.
-        None => {}
     }
     match &request.completion_routing {
         crate::runtime::effect::ToolChildCompletionRouting::Inline => {}
@@ -680,13 +700,40 @@ fn child_turn_cancel_wait(
 
 /// Arms the resolver the parked call named, then parks on the child's own
 /// journaled await.
+async fn await_child_completion(
+    dispatch: &Arc<ToolDispatchContext<'static>>,
+    request: &ToolChildRequest,
+    pending: crate::tool_dispatch::PendingToolDispatchOutcome,
+    turn_cancel_wait: &crate::runtime::TurnCancelWait,
+) -> ToolDispatchOutcome {
+    await_journaled_tool_completion(
+        dispatch,
+        request.attempt_identity.parent_invocation(),
+        &request.call.call_id,
+        pending,
+        turn_cancel_wait,
+    )
+    .await
+}
+
+/// Arms the resolver a deferred tool call named, then parks on a journaled
+/// await derived from the lineage the caller supplies.
+///
+/// Two callers park through this one body. The driver itself parks the child's
+/// own deferred call under the request's *recorded* parent invocation; an
+/// orchestrating body on the group-child path parks a nested deferred call
+/// under the parent it derived for that call. Both derivations name recorded
+/// lineage, so a redrive re-derives the same replay key rather than a fresh
+/// one — the same reconstruction property this module's documentation claims
+/// for the attempts themselves.
 ///
 /// The arming runs before the park and on every redrive, for the reason the
 /// session path states: the recorded attempt body that named the resolver does
 /// not re-run, so nothing else would arm it.
-async fn await_child_completion(
-    dispatch: &Arc<ToolDispatchContext<'static>>,
-    request: &ToolChildRequest,
+pub(crate) async fn await_journaled_tool_completion(
+    dispatch: &ToolDispatchContext<'_>,
+    parent_invocation: Option<&crate::RuntimeInvocation>,
+    call_id: &str,
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
 ) -> ToolDispatchOutcome {
@@ -700,10 +747,12 @@ async fn await_child_completion(
     {
         return unarmed_child_outcome(pending, &error.to_string());
     }
-    let Some(invocation) = child_await_invocation(dispatch, request) else {
+    let Some(invocation) =
+        parent_invocation.map(|parent| journaled_await_invocation(dispatch, parent, call_id))
+    else {
         return unarmed_child_outcome(
             pending,
-            "the child's recorded attempt identity names no invocation to hang an await on",
+            "the caller's lineage names no invocation to hang an await on",
         );
     };
     let resolver = pending.pending.resolved_by.clone();
@@ -733,7 +782,7 @@ async fn await_child_completion(
         Err(error) => return failed_child_outcome(pending, &error.to_string()),
     };
     crate::tool_dispatch::settle_completed_pending_tool_call(
-        dispatch.as_ref(),
+        dispatch,
         pending.tool_name,
         pending.args,
         resolution,
@@ -744,26 +793,22 @@ async fn await_child_completion(
     .await
 }
 
-/// The invocation the child's await is journaled under.
-///
-/// Derived from the child's *recorded* attempt identity, so a redrive re-derives
-/// the same replay key rather than a fresh one — the same reconstruction
-/// property the request's module documentation claims for the attempts
-/// themselves.
-fn child_await_invocation(
-    dispatch: &Arc<ToolDispatchContext<'static>>,
-    request: &ToolChildRequest,
-) -> Option<crate::RuntimeEffectInvocation> {
-    let parent = request.attempt_identity.parent_invocation()?;
-    let suffix = format!("{}:await", request.call.call_id);
+/// The invocation a journaled await is recorded under: a child of the
+/// supplied parent, keyed by the deferred call's id.
+fn journaled_await_invocation(
+    dispatch: &ToolDispatchContext<'_>,
+    parent: &crate::RuntimeInvocation,
+    call_id: &str,
+) -> crate::RuntimeEffectInvocation {
+    let suffix = format!("{call_id}:await");
     let parent_effect_id = parent.effect_id().unwrap_or("tool").to_string();
-    Some(crate::runtime::causal::child_effect_invocation(
+    crate::runtime::causal::child_effect_invocation(
         dispatch.effect_controller.scoped().execution_scope(),
         parent,
         format!("{parent_effect_id}:{suffix}"),
         crate::RuntimeEffectKind::AwaitEvent,
         suffix,
-    ))
+    )
 }
 
 /// A wait nobody will resolve is a failure, never a park.

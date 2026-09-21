@@ -25,9 +25,9 @@
 //! * a **usage** leaf's managed-LLM spend inside the attempt is captured into
 //!   the journaled `ToolAttempt` outcome and aggregated onto the settlement;
 //! * an **orchestrating** leaf runs its body directly — no invented outer
-//!   `ToolAttempt` — and observes the §3 ruling: a group child holds no
-//!   `RuntimeExecutionContext`, so `call_tool_batch` answers the
-//!   out-of-process-replay refusal.
+//!   `ToolAttempt` — and its work is real: a nested call runs through the
+//!   child's own rebound dispatch as a journaled attempt, and the durable
+//!   process start the body realizes rides the settlement's `possession`.
 //!
 //! A second scenario covers the recovery routing rule: a reopened group whose
 //! child's opener is not live on this host is **not refused** and **not run** —
@@ -187,6 +187,10 @@ const POLL: Duration = Duration::from_millis(25);
 struct LeafExecution {
     /// The tool name the leaf was invoked under.
     tool: String,
+    /// The session the attempt's context was bound to — the child's recorded
+    /// one when the driver honoured the retained request, the lending
+    /// opener's when it did not.
+    session_id: String,
     /// The one-based attempt number the context stamped.
     attempt: u32,
     /// The execution binding the attempt carried — the grant's, for a granted
@@ -206,9 +210,16 @@ struct LawObservation {
 }
 
 impl LawObservation {
-    fn record(&self, tool: &str, attempt: u32, execution_binding: serde_json::Value) {
+    fn record(
+        &self,
+        tool: &str,
+        session_id: &str,
+        attempt: u32,
+        execution_binding: serde_json::Value,
+    ) {
         self.executions.lock_recover().push(LeafExecution {
             tool: tool.to_string(),
+            session_id: session_id.to_string(),
             attempt,
             execution_binding,
         });
@@ -288,6 +299,27 @@ fn leaf_grant() -> crate::ToolExecutionGrant {
         .with_execution_binding(serde_json::json!({ "route": "granted-by-request" }))
 }
 
+/// The grant the same-ID-orchestrator child is admitted under: authority over
+/// the very id the live registry holds as orchestrating, so any lane decision
+/// that consulted the registration instead of the recorded admission would
+/// route the call into an orchestrating body the grant never described.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn orchestrator_id_grant() -> crate::ToolExecutionGrant {
+    let definition = crate::ToolDefinition::raw(
+        LEAF_ORCHESTRATING,
+        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
+        "conformance orchestrating leaf",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    );
+    crate::ToolExecutionGrant::from_definition(definition)
+        .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
+        .with_execution_binding(serde_json::json!({ "route": "granted-over-orchestrator" }))
+}
+
 /// The leaf provider every child but the orchestrating one executes under.
 struct LawLeafProvider {
     definitions: Vec<crate::ToolDefinition>,
@@ -326,6 +358,7 @@ impl crate::ToolProvider for LawLeafProvider {
         let name = call.name().to_string();
         self.observation.record(
             &name,
+            context.session_id(),
             context.attempt_number(),
             context.tool_execution_binding().clone(),
         );
@@ -371,6 +404,15 @@ impl crate::ToolProvider for LawLeafProvider {
             name if name == LEAF_GRANTED.trim_start_matches("tool:") => {
                 crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
                     serde_json::json!({ "leaf": "granted" }),
+                ))
+            }
+            // Reached only by the rank-7 child: a catalog-admitted call on
+            // this id is claimed by the orchestrating lane before the provider
+            // is asked, so a provider execution under this name is, by
+            // construction, a call that ran as a leaf under its own grant.
+            name if name == LEAF_ORCHESTRATING.trim_start_matches("tool:") => {
+                crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
+                    serde_json::json!({ "leaf": "orchestrating-as-leaf" }),
                 ))
             }
             name if name == LEAF_INTENTS.trim_start_matches("tool:") => {
@@ -462,10 +504,12 @@ fn law_direct_completion() -> crate::DirectCompletion {
     }
 }
 
-/// The orchestrating child's body. It exists to prove two §3 facts at once:
-/// the child ran through the orchestrating lane — no `ToolAttempt` framed it —
-/// and the child holds no `RuntimeExecutionContext`, which is exactly what
-/// `call_tool_batch` reports.
+/// The orchestrating child's body. It does the work §2 and §6 actually
+/// describe: a nested call coordinated through the child's own rebound
+/// dispatch — a journaled `ToolAttempt` under the child's admitted
+/// controller, not a `RuntimeExecutionContext` borrow — and a durable
+/// process start, which the settlement's `possession` must record because an
+/// orchestrating body has no attempt frame whose intents would carry it.
 struct LawOrchestratingTool {
     definition: crate::ToolDefinition,
 }
@@ -492,14 +536,38 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for La
                 serde_json::json!({}),
             )])
             .await;
-        let refused = replies
-            .iter()
-            .all(|reply| !matches!(reply.output.outcome, crate::ToolCallOutcome::Success(_)));
-        crate::ToolOutcome::ok(serde_json::json!({
-            "leaf": "orchestrating",
-            "replies": replies.len(),
-            "nested_batch_unavailable": refused,
-        }))
+        let nested_ok = matches!(
+            replies.first().map(|reply| &reply.output.outcome),
+            Some(crate::ToolCallOutcome::Success(_))
+        );
+        // The started id derives from the body's own call id, so a redrive
+        // re-requests the same start rather than minting a second process.
+        let started_id = crate::ProcessId::from(format!(
+            "{}-started",
+            context.tool_call_id().unwrap_or("law-orchestrating")
+        ));
+        match context
+            .start_process(crate::ProcessStartRequest::external(
+                started_id,
+                crate::ProcessOriginator::host(),
+                serde_json::json!({ "lane": "orchestrating" }),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            ))
+            .await
+        {
+            Ok(view) => crate::ToolOutcome::ok(serde_json::json!({
+                "leaf": "orchestrating",
+                "replies": replies.len(),
+                "nested_ok": nested_ok,
+                "started": view.process_id.to_string(),
+            })),
+            Err(error) => crate::ToolOutcome::err_fmt(format!(
+                "the orchestrating body's process start failed: {error}"
+            )),
+        }
     }
 }
 
@@ -862,6 +930,29 @@ fn lane_group(
             parent,
         ),
     );
+    // Rank 7 is the same-ID-orchestrator probe: a Granted admission on the
+    // id the tool registry holds as orchestrating. The lane gate must see
+    // the admission arm, not the registration — the call runs as a leaf
+    // under its grant or it runs an orchestrating body the grant never
+    // described, and the assertions downstream name which happened.
+    let granted_over_orchestrator = child_envelope(
+        scope,
+        group_key,
+        7,
+        leaf_request(
+            scope,
+            session_id,
+            &format!("{group_key}-call-7"),
+            LEAF_ORCHESTRATING,
+            LEAF_ORCHESTRATING.trim_start_matches("tool:"),
+            crate::runtime::effect::ToolChildAdmission::Granted {
+                grant: Box::new(orchestrator_id_grant()),
+            },
+            ToolChildCompletionRouting::Inline,
+            env_ref,
+            parent,
+        ),
+    );
     let children = vec![
         leaf(0, LEAF_PLAIN, ToolChildCompletionRouting::Inline),
         leaf(1, LEAF_RETRY, ToolChildCompletionRouting::Inline),
@@ -870,6 +961,7 @@ fn lane_group(
         leaf(4, LEAF_INTENTS, ToolChildCompletionRouting::Inline),
         leaf(5, LEAF_USAGE, ToolChildCompletionRouting::Inline),
         leaf(6, LEAF_ORCHESTRATING, ToolChildCompletionRouting::Inline),
+        granted_over_orchestrator,
     ];
     crate::RuntimeEffectGroup::try_new(
         crate::RuntimeEffectInvocation::new(
@@ -904,6 +996,29 @@ async fn resolve_when_registered(
                     "the deferred leaf's await never registered a resolvable key"
                 );
                 tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    }
+}
+
+/// Polls `host`'s outstanding await registry until `key` is listed — the
+/// journal-visible half of `parked_key`, which fires inside the attempt body
+/// before the coordinator's commits have landed.
+async fn await_key_registered(
+    host: &Arc<dyn crate::EffectHost>,
+    session_id: &crate::SessionId,
+    key: &crate::AwaitEventKey,
+) {
+    let deadline = std::time::Instant::now() + SETTLE_BUDGET;
+    loop {
+        match host.list_outstanding_await_event_keys(session_id).await {
+            Ok(keys) if keys.contains(key) => return,
+            _ => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the deferred leaf's await key never became durable"
+                );
+                tokio::time::sleep(POLL).await;
             }
         }
     }
@@ -970,7 +1085,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
     let scoped = host.scoped(scope.clone()).expect("the group scope binds");
     let mut handle = scoped
         .controller()
-        .open_effect_group(group)
+        .open_effect_group(group.clone())
         .await
         .expect("a group of tool children opens when their opener is live");
 
@@ -990,7 +1105,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
     });
 
     let mut settlements: Vec<crate::GroupSettlement> = Vec::new();
-    for rank in 0..7 {
+    for rank in 0..8 {
         settlements.push(next_settlement(&scoped, &mut handle, rank).await);
     }
     resolve.await.expect("the resolver task joins");
@@ -1006,7 +1121,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
             .iter()
             .map(|settlement| settlement.position)
             .collect::<Vec<_>>(),
-        (0..7).collect::<Vec<_>>(),
+        (0..8).collect::<Vec<_>>(),
         "every child settles exactly once, at every rank"
     );
 
@@ -1048,7 +1163,17 @@ pub async fn tool_children_run_through_the_invocation_driver(
         ),
         "the plain leaf succeeds"
     );
-    assert_eq!(scenario.observation.executions_of("law_plain").len(), 1);
+    // The orchestrating child at rank 6 also calls this leaf nested; every
+    // invocation ran its body exactly once (each run is attempt 1). The total
+    // count is asserted after the orchestrating assertions below.
+    assert!(
+        scenario
+            .observation
+            .executions_of("law_plain")
+            .iter()
+            .all(|run| run.attempt == 1),
+        "no invocation of the plain leaf re-executed its body"
+    );
 
     // The retry leaf: the first attempt's journaled failure is visible as a
     // recorded attempt, and the retry settles the child — one driver owns the
@@ -1135,14 +1260,25 @@ pub async fn tool_children_run_through_the_invocation_driver(
     );
 
     // The orchestrating leaf: the orchestration lane ran the body directly —
-    // the leaf provider never saw it — and the child held no runtime execution
-    // context, which is the §3 ruling a nested batch reports.
-    assert!(
-        scenario
-            .observation
-            .executions_of("law_orchestrating")
-            .is_empty(),
-        "an orchestrating child never enters the leaf provider"
+    // the leaf provider never saw *it* — while the body's nested call ran as
+    // a journaled attempt under the child's own rebound dispatch, and the
+    // durable start it realized is the settlement's possession.
+    //
+    // The one provider execution under this name is the rank-7 child's: a
+    // Granted admission, so the lane gate left it to the leaf provider, which
+    // recorded the grant's execution binding. Had the gate consulted the
+    // registration instead of the admission arm, that call would have run an
+    // orchestrating body and this execution would not exist.
+    let orchestrating_runs = scenario.observation.executions_of("law_orchestrating");
+    assert_eq!(
+        orchestrating_runs.len(),
+        1,
+        "only the same-ID grant reached the leaf provider: {orchestrating_runs:?}"
+    );
+    assert_eq!(
+        orchestrating_runs[0].execution_binding,
+        serde_json::json!({ "route": "granted-over-orchestrator" }),
+        "the same-ID call executed under its recorded grant, not the orchestrating registration"
     );
     let orchestrating = &outcomes[6];
     if !orchestrating.0.record.output.is_success() {
@@ -1150,9 +1286,82 @@ pub async fn tool_children_run_through_the_invocation_driver(
     }
     let value = orchestrating.0.record.output.value_for_projection();
     assert_eq!(
-        value["nested_batch_unavailable"],
+        value["nested_ok"],
         serde_json::json!(true),
-        "a group child holds no runtime execution context"
+        "the body's nested call executed through the child's rebound dispatch"
+    );
+    let started_id = format!("{group_key}-call-6-started");
+    assert_eq!(
+        value["started"],
+        serde_json::json!(started_id.clone()),
+        "the body's durable start is part of its settled output"
+    );
+    assert_eq!(
+        orchestrating.1.possession,
+        vec![crate::ProcessId::from(started_id)],
+        "an orchestrating body's realized start rides the settlement's possession"
+    );
+    assert_eq!(
+        scenario.observation.executions_of("law_plain").len(),
+        2,
+        "the plain leaf ran once as its own child and once nested under the \
+         orchestrating body"
+    );
+
+    // The same-ID-orchestrator child: the recorded grant decided the lane, so
+    // the call settled as a leaf — the leaf-shaped output, no started process
+    // in its possession, and none of the orchestrating body's side effects.
+    let granted_over_orchestrator = &outcomes[7];
+    let granted_value = granted_over_orchestrator
+        .0
+        .record
+        .output
+        .value_for_projection();
+    assert_eq!(
+        granted_value["leaf"],
+        serde_json::json!("orchestrating-as-leaf"),
+        "the granted call ran the leaf body, not the orchestrating one: {granted_value}"
+    );
+    assert!(
+        granted_over_orchestrator.1.possession.is_empty(),
+        "a granted leaf starts nothing: possession stays empty where an \
+         orchestrating body would have recorded its start"
+    );
+
+    // Replay: a second open of the same group serves the journaled
+    // settlements — the receipts and the possession are the recorded ones,
+    // not re-executions.
+    let mut replay_handle = scoped
+        .controller()
+        .open_effect_group(group)
+        .await
+        .expect("a recorded group reopens to serve its journaled settlements");
+    let mut replayed_orchestrating = None;
+    for rank in 0..8 {
+        let settlement = next_settlement(&scoped, &mut replay_handle, rank).await;
+        if settlement.position == 6 {
+            replayed_orchestrating = Some(settlement.outcome);
+        }
+    }
+    scoped
+        .controller()
+        .close_effect_group(replay_handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the replayed group closes");
+    let Ok(crate::RuntimeEffectOutcome::ToolInvocation {
+        settlement: replayed,
+        ..
+    }) = replayed_orchestrating.expect("rank 6 re-serves on replay")
+    else {
+        panic!("rank 6 replayed to something that is not a tool invocation")
+    };
+    assert_eq!(
+        replayed.possession, outcomes[6].1.possession,
+        "the settlement's possession is the recorded one after replay"
+    );
+    assert_eq!(
+        replayed.model_return, outcomes[6].1.model_return,
+        "the settlement's recorded return is unchanged on replay"
     );
 }
 
@@ -1160,17 +1369,17 @@ pub async fn tool_children_run_through_the_invocation_driver(
 // Recovery: an opener that is not live on this host
 // =============================================================================
 
-/// A single-child group: the recovery leaf alone, parked on its deferred
-/// completion key.
+/// A single-child group: one catalog-admitted leaf at rank 0.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-fn recovery_group(
+fn single_leaf_group(
     scope: &crate::ExecutionScope,
     session_id: &crate::SessionId,
     group_key: &str,
     env_ref: &crate::ProcessExecutionEnvRef,
+    tool_id: &str,
     routing: ToolChildCompletionRouting,
 ) -> crate::RuntimeEffectGroup {
     let parent = parent_invocation(scope);
@@ -1182,9 +1391,9 @@ fn recovery_group(
             scope,
             session_id,
             &format!("{group_key}-call-0"),
-            LEAF_RECOVERY,
-            LEAF_RECOVERY.trim_start_matches("tool:"),
-            catalog_admission(LEAF_RECOVERY),
+            tool_id,
+            tool_id.trim_start_matches("tool:"),
+            catalog_admission(tool_id),
             routing,
             env_ref,
             &parent,
@@ -1202,7 +1411,26 @@ fn recovery_group(
         crate::GroupWakePolicy::All,
         crate::LoserPolicy::RunToCompletion,
     )
-    .expect("the recovery group assembles")
+    .expect("the single-leaf group assembles")
+}
+
+/// A single-child group: the recovery leaf alone, parked on its deferred
+/// completion key.
+fn recovery_group(
+    scope: &crate::ExecutionScope,
+    session_id: &crate::SessionId,
+    group_key: &str,
+    env_ref: &crate::ProcessExecutionEnvRef,
+    routing: ToolChildCompletionRouting,
+) -> crate::RuntimeEffectGroup {
+    single_leaf_group(
+        scope,
+        session_id,
+        group_key,
+        env_ref,
+        LEAF_RECOVERY,
+        routing,
+    )
 }
 
 /// The crash: run `phase` on a world of its own, on a runtime of its own, and
@@ -1441,9 +1669,13 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                     .expect("the group opens under the live opener");
                 // Wait until the child has parked on its completion key, so
                 // what the dead process leaves is a *claimed* unsettled child,
-                // not a row that never ran.
+                // not a row that never ran. `park` fires inside the attempt
+                // body — one commit before the journaled Pending row lands —
+                // so the durable half of the wait is the armed resolver key
+                // becoming visible to this host's journal: by then the
+                // attempt row the resolver settles is already durable.
                 let key = observation.parked_key(&call_id).await;
-                let _ = key;
+                await_key_registered(&world.host, &session_id, &key).await;
                 // Close the caller's handle the way a finishing turn would:
                 // the parked child is a loser under RunToCompletion and stays
                 // owned by the host's task until the runtime dies under it.
@@ -1621,4 +1853,357 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
         .await
         .expect("the successor closes");
+}
+
+// =============================================================================
+// Routing: a live opener that is not the recorded one
+// =============================================================================
+
+/// The present-but-foreign half of the routing gate, in both directions
+/// (ADR 0099 §1, §3).
+///
+/// `an_unregistered_opener_leaves_the_child_accepted` proves the absent half:
+/// no live opener, no run. This proves the mismatched half — a live opener
+/// that is *not* the recorded one still cannot drive the child, whichever way
+/// the pair is arranged — because a child's context is reconstructed from its
+/// retained request, not lent from whichever opener happens to be registered.
+/// The leak this closes is the one where "an opener is live" was authority
+/// enough: a reopen under a different opener would have run the child under
+/// *that* opener's session, frame and controller.
+///
+/// On a durable tier the group journals and its children stay accepted while
+/// the recorded opener is elsewhere; on the in-memory tier the same gate is
+/// observable at open. Either way, when the recorded opener registers the
+/// child runs under its *recorded* session — which the leaf reports, so a
+/// child that ran under the foreign opener's context instead would be caught
+/// rather than merely counted.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_foreign_opener_cannot_drive_another_openers_child(
+    fixture: &ToolChildLawFixture,
+    prefix: &str,
+) {
+    let session_a = crate::SessionId::from(format!("{prefix}-mismatch-session-a"));
+    let session_b = crate::SessionId::from(format!("{prefix}-mismatch-session-b"));
+    let scope_a = crate::ExecutionScope::turn(
+        session_a.clone(),
+        crate::TurnId::from(format!("{prefix}-mismatch-turn-a")),
+    );
+    let scope_b = crate::ExecutionScope::turn(
+        session_b.clone(),
+        crate::TurnId::from(format!("{prefix}-mismatch-turn-b")),
+    );
+    let opener_a =
+        crate::EffectOpener::for_scope(&scope_a, None).expect("a turn scope derives an opener");
+    let opener_b =
+        crate::EffectOpener::for_scope(&scope_b, None).expect("a turn scope derives an opener");
+    let group_key_a = format!("{prefix}-mismatch-group-a");
+    let group_key_b = format!("{prefix}-mismatch-group-b");
+    let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let observation = Arc::new(LawObservation::default());
+    let registry = (fixture.make_registry)().await;
+
+    let provider = |session_id: &crate::SessionId| -> Arc<dyn crate::ToolProvider> {
+        Arc::new(LawLeafProvider {
+            definitions: leaf_definitions(),
+            observation: Arc::clone(&observation),
+            session_id: session_id.clone(),
+            intent_target: crate::ProcessId::from("unused-in-mismatch"),
+            start_metadata: serde_json::Value::Null,
+        })
+    };
+    let group = |scope: &crate::ExecutionScope, session_id: &crate::SessionId, group_key: &str| {
+        single_leaf_group(
+            scope,
+            session_id,
+            group_key,
+            &env_ref,
+            LEAF_PLAIN,
+            ToolChildCompletionRouting::Inline,
+        )
+    };
+
+    let world = (fixture.make_world)(ToolChildWorldSpec {
+        lease_ttl_ms: LIVE_LEASE_MS,
+    })
+    .await;
+    install_child_host(&world.host, &env_store);
+
+    if world.drain.is_some() {
+        // The durable tiers. A first open refuses a child with no runner —
+        // only a reopen tolerates one — so the groups are journaled while
+        // their own openers are live, parked on their deferred keys, and the
+        // worker dies leaving claimed unsettled children.
+        for (scope, session_id, group_key, opener) in [
+            (&scope_a, &session_a, &group_key_a, &opener_a),
+            (&scope_b, &session_b, &group_key_b, &opener_b),
+        ] {
+            crashed_world(fixture, {
+                let scope = scope.clone();
+                let session_id = session_id.clone();
+                let group_key = group_key.clone();
+                let env_store = Arc::clone(&env_store);
+                let env_ref = env_ref.clone();
+                let observation = Arc::clone(&observation);
+                let opener = opener.clone();
+                let routing_kind = fixture.deferrable_routing;
+                move |world| {
+                    Box::pin(async move {
+                        let _guard = register_opener(
+                            &world.host,
+                            &scope,
+                            Arc::new(LawLeafProvider {
+                                definitions: leaf_definitions(),
+                                observation: Arc::clone(&observation),
+                                session_id: session_id.clone(),
+                                intent_target: crate::ProcessId::from("unused-in-mismatch"),
+                                start_metadata: serde_json::Value::Null,
+                            }),
+                            Arc::new(crate::TestLocalProcessRegistry::default()),
+                            env_store,
+                            opener,
+                            tokio_util::sync::CancellationToken::new(),
+                        );
+                        let scoped = world
+                            .host
+                            .scoped(scope.clone())
+                            .expect("the group scope binds");
+                        let handle = scoped
+                            .controller()
+                            .open_effect_group(single_leaf_group(
+                                &scope,
+                                &session_id,
+                                &group_key,
+                                &env_ref,
+                                LEAF_DEFERRED,
+                                deferrable_routing(routing_kind, &world.host),
+                            ))
+                            .await
+                            .expect("the group opens under its live opener");
+                        // The durable park: the journaled Pending row plus
+                        // the armed resolver key, so the dead worker leaves a
+                        // claimed unsettled child the successor can inspect.
+                        let key = observation.parked_key(&format!("{group_key}-call-0")).await;
+                        await_key_registered(&world.host, &session_id, &key).await;
+                        scoped
+                            .controller()
+                            .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+                            .await
+                            .expect("the caller closes and releases its loser");
+                    })
+                }
+            })
+            .await;
+        }
+
+        let successor = world;
+        until_claims_lapse(&successor, &group_key_a).await;
+        until_claims_lapse(&successor, &group_key_b).await;
+        let drain = successor
+            .drain
+            .as_ref()
+            .expect("a durable tier hands out a drain");
+
+        // Direction one: only the foreign opener B is live. The A child is
+        // reported unrunnable — B's live context is not a substitute for the
+        // recorded opener.
+        let guard_b = register_opener(
+            &successor.host,
+            &scope_b,
+            provider(&session_b),
+            Arc::clone(&registry),
+            Arc::clone(&env_store),
+            opener_b.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let report = drain
+            .drain_group(&group_key_a, &tokio_util::sync::CancellationToken::new())
+            .await
+            .expect("the drain pass over the A group runs");
+        assert!(
+            report.children.iter().all(|child| matches!(
+                child.outcome,
+                crate::testing::conformance_support::ChildDrainOutcome::NoExecutor
+            )),
+            "a live foreign opener cannot drive the recorded opener's child: {report:?}"
+        );
+        assert_eq!(
+            observation.executions_of("law_deferred").len(),
+            2,
+            "the foreign opener's drain ran nothing — only the crashed worlds' \
+             admissions have run the leaves"
+        );
+
+        // Direction two: B steps down, only the foreign opener A is live, and
+        // the B child answers the same way.
+        drop(guard_b);
+        let guard_a = register_opener(
+            &successor.host,
+            &scope_a,
+            provider(&session_a),
+            Arc::clone(&registry),
+            Arc::clone(&env_store),
+            opener_a.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let report = drain
+            .drain_group(&group_key_b, &tokio_util::sync::CancellationToken::new())
+            .await
+            .expect("the drain pass over the B group runs");
+        assert!(
+            report.children.iter().all(|child| matches!(
+                child.outcome,
+                crate::testing::conformance_support::ChildDrainOutcome::NoExecutor
+            )),
+            "the foreign opener fails the other direction the same way: {report:?}"
+        );
+        assert_eq!(
+            observation.executions_of("law_deferred").len(),
+            2,
+            "no child ran under a foreign opener in either direction"
+        );
+
+        // Both recorded openers live: each reclaiming drain replays the
+        // journaled Pending attempt — the body never re-runs — and the
+        // out-of-band resolutions settle both children.
+        let _guard_b = register_opener(
+            &successor.host,
+            &scope_b,
+            provider(&session_b),
+            Arc::clone(&registry),
+            Arc::clone(&env_store),
+            opener_b.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        for group_key in [group_key_a.as_str(), group_key_b.as_str()] {
+            let drained = crate::task::spawn({
+                let drain = Arc::clone(drain);
+                let group_key = group_key.to_string();
+                async move {
+                    drain
+                        .drain_group(&group_key, &tokio_util::sync::CancellationToken::new())
+                        .await
+                }
+            });
+            let key = observation.parked_key(&format!("{group_key}-call-0")).await;
+            resolve_when_registered(
+                &successor.host,
+                key,
+                crate::Resolution::Ok(serde_json::json!({ "leaf": "mismatch", "via": "resolver" })),
+            )
+            .await;
+            let report = drained
+                .await
+                .expect("the reclaiming drain task joins")
+                .expect("the reclaiming drain pass runs");
+            assert!(
+                report.children.iter().all(|child| matches!(
+                    child.outcome,
+                    crate::testing::conformance_support::ChildDrainOutcome::Settled
+                )),
+                "the recorded opener's drain settles its own child: {report:?}"
+            );
+        }
+        drop(guard_a);
+        let runs = observation.executions_of("law_deferred");
+        assert_eq!(
+            runs.len(),
+            2,
+            "each child ran its body exactly once — the journaled Pending replayed, never re-executed"
+        );
+        assert!(
+            runs.iter().any(|run| run.session_id == session_a.as_str()),
+            "the A child ran under its recorded session: {runs:?}"
+        );
+        assert!(
+            runs.iter().any(|run| run.session_id == session_b.as_str()),
+            "the B child ran under its recorded session: {runs:?}"
+        );
+        return;
+    }
+
+    {
+        // The in-memory tier: the gate is the open itself, and a live foreign
+        // opener does not satisfy it in either direction.
+        let host = world.host;
+        let scoped_a = host.scoped(scope_a.clone()).expect("the A scope binds");
+        let scoped_b = host.scoped(scope_b.clone()).expect("the B scope binds");
+        let guard_b = register_opener(
+            &host,
+            &scope_b,
+            provider(&session_b),
+            Arc::clone(&registry),
+            Arc::clone(&env_store),
+            opener_b.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        scoped_a
+            .controller()
+            .open_effect_group(group(&scope_a, &session_a, &group_key_a))
+            .await
+            .expect_err("a group whose opener is foreign to the live one refuses to open");
+        drop(guard_b);
+        let guard_a = register_opener(
+            &host,
+            &scope_a,
+            provider(&session_a),
+            Arc::clone(&registry),
+            Arc::clone(&env_store),
+            opener_a.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        scoped_b
+            .controller()
+            .open_effect_group(group(&scope_b, &session_b, &group_key_b))
+            .await
+            .expect_err("the foreign direction refuses the same way");
+
+        let _guard_b = register_opener(
+            &host,
+            &scope_b,
+            provider(&session_b),
+            Arc::clone(&registry),
+            Arc::clone(&env_store),
+            opener_b.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let mut handle_a = scoped_a
+            .controller()
+            .open_effect_group(group(&scope_a, &session_a, &group_key_a))
+            .await
+            .expect("the A group opens once its opener is live");
+        let mut handle_b = scoped_b
+            .controller()
+            .open_effect_group(group(&scope_b, &session_b, &group_key_b))
+            .await
+            .expect("the B group opens once its opener is live");
+        next_settlement(&scoped_a, &mut handle_a, 0).await;
+        next_settlement(&scoped_b, &mut handle_b, 0).await;
+        scoped_a
+            .controller()
+            .close_effect_group(handle_a, crate::LoserPolicy::RunToCompletion)
+            .await
+            .expect("the A group closes");
+        scoped_b
+            .controller()
+            .close_effect_group(handle_b, crate::LoserPolicy::RunToCompletion)
+            .await
+            .expect("the B group closes");
+        drop(guard_a);
+    }
+
+    // Each child ran exactly once, under the session its own request
+    // recorded — never under the foreign opener's.
+    let runs = observation.executions_of("law_plain");
+    assert_eq!(runs.len(), 2, "each child ran exactly once");
+    assert!(
+        runs.iter().any(|run| run.session_id == session_a.as_str()),
+        "the A child ran under its recorded session: {runs:?}"
+    );
+    assert!(
+        runs.iter().any(|run| run.session_id == session_b.as_str()),
+        "the B child ran under its recorded session: {runs:?}"
+    );
 }

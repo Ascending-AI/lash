@@ -25,6 +25,25 @@ impl RuntimeSessionServices {
     }
 }
 
+impl RuntimeSessionServices {
+    /// The concrete half of the trait rebind below: the same refusal and the
+    /// same policy swap, but it returns the rebound services themselves so a
+    /// caller that already holds the concrete type — and a test asserting on
+    /// what was lent — keeps it.
+    fn bound_tool_child_services(
+        &self,
+        session_id: &crate::SessionId,
+        execution_env_spec: &crate::ProcessExecutionEnvSpec,
+    ) -> Option<Self> {
+        if *session_id != self.current.session_id {
+            return None;
+        }
+        let mut services = self.clone();
+        services.current.policy = execution_env_spec.policy.clone();
+        Some(services)
+    }
+}
+
 #[async_trait::async_trait]
 impl DirectCompletionService for RuntimeSessionServices {
     async fn complete(
@@ -90,12 +109,8 @@ impl DirectCompletionService for RuntimeSessionServices {
         session_id: &crate::SessionId,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
     ) -> Option<Arc<dyn DirectCompletionService>> {
-        if *session_id != self.current.session_id {
-            return None;
-        }
-        let mut services = (*self).clone();
-        services.current.policy = execution_env_spec.policy.clone();
-        Some(Arc::new(services))
+        self.bound_tool_child_services(session_id, execution_env_spec)
+            .map(|services| Arc::new(services) as Arc<dyn DirectCompletionService>)
     }
 }
 
@@ -397,5 +412,90 @@ impl DirectCompletionCapability {
             usage,
             llm_call,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::tests::helpers::standard_test_policy;
+
+    const SESSION_ID: &str = "direct-completion-rebind-session";
+
+    /// Real session services over a live runtime: the law asserts on the
+    /// production rebind, not a fixture's idea of it.
+    async fn session_services() -> (Arc<RuntimeSessionServices>, crate::SessionPolicy) {
+        let env = crate::RuntimeEnvironment::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_plugin_host(Arc::new(crate::PluginHost::new(
+            crate::testing::test_standard_protocol_factories(),
+        )))
+        .build();
+        let policy = standard_test_policy();
+        let runtime = crate::LashRuntime::from_environment(
+            &env,
+            policy.clone(),
+            crate::RuntimeSessionState {
+                session_id: crate::SessionId::from(SESSION_ID.to_string()),
+                policy: policy.clone(),
+                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                ))
+            },
+            None,
+            crate::testing::runtime_lease_owner(),
+        )
+        .await
+        .expect("a runtime for the direct-completion rebind law");
+        (
+            runtime
+                .runtime_session_services()
+                .expect("runtime session services"),
+            policy,
+        )
+    }
+
+    /// ADR 0099 §3: a managed-LLM service lent to a tool child is rebound to
+    /// the child's *recorded* environment — provider and policy resolution
+    /// answer under the facts the child was admitted with, not whatever the
+    /// opener is running now — and a bind naming a session the transport is
+    /// not bound to is refused rather than lent across.
+    #[tokio::test]
+    async fn a_rebound_completion_service_resolves_the_childs_recorded_policy() {
+        let (services, opener_policy) = Box::pin(session_services()).await;
+        let mut child_policy = opener_policy.clone();
+        child_policy.model = crate::ModelSpec::builder("child-recorded-model")
+            .context_window_tokens(128_000)
+            .build()
+            .expect("valid child model spec");
+        child_policy.provider_id = "child-recorded-provider".to_string();
+        let child_env = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            child_policy.clone(),
+        );
+
+        let rebound = services
+            .bound_tool_child_services(&crate::SessionId::from(SESSION_ID.to_string()), &child_env)
+            .expect("the transport's own session binds");
+        assert_eq!(
+            rebound.current.policy, child_policy,
+            "provider and budget resolution answer under the recorded environment"
+        );
+        assert_eq!(
+            services.current.policy, opener_policy,
+            "the rebind clones; the opener's services keep resolving their own policy"
+        );
+
+        assert!(
+            services
+                .bound_tool_child_services(
+                    &crate::SessionId::from("a-foreign-session"),
+                    &child_env,
+                )
+                .is_none(),
+            "a session-bound transport is refused across sessions, never lent"
+        );
     }
 }

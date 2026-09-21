@@ -1960,6 +1960,10 @@ macro_rules! tool_child_invocation_tests {
                 an_unregistered_opener_leaves_the_child_accepted,
                 "tool-child-unregistered-opener"
             ),
+            (
+                a_foreign_opener_cannot_drive_another_openers_child,
+                "tool-child-foreign-opener"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

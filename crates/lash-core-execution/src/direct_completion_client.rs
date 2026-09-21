@@ -12,6 +12,10 @@ pub trait DirectCompletionService: Send + Sync {
         usage_sink: Option<&crate::runtime::ToolUsageLedger>,
     ) -> Result<crate::DirectCompletion, crate::PluginError>;
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the service boundary receives the controller, lineage, causal link, and usage sink separately because each answers from a different authority"
+    )]
     async fn complete_llm(
         &self,
         request: crate::LlmRequest,
