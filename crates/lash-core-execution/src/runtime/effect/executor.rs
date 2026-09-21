@@ -35,8 +35,10 @@ pub use control::{
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
+pub use lash_core_store::effect_opener::EffectOpener;
 pub use lash_core_store::turn_control_binding::admitted_turn_cancel_scope;
 pub use lash_core_store::turn_control_binding::turn_control_binding_id_for_scope;
+pub use lash_core_store::turn_control_binding::{TurnControlBindingId, TurnControlBindingIdError};
 pub use native_controller::NativeRuntimeEffectController;
 pub use trigger::TriggerLocalExecution;
 pub use turn_control_authority::{

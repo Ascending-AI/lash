@@ -13,6 +13,11 @@ use lash_core_store::effect_identity as identity_types;
 mod native_host;
 mod store_turn_control;
 pub use store_turn_control::bind_store_turn_control_authority;
+mod tool_child;
+pub use tool_child::{
+    TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
+    ToolChildScope,
+};
 mod outcome;
 pub use lash_core_effect::promise_semantics;
 mod validation;
@@ -28,16 +33,17 @@ pub use envelope::{
 pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, NativeRuntimeEffectController,
-    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
-    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
-    ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor,
-    RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
-    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    concrete_turn_cancellation_authority, turn_control_binding_id_for_scope,
+    EffectOpener, EffectRetirementGate, ExecutionScope, ExternalCompletionError,
+    NativeRuntimeEffectController, ProcessLocalExecution, ProcessOutcomeObserver,
+    ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
+    QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectFailureDisposition,
+    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
+    TurnControlBindingIdError, TurnControlParticipation, concrete_turn_cancellation_authority,
+    turn_control_binding_id_for_scope,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,

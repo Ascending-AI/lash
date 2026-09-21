@@ -66,6 +66,12 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-3408: ADR 0099 section 3 mints the retained tool-child request and the
+    # invocation-level tool command together, as one new durable format. The
+    # constant has no merge-base value because the surface is new, not renamed.
+    "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
+        "sha256:296da08a0c7d581e875b1494223ff65c68e01dc40d73614c0f1aa8992390f0ba"
+    ),
     # FIG-1128: the v2 Restate durable-wait request enrolls an explicit
     # absolute-deadline wire after retiring the unversioned relative timeout.
     "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REQUEST_VERSION": (

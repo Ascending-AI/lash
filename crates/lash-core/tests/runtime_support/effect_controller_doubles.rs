@@ -938,6 +938,15 @@ impl RuntimeEffectController for RecordingEffectController {
                     terminal_finish: Some(serde_json::json!("ok")),
                 })),
             }),
+            // Refused rather than given a fabricated outcome. This double has no
+            // handler-level driver (FIG-2266 builds it), and a synthesized
+            // settlement here would be a terminal no effect ever produced.
+            RuntimeEffectCommand::ToolInvocation { .. } => {
+                Err(lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                    "this test double runs no tool invocations",
+                ))
+            }
             RuntimeEffectCommand::Sleep { .. } => Ok(RuntimeEffectOutcome::Sleep),
             RuntimeEffectCommand::AwaitEvent { .. } => Ok(RuntimeEffectOutcome::AwaitEvent {
                 resolution: lash_core::Resolution::Ok(serde_json::json!(null)),

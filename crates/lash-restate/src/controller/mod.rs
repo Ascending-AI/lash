@@ -1511,6 +1511,21 @@ pub(crate) fn restate_effect_execution(
                 group,
             },
         },
+        // No arm yet, and deliberately not `JournaledRun`. A tool invocation is
+        // ADR 0099 §2's handler-level driver: retry, completion-key derivation
+        // and the deferred await are coordination, and §2 forbids coordination
+        // inside a recorded body ("A recorded body must not emit commands into
+        // an ordinal-addressed journal"). Routing it to a `ctx.run` closure
+        // would be exactly that, so this tier refuses until FIG-2266 builds the
+        // driver. FIG-3408 mints the shape; it does not execute it.
+        RuntimeEffectCommand::ToolInvocation { .. } => {
+            return Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                "restate has no handler-level driver for a tool invocation yet, so the \
+                 command is refused rather than run inside a recorded body, which ADR 0099 \
+                 section 2 forbids for coordination",
+            ));
+        }
         RuntimeEffectCommand::Sleep { spec } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
             RestateEffectExecution::Timer { invocation, spec }

@@ -408,6 +408,35 @@ symbols = [
 ]
 
 [[surface]]
+constant = "TOOL_CHILD_REQUEST_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/effect/tool_child.rs"
+description = "retained tool-child request of a durable effect group (ADR 0099 section 3)"
+
+# The request is journaled inside a group child's envelope and read back by a
+# reopen, so a field added, retired or retyped in any of these three items
+# changes what a recovered child can reconstruct. `ToolAttemptEffectIdentity`
+# is guarded with them because the request carries it whole: it is the child's
+# replay-key derivation and its lineage, and a new arm would be a recorded
+# identity an older build cannot route.
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lash-core-execution/src/runtime/effect/tool_child.rs",
+  "crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs",
+  "crates/lash-core-store/src/effect_opener.rs",
+  "crates/lash-core-store/src/turn_control_binding.rs",
+]
+symbols = [
+  "ToolChildRequest",
+  "ToolChildScope",
+  "ToolChildAdmission",
+  "ToolChildCompletionRouting",
+  "ToolAttemptEffectIdentity",
+  "EffectOpener",
+  "TurnControlBindingId",
+]
+
+[[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/effect_identity.rs"
 description = "stable process-transfer set identity"
