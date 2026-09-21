@@ -75,7 +75,7 @@ REGISTRATION_BASELINES = {
     # `ToolSettlement.usage`, and the guard's full serialized closure — the
     # pin now covers every nested payload type review approved.
     "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_SETTLEMENT_VERSION": (
-        "sha256:b0c65fc7c09a99de237d531de16c143d5b163a7dc7985b4ce3be462635341284"
+        "sha256:aedb87be6d8a9e0505a37634d2d2b0f0ed54758856935251eec2878e6f4ab66d"
     ),
     # FIG-2266: ADR 0099 section 13 journals the facts one atomic tool attempt
     # produced on the attempt's own outcome, restored on replay. A new durable
@@ -83,7 +83,7 @@ REGISTRATION_BASELINES = {
     # settlement because the two carriers move for different reasons. Re-pinned
     # alongside the settlement for the same closure growth.
     "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_ATTEMPT_CAPTURE_VERSION": (
-        "sha256:2f9e37c3c9fde3320fea8e379f56206cffb246db906644b221d3bb684e41bd7b"
+        "sha256:eb503301a493453e2312503176fd7f6a9a24721cb53c398432928c86db28fcec"
     ),
     # FIG-3408: ADR 0099 section 3 mints the retained tool-child request and the
     # invocation-level tool command together, as one new durable format. The
