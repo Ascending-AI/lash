@@ -1255,6 +1255,19 @@ jobs:
         if: needs.plan.outputs.bazel_trusted != 'true'
         run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
 
+      # `cargo check --workspace --all-targets` never exercises the
+      # package-only `--no-default-features` resolution, and the repo-gates
+      # boundary leg is `cargo tree`-only: it proves the resolved graph, not
+      # that every referenced path exists at that feature set (FIG-3427:
+      # `lash_core::runtime::effect` is `pub(crate)` without `testing`, and a
+      # downstream `crate::runtime::effect::…` path broke only under this
+      # command). This is the `runtime-features` lane's OFF witness from
+      # scripts/feature-coverage.toml, run unconditionally because the
+      # feature-lanes job is dispatch-only and repo-gates skips Rust-only
+      # diffs.
+      - name: Check lash-runtime without default features
+        run: cargo check -p lash-runtime --lib --no-default-features --locked
+
       - name: Check Restate handler panic boundary
         run: python3 scripts/check-restate-handler-panics.py
 
