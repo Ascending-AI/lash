@@ -93,7 +93,16 @@ pub(super) async fn update_wake_delivery_state(
         .await
         .map_err(plugin_sqlx_error)?
         .rows_affected();
-    if changed == 0 {
+    // The statement's own predicate is the fence (`state` is enqueuing and the
+    // claim token still matches), so exactly one row must change; the shared
+    // backstop records the disagreement if not and the existing branch
+    // classifies the loss.
+    if !lash_core::store_backend_support::fenced_write_applied(
+        lash_core::store_backend_support::FencedWrite::WakeDeliverySettlement,
+        crate::POSTGRES_BACKEND,
+        delivery_id,
+        changed,
+    ) {
         let current: Option<String> = sqlx::query_scalar(process_sql().wake.select_state.sql())
             .bind(delivery_id)
             .fetch_optional(pool)

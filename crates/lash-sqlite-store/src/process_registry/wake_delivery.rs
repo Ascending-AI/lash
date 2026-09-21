@@ -67,7 +67,16 @@ pub(super) async fn update_wake_delivery_state(
                     ],
                 )
                 .map_err(process_sqlite_error)?;
-            if changed == 0 {
+            // The statement's own predicate is the fence (`state` is
+            // enqueuing and the claim token still matches), so exactly one row
+            // must change; the shared backstop records the disagreement if not
+            // and the existing branch classifies the loss.
+            if !lash_core::store_backend_support::fenced_write_applied(
+                lash_core::store_backend_support::FencedWrite::WakeDeliverySettlement,
+                crate::SQLITE_BACKEND,
+                &delivery_id,
+                u64::try_from(changed).unwrap_or(u64::MAX),
+            ) {
                 let current = tx
                     .query_row(
                         process_sql().wake.select_state.sql(),
