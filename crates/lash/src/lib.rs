@@ -686,7 +686,7 @@ pub mod remote {
             RemoteTriggerDeliveryEmitOutcome, RemoteTriggerDeliveryEmitReceipt,
             RemoteTriggerEmitReport, RemoteTriggerInputBinding, RemoteTriggerInputTemplate,
             RemoteTriggerListSubscriptionsResponse, RemoteTriggerOccurrenceOutcome,
-            RemoteTriggerOccurrenceRecord, RemoteTriggerOccurrenceRequest,
+            RemoteTriggerOccurrenceRecord, RemoteTriggerOccurrenceRequest, RemoteTriggerOwnerScope,
             RemoteTriggerProviderRoute, RemoteTriggerRegisterSubscriptionReceipt,
             RemoteTriggerRegisterSubscriptionRequest, RemoteTriggerRegistration,
             RemoteTriggerSourceCapture, RemoteTriggerSubscriptionDraft,

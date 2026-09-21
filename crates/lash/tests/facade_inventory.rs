@@ -625,6 +625,14 @@ mod whole_module_coverage {
         );
         assert_module_covered(
             &exports,
+            "../lash-remote-protocol/src/triggers.rs",
+            "../lash-remote-protocol/src/triggers",
+            "lash_remote_protocol::triggers",
+            "remote::triggers",
+            20,
+        );
+        assert_module_covered(
+            &exports,
             "../lash-tool-support/src/lib.rs",
             "../lash-tool-support/src",
             "lash_tool_support",
