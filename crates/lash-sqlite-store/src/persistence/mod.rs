@@ -134,118 +134,20 @@ pub(crate) fn ensure_session_not_deleted_conn(
     }
 }
 
-const PENDING_TURN_INPUT_COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id, claim_fencing_token, claim_owner_id, claim_owner_incarnation_id, claim_token, claim_session_lease_generation";
-
-/// The claim-release assignment tail: settling an input clears the whole
-/// four-column identity family in one motion;
-/// `ck_pending_turn_inputs_claim_identity_all_or_none` makes that all-or-none
-/// shape load-bearing, so every release path shares this spelling. `?3` is the
-/// settled lifecycle state the caller assigns alongside it (ADR 0069 §5).
-const TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS: &str = "claim_id = NULL,
-                                     claim_owner_id = NULL,
-                                     claim_owner_incarnation_id = NULL,
-                                     claim_token = NULL,
-                                     claim_session_lease_generation = 0";
-
-/// The terminal state set spelled as the body of a SQL `IN (...)` list, so the
-/// unclaimed settlement predicate and the shared verdict's
-/// [`unclaimed_turn_input_is_settleable`](lash_core::store_backend_support::unclaimed_turn_input_is_settleable)
-/// cannot drift from the enum.
-fn unclaimed_turn_input_terminal_states_sql() -> String {
-    lash_core::store_backend_support::terminal_turn_input_states_sql()
-}
-
-const SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = ?1
-       AND available_at_ms <= ?2
-       AND (
-            claim_token IS NULL
-            OR claim_session_lease_generation <> ?3
-       )";
-
-fn sqlite_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> String {
-    if boundary == QueuedWorkClaimBoundary::Idle {
-        return format!(
-            "queued_work_head_candidate AS (
-            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
-            FROM (
-                SELECT enqueue_seq AS head_enqueue_seq,
-                       batch_id AS head_batch_id,
-                       delivery_policy AS head_delivery_policy,
-                       claim_id AS head_claim_id
-                FROM queued_work_batches
-                WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
-                ORDER BY enqueue_seq ASC
-                LIMIT 1
-            ) AS unfiltered_head
-         )"
-        );
+/// The claim-candidate scan for `boundary`, rendered once at startup.
+///
+/// The boundary is a closed two-variant choice, so it selects a named statement
+/// rather than splicing a predicate: an optional boundary filter — a
+/// `COALESCE(?N, …)` or a `?N IS NULL OR …` — cannot use
+/// `idx_queued_work_batches_ready`, and this query is the claim path's hottest.
+fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> &'static str {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    match boundary {
+        QueuedWorkClaimBoundary::Idle => sql.queued_batches_sqlite.claim_candidates_idle.sql(),
+        QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
+            sql.queued_batches_sqlite.claim_candidates_boundary.sql()
+        }
     }
-    let earliest_safe_boundary = DeliveryPolicy::EarliestSafeBoundary.as_str();
-    format!(
-        "queued_work_unfiltered_head AS (
-            SELECT enqueue_seq AS head_enqueue_seq,
-                   batch_id AS head_batch_id,
-                   delivery_policy AS head_delivery_policy,
-                   claim_id AS head_claim_id
-            FROM queued_work_batches
-            WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
-            ORDER BY enqueue_seq ASC
-            LIMIT 1
-         ),
-         queued_work_head_candidate AS (
-            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
-            FROM (
-                SELECT candidate.enqueue_seq AS head_enqueue_seq,
-                       candidate.batch_id AS head_batch_id,
-                       candidate.delivery_policy AS head_delivery_policy,
-                       candidate.claim_id AS head_claim_id
-                FROM queued_work_batches AS candidate
-                CROSS JOIN queued_work_unfiltered_head AS unfiltered
-                WHERE candidate.session_id = ?1
-                  AND candidate.available_at_ms <= ?2
-                  AND (
-                       candidate.claim_token IS NULL
-                       OR candidate.claim_session_lease_generation <> ?3
-                  )
-                  AND (
-                       (
-                            candidate.enqueue_seq = unfiltered.head_enqueue_seq
-                            AND unfiltered.head_delivery_policy = '{earliest_safe_boundary}'
-                       )
-                       OR (
-                            unfiltered.head_delivery_policy <> '{earliest_safe_boundary}'
-                            AND unfiltered.head_claim_id IS NOT NULL
-                            AND (
-                                 candidate.claim_id IS NULL
-                                 OR candidate.claim_id <> unfiltered.head_claim_id
-                            )
-                       )
-                  )
-                ORDER BY candidate.enqueue_seq ASC
-                LIMIT 1
-            ) AS boundary_head
-            WHERE head_delivery_policy = '{earliest_safe_boundary}'
-         )"
-    )
-}
-
-fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> String {
-    let head_candidate = sqlite_queued_work_head_candidate_cte(boundary);
-    format!(
-        "WITH {head_candidate}
-         SELECT {QUEUED_WORK_COLUMNS}
-         FROM queued_work_batches
-         CROSS JOIN queued_work_head_candidate
-         WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
-           AND enqueue_seq >= head_enqueue_seq
-           AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
-         ORDER BY enqueue_seq ASC
-         LIMIT COALESCE((
-             SELECT CASE WHEN head_claim_id IS NULL THEN ?4 ELSE 9223372036854775807 END
-             FROM queued_work_head_candidate
-         ), 0)",
-        QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-    )
 }
 
 /// Reclaim the ancestry prefix with no live child, session-head root, or

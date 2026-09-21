@@ -41,22 +41,15 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 let sql_lease_term =
                     sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
                 let claimed_at = current.claimed_at_ms;
-                sqlx::query(
-                    "UPDATE lash_session_execution_leases
-                     SET lease_token = $2,
-                         lease_claimed_at_ms = $3,
-                         lease_expires_at_ms = $4,
-                         lease_term_ms = $5
-                     WHERE session_id = $1",
-                )
-                .bind(session_id.as_str())
-                .bind(lease_token)
-                .bind(claimed_at as i64)
-                .bind(sql_expires_at)
-                .bind(sql_lease_term)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+                sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.reenter.sql())
+                    .bind(session_id.as_str())
+                    .bind(lease_token)
+                    .bind(claimed_at as i64)
+                    .bind(sql_expires_at)
+                    .bind(sql_lease_term)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
                 tx.commit().await.map_err(store_sqlx_error)?;
                 // Reentry advances no generation: nobody is displaced.
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
@@ -161,26 +154,17 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         let sql_expires_at =
             sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
         let sql_lease_term = sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
-        let renewed = sqlx::query(
-            "UPDATE lash_session_execution_leases
-             SET lease_expires_at_ms = $6,
-                 lease_term_ms = $7
-             WHERE session_id = $1
-               AND lease_owner_id = $2
-               AND lease_owner_incarnation_id = $3
-               AND lease_executor_id = $4
-               AND lease_token = $5",
-        )
-        .bind(fence.session_id.as_str())
-        .bind(&fence.owner.owner_id)
-        .bind(&fence.owner.incarnation_id)
-        .bind(&fence.executor_id)
-        .bind(&fence.lease_token)
-        .bind(sql_expires_at)
-        .bind(sql_lease_term)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let renewed = sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.renew.sql())
+            .bind(fence.session_id.as_str())
+            .bind(&fence.owner.owner_id)
+            .bind(&fence.owner.incarnation_id)
+            .bind(&fence.executor_id)
+            .bind(&fence.lease_token)
+            .bind(sql_expires_at)
+            .bind(sql_lease_term)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         // Backstop: the five-column predicate stays on the statement, but the
         // row is locked and the verdict already authorized the write, so any
         // row count other than one is a defect, never a race.

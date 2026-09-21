@@ -12,8 +12,6 @@ impl StoreMaintenance for Store {
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self
             .conn
             .write(move |tx| {
-                let terminal_states =
-                    lash_core::store_backend_support::terminal_turn_input_states_sql();
                 let removed_node_count = tx.execute(
                     session_sql()
                         .graph_sqlite
@@ -22,10 +20,10 @@ impl StoreMaintenance for Store {
                     params![session_id.as_str()],
                 )?;
                 let removed_pending_turn_input_tombstone_count = tx.execute(
-                    &format!(
-                        "DELETE FROM pending_turn_inputs
-                         WHERE session_id = ?1 AND state IN ({terminal_states})"
-                    ),
+                    crate::turn_ingress::turn_ingress_sql()
+                        .pending_inputs
+                        .delete_terminal
+                        .sql(),
                     params![session_id.as_str()],
                 )?;
                 // Cancellation rows include unresolved recovery intent. They

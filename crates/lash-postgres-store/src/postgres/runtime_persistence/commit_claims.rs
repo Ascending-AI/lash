@@ -6,40 +6,26 @@ pub(super) async fn complete_queued_work_claims_tx(
 ) -> Result<(), StoreError> {
     for completed in completed_claims {
         for batch_id in &completed.batch_ids {
-            let source_key: Option<String> = sqlx::query_scalar(
-                "SELECT source_key
-                 FROM lash_queued_work_batches
-                 WHERE session_id = $1
-                   AND batch_id = $2
-                   AND claim_id = $3
-                   AND claim_token = $4",
-            )
-            .bind(completed.session_id.as_str())
-            .bind(batch_id.as_str())
-            .bind(&completed.claim_id)
-            .bind(&completed.lease_token)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .flatten();
-            let payload_json: Option<String> = sqlx::query_scalar(
-                "SELECT item.payload_json
-                 FROM lash_queued_work_batches AS batch
-                 JOIN lash_queued_work_items AS item ON item.batch_id = batch.batch_id
-                 WHERE batch.session_id = $1
-                   AND batch.batch_id = $2
-                   AND batch.claim_id = $3
-                   AND batch.claim_token = $4
-                 ORDER BY item.item_index ASC
-                 LIMIT 1",
-            )
-            .bind(completed.session_id.as_str())
-            .bind(batch_id.as_str())
-            .bind(&completed.claim_id)
-            .bind(&completed.lease_token)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+            let sql = crate::turn_ingress::turn_ingress_sql();
+            let source_key: Option<String> =
+                sqlx::query_scalar(sql.family_postgres.select_claimed_batch_source_key.sql())
+                    .bind(completed.session_id.as_str())
+                    .bind(batch_id.as_str())
+                    .bind(&completed.claim_id)
+                    .bind(&completed.lease_token)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(store_sqlx_error)?
+                    .flatten();
+            let payload_json: Option<String> =
+                sqlx::query_scalar(sql.family_postgres.select_claimed_batch_head_payload.sql())
+                    .bind(completed.session_id.as_str())
+                    .bind(batch_id.as_str())
+                    .bind(&completed.claim_id)
+                    .bind(&completed.lease_token)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
             let wake_source = payload_json
                 .as_deref()
                 .map(|json| {
@@ -72,26 +58,32 @@ pub(super) async fn complete_queued_work_claims_tx(
                 .await
                 .map_err(store_sqlx_error)?;
             }
-            let completion = sqlx::query(
-                "DELETE FROM lash_queued_work_batches
-                 WHERE session_id = $1 AND batch_id = $2 AND claim_id = $3 AND claim_token = $4",
-            )
-            .bind(completed.session_id.as_str())
-            .bind(batch_id.as_str())
-            .bind(&completed.claim_id)
-            .bind(&completed.lease_token)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            if completion.rows_affected() != 1 {
-                return Err(StoreError::QueuedWorkClaimSuperseded {
+            let completion = sqlx::query(sql.queued_batches.settle_claimed.sql())
+                .bind(completed.session_id.as_str())
+                .bind(batch_id.as_str())
+                .bind(&completed.claim_id)
+                .bind(&completed.lease_token)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            // Backstop: `ensure_queued_work_completion_tx` already took the
+            // verdict over this row under `FOR UPDATE` earlier in this same
+            // transaction, so the predicate cannot legitimately miss. A miss is
+            // recorded as evidence and then fails closed with the same
+            // supersession this site has always returned.
+            lash_core::store_backend_support::require_fenced_write_applied(
+                lash_core::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
+                crate::POSTGRES_BACKEND,
+                batch_id.as_str(),
+                completion.rows_affected(),
+                || StoreError::QueuedWorkClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: completed.claim_id.clone(),
                     row_id: Some(batch_id.as_str().to_string().into_boxed_str()),
                     superseding_claim_id: None,
                     superseding_session_lease_generation: None,
-                });
-            }
+                },
+            )?;
         }
     }
     Ok(())
@@ -101,38 +93,22 @@ pub(crate) async fn complete_turn_input_claims_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completed_claims: &[lash_core::TurnInputCompletion],
 ) -> Result<(), StoreError> {
-    let unclaimed_settlement_statement = format!(
-        "UPDATE lash_pending_turn_inputs
-                     SET state = $3,
-                         {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-                     WHERE session_id = $1
-                       AND input_id = $2
-                       AND claim_id IS NULL
-                       AND state NOT IN ({terminal_states})",
-        terminal_states = super::turn_input_settlement::unclaimed_turn_input_terminal_states_sql()
-    );
-    let claimed_settlement_statement = format!(
-        "UPDATE lash_pending_turn_inputs
-         SET state = $3,
-             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-         WHERE session_id = $1
-           AND input_id = $2
-           AND claim_id = $4
-           AND claim_token = $5"
-    );
+    let pending_inputs = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+    let unclaimed_settlement_statement = pending_inputs.settle_unclaimed.sql();
+    let claimed_settlement_statement = pending_inputs.settle_claimed.sql();
     for completed in completed_claims {
         for input_id in &completed.input_ids {
             // One conditional write for both settlement regimes: the claim
             // fields are an optional predicate strengthener, and either way
             // exactly one row must change (ADR 0069 §5).
             let settlement = match completed.claim.as_ref() {
-                Some(claim) => sqlx::query(&claimed_settlement_statement)
+                Some(claim) => sqlx::query(claimed_settlement_statement)
                     .bind(completed.session_id.as_str())
                     .bind(input_id.as_str())
                     .bind(lash_core::TurnInputStateKind::Completed.as_str())
                     .bind(&claim.claim_id)
                     .bind(&claim.lease_token),
-                None => sqlx::query(&unclaimed_settlement_statement)
+                None => sqlx::query(unclaimed_settlement_statement)
                     .bind(completed.session_id.as_str())
                     .bind(input_id.as_str())
                     .bind(lash_core::TurnInputStateKind::Completed.as_str()),

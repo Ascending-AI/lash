@@ -7,6 +7,7 @@ mod attachment_owner_sql;
 mod process_lifecycle_sql;
 pub mod required_constraints;
 mod session_meta;
+mod turn_input_lifecycle_sql;
 
 pub use append_identity::decode_append_request_identity;
 pub use attachment_owner_sql::{
@@ -20,6 +21,12 @@ pub use process_lifecycle_sql::{
 pub use session_meta::{
     CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
     guard_rebind_lineage, guard_session_meta_relation_rewrite,
+};
+pub use turn_input_lifecycle_sql::{
+    accepted_turn_input_state_predicate_sql, active_turn_input_state_predicate_sql,
+    deferred_next_turn_turn_input_state_predicate_sql, nonterminal_turn_input_state_predicate_sql,
+    pending_active_turn_input_state_predicate_sql, terminal_turn_input_state_predicate_sql,
+    undelivered_turn_input_state_predicate_sql,
 };
 
 /// Reserved runtime-receipt identity used as the durable completion marker

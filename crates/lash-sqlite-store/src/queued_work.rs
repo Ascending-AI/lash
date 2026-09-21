@@ -1,23 +1,6 @@
 use super::*;
 use lash_sansio::SessionId;
 
-pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
-    "enqueue_seq",
-    "batch_id",
-    "session_id",
-    "source_key",
-    "delivery_policy",
-    "work_kind",
-    "authority_json",
-    "merge_key",
-    "available_at_ms",
-    "enqueued_at_ms",
-    "claim_fencing_token",
-    "claim_token",
-    "claim_session_lease_generation",
-    "claim_id",
-];
-
 pub(crate) fn decode_delivery_policy(value: String) -> Result<DeliveryPolicy, StoreError> {
     DeliveryPolicy::from_wire_str(&value).ok_or_else(|| {
         StoreError::Backend(format!("unknown queued-work delivery policy `{value}`"))
@@ -46,10 +29,10 @@ pub(crate) fn queued_work_batch_from_conn(
 ) -> Result<QueuedWorkBatch, StoreError> {
     let mut stmt = conn
         .prepare(
-            "SELECT item_id, payload_json
-             FROM queued_work_items
-             WHERE batch_id = ?1
-             ORDER BY item_index ASC",
+            crate::turn_ingress::turn_ingress_sql()
+                .queued_items
+                .list_by_batch
+                .sql(),
         )
         .map_err(sqlite_error)?;
     let rows = stmt
@@ -89,29 +72,28 @@ pub(crate) fn queued_work_batches_from_conn(
     if rows.is_empty() {
         return Ok(Vec::new());
     }
-    let mut sql = "SELECT batch_id, item_id, payload_json
-         FROM queued_work_items
-         WHERE batch_id IN ("
-        .to_string();
-    for index in 0..rows.len() {
-        if index > 0 {
-            sql.push_str(", ");
-        }
-        sql.push('?');
-    }
-    sql.push_str(") ORDER BY batch_id ASC, item_index ASC");
-    let mut stmt = conn.prepare(&sql).map_err(sqlite_error)?;
-    let item_rows = stmt
-        .query_map(
-            rusqlite::params_from_iter(rows.iter().map(|row| row.batch_id.as_str())),
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
+    let batch_ids = encode_json(
+        &rows
+            .iter()
+            .map(|row| row.batch_id.as_str())
+            .collect::<Vec<_>>(),
+    )?;
+    let mut stmt = conn
+        .prepare(
+            crate::turn_ingress::turn_ingress_sql()
+                .queued_items_sqlite
+                .list_by_batches
+                .sql(),
         )
+        .map_err(sqlite_error)?;
+    let item_rows = stmt
+        .query_map(params![batch_ids], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
         .map_err(sqlite_error)?;
     let mut items_by_batch = BTreeMap::<String, Vec<QueuedWorkItem>>::new();
     for item_row in item_rows {
@@ -165,6 +147,19 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) claim_session_lease_generation: u64,
 }
 
+impl QueuedBatchRow {
+    /// The claim columns the shared claimability verdict consults.
+    ///
+    /// Exposed as one value rather than two fields so a call site cannot pass
+    /// a generation that belongs to a different row's token.
+    pub(crate) fn claim_facts(&self) -> lash_core::store_backend_support::WorkRowClaimFacts<'_> {
+        lash_core::store_backend_support::WorkRowClaimFacts {
+            claim_token: self.claim_token.as_deref(),
+            claim_session_lease_generation: self.claim_session_lease_generation,
+        }
+    }
+}
+
 pub(crate) fn claim_candidate_from_row(
     row: &QueuedBatchRow,
     batch: &QueuedWorkBatch,
@@ -181,39 +176,35 @@ pub(crate) fn queued_batch_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<QueuedBatchRow> {
     Ok(QueuedBatchRow {
-        enqueue_seq: u64_from_sql(
-            "QueuedWorkBatch",
-            "enqueue_seq",
-            row.get(QUEUED_WORK_COLUMNS[0])?,
-        )?,
-        batch_id: row.get(QUEUED_WORK_COLUMNS[1])?,
-        session_id: SessionId::from(row.get::<_, String>(QUEUED_WORK_COLUMNS[2])?),
-        source_key: row.get(QUEUED_WORK_COLUMNS[3])?,
-        delivery_policy: row.get(QUEUED_WORK_COLUMNS[4])?,
-        work_kind: row.get(QUEUED_WORK_COLUMNS[5])?,
-        authority_json: row.get(QUEUED_WORK_COLUMNS[6])?,
-        merge_key: row.get(QUEUED_WORK_COLUMNS[7])?,
+        enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq")?)?,
+        batch_id: row.get("batch_id")?,
+        session_id: SessionId::from(row.get::<_, String>("session_id")?),
+        source_key: row.get("source_key")?,
+        delivery_policy: row.get("delivery_policy")?,
+        work_kind: row.get("work_kind")?,
+        authority_json: row.get("authority_json")?,
+        merge_key: row.get("merge_key")?,
         available_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "available_at_ms",
-            row.get(QUEUED_WORK_COLUMNS[8])?,
+            row.get("available_at_ms")?,
         )?,
         enqueued_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "enqueued_at_ms",
-            row.get(QUEUED_WORK_COLUMNS[9])?,
+            row.get("enqueued_at_ms")?,
         )?,
         claim_fencing_token: u64_from_sql(
             "QueuedWorkBatch",
             "claim_fencing_token",
-            row.get(QUEUED_WORK_COLUMNS[10])?,
+            row.get("claim_fencing_token")?,
         )?,
-        claim_id: row.get(QUEUED_WORK_COLUMNS[13])?,
-        claim_token: row.get(QUEUED_WORK_COLUMNS[11])?,
+        claim_id: row.get("claim_id")?,
+        claim_token: row.get("claim_token")?,
         claim_session_lease_generation: u64_from_sql(
             "QueuedWorkBatch",
             "claim_session_lease_generation",
-            row.get(QUEUED_WORK_COLUMNS[12])?,
+            row.get("claim_session_lease_generation")?,
         )?,
     })
 }
@@ -224,12 +215,10 @@ pub(crate) fn load_queued_batch_by_id_conn(
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
     let row = conn
         .query_row(
-            &format!(
-                "SELECT {QUEUED_WORK_COLUMNS}
-             FROM queued_work_batches
-             WHERE batch_id = ?1",
-                QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-            ),
+            crate::turn_ingress::turn_ingress_sql()
+                .queued_batches
+                .select_by_id
+                .sql(),
             params![batch_id],
             queued_batch_row_from_sql,
         )
@@ -277,14 +266,10 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         now,
         Some(nonce),
     );
+    let sql = crate::turn_ingress::turn_ingress_sql();
     let inserted = conn
         .execute(
-            "INSERT INTO queued_work_batches (
-            batch_id, session_id, source_key, delivery_policy, work_kind,
-            authority_json, merge_key, available_at_ms, enqueued_at_ms
-         )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT (session_id, source_key) DO NOTHING",
+            sql.queued_batches_sqlite.insert_new.sql(),
             params![
                 batch_id.as_str(),
                 batch.session_id.as_str(),
@@ -304,8 +289,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         })?;
         let existing_id: Option<String> = conn
             .query_row(
-                "SELECT batch_id FROM queued_work_batches
-                 WHERE session_id = ?1 AND source_key = ?2",
+                sql.queued_batches.select_id_by_source_key.sql(),
                 params![batch.session_id.as_str(), source_key],
                 |row| row.get(0),
             )
@@ -342,8 +326,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     for (index, payload) in batch.payloads.iter().enumerate() {
         let item_id = format!("{batch_id}:item:{index}");
         conn.execute(
-            "INSERT INTO queued_work_items (batch_id, item_index, item_id, payload_json)
-             VALUES (?1, ?2, ?3, ?4)",
+            sql.queued_items.insert_new.sql(),
             params![batch_id, index as i64, item_id, encode_json(payload)?],
         )
         .map_err(sqlite_error)?;
@@ -358,12 +341,14 @@ pub(crate) fn ensure_queued_work_completion_conn(
     completed: &QueuedWorkCompletion,
 ) -> Result<(), StoreError> {
     for batch_id in &completed.batch_ids {
-        let authority = conn
+        // Lock and read: this runs inside the commit's `BEGIN IMMEDIATE`
+        // transaction, so the row cannot move before the settlement below.
+        let observed = conn
             .query_row(
-                "SELECT claim_id, claim_token, claim_session_lease_generation
-             FROM queued_work_batches
-             WHERE session_id = ?1
-               AND batch_id = ?2",
+                crate::turn_ingress::turn_ingress_sql()
+                    .queued_batches_sqlite
+                    .settlement_facts
+                    .sql(),
                 params![completed.session_id.as_str(), batch_id.as_str()],
                 |row| {
                     Ok((
@@ -375,7 +360,7 @@ pub(crate) fn ensure_queued_work_completion_conn(
             )
             .optional()
             .map_err(sqlite_error)?;
-        let authority = authority
+        let observed = observed
             .map(|(claim_id, claim_token, generation)| {
                 Ok((
                     claim_id,
@@ -391,26 +376,21 @@ pub(crate) fn ensure_queued_work_completion_conn(
                 ))
             })
             .transpose()?;
-        let owns_row = authority
-            .as_ref()
-            .is_some_and(|(claim_id, claim_token, _)| {
-                claim_id.as_deref() == Some(completed.claim_id.as_str())
-                    && claim_token.as_deref() == Some(completed.lease_token.as_str())
-            });
-        if !owns_row {
-            return Err(StoreError::QueuedWorkClaimSuperseded {
-                session_id: completed.session_id.clone(),
-                claim_id: completed.claim_id.clone(),
-                row_id: Some(batch_id.as_str().to_string().into_boxed_str()),
-                superseding_claim_id: authority
-                    .as_ref()
-                    .and_then(|(claim_id, _, _)| claim_id.clone())
-                    .map(String::into_boxed_str),
-                superseding_session_lease_generation: authority.as_ref().and_then(
-                    |(claim_id, _, generation)| claim_id.as_ref().map(|_| Box::new(*generation)),
-                ),
-            });
-        }
+        // The shared verdict is the decision: a settlement is authorized only
+        // while the row still carries this claim's id and lease token.
+        lash_core::store_backend_support::require_settleable_queued_work(
+            completed,
+            batch_id.as_str(),
+            observed
+                .as_ref()
+                .map(|(claim_id, claim_token, generation)| {
+                    lash_core::store_backend_support::QueuedWorkSettlementFacts {
+                        claim_id: claim_id.as_deref(),
+                        claim_token: claim_token.as_deref(),
+                        claim_session_lease_generation: *generation,
+                    }
+                }),
+        )?;
     }
     Ok(())
 }

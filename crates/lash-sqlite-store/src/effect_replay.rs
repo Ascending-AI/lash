@@ -219,30 +219,14 @@ pub(crate) fn effect_sql(schema: Schema) -> &'static EffectSql {
 /// Whether a session catalog still pins `scope_id` through a cancellation
 /// closure, addressed through `schema`.
 ///
-/// `turn_cancel_closure_participants` belongs to the session-core family,
-/// which this arc converts later; until then its three qualified spellings are
-/// constants rather than a statement built per call.
-const fn closure_participant_exists_sql(schema: Schema) -> &'static str {
-    match schema {
-        Schema::Main => {
-            "SELECT EXISTS(
-                SELECT 1 FROM main.turn_cancel_closure_participants
-                WHERE scope_id = ?1
-             )"
-        }
-        Schema::EffectJournal => {
-            "SELECT EXISTS(
-                SELECT 1 FROM effect_journal.turn_cancel_closure_participants
-                WHERE scope_id = ?1
-             )"
-        }
-        Schema::ProcessRegistry => {
-            "SELECT EXISTS(
-                SELECT 1 FROM process_registry.turn_cancel_closure_participants
-                WHERE scope_id = ?1
-             )"
-        }
-    }
+/// `turn_cancel_closure_participants` belongs to the turn-ingress family, whose
+/// module owns the statement; this host reaches it through every schema it has
+/// attached, so the statement is rendered once per schema rather than built per
+/// call (FIG-3383).
+fn closure_participant_exists_sql(schema: Schema) -> &'static str {
+    crate::turn_ingress::closure_participant_sql(schema)
+        .exists_for_scope
+        .sql()
 }
 
 /// The SQLite effect-replay driver: one shared state machine over
@@ -353,9 +337,9 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
                     return Ok(false);
                 }
                 tx.execute(
-                    "INSERT INTO turn_cancel_closure_participants (scope_id, participant_id, scope_json)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT(scope_id, participant_id) DO NOTHING",
+                    crate::turn_ingress::closure_participant_sql(Schema::Main)
+                        .insert_new
+                        .sql(),
                     params![scope_id, participant_id, scope_json],
                 )?;
                 Ok(true)
@@ -387,16 +371,20 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
         self.closure_lifecycle
             .write(move |tx| {
                 tx.execute(
-                    "DELETE FROM turn_cancel_closure_participants WHERE scope_id = ?1 AND participant_id = ?2",
+                    crate::turn_ingress::closure_participant_sql(Schema::Main)
+                        .delete_participant
+                        .sql(),
                     params![scope_id, participant_id],
                 )?;
                 Ok(())
             })
             .await
-            .map_err(|error| RuntimeError::new(
-                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
-                error.to_string(),
-            ))
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })
     }
 }
 

@@ -337,9 +337,18 @@ impl SessionCommitStore for PostgresSessionStore {
                                 message: error.to_string(),
                             }
                         })?;
-                        sqlx::query("DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2 AND authorization_json = $3")
-                            .bind(closure.session_id().as_str()).bind(closure.turn_id().as_str()).bind(encoded)
-                            .execute(&mut *tx).await.map_err(store_sqlx_error)?;
+                        sqlx::query(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .closures
+                                .delete_settled
+                                .sql(),
+                        )
+                        .bind(closure.session_id().as_str())
+                        .bind(closure.turn_id().as_str())
+                        .bind(encoded)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(store_sqlx_error)?;
                     }
                     pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
                     pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
@@ -388,8 +397,15 @@ impl SessionCommitStore for PostgresSessionStore {
                     .await
                     .map_err(store_sqlx_error)?;
                 let retired: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM lash_turn_cancel_retired_scopes WHERE scope_id = $1)",
-                ).bind(&scope_id).fetch_one(&mut *tx).await.map_err(store_sqlx_error)?;
+                    crate::turn_ingress::turn_ingress_sql()
+                        .retired_scopes
+                        .exists_for_scope
+                        .sql(),
+                )
+                .bind(&scope_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
                 if retired {
                     return Err(StoreError::TurnCancelClosureScopeRetired { scope_id });
                 }
@@ -411,7 +427,10 @@ impl SessionCommitStore for PostgresSessionStore {
                 });
             }
             let stored: Option<String> = sqlx::query_scalar(
-                "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+                crate::turn_ingress::turn_ingress_sql()
+                    .closures_postgres
+                    .select_by_turn
+                    .sql(),
             )
             .bind(closure.session_id().as_str())
             .bind(closure.turn_id().as_str())
@@ -747,18 +766,12 @@ impl SessionCommitStore for PostgresSessionStore {
                     });
                 }
             }
-            let rows = sqlx::query(&format!(
-                "SELECT {PENDING_TURN_INPUT_COLUMNS}
-                 FROM lash_pending_turn_inputs
-                 WHERE session_id = $1 AND state = $2
-                 ORDER BY enqueue_seq ASC
-                 FOR UPDATE"
-            ))
-            .bind(commit.session_id.as_str())
-            .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+            let sql = crate::turn_ingress::turn_ingress_sql();
+            let rows = sqlx::query(sql.pending_inputs_postgres.select_pending_active.sql())
+                .bind(commit.session_id.as_str())
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
             let mut inputs = Vec::new();
             for row in rows {
                 let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
@@ -770,30 +783,27 @@ impl SessionCommitStore for PostgresSessionStore {
                     inputs.push((input.input_id, input.input));
                 }
             }
+            let deferred_ingress =
+                encode_json(&lash_core::TurnInputState::DeferredNextTurn.ingress())?;
             for (input_id, payload) in inputs {
-                sqlx::query(&format!(
-                    "UPDATE lash_pending_turn_inputs
-                     SET state = $3,
-                         ingress_json = COALESCE($4, ingress_json),
-                         {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-                     WHERE session_id = $1 AND input_id = $2"
-                ))
-                .bind(commit.session_id.as_str())
-                .bind(&*input_id)
-                .bind(match disposition {
+                // Two dispositions, two named statements: deferring rewrites
+                // the ingress so the row stops naming a turn that is over,
+                // dropping is the cancel this table already has.
+                match disposition {
                     lash_core::TurnCancelDisposition::Defer => {
-                        lash_core::TurnInputStateKind::DeferredNextTurn.as_str()
+                        sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
+                            .bind(commit.session_id.as_str())
+                            .bind(&*input_id)
+                            .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
+                            .bind(&deferred_ingress)
                     }
                     lash_core::TurnCancelDisposition::Drop => {
-                        lash_core::TurnInputStateKind::Cancelled.as_str()
+                        sqlx::query(sql.pending_inputs.cancel.sql())
+                            .bind(commit.session_id.as_str())
+                            .bind(&*input_id)
+                            .bind(lash_core::TurnInputStateKind::Cancelled.as_str())
                     }
-                })
-                .bind(match disposition {
-                    lash_core::TurnCancelDisposition::Defer => Some(encode_json(
-                        &lash_core::TurnInputState::DeferredNextTurn.ingress(),
-                    )?),
-                    lash_core::TurnCancelDisposition::Drop => None,
-                })
+                }
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -884,7 +894,10 @@ impl SessionCommitStore for PostgresSessionStore {
         if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
             let closure = settlement.authorization();
             sqlx::query(
-                "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2",
+                crate::turn_ingress::turn_ingress_sql()
+                    .closures
+                    .delete_by_turn
+                    .sql(),
             )
             .bind(closure.session_id().as_str())
             .bind(closure.turn_id().as_str())

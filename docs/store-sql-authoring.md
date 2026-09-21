@@ -78,6 +78,23 @@ Rules the gate holds you to:
   measurement, or a named unbounded column it avoids decoding, is.
 * Add `TABLE` to `lash_store_sql::TABLES`, or the renderer will refuse any
   statement that names it.
+* A relation the statement binds for itself — a `WITH … AS (…)` common table
+  expression, a derived table's `) AS name` — is accepted in a `FROM` or `JOIN`
+  and left unqualified. A `FROM` naming anything else is still a startup
+  refusal, so a misspelled reference cannot reach a database.
+* `FOR UPDATE` is a locking clause, not a statement head: the renderer does not
+  read the word after it as a table, which is what lets `FOR UPDATE OF t` and
+  `FOR UPDATE SKIP LOCKED` render at all.
+
+One thing the neutral form deliberately cannot express: a statement whose text
+depends on how many values it was given. A list bind is one bound value — a
+JSON array unpacked with `json_each` on SQLite, a real array joined through
+`unnest` or compared with `= ANY` on PostgreSQL — so the statement stays one
+literal and only the value's length varies. The same rule kills the optional
+predicate: where a filter varies, name one statement per filter *shape*
+production callers actually use and pick it with an exhaustive match, because
+neither `column = COALESCE(?N, column)` nor `?N IS NULL OR column = ?N` can use
+an index. Add a query-plan test per named shape.
 
 Row types: if both backends carry a byte-identical private struct for the row
 and compare it the same way, that struct belongs here (see

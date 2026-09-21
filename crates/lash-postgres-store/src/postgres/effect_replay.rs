@@ -337,10 +337,10 @@ impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
             ));
         }
         sqlx::query(
-            "INSERT INTO lash_turn_cancel_closure_participants
-             (scope_id, participant_id, scope_json)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (scope_id, participant_id) DO NOTHING",
+            crate::turn_ingress::turn_ingress_sql()
+                .closure_participants
+                .insert_new
+                .sql(),
         )
         .bind(&scope_id)
         .bind(participant_id)
@@ -368,8 +368,10 @@ impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
             .await
             .map_err(retirement_error)?;
         sqlx::query(
-            "DELETE FROM lash_turn_cancel_closure_participants
-             WHERE scope_id = $1 AND participant_id = $2",
+            crate::turn_ingress::turn_ingress_sql()
+                .closure_participants
+                .delete_participant
+                .sql(),
         )
         .bind(scope_id)
         .bind(participant_id)
@@ -1049,10 +1051,10 @@ pub(crate) async fn scope_has_turn_cancel_closure_participant(
     scope_id: &str,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM lash_turn_cancel_closure_participants
-            WHERE scope_id = $1
-         )",
+        crate::turn_ingress::turn_ingress_sql()
+            .closure_participants
+            .exists_for_scope
+            .sql(),
     )
     .bind(scope_id)
     .fetch_one(&mut **tx)

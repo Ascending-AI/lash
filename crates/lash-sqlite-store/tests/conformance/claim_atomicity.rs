@@ -43,3 +43,23 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
         );
     }
 }
+
+#[tokio::test]
+async fn sqlite_queued_work_claimability_verdict_holds_over_a_displaced_generation() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory = SqliteSessionStoreFactory::new(dir.path());
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: "root".into(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .unwrap();
+    law::claimability_verdict_holds_over_a_displaced_generation(
+        store as Arc<dyn RuntimePersistence>,
+        "sqlite",
+    )
+    .await;
+}

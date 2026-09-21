@@ -119,3 +119,16 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         } if current == i64::MAX as u64
     ));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_queued_work_claimability_verdict_holds_over_a_displaced_generation() {
+    let Some((_lock, storage)) = super::storage().await else {
+        return;
+    };
+    super::reset(&storage).await;
+    law::claimability_verdict_holds_over_a_displaced_generation(
+        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
+        "postgres",
+    )
+    .await;
+}

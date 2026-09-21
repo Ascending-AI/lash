@@ -16,12 +16,10 @@ pub(crate) async fn ensure_turn_input_completion_tx(
 ) -> Result<(), StoreError> {
     for input_id in &completed.input_ids {
         let observed: Option<(Option<String>, Option<String>, i64, String)> = sqlx::query_as(
-            "SELECT claim_id, claim_token, claim_session_lease_generation, state
-             FROM lash_pending_turn_inputs
-             WHERE session_id = $1
-               AND input_id = $2
-             LIMIT 1
-             FOR UPDATE",
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs_postgres
+                .settlement_facts
+                .sql(),
         )
         .bind(completed.session_id.as_str())
         .bind(input_id.as_str())
@@ -60,10 +58,4 @@ pub(crate) async fn ensure_turn_input_completion_tx(
         )?;
     }
     Ok(())
-}
-
-/// The terminal state set spelled as the body of a SQL `IN (...)` list, so the
-/// settlement predicate and its Rust twin above cannot drift from the enum.
-pub(crate) fn unclaimed_turn_input_terminal_states_sql() -> String {
-    lash_core::store_backend_support::terminal_turn_input_states_sql()
 }

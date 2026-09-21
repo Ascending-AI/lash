@@ -448,6 +448,13 @@ fn every_owned_statement_renders_for_both_backends() {
         VocabularyTerm::new("enqueuing_wake_delivery_state", stub_predicate),
         VocabularyTerm::new("discarded_wake_delivery_state", stub_predicate),
         VocabularyTerm::new("not_enqueued_wake_delivery_state", stub_predicate),
+        VocabularyTerm::new("accepted_turn_input_state", stub_predicate),
+        VocabularyTerm::new("active_turn_input_state", stub_predicate),
+        VocabularyTerm::new("deferred_next_turn_turn_input_state", stub_predicate),
+        VocabularyTerm::new("nonterminal_turn_input_state", stub_predicate),
+        VocabularyTerm::new("pending_active_turn_input_state", stub_predicate),
+        VocabularyTerm::new("terminal_turn_input_state", stub_predicate),
+        VocabularyTerm::new("undelivered_turn_input_state", stub_predicate),
     ]);
 
     for statement in crate::all_statements() {
@@ -664,5 +671,36 @@ fn a_for_update_lock_clause_is_not_a_table_position() {
         ),
         "SELECT 1 FROM lash_await_event_waits AS candidate
              FOR UPDATE OF candidate SKIP LOCKED"
+    );
+}
+
+#[test]
+fn is_distinct_from_is_a_comparison_operator_not_a_relation_list() {
+    // `a IS DISTINCT FROM b` is how PostgreSQL compares a value against one
+    // that may be NULL, and it spells `FROM` where no relation follows.
+    // Reading that `FROM` as a relation list refuses every claim scan that
+    // compares against a nullable claim id.
+    assert_eq!(
+        postgres(
+            "SELECT key_id FROM await_event_waits AS wait
+             WHERE wait.session_id IS DISTINCT FROM wait.scope_json
+               AND wait.terminal_json IS NOT DISTINCT FROM wait.wait_json"
+        ),
+        "SELECT key_id FROM lash_await_event_waits AS wait
+             WHERE wait.session_id IS DISTINCT FROM wait.scope_json
+               AND wait.terminal_json IS NOT DISTINCT FROM wait.wait_json"
+    );
+    // A `SELECT DISTINCT` still opens a relation list at its own `FROM`, so
+    // the guard reaches exactly the comparison operator.
+    assert_eq!(
+        render(
+            "SELECT DISTINCT scope_json FROM not_a_table",
+            Dialect::postgres(),
+            TABLES
+        ),
+        Err(RenderError::UnknownTable {
+            name: "not_a_table".to_string(),
+            at: 32,
+        })
     );
 }

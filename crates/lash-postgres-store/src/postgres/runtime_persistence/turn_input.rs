@@ -56,7 +56,10 @@ impl TurnInputStore for PostgresSessionStore {
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
         let existing: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT binding_id, admitted_scope_json FROM lash_turn_cancellation_bindings WHERE session_id = $1 FOR UPDATE",
+            crate::turn_ingress::turn_ingress_sql()
+                .bindings_postgres
+                .select_by_session_for_update
+                .sql(),
         )
         .bind(session_id.as_str())
         .fetch_optional(&mut *tx)
@@ -84,7 +87,10 @@ impl TurnInputStore for PostgresSessionStore {
             Some(_) => {}
             None => {
                 sqlx::query(
-                    "INSERT INTO lash_turn_cancellation_bindings (session_id, binding_id, admitted_scope_json) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .bindings_postgres
+                        .insert_new
+                        .sql(),
                 )
                 .bind(session_id.as_str())
                 .bind(binding_id)
@@ -93,7 +99,10 @@ impl TurnInputStore for PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?;
                 let selected: (String, Option<String>) = sqlx::query_as(
-                    "SELECT binding_id, admitted_scope_json FROM lash_turn_cancellation_bindings WHERE session_id = $1",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .bindings
+                        .select_by_session
+                        .sql(),
                 )
                 .bind(session_id.as_str())
                 .fetch_one(&mut *tx)
@@ -154,7 +163,10 @@ impl TurnInputStore for PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?;
             let retired: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM lash_turn_cancel_retired_scopes WHERE scope_id = $1)",
+                crate::turn_ingress::turn_ingress_sql()
+                    .retired_scopes
+                    .exists_for_scope
+                    .sql(),
             )
             .bind(&scope_id)
             .fetch_one(&mut *tx)
@@ -165,7 +177,10 @@ impl TurnInputStore for PostgresSessionStore {
             }
         }
         let selected: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT binding_id, admitted_scope_json FROM lash_turn_cancellation_bindings WHERE session_id = $1",
+            crate::turn_ingress::turn_ingress_sql()
+                .bindings
+                .select_by_session
+                .sql(),
         )
         .bind(authorization.session_id().as_str())
         .fetch_optional(&mut *tx)
@@ -200,7 +215,10 @@ impl TurnInputStore for PostgresSessionStore {
             }
         })?;
         let existing: Option<String> = sqlx::query_scalar(
-            "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+            crate::turn_ingress::turn_ingress_sql()
+                .closures_postgres
+                .select_by_turn
+                .sql(),
         )
         .bind(authorization.session_id().as_str())
         .bind(authorization.turn_id().as_str())
@@ -232,7 +250,10 @@ impl TurnInputStore for PostgresSessionStore {
                     });
                 }
                 sqlx::query(
-                    "INSERT INTO lash_turn_cancel_closure_authorizations (session_id, turn_id, authorization_json) VALUES ($1, $2, $3)",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .closures
+                        .insert_new
+                        .sql(),
                 )
                 .bind(authorization.session_id().as_str())
                 .bind(authorization.turn_id().as_str())
@@ -263,7 +284,10 @@ impl TurnInputStore for PostgresSessionStore {
         .await?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let rows: Vec<String> = sqlx::query_scalar(
-            "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 ORDER BY turn_id",
+            crate::turn_ingress::turn_ingress_sql()
+                .closures
+                .list_by_session
+                .sql(),
         )
         .bind(session_id.as_str())
         .fetch_all(&mut *connection)
@@ -283,7 +307,10 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
     ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
         let rows: Vec<String> = sqlx::query_scalar(
-            "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 ORDER BY turn_id",
+            crate::turn_ingress::turn_ingress_sql()
+                .closures
+                .list_by_session
+                .sql(),
         )
         .bind(self.session_id.as_str())
         .fetch_all(&self.pool)
@@ -382,9 +409,10 @@ impl TurnInputStore for PostgresSessionStore {
                     )
                 })?;
                 sqlx::query(
-                    "UPDATE lash_turn_cancel_requests
-                     SET intent_revision = $3
-                     WHERE session_id = $1 AND turn_id = $2",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .cancel_requests
+                        .advance_intent_revision
+                        .sql(),
                 )
                 .bind(session_id.as_str())
                 .bind(turn_id.as_str())
@@ -399,9 +427,10 @@ impl TurnInputStore for PostgresSessionStore {
             }
             None => {
                 sqlx::query(
-                    "INSERT INTO lash_turn_cancel_requests (
-                         session_id, turn_id, request_id, origin, reason, disposition, mode, intent_revision
-                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1)",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .cancel_requests_postgres
+                        .insert_first
+                        .sql(),
                 )
                 .bind(session_id.as_str())
                 .bind(turn_id.as_str())
@@ -470,6 +499,10 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
         let now = self.clock.timestamp_ms();
+        // The sequence is read by name, not through this family's statements:
+        // it is a catalog function over the column's own sequence, not SQL over
+        // the table, and the prefixed name is a render parameter nothing else
+        // here spells.
         let enqueue_seq: i64 = sqlx::query_scalar(
             "SELECT nextval(pg_get_serial_sequence(
                 'lash_pending_turn_inputs',
@@ -493,17 +526,10 @@ impl TurnInputStore for PostgresSessionStore {
         let input_json = encode_json(&draft.input)?;
         let input = if let Some(source_key) = draft.source_key.as_deref() {
             let row = sqlx::query(
-                "INSERT INTO lash_pending_turn_inputs (
-                    enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json,
-                    enqueued_at_ms
-                 )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                 ON CONFLICT (session_id, source_key) DO UPDATE
-                 SET source_key = lash_pending_turn_inputs.source_key
-                 RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
-                           state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                           claim_owner_id, claim_owner_incarnation_id,
-                           claim_token, claim_session_lease_generation",
+                crate::turn_ingress::turn_ingress_sql()
+                    .pending_inputs_postgres
+                    .insert_or_adopt_existing
+                    .sql(),
             )
             .bind(enqueue_seq)
             .bind(&input_id)
@@ -531,11 +557,10 @@ impl TurnInputStore for PostgresSessionStore {
             input
         } else {
             sqlx::query(
-                "INSERT INTO lash_pending_turn_inputs (
-                    enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json,
-                    enqueued_at_ms
-                 )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                crate::turn_ingress::turn_ingress_sql()
+                    .pending_inputs_postgres
+                    .insert_new
+                    .sql(),
             )
             .bind(enqueue_seq)
             .bind(&input_id)
@@ -568,25 +593,13 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        let rows = sqlx::query(&format!(
-            "SELECT {PENDING_TURN_INPUT_COLUMNS},
-                    (SELECT sel.lease_expires_at_ms
-                     FROM lash_session_execution_leases sel
-                     WHERE lash_pending_turn_inputs.claim_token IS NOT NULL
-                       AND sel.session_id = $1
-                       AND sel.lease_token IS NOT NULL
-                       AND sel.lease_expires_at_ms > $4
-                       AND sel.lease_fencing_token
-                           = lash_pending_turn_inputs.claim_session_lease_generation)
-                        AS live_lease_expires_at_ms
-             FROM lash_pending_turn_inputs
-             WHERE session_id = $1
-               AND state IN ($2, $3)
-             ORDER BY enqueue_seq ASC"
-        ))
+        let rows = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .list_undelivered
+                .sql(),
+        )
         .bind(session_id.as_str())
-        .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
-        .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
         .bind(now as i64)
         .fetch_all(&mut *tx)
         .await
@@ -678,13 +691,12 @@ impl TurnInputStore for PostgresSessionStore {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });
         };
-        let rows = sqlx::query(&format!(
-            "SELECT {PENDING_TURN_INPUT_COLUMNS}
-             FROM lash_pending_turn_inputs
-             WHERE session_id = $1 AND enqueue_seq >= $2
-             ORDER BY enqueue_seq ASC
-             FOR UPDATE"
-        ))
+        let rows = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs_postgres
+                .select_suffix
+                .sql(),
+        )
         .bind(session_id.as_str())
         .bind(anchor_row.enqueue_seq as i64)
         .fetch_all(&mut *tx)
@@ -751,23 +763,15 @@ impl TurnInputStore for PostgresSessionStore {
         claim: &lash_core::TurnInputClaim,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        sqlx::query(&format!(
-            "UPDATE lash_pending_turn_inputs
-             SET state = CASE
-                     WHEN state = $4 THEN
-                         CASE ingress_json::jsonb ->> 'scope'
-                             WHEN 'active_turn' THEN $5
-                             ELSE $6
-                         END
-                     ELSE state
-                 END,
-                 {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-             WHERE session_id = $1 AND claim_id = $2 AND claim_token = $3"
-        ))
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs_postgres
+                .abandon_claim
+                .sql(),
+        )
         .bind(claim.session_id.as_str())
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
-        .bind(lash_core::TurnInputStateKind::Accepted.as_str())
         .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
         .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
         .execute(&mut *connection)
@@ -796,37 +800,35 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         {
-            let accepted_state = lash_core::store_backend_support::state_sql_literal(
-                lash_core::TurnInputStateKind::Accepted,
-            );
-            let pending_active = lash_core::store_backend_support::state_sql_literal(
-                lash_core::TurnInputStateKind::PendingActive,
-            );
-            let deferred_next_turn = lash_core::store_backend_support::state_sql_literal(
-                lash_core::TurnInputStateKind::DeferredNextTurn,
-            );
-            let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-                "UPDATE lash_pending_turn_inputs
-                 SET state = CASE
-                         WHEN state = ",
-            );
-            query.push(accepted_state).push(" THEN ");
-            query.push("CASE ingress_json::jsonb ->> 'scope' WHEN 'active_turn' THEN ");
-            query.push(pending_active).push(" ELSE ");
-            query.push(deferred_next_turn).push(" END");
-            query.push("     ELSE state\n                     END,\n                     ");
-            query.push(TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS);
-            query.push("\n                 WHERE (session_id, claim_id, claim_token) IN ");
-            query.push_tuples(claims.iter(), |mut row, claim| {
-                row.push_bind(claim.session_id.as_str())
-                    .push_bind(&claim.claim_id)
-                    .push_bind(&claim.lease_token);
-            });
-            query
-                .build()
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+            // The claims a batch abandon gives up are bound as three parallel
+            // arrays, so the statement's own text is fixed however many there
+            // are; it used to be built one tuple at a time.
+            let session_ids = claims
+                .iter()
+                .map(|claim| claim.session_id.as_str().to_string())
+                .collect::<Vec<_>>();
+            let claim_ids = claims
+                .iter()
+                .map(|claim| claim.claim_id.clone())
+                .collect::<Vec<_>>();
+            let claim_tokens = claims
+                .iter()
+                .map(|claim| claim.lease_token.clone())
+                .collect::<Vec<_>>();
+            sqlx::query(
+                crate::turn_ingress::turn_ingress_sql()
+                    .pending_inputs_postgres
+                    .abandon_claims
+                    .sql(),
+            )
+            .bind(&session_ids)
+            .bind(&claim_ids)
+            .bind(&claim_tokens)
+            .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
+            .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
@@ -875,7 +877,10 @@ impl TurnInputStore for PostgresSessionStore {
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
         let closure = settlement.map(lash_core::TurnCancelClosureSettlement::authorization);
         let stored: Option<String> = sqlx::query_scalar(
-            "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+            crate::turn_ingress::turn_ingress_sql()
+                .closures_postgres
+                .select_by_turn
+                .sql(),
         )
         .bind(session_id.as_str())
         .bind(turn_id.as_str())
@@ -920,7 +925,10 @@ impl TurnInputStore for PostgresSessionStore {
         if settlement.is_some() && matches!(repaired, lash_core::TurnCancelRepairResult::Applied(_))
         {
             sqlx::query(
-                "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2",
+                crate::turn_ingress::turn_ingress_sql()
+                    .closures
+                    .delete_by_turn
+                    .sql(),
             )
             .bind(session_id.as_str())
             .bind(turn_id.as_str())

@@ -130,12 +130,10 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
 ) -> Result<Option<lash_core::PendingTurnInput>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                    claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND input_id = ?2",
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .select_by_id
+                .sql(),
             params![session_id.as_str(), input_id],
             pending_turn_input_row_from_sql,
         )
@@ -149,15 +147,11 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
     session_id: &SessionId,
     target: &lash_core::PendingTurnInputCancelTarget,
 ) -> Result<Option<PendingTurnInputRow>, StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
     match target {
         lash_core::PendingTurnInputCancelTarget::InputId(input_id) => conn
             .query_row(
-                "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                        state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                        claim_owner_id, claim_owner_incarnation_id,
-                        claim_token, claim_session_lease_generation
-                 FROM pending_turn_inputs
-                 WHERE session_id = ?1 AND input_id = ?2",
+                sql.pending_inputs.select_by_id.sql(),
                 params![session_id.as_str(), input_id.as_str()],
                 pending_turn_input_row_from_sql,
             )
@@ -165,12 +159,7 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
             .map_err(sqlite_error),
         lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => conn
             .query_row(
-                "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                        state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                        claim_owner_id, claim_owner_incarnation_id,
-                        claim_token, claim_session_lease_generation
-                 FROM pending_turn_inputs
-                 WHERE session_id = ?1 AND source_key = ?2",
+                sql.pending_inputs.select_by_source_key.sql(),
                 params![session_id.as_str(), source_key],
                 pending_turn_input_row_from_sql,
             )

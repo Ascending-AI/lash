@@ -141,6 +141,7 @@ mod test_support;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod triggers;
+mod turn_ingress;
 
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 
@@ -1053,19 +1054,28 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
                     let mut statement = tx
-                        .prepare("SELECT session_id, authorization_json FROM turn_cancel_closure_authorizations ORDER BY session_id, turn_id")
+                        .prepare(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .closures
+                                .list_all
+                                .sql(),
+                        )
                         .map_err(sqlite_error)?;
                     let rows = statement
-                        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                        .query_map([], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })
                         .map_err(sqlite_error)?
                         .collect::<Result<Vec<_>, _>>()
                         .map_err(sqlite_error)?;
                     drop(statement);
                     for (session_id, encoded) in rows {
                         let authorization: lash_core::TurnCancelClosureAuthorization =
-                            serde_json::from_str(&encoded).map_err(|error| StoreError::StoredDataCorrupt {
-                                record_kind: "TurnCancelClosureAuthorization",
-                                message: error.to_string(),
+                            serde_json::from_str(&encoded).map_err(|error| {
+                                StoreError::StoredDataCorrupt {
+                                    record_kind: "TurnCancelClosureAuthorization",
+                                    message: error.to_string(),
+                                }
                             })?;
                         if authorization.admitted_scope() == &inspected_scope {
                             return Err(StoreError::TurnCancelClosureLifecyclePinned {
@@ -1075,7 +1085,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                         }
                     }
                     tx.execute(
-                        "INSERT OR IGNORE INTO turn_cancel_retired_scopes (scope_id) VALUES (?1)",
+                        crate::turn_ingress::turn_ingress_sql()
+                            .retired_scopes_sqlite
+                            .insert_new
+                            .sql(),
                         params![scope_id],
                     )
                     .map_err(sqlite_error)?;
@@ -1113,22 +1126,11 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let session_id = request.session_id.clone();
         conn.call(move |conn| {
             conn.query_row(
-                "SELECT EXISTS(
-                    SELECT 1
-                    FROM queued_work_batches qwb
-                    WHERE qwb.session_id = ?1
-                      AND qwb.available_at_ms <= ?2
-                ) OR EXISTS(
-                    SELECT 1
-                    FROM pending_turn_inputs pti
-                    WHERE pti.session_id = ?1
-                      AND pti.state = ?3
-                )",
-                params![
-                    session_id.as_str(),
-                    now_epoch_ms as i64,
-                    lash_core::TurnInputState::DeferredNextTurn.as_str()
-                ],
+                crate::turn_ingress::turn_ingress_sql()
+                    .family
+                    .has_claimable_work
+                    .sql(),
+                params![session_id.as_str(), now_epoch_ms as i64],
                 |row| row.get(0),
             )
         })

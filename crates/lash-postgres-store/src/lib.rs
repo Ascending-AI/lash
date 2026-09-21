@@ -1149,6 +1149,8 @@ pub mod testing;
 mod trigger_listing_plan_tests;
 #[path = "postgres/trigger_store.rs"]
 mod trigger_store;
+#[path = "postgres/turn_ingress.rs"]
+mod turn_ingress;
 #[path = "postgres/turn_input_settlement.rs"]
 mod turn_input_settlement;
 

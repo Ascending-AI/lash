@@ -91,7 +91,7 @@ pub mod effect;
 pub mod process;
 pub mod session;
 pub mod trigger;
-
+pub mod turn_ingress;
 pub mod wait;
 
 pub use render::{
@@ -131,6 +131,16 @@ pub const TABLES: &[&str] = &[
     trigger::mutation_receipts::TABLE,
     trigger::occurrences::TABLE,
     trigger::subscriptions::TABLE,
+    turn_ingress::cancel_requests::TABLE,
+    turn_ingress::cancellation_bindings::TABLE,
+    turn_ingress::closure_authorizations::TABLE,
+    turn_ingress::closure_participants::TABLE,
+    turn_ingress::pending_inputs::TABLE,
+    turn_ingress::queued_batches::TABLE,
+    turn_ingress::queued_items::TABLE,
+    turn_ingress::retired_scopes::TABLE,
+    turn_ingress::session_execution_leases::TABLE,
+    turn_ingress::tool_intent_submissions::TABLE,
     wait::waits::TABLE,
     wait::meta::TABLE,
     wait::revoked_sessions::TABLE,
@@ -155,13 +165,6 @@ pub const TABLES: &[&str] = &[
     // lane replaces the string with that module's `TABLE` and adds the
     // `[[cross_family]]` entry the gate then starts demanding.
     "lashlang_artifacts",
-    "pending_turn_inputs",
-    "queued_work_batches",
-    "queued_work_items",
-    "session_execution_leases",
-    "turn_cancel_closure_authorizations",
-    "turn_cancel_requests",
-    "turn_cancellation_bindings",
 ];
 
 /// Every shared statement this crate owns, across every family.
@@ -209,6 +212,27 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session::usage_deltas::UsageDeltaStatements::NEUTRAL);
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
     statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::TurnIngressStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::cancel_requests::CancelRequestStatements::NEUTRAL);
+    statements.extend_from_slice(
+        turn_ingress::cancellation_bindings::CancellationBindingStatements::NEUTRAL,
+    );
+    statements.extend_from_slice(
+        turn_ingress::closure_authorizations::ClosureAuthorizationStatements::NEUTRAL,
+    );
+    statements.extend_from_slice(
+        turn_ingress::closure_participants::ClosureParticipantStatements::NEUTRAL,
+    );
+    statements.extend_from_slice(turn_ingress::pending_inputs::PendingInputStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::queued_batches::QueuedBatchStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::queued_items::QueuedItemStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::retired_scopes::RetiredScopeStatements::NEUTRAL);
+    statements.extend_from_slice(
+        turn_ingress::session_execution_leases::SessionExecutionLeaseStatements::NEUTRAL,
+    );
+    statements.extend_from_slice(
+        turn_ingress::tool_intent_submissions::ToolIntentSubmissionStatements::NEUTRAL,
+    );
     statements
 }
 

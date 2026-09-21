@@ -129,3 +129,94 @@ impl Case {
         }
     }
 }
+
+/// The claimability verdict's two answers, over one row, on a real backend.
+///
+/// `queued_work_batch_claimability` (FIG-3381, called by both stores since
+/// FIG-3383) says a row is claimable when it is unclaimed **or** claimed under
+/// a superseded session-execution-lease generation, and refuses it when the
+/// claiming generation already holds it. Both halves are safety properties:
+/// the first is how a crashed runner's work is recovered, and the second is
+/// what stops one generation holding two claims over one row (ADR 0029).
+///
+/// This runs on every backend, because the whole point of moving the decision
+/// into shared code is that the two cannot answer differently. The SQL
+/// predicate is still on each statement as the backstop, so a store that
+/// dropped the verdict call would still pass the first half — the second half
+/// is the one that fails, and it fails identically on both.
+pub(super) async fn claimability_verdict_holds_over_a_displaced_generation(
+    store: Arc<dyn RuntimePersistence>,
+    backend: &str,
+) {
+    let case = prepare(store, Entry::Automatic).await;
+    let first = case
+        .claim()
+        .await
+        .unwrap_or_else(|| panic!("{backend}: the first generation claims the ready run"));
+
+    // The same generation must not take the rows it already holds.
+    assert!(
+        case.claim().await.is_none(),
+        "{backend}: a generation that already holds these rows must not claim them again",
+    );
+
+    // Displace the lane. The new holder's generation is a different one, so
+    // the same rows become claimable again without anything releasing them.
+    let successor = case.displace_lease().await;
+    let second = successor
+        .claim()
+        .await
+        .unwrap_or_else(|| panic!("{backend}: a displacing generation reclaims the held rows"));
+    assert_ne!(
+        first.claim_id, second.claim_id,
+        "{backend}: the successor must take its own claim over the same rows",
+    );
+    assert_eq!(
+        second.data.batches.len(),
+        first.data.batches.len(),
+        "{backend}: the successor recovers the whole interrupted run",
+    );
+    assert!(
+        successor.claim().await.is_none(),
+        "{backend}: the successor must not claim its own rows twice either",
+    );
+}
+
+impl Case {
+    /// Take this session's lane for a fresh owner, advancing the generation.
+    ///
+    /// The incumbent hands the lane back first, which is what a runner does
+    /// when it stands down; the claims it left behind keep pointing at the
+    /// generation that is now gone, which is exactly the state a successor has
+    /// to recover from.
+    async fn displace_lease(&self) -> Case {
+        self.store
+            .release_session_execution_lease(&self.lease.fence())
+            .await
+            .expect("the incumbent hands its lane back");
+        let owner = LeaseOwnerIdentity::opaque("claims-successor", "claims-successor-incarnation");
+        let lease = self
+            .store
+            .try_claim_session_execution_lease(
+                &SessionId::from("root"),
+                &owner,
+                "claims-successor-executor",
+                60_000,
+            )
+            .await
+            .expect("claim the successor execution lease")
+            .acquired()
+            .expect("the successor execution lease is available");
+        assert_ne!(
+            lease.fencing_token, self.lease.fencing_token,
+            "a displacing claim must advance the generation",
+        );
+        Case {
+            store: Arc::clone(&self.store),
+            ids: self.ids.clone(),
+            owner,
+            lease,
+            entry: self.entry,
+        }
+    }
+}

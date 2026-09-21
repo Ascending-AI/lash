@@ -71,14 +71,15 @@ impl QueuedWorkStore for Store {
                     // currently-live session-lease generation; claims pin it and
                     // are claimable only across a different generation (ADR 0029).
                     let generation = session_execution_lease.fencing_token;
-                    let (candidate_batches, candidates) = scan_queued_work_candidates_sqlite(
-                        tx,
-                        now,
-                        &session_id,
-                        generation,
-                        QueuedWorkClaimBoundary::Idle,
-                        MAX_SESSION_COMMAND_BATCHES_PER_CLAIM,
-                    )?;
+                    let (candidate_rows, candidate_batches, candidates) =
+                        scan_queued_work_candidates_sqlite(
+                            tx,
+                            now,
+                            &session_id,
+                            generation,
+                            QueuedWorkClaimBoundary::Idle,
+                            MAX_SESSION_COMMAND_BATCHES_PER_CLAIM,
+                        )?;
                     let selected_len = select_leading_session_command(&candidates);
                     if selected_len == 0 {
                         return Ok(TxOutcome::Commit(None));
@@ -91,6 +92,7 @@ impl QueuedWorkStore for Store {
                         &session_id,
                         &owner,
                         generation,
+                        &candidate_rows[..selected_len],
                         selected_batches,
                         &candidates[..selected_len],
                     )
@@ -133,14 +135,15 @@ impl QueuedWorkStore for Store {
                         now,
                     )?;
                     let generation = session_execution_lease.fencing_token;
-                    let (candidate_batches, candidates) = scan_queued_work_candidates_sqlite(
-                        tx,
-                        now,
-                        &session_id,
-                        generation,
-                        boundary,
-                        policy.max_rows,
-                    )?;
+                    let (candidate_rows, candidate_batches, candidates) =
+                        scan_queued_work_candidates_sqlite(
+                            tx,
+                            now,
+                            &session_id,
+                            generation,
+                            boundary,
+                            policy.max_rows,
+                        )?;
                     let prefix =
                         select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
                     let selected_len = match prefix {
@@ -175,6 +178,7 @@ impl QueuedWorkStore for Store {
                         &session_id,
                         &owner,
                         generation,
+                        &candidate_rows[..selected_len],
                         selected_batches,
                         &candidates[..selected_len],
                     )? {
@@ -319,17 +323,21 @@ impl QueuedWorkStore for Store {
                         .iter()
                         .cloned()
                         .collect::<std::collections::BTreeSet<_>>();
+                    let sql = crate::turn_ingress::turn_ingress_sql();
+                    // Every list bind in this crate is a JSON array unpacked
+                    // with `json_each`, so the statement's text is fixed and
+                    // the arity lives in the bound value.
+                    let sql_batch_ids = encode_json(
+                        &batch_ids
+                            .iter()
+                            .map(lash_core::BatchId::as_str)
+                            .collect::<Vec<_>>(),
+                    )?;
                     let present_ids = {
-                        let mut sql = "SELECT batch_id FROM queued_work_batches
-                                       WHERE session_id = ? AND batch_id IN ("
-                            .to_string();
-                        sql.push_str(&vec!["?"; batch_ids.len()].join(", "));
-                        sql.push(')');
-                        let mut values: Vec<rusqlite::types::Value> =
-                            vec![session_id.as_str().to_string().into()];
-                        values.extend(batch_ids.iter().map(|id| id.as_str().to_string().into()));
-                        let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
-                        stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
+                        let mut stmt = tx
+                            .prepare(sql.queued_batches_sqlite.select_present_ids.sql())
+                            .map_err(sqlite_error)?;
+                        stmt.query_map(params![session_id.as_str(), sql_batch_ids], |row| {
                             row.get::<_, String>(0)
                         })
                         .map_err(sqlite_error)?
@@ -348,27 +356,17 @@ impl QueuedWorkStore for Store {
                         ));
                     }
                     let requested_rows = {
-                        let mut sql = format!(
-                            "SELECT {QUEUED_WORK_COLUMNS}
-                                     FROM queued_work_batches
-                                     WHERE session_id = ? AND available_at_ms <= ?
-                                       AND (claim_token IS NULL
-                                            OR claim_session_lease_generation <> ?)
-                                       AND batch_id IN (",
-                            QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-                        );
-                        sql.push_str(&vec!["?"; batch_ids.len()].join(", "));
-                        sql.push_str(") ORDER BY enqueue_seq ASC");
-                        let mut values: Vec<rusqlite::types::Value> = vec![
-                            session_id.as_str().to_string().into(),
-                            (now as i64).into(),
-                            sql_session_lease_generation(generation)?.into(),
-                        ];
-                        values.extend(batch_ids.iter().map(|id| id.as_str().to_string().into()));
-                        let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
+                        let mut stmt = tx
+                            .prepare(sql.queued_batches_sqlite.select_by_ids.sql())
+                            .map_err(sqlite_error)?;
                         let rows = stmt
                             .query_map(
-                                rusqlite::params_from_iter(values.iter()),
+                                params![
+                                    session_id.as_str(),
+                                    now as i64,
+                                    sql_session_lease_generation(generation)?,
+                                    sql_batch_ids,
+                                ],
                                 queued_batch_row_from_sql,
                             )
                             .map_err(sqlite_error)?;
@@ -388,27 +386,17 @@ impl QueuedWorkStore for Store {
                         .collect::<Vec<_>>();
                     let mut validation_rows = requested_rows.clone();
                     if !involved_claim_ids.is_empty() {
-                        let mut sql = format!(
-                            "SELECT {QUEUED_WORK_COLUMNS}
-                                     FROM queued_work_batches
-                                     WHERE session_id = ? AND available_at_ms <= ?
-                                       AND (claim_token IS NULL
-                                            OR claim_session_lease_generation <> ?)
-                                       AND claim_id IN (",
-                            QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-                        );
-                        sql.push_str(&vec!["?"; involved_claim_ids.len()].join(", "));
-                        sql.push_str(") ORDER BY enqueue_seq ASC");
-                        let mut values: Vec<rusqlite::types::Value> = vec![
-                            session_id.as_str().to_string().into(),
-                            (now as i64).into(),
-                            sql_session_lease_generation(generation)?.into(),
-                        ];
-                        values.extend(involved_claim_ids.iter().cloned().map(Into::into));
-                        let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
+                        let mut stmt = tx
+                            .prepare(sql.queued_batches_sqlite.select_by_claim_ids.sql())
+                            .map_err(sqlite_error)?;
                         let claim_rows = stmt
                             .query_map(
-                                rusqlite::params_from_iter(values.iter()),
+                                params![
+                                    session_id.as_str(),
+                                    now as i64,
+                                    sql_session_lease_generation(generation)?,
+                                    encode_json(&involved_claim_ids)?,
+                                ],
                                 queued_batch_row_from_sql,
                             )
                             .map_err(sqlite_error)?
@@ -466,16 +454,7 @@ impl QueuedWorkStore for Store {
                         }
                         let span_rows = {
                             let mut stmt = tx
-                                .prepare(&format!(
-                                    "SELECT {QUEUED_WORK_COLUMNS}
-                                         FROM queued_work_batches
-                                         WHERE session_id = ?1 AND available_at_ms <= ?2
-                                           AND (claim_token IS NULL
-                                                OR claim_session_lease_generation <> ?3)
-                                           AND enqueue_seq BETWEEN ?4 AND ?5
-                                         ORDER BY enqueue_seq ASC",
-                                    QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-                                ))
+                                .prepare(sql.queued_batches_sqlite.select_span.sql())
                                 .map_err(sqlite_error)?;
                             #[expect(
                                 clippy::expect_used,
@@ -555,6 +534,7 @@ impl QueuedWorkStore for Store {
                         &session_id,
                         &owner,
                         generation,
+                        &rows,
                         batches,
                         &candidates,
                     )? {
@@ -590,11 +570,10 @@ impl QueuedWorkStore for Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "UPDATE queued_work_batches
-                     SET claim_id = ?4,
-                         claim_token = ?5,
-                         claim_session_lease_generation = 0
-                     WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .queued_batches
+                        .abandon_claim
+                        .sql(),
                     params![
                         session_id.as_str(),
                         claim_id.as_str(),
@@ -622,11 +601,10 @@ impl QueuedWorkStore for Store {
                 let mut changed = 0;
                 for claim in claims {
                     changed += tx.execute(
-                        "UPDATE queued_work_batches
-                         SET claim_id = ?4,
-                             claim_token = ?5,
-                             claim_session_lease_generation = 0
-                         WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
+                        crate::turn_ingress::turn_ingress_sql()
+                            .queued_batches
+                            .abandon_claim
+                            .sql(),
                         params![
                             claim.session_id.as_str(),
                             claim.claim_id.as_str(),
@@ -658,23 +636,10 @@ impl QueuedWorkStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<Option<QueuedWorkBatch>, StoreError> = (|| {
+                    let sql = crate::turn_ingress::turn_ingress_sql();
                     let row = tx
                         .query_row(
-                            &format!(
-                                "SELECT {QUEUED_WORK_COLUMNS}
-                             FROM queued_work_batches
-                             WHERE session_id = ?1
-                               AND batch_id = ?2
-                               AND (claim_token IS NULL OR NOT EXISTS (
-                                        SELECT 1 FROM session_execution_leases sel
-                                        WHERE sel.session_id = ?1
-                                          AND sel.lease_token IS NOT NULL
-                                          AND sel.lease_expires_at_ms > ?3
-                                          AND sel.lease_fencing_token
-                                              = queued_work_batches.claim_session_lease_generation
-                                   ))",
-                                QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-                            ),
+                            sql.queued_batches_sqlite.select_cancelable.sql(),
                             params![session_id.as_str(), batch_id.as_str(), now],
                             queued_batch_row_from_sql,
                         )
@@ -685,17 +650,7 @@ impl QueuedWorkStore for Store {
                     };
                     let batch = queued_work_batch_from_conn(tx, row)?;
                     tx.execute(
-                        "DELETE FROM queued_work_batches
-                         WHERE session_id = ?1
-                           AND batch_id = ?2
-                           AND (claim_token IS NULL OR NOT EXISTS (
-                                SELECT 1 FROM session_execution_leases sel
-                                WHERE sel.session_id = ?1
-                                  AND sel.lease_token IS NOT NULL
-                                  AND sel.lease_expires_at_ms > ?3
-                                  AND sel.lease_fencing_token
-                                      = queued_work_batches.claim_session_lease_generation
-                           ))",
+                        sql.queued_batches_sqlite.delete_cancelled.sql(),
                         params![session_id.as_str(), batch_id.as_str(), now],
                     )
                     .map_err(sqlite_error)?;
@@ -749,13 +704,12 @@ impl QueuedWorkStore for Store {
                 let outcome: Result<Vec<QueuedWorkBatch>, StoreError> = (|| {
                     let rows = {
                         let mut stmt = tx
-                            .prepare(&format!(
-                                "SELECT {QUEUED_WORK_COLUMNS}
-                                 FROM queued_work_batches
-                                 WHERE session_id = ?1
-                                 ORDER BY enqueue_seq ASC",
-                                QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-                            ))
+                            .prepare(
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .queued_batches
+                                    .list_by_session
+                                    .sql(),
+                            )
                             .map_err(sqlite_error)?;
                         let rows = stmt
                             .query_map(params![session_id.as_str()], queued_batch_row_from_sql)
@@ -795,46 +749,13 @@ impl QueuedWorkStore for Store {
                             Option<i64>,
                         ) = conn
                             .query_row(
-                                "WITH earliest_command AS (
-                                    SELECT enqueued_at_ms, enqueue_seq
-                                    FROM queued_work_batches AS queued
-                                    WHERE session_id = ?1
-                                      AND work_kind = ?4
-                                      AND (claim_token IS NULL OR NOT EXISTS (
-                                           SELECT 1 FROM session_execution_leases AS lease
-                                           WHERE lease.session_id = ?1
-                                             AND lease.lease_token IS NOT NULL
-                                             AND lease.lease_expires_at_ms > ?2
-                                             AND lease.lease_fencing_token
-                                                 = queued.claim_session_lease_generation
-                                      ))
-                                    ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
-                                    LIMIT 1
-                                 ), earliest_input AS (
-                                    SELECT enqueued_at_ms, enqueue_seq
-                                    FROM pending_turn_inputs AS input
-                                    WHERE session_id = ?1
-                                      AND state = ?3
-                                      AND (claim_token IS NULL OR NOT EXISTS (
-                                           SELECT 1 FROM session_execution_leases AS lease
-                                           WHERE lease.session_id = ?1
-                                             AND lease.lease_token IS NOT NULL
-                                             AND lease.lease_expires_at_ms > ?2
-                                             AND lease.lease_fencing_token
-                                                 = input.claim_session_lease_generation
-                                      ))
-                                    ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
-                                    LIMIT 1
-                                 )
-                                 SELECT command.enqueued_at_ms, command.enqueue_seq,
-                                        input.enqueued_at_ms, input.enqueue_seq
-                                 FROM (SELECT 1) AS singleton
-                                 LEFT JOIN earliest_command AS command ON TRUE
-                                 LEFT JOIN earliest_input AS input ON TRUE",
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .family
+                                    .pending_session_work_ordering
+                                    .sql(),
                                 params![
                                     session_id.as_str(),
                                     now as i64,
-                                    lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
                                     QueuedWorkKind::Control.as_str()
                                 ],
                                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -887,21 +808,12 @@ impl QueuedWorkStore for Store {
                 let outcome: Result<Vec<QueuedWorkBatch>, StoreError> = (|| {
                     let rows = {
                         let mut stmt = tx
-                            .prepare(&format!(
-                                "SELECT {QUEUED_WORK_COLUMNS}
-                                 FROM queued_work_batches
-                                 WHERE session_id = ?1
-                                   AND (claim_token IS NULL OR NOT EXISTS (
-                                        SELECT 1 FROM session_execution_leases sel
-                                        WHERE sel.session_id = ?1
-                                          AND sel.lease_token IS NOT NULL
-                                          AND sel.lease_expires_at_ms > ?2
-                                          AND sel.lease_fencing_token
-                                              = queued_work_batches.claim_session_lease_generation
-                                   ))
-                                 ORDER BY enqueue_seq ASC",
-                                QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
-                            ))
+                            .prepare(
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .queued_batches
+                                    .list_unclaimed
+                                    .sql(),
+                            )
                             .map_err(sqlite_error)?;
                         let rows = stmt
                             .query_map(
