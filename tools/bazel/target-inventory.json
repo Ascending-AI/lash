@@ -1,8 +1,14 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 139,
+  "cargo_target_count": 140,
   "feature_lane_units": [
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-conformance:lash-conformance__fv_2eef8079",
+      "package": "lash-internal-conformance"
+    },
     {
       "features": [],
       "kind": "lib",
@@ -9631,7 +9637,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_49a478e3",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_5c2b4207",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9640,7 +9646,16 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_49a478e3",
+      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_5c2b4207",
+      "package": "lash-internal-protocol-rlm"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_5c2b4207",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -17231,7 +17246,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 192,
+  "generated_label_count": 193,
   "packages": [
     {
       "declared_features": [
@@ -18160,8 +18175,10 @@
         "lash-internal-core",
         "lash-internal-core-worker",
         "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
         "lash-internal-plugin-process-controls",
         "lash-internal-postgres-store",
+        "lash-internal-protocol-rlm",
         "lash-internal-protocol-standard",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
@@ -18312,6 +18329,7 @@
         "async-trait",
         "insta",
         "jsonschema",
+        "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-worker",
         "lash-internal-lashlang",
@@ -18368,13 +18386,20 @@
           "kind": "test",
           "label": "//crates/lash-protocol-rlm:protocol_drivers__test",
           "tags": []
+        },
+        {
+          "cargo": "tool_batch_parallelism",
+          "kind": "test",
+          "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test",
+          "tags": []
         }
       ],
       "test_batch": {
         "label": "//crates/lash-protocol-rlm:test_batch",
         "members": [
           "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
-          "//crates/lash-protocol-rlm:protocol_drivers__test"
+          "//crates/lash-protocol-rlm:protocol_drivers__test",
+          "//crates/lash-protocol-rlm:tool_batch_parallelism__test"
         ]
       }
     },

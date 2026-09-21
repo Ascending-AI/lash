@@ -56,6 +56,8 @@ lashlang = { workspace = true, features = ["testing"] }
 # Integration tests need this crate's own `testing` seams (the conformance
 # factory and probe impls), the same way lash-sqlite-store wires itself.
 lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", features = ["testing"] }
+lash-lashlang-runtime = { workspace = true }
+lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-subagents = { workspace = true }

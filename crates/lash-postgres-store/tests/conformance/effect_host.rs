@@ -58,7 +58,23 @@ lash_conformance::tool_batch_parallelism_tests!({
         // The producers this crate reaches. `Promise.all` on the RLM bridge and
         // the Lashlang aggregate on the process bridge register the same law
         // from the crates that own them.
-        vec![lash_conformance::parallel_model_tool_calls_producer()],
+        vec![
+            lash_conformance::parallel_model_tool_calls_producer(),
+            lash_conformance::rlm_promise_all_producer(vec![Arc::new(
+                lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                    lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash_protocol_rlm::RlmChannel::Cell)
+                        .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
+                            1_000_000,
+                        ))
+                        .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                        .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                        .build(),
+                    Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+                )
+                .with_process_lifecycle(false),
+            )]),
+        ],
     )
 });
 

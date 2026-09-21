@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use crate::ToolDefinitionBindingExt as _;
 use lash_sansio::sync::MutexExt as _;
 
 use pretty_assertions::assert_eq;
@@ -191,6 +192,64 @@ pub fn parallel_model_tool_calls_producer() -> ToolBatchProducer {
         }),
         reaches_relay: true,
     }
+}
+
+/// The RLM bridge's `Promise.all`: one cell whose leaves are awaited together,
+/// which the bridge turns into exactly one `call_tool_batch`.
+///
+/// The cell source lives here rather than at the registration site so every
+/// tier issues the byte-identical program; the caller supplies only the RLM
+/// protocol plugin factory, which is the part this crate cannot construct.
+pub fn rlm_promise_all_producer(
+    factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+) -> ToolBatchProducer {
+    ToolBatchProducer {
+        label: "rlm-promise-all".to_string(),
+        factories,
+        script: Arc::new(|plan| {
+            vec![crate::LlmResponse {
+                parts: vec![crate::LlmOutputPart::Text {
+                    text: rlm_promise_all_cell(plan),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..crate::LlmResponse::default()
+            }]
+        }),
+        reaches_relay: true,
+    }
+}
+
+/// The dialect the RLM cell channel wraps a cell's source in. Named once here
+/// so the opening and closing tags cannot drift apart.
+const RLM_CELL_DIALECT: &str = "typescript";
+
+/// The cell text [`rlm_promise_all_producer`] issues.
+///
+/// `finish` is the only statement that closes an RLM turn, so both entries end
+/// in one: a cell whose last line is a bare expression leaves the driver asking
+/// the provider again, and the batch would be re-issued rather than settled.
+fn rlm_promise_all_cell(plan: &ToolBatchPlan) -> String {
+    let body = match plan.via {
+        ToolBatchEntry::Direct => {
+            let calls = plan
+                .leaves
+                .iter()
+                .enumerate()
+                .map(|(position, leaf)| {
+                    format!("  tools.{}({{ position: {position} }})", leaf.tool)
+                })
+                .collect::<Vec<_>>()
+                .join(",\n");
+            format!("finish(await Promise.all([\n{calls}\n]));")
+        }
+        ToolBatchEntry::Relay => format!(
+            "finish(await tools.{}({}));",
+            plan.relay_tool,
+            plan.relay_args()
+        ),
+    };
+    format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>")
 }
 
 /// The observation log every assertion in this law reads.
@@ -369,6 +428,7 @@ fn leaf_definition(name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .with_tool_binding(crate::ToolBinding::new(["tools"], name))
 }
 
 /// The leaf provider. Every plain, granted and deferred leaf of every scenario
@@ -480,6 +540,7 @@ fn relay_definition(name: &str) -> crate::ToolDefinition {
         }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .with_tool_binding(crate::ToolBinding::new(["tools"], name))
 }
 
 #[async_trait::async_trait]
@@ -563,6 +624,7 @@ fn orchestrating_leaf_definition(name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .with_tool_binding(crate::ToolBinding::new(["tools"], name))
 }
 
 /// An orchestrating body that rendezvouses like a leaf, so the orchestration
@@ -860,8 +922,9 @@ async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &
         .expect("run the tool-batch parallelism conformance turn");
     assert!(
         matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
-        "the batch turn must finish: {:?}",
-        turn.outcome
+        "the batch turn must finish: {:?}; turn issues: {:?}",
+        turn.outcome,
+        turn.errors,
     );
     let _ = &world.state;
 }
