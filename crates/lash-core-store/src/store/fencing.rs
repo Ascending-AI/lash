@@ -733,13 +733,12 @@ impl ProcessLeaseVerdict {
 
 /// Decide whether a process lease is still current (`D7`).
 ///
-/// This is the single verdict both process-lease release paths are meant to
-/// call. They do not today: `complete_process_lease` fences on `lease_token`
-/// alone, outside any write transaction, while `complete_process_with_lease`
-/// also requires `lease_fencing_token`. Reconciling them is tracked separately
-/// (FIG-3388) because giving the first path a transaction is a behaviour
-/// change, not a refactor. This function is the destination both will call: it
-/// consults both tokens, which is the stronger of the two spellings.
+/// This is the single verdict both process-lease release paths call
+/// (FIG-3388): `complete_process_lease` treats `Current` and `Expired` as
+/// releasable and every other verdict as a no-op, while
+/// `complete_process_with_lease` requires `Current`. Both then issue the same
+/// release statement, whose predicate — token and generation — backstops this
+/// verdict.
 pub fn process_lease_verdict(
     observed: Option<ProcessLeaseFacts<'_>>,
     presented: ProcessLeaseAuthority<'_>,

@@ -38,6 +38,7 @@ case "$LASH_CONFIDENCE_STAGE" in
   coverage) run_coverage_blind_spots ;;
   mutation-core)
     run_lash_core_direct_model_mutation_evidence
+    run_process_lease_preimage_mutation_evidence
     test "$mutation_commands_run" -gt 0
     test "$mutation_failures" -eq 0
     ;;

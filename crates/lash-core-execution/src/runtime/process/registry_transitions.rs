@@ -91,6 +91,20 @@ pub struct ProcessLeaseRow {
 }
 
 impl ProcessLeaseRow {
+    /// The verdict's view of this row for
+    /// [`process_lease_verdict`](crate::store::fencing::process_lease_verdict)
+    /// (FIG-3388): the holder columns exactly as stored, so the verdict can
+    /// distinguish absent, released, superseded and expired rows itself.
+    /// Columns that do not fit `u64` read as zero rather than trusted.
+    pub fn facts(&self) -> crate::store::fencing::ProcessLeaseFacts<'_> {
+        crate::store::fencing::ProcessLeaseFacts {
+            lease_owner_id: self.owner_id.as_deref(),
+            lease_token: self.lease_token.as_deref(),
+            lease_fencing_token: u64::try_from(self.fencing_token).unwrap_or(0),
+            lease_expires_at_ms: u64::try_from(self.expires_at_ms).unwrap_or(0),
+        }
+    }
+
     /// Project the row into the lease it records, or `None` when it records no
     /// holder.
     ///

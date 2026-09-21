@@ -120,14 +120,28 @@ pub(super) async fn complete_process_with_lease(
                         stored: record,
                     });
                 }
-                tx.execute(
-                    crate::process_registry::sql::process_sql()
-                        .lease
-                        .release_completed
-                        .sql(),
-                    params![process_id, lease.lease_token, lease.fencing_token as i64],
-                )
-                .map_err(process_sqlite_error)?;
+                // The verdict inside the append sequence authorized this
+                // release; the statement's predicate is the backstop and
+                // `require_fenced_write_applied` returns this site's refusal
+                // if it and the locked read ever disagree.
+                let released = tx
+                    .execute(
+                        crate::process_registry::sql::process_sql()
+                            .lease
+                            .release
+                            .sql(),
+                        params![process_id, lease.lease_token, lease.fencing_token as i64],
+                    )
+                    .map_err(process_sqlite_error)? as u64;
+                lash_core::store_backend_support::require_fenced_write_applied(
+                    lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+                    crate::SQLITE_BACKEND,
+                    process_id,
+                    released,
+                    || lash_core::PluginError::ProcessLeaseSuperseded {
+                        process_id: ProcessId::from(process_id),
+                    },
+                )?;
                 Ok(lash_core::ProcessCompletionOutcome::Committed(record))
             })()))
         })

@@ -1495,3 +1495,208 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
         .await
         .expect("clean settlement-order input");
 }
+
+/// The per-operation PostgreSQL round trips, counted by normalized statement
+/// text in `pg_stat_statements` (FIG-3412).
+///
+/// A statement-count pin is the only honest shape for this measurement: the
+/// ticket's budget is per *statement name*, so a wall-clock or total-row probe
+/// would pass while an extra round trip slipped in. The expected map is the
+/// production count plus the two `current_setting` probes the testing build
+/// runs inside the claim transaction — `#[cfg(test)]` compiles them in here
+/// exactly as the `testing` feature does for the integration targets.
+async fn postgres_statement_calls_by_name(
+    pool: &sqlx::PgPool,
+) -> std::collections::BTreeMap<&'static str, i64> {
+    let mut calls_by_name = std::collections::BTreeMap::new();
+    for (query, calls) in sqlx::query_as::<_, (String, i64)>(
+        "SELECT query, calls
+         FROM pg_stat_statements
+         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+           AND query NOT LIKE '%pg_stat_statements%'",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read PostgreSQL statement statistics")
+    {
+        *calls_by_name
+            .entry(postgres_statement_name(&query))
+            .or_default() += calls;
+    }
+    calls_by_name
+}
+
+/// The stable name a `pg_stat_statements` row is pinned under. Any statement
+/// outside this catalogue is reported as `unrecognized` so the pin fails on a
+/// new round trip instead of silently absorbing it.
+fn postgres_statement_name(query: &str) -> &'static str {
+    let collapsed: String = query.split_whitespace().collect::<Vec<_>>().join(" ");
+    match collapsed.as_str() {
+        "BEGIN" => "begin",
+        "COMMIT" => "commit",
+        // pg_stat_statements may report the literal text or the parameterised
+        // form (`current_setting($1,$2)`); match on the function shape instead.
+        q if q.starts_with("SELECT NULLIF(current_setting(") => "testing-lease-epoch-probe",
+        q if q.starts_with("SELECT floor(extract(") && q.contains("transaction_timestamp()") => {
+            "txn-clock-ms"
+        }
+        q if q.starts_with("SELECT pg_advisory_xact_lock(") => "advisory-lock",
+        q if q.contains("FROM lash_session_execution_leases") => "session-lease-lock",
+        q if q.contains("FROM lash_pending_turn_inputs") => "pending-inputs-lock",
+        q if q.starts_with("UPDATE lash_pending_turn_inputs") => "pending-input-claim-update",
+        q if q.starts_with("SELECT EXISTS( SELECT 1 FROM lash_deleted_sessions") => {
+            "deleted-session-check"
+        }
+        q if q.starts_with("SELECT head_json, head_revision") => "head-load",
+        q if q.starts_with("SELECT head_revision") => "head-lock",
+        q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
+        q if q.starts_with("SELECT hash FROM lash_blobs") => "blob-lock",
+        q if q.starts_with("SELECT turn_commit_hash, result_json") => "turn-commit-load",
+        q if q.starts_with("INSERT INTO lash_blobs") => "blob-insert",
+        q if q.starts_with("INSERT INTO lash_checkpoint_blob_refs") => {
+            "checkpoint-blob-refs-insert"
+        }
+        q if q.starts_with("INSERT INTO lash_runtime_turn_commits") => "turn-commit-insert",
+        q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
+        q if q.starts_with("INSERT INTO lash_sessions") => "head-upsert",
+        q if q.starts_with("UPDATE lash_attachment_manifest") => "attachment-manifest-commit",
+        q if q.starts_with("UPDATE lash_session_meta") => "session-meta-touch",
+        _ => "unrecognized",
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping statement round-trip pin: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(isolated_database.url())
+        .await
+        .expect("connect statement round-trip pin storage");
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+        .execute(storage.pool())
+        .await
+        .expect("enable pg_stat_statements for the round-trip pin");
+
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let session_id = SessionId::from(format!("statement-pin-session:{nonce}"));
+    let store = storage.session_store(&session_id);
+    store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id.as_str()))
+        .await
+        .expect("admit statement-pin session");
+    let owner = LeaseOwnerIdentity::opaque(
+        "statement-pin-owner",
+        format!("statement-pin-owner:{nonce}"),
+    );
+    let lease = store
+        .try_claim_session_execution_lease(&session_id, &owner, "statement-pin-executor", 60_000)
+        .await
+        .expect("claim statement-pin session lease")
+        .acquired()
+        .expect("statement-pin lane is free");
+    store
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+            &session_id,
+            lash_core::TurnInputIngress::NextTurn,
+            lash_core::TurnInput::text("statement-pin input"),
+        ))
+        .await
+        .expect("enqueue statement-pin input");
+    // Seed a committed head so the measured commit is the steady-state write
+    // path the production number describes, not the first-commit arm.
+    let mut state = lash_core::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let (seed_commit, _) = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(lash_core::OperationId::turn(
+            &session_id,
+            "statement-pin-seed",
+            "final",
+        ))
+        .expect("build statement-pin seed commit");
+    let seed_receipt = store
+        .commit_runtime_state(seed_commit)
+        .await
+        .expect("seed statement-pin head");
+
+    sqlx::query("SELECT pg_stat_statements_reset()")
+        .execute(storage.pool())
+        .await
+        .expect("reset statement statistics before the claim measurement");
+    let claim = store
+        .claim_next_turn_inputs(&session_id, &lease.fence(), &owner, 1)
+        .await
+        .expect("claim statement-pin input")
+        .expect("statement-pin input is claimable");
+    assert_eq!(claim.inputs.len(), 1);
+    let claim_statements = postgres_statement_calls_by_name(storage.pool()).await;
+    // FIG-3412: production claim is 7 round trips; the testing build adds two
+    // `current_setting('lash.test_lease_epoch_ms')` probes inside the same
+    // transaction.
+    assert_eq!(
+        claim_statements,
+        std::collections::BTreeMap::from([
+            ("begin", 1),
+            ("commit", 1),
+            ("testing-lease-epoch-probe", 2),
+            ("txn-clock-ms", 2),
+            ("session-lease-lock", 1),
+            ("pending-inputs-lock", 1),
+            ("pending-input-claim-update", 1),
+        ]),
+        "claim round trips changed",
+    );
+
+    sqlx::query("SELECT pg_stat_statements_reset()")
+        .execute(storage.pool())
+        .await
+        .expect("reset statement statistics before the head-commit measurement");
+    state.head_revision = seed_receipt.head_revision;
+    let (measured_commit, _) = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(lash_core::OperationId::turn(
+            &session_id,
+            "statement-pin-commit",
+            "final",
+        ))
+        .expect("build statement-pin commit");
+    store
+        .commit_runtime_state(measured_commit)
+        .await
+        .expect("measured statement-pin commit");
+    let commit_statements = postgres_statement_calls_by_name(storage.pool()).await;
+    // FIG-3412: production head commit is 16 round trips — the ticket's pinned
+    // 15 was measured for FIG-3381 before FIG-3386 (#1807) added the
+    // unconditional attachment-adoption `commit_owned` UPDATE to every turn
+    // commit (ADR 0058). This fixture's commit path does not pass through the
+    // lease-epoch probe, so the testing build adds nothing here.
+    let expected_commit: std::collections::BTreeMap<&'static str, i64> =
+        std::collections::BTreeMap::from([
+            ("begin", 1),
+            ("commit", 1),
+            ("advisory-lock", 1),
+            ("deleted-session-check", 1),
+            ("head-lock", 1),
+            ("head-load", 1),
+            ("turn-commit-load", 1),
+            ("graph-nodes-exist", 1),
+            ("blob-lock", 1),
+            ("blob-insert", 1),
+            ("checkpoint-blob-refs-insert", 1),
+            ("turn-commit-insert", 1),
+            ("session-meta-insert", 1),
+            ("head-upsert", 1),
+            ("attachment-manifest-commit", 1),
+            ("session-meta-touch", 1),
+        ]);
+    assert_eq!(
+        commit_statements, expected_commit,
+        "head-commit round trips changed",
+    );
+}

@@ -5,10 +5,11 @@ mod caller_departure;
 mod cancellation;
 mod event_replay;
 mod external_ref;
-pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 mod lifecycle;
 mod parent_end;
 mod registration;
+pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
+pub use lifecycle::superseded_process_lease_cannot_release_or_complete;
 pub use registration::{
     concurrent_identical_registrations_are_idempotent, registration_and_observers_are_atomic,
     registration_reports_created_then_existing,

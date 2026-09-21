@@ -228,19 +228,62 @@ pub(super) async fn complete_process_lease(
     registry: &SqliteProcessRegistry,
     completion: &ProcessLeaseCompletion,
 ) -> Result<(), lash_core::PluginError> {
-    let process_id = completion.process_id.clone();
-    let lease_token = completion.lease_token.clone();
+    // The same release decision `complete_process_with_lease` makes
+    // (FIG-3388): read the row under the write flow's lock, run the shared
+    // verdict, and let the one release statement's predicate backstop it. A
+    // stale or superseded presentation is a no-op, not an error — release is
+    // idempotent.
+    let completion = completion.clone();
+    let now = registry.clock.timestamp_ms();
     registry
         .conn
-        .call(move |conn| {
-            conn.execute(
-                process_sql().lease.release_claimed.sql(),
-                params![process_id.as_str(), lease_token],
-            )
+        .write_flow(move |tx| {
+            Ok(tx_outcome((|| {
+                let process_id = completion.process_id.clone();
+                let current = SqliteProcessRegistry::load_process_lease_row_conn(tx, &process_id)?;
+                let verdict = lash_core::store_backend_support::process_lease_verdict(
+                    current
+                        .as_ref()
+                        .map(registry_transitions::ProcessLeaseRow::facts),
+                    lash_core::store_backend_support::ProcessLeaseAuthority {
+                        lease_token: &completion.lease_token,
+                        fencing_token: completion.fencing_token,
+                    },
+                    now,
+                );
+                if !matches!(
+                    verdict,
+                    lash_core::store_backend_support::ProcessLeaseVerdict::Current
+                        | lash_core::store_backend_support::ProcessLeaseVerdict::Expired
+                ) {
+                    return Ok(());
+                }
+                // An expired lease still clears: the holder fields belong to
+                // the lapsed claim and the retained fencing token is what a
+                // re-claim builds on.
+                let released = tx
+                    .execute(
+                        process_sql().lease.release.sql(),
+                        params![
+                            process_id.as_str(),
+                            completion.lease_token.as_str(),
+                            completion.fencing_token as i64,
+                        ],
+                    )
+                    .map_err(process_sqlite_error)? as u64;
+                lash_core::store_backend_support::require_fenced_write_applied(
+                    lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+                    crate::SQLITE_BACKEND,
+                    process_id.as_str(),
+                    released,
+                    || lash_core::PluginError::ProcessLeaseSuperseded {
+                        process_id: process_id.clone(),
+                    },
+                )
+            })()))
         })
         .await
-        .map_err(process_sqlite_error)?;
-    Ok(())
+        .map_err(process_sqlite_error)?
 }
 
 #[async_trait::async_trait]
