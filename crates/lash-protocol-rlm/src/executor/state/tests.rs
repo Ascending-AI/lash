@@ -61,7 +61,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         json!({"type": "object"}),
         json!({"type": "object"}),
     );
-    definition.manifest.compact_contract = Some(compact_contract.clone());
+    definition.manifest.compact_contract = Some(std::sync::Arc::new(compact_contract.clone()));
     definition.manifest.activation = ToolActivation::Internal;
     definition
         .manifest

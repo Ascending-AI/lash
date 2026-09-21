@@ -59,7 +59,7 @@ where
         .into_iter()
         .map(|entry| {
             let manifest = entry.manifest;
-            let compact_contract = entry.contract.compact_contract(&manifest);
+            let compact_contract = entry.contract.compact_contract_shared(&manifest);
             let mut projected = serde_json::json!({
                 "id": manifest.id,
                 "name": manifest.name,

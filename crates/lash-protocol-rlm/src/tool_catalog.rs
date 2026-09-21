@@ -210,7 +210,7 @@ fn rendered_doc_strings(
     manifest: &lash_core::ToolManifest,
     contract: &lash_core::ToolContract,
 ) -> std::collections::BTreeSet<String> {
-    let compact = contract.compact_contract(manifest);
+    let compact = contract.compact_contract_shared(manifest);
     compact
         .parameters
         .iter()
