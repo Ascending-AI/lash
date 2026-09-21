@@ -109,6 +109,10 @@ fn profile_a() -> OpenerProfile {
 
 /// The second opener differs in every inheritable field — including the opener
 /// arm itself: a process incarnation where A was a turn.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the literal ids below are valid by inspection; a refusal panics the harness with its case name by design"
+)]
 fn profile_b() -> OpenerProfile {
     OpenerProfile {
         session: "session-b",
@@ -145,6 +149,10 @@ fn manifest(profile: &OpenerProfile) -> ToolManifest {
 
 /// Builds the retained request one opener's child would carry — the whole of
 /// the authority it was admitted under.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the profile's ids are valid by construction; a refusal panics the harness with its case name by design"
+)]
 fn request(profile: &OpenerProfile) -> ToolChildRequest {
     let call = PreparedToolCall::from_parts(
         profile.call,
@@ -255,6 +263,10 @@ fn checklist_axis(field: RebindField) -> Option<&'static str> {
 
 /// The canonical value of one axis, so the differential can compare the
 /// observed request field by field and name the one that leaked.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: every request field serializes; a refusal panics the harness with its case name by design"
+)]
 fn axis_value(request: &ToolChildRequest, axis: &str) -> String {
     let value = match axis {
         "admission" => serde_json::to_value(&request.admission),
@@ -557,6 +569,10 @@ fn child_key(group_key: &str, position: usize) -> String {
     format!("{group_key}:child:{position}")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixture's addresses are valid by construction; a refusal panics the harness with its case name by design"
+)]
 fn child_envelope(
     scope: &ExecutionScope,
     group_key: &str,
@@ -578,6 +594,10 @@ fn child_envelope(
 
 /// The same group header over children built from one request, at positions
 /// that differ only in replay key.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixture's addresses are valid by construction; a refusal panics the harness with its case name by design"
+)]
 fn group(scope: &ExecutionScope, key: &str, request: &ToolChildRequest) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
         RuntimeEffectInvocation::new(
@@ -697,6 +717,10 @@ fn parked(entered: &Arc<AtomicUsize>) -> RuntimeEffectLocalExecutor<'static> {
 /// A runner bound to the *offered* request that must never run — it counts
 /// invocations and records the request it was handed, so the differential can
 /// name what leaked rather than only that something did.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: every child request serializes; a refusal panics the harness with its case name by design"
+)]
 fn impostor(
     runs: &Arc<AtomicUsize>,
     saw: &Arc<Mutex<Vec<String>>>,
@@ -736,6 +760,10 @@ fn capturing(saw: &Arc<Mutex<Vec<ToolChildRequest>>>) -> RuntimeEffectLocalExecu
 }
 
 /// One host over the shared journal, wired to the given resolver.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a fresh temp journal opens and a fresh host has no resolver; a refusal panics the harness with its case name by design"
+)]
 async fn world(path: &Path, spy: &Arc<SpyExecutors>) -> Arc<SqliteEffectHost> {
     let host = SqliteEffectHost::open_with_options(
         path,
@@ -757,6 +785,10 @@ async fn world(path: &Path, spy: &Arc<SpyExecutors>) -> Arc<SqliteEffectHost> {
 ///
 /// The host is opened inside a runtime of its own, because the point of the
 /// phase is that the runtime — and every task and connection it owns — dies.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the crashing phase's thread, runtime and group open are fixture facts; a refusal panics the harness with its case name by design"
+)]
 fn crash_opening(
     path: &Path,
     scope: &ExecutionScope,
@@ -815,6 +847,10 @@ async fn until_leases_lapse(path: &Path, group_key: &str) {
 
 /// Drains until a pass finds nothing left under a live lease, and returns
 /// that pass.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a drain pass over a journaled group runs and the dead process's claims lapse; a refusal panics the harness with its case name by design"
+)]
 async fn drain_until_no_live_lease(
     drain: &Arc<dyn StoreEffectGroupDrain>,
     group_key: &str,
@@ -841,6 +877,10 @@ async fn drain_until_no_live_lease(
 
 /// Opens a group with one staged runner per child — or none, when the caller
 /// already staged them.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixture opens the group it staged; a refusal panics the harness with its case name by design"
+)]
 async fn open(
     scoped: &ScopedEffectController<'_>,
     group: RuntimeEffectGroup,
