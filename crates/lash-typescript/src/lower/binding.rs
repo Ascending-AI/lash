@@ -328,7 +328,7 @@ fn collect_statement_called_names(statement: &Stmt, called: &mut BTreeSet<String
             collect_expression_called_names(test, called);
             collect_statement_called_names(body, called);
         }
-        Stmt::DoWhile { body, test } => {
+        Stmt::DoWhile { body, test, .. } => {
             collect_expression_called_names(test, called);
             collect_statement_called_names(body, called);
         }

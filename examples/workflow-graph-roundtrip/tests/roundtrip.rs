@@ -1,6 +1,9 @@
+mod catalog_span_oracles;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use catalog_span_oracles::{expected_catalog_node_slices, expected_catalog_process_slice};
 use serde_json::Value;
 use workflow_graph_roundtrip::{
     AppState, ChildGroup, EditableProcessField, EditableValue, FlowNode, NodeData, NodeName,
@@ -901,26 +904,48 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
         let projected =
             lash_typescript::workflow_graph::workflow_graph_from_source(&document.source)
                 .expect("catalog source should project");
-        for node in projected.nodes() {
-            let span = node
-                .source_span
-                .unwrap_or_else(|| panic!("catalog node `{}` has no canonical span", node.name));
-            let slice = document
-                .source
-                .get(span.start..span.end)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "catalog node `{}` span {span:?} is out of bounds for {} bytes",
-                        node.name,
-                        document.source.len()
-                    )
+        let nodes = projected.nodes().collect::<Vec<_>>();
+        assert!(
+            !nodes.is_empty(),
+            "catalog workflow `{}` must project at least one textual node",
+            entry.id
+        );
+        let slices = nodes
+            .iter()
+            .map(|node| {
+                let span = node.source_span.unwrap_or_else(|| {
+                    panic!("catalog node `{}` has no canonical span", node.name)
                 });
-            assert!(
-                !slice.trim().is_empty(),
-                "catalog node `{}` has an empty canonical slice",
-                node.name
-            );
-        }
+                document
+                    .source
+                    .get(span.start..span.end)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "catalog node `{}` span {span:?} is out of bounds for {} bytes",
+                            node.name,
+                            document.source.len()
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            slices[0],
+            expected_catalog_process_slice(&entry.id, &document.source),
+            "exact canonical process-root slice for catalog workflow `{}`",
+            entry.id
+        );
+        let expected = expected_catalog_node_slices(&entry.id);
+        assert!(
+            !expected.is_empty(),
+            "catalog oracle `{}` is empty",
+            entry.id
+        );
+        assert_eq!(
+            &slices[1..],
+            expected,
+            "exact canonical node slices for catalog workflow `{}`",
+            entry.id
+        );
         let rendered = lash_typescript::workflow_graph::workflow_graph_to_source(&projected)
             .expect("catalog graph should render");
         assert_eq!(rendered, document.source);

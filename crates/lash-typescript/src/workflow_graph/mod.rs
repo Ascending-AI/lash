@@ -128,13 +128,17 @@ pub fn workflow_graph_from_source(src: &str) -> Result<WorkflowGraph, WorkflowGr
 /// source round-trip is unavailable. Such expressions retain their typed
 /// execution sites; their editable display text is a trace-only placeholder.
 pub fn workflow_graph_from_program(program: &Program) -> WorkflowGraph {
+    if let Ok(canonical) = typescript_program_source(program)
+        && let Ok(canonical_program) = crate::parse(&canonical)
+    {
+        return GraphProjector::new(&canonical, &canonical_program, None, false).project();
+    }
     #[expect(
         clippy::expect_used,
         reason = "`Program` derives `Serialize` over plain data, so encoding it cannot fail"
     )]
-    let hash_input = typescript_program_source(program)
-        .unwrap_or_else(|_| serde_json::to_string(program).expect("program serializes"));
-    GraphProjector::new(&hash_input, program, None, true).project()
+    let hash_input = serde_json::to_string(program).expect("program serializes");
+    GraphProjector::new_without_spans(&hash_input, program, None, true).project()
 }
 
 /// Validate and render a graph through the canonical TypeScript printer.
@@ -163,10 +167,41 @@ impl<'a> GraphProjector<'a> {
         analysis: Option<&'a WorkflowLinkAnalysis>,
         allow_non_sourceable_expressions: bool,
     ) -> Self {
+        Self::with_spans(
+            canonical,
+            program,
+            program.spans.clone(),
+            analysis,
+            allow_non_sourceable_expressions,
+        )
+    }
+
+    fn new_without_spans(
+        canonical: &'a str,
+        program: &'a Program,
+        analysis: Option<&'a WorkflowLinkAnalysis>,
+        allow_non_sourceable_expressions: bool,
+    ) -> Self {
+        Self::with_spans(
+            canonical,
+            program,
+            BTreeMap::new(),
+            analysis,
+            allow_non_sourceable_expressions,
+        )
+    }
+
+    fn with_spans(
+        canonical: &'a str,
+        program: &'a Program,
+        spans: BTreeMap<lashlang::AstPath, Span>,
+        analysis: Option<&'a WorkflowLinkAnalysis>,
+        allow_non_sourceable_expressions: bool,
+    ) -> Self {
         Self {
             program,
             source_hash: hex_digest("lash-workflow-source/v3", canonical.as_bytes()),
-            spans: program.spans.clone(),
+            spans,
             analysis,
             allow_non_sourceable_expressions,
         }

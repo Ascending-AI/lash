@@ -186,7 +186,7 @@ impl Stmt {
             Stmt::While { test, body } => {
                 Box::new(std::iter::once(test).chain(body.child_expressions()))
             }
-            Stmt::DoWhile { body, test } => {
+            Stmt::DoWhile { body, test, .. } => {
                 Box::new(body.child_expressions().chain(std::iter::once(test)))
             }
             Stmt::For {

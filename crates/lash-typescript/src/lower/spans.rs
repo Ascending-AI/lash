@@ -11,7 +11,7 @@
 //! their root-qualified [`AstPath`]s in `Program::spans`. The private labels
 //! never leave this module and therefore change neither the IR nor identity.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{AstPath, AstRoot, Declaration, Expr as LashExpr, LabelMetadata, Program, Span};
 
@@ -42,7 +42,7 @@ impl SpanMarkers {
 
     pub(super) fn resolve(self, program: &mut Program) {
         let mut resolved = BTreeMap::new();
-        let mut resolved_count = 0;
+        let mut resolved_markers = BTreeSet::new();
         for (index, declaration) in program.declarations.iter_mut().enumerate() {
             let Ok(index) = u32::try_from(index) else {
                 unreachable!("the source bound keeps the declaration count within u32")
@@ -56,7 +56,7 @@ impl SpanMarkers {
                         steps: Vec::new(),
                     },
                     &self.spans,
-                    &mut resolved_count,
+                    &mut resolved_markers,
                     &mut resolved,
                 ),
                 Declaration::Function(function) => extract(
@@ -66,7 +66,7 @@ impl SpanMarkers {
                         steps: Vec::new(),
                     },
                     &self.spans,
-                    &mut resolved_count,
+                    &mut resolved_markers,
                     &mut resolved,
                 ),
                 Declaration::Type(_) => {}
@@ -76,13 +76,12 @@ impl SpanMarkers {
             &mut program.main,
             AstPath::main(Vec::new()),
             &self.spans,
-            &mut resolved_count,
+            &mut resolved_markers,
             &mut resolved,
         );
-        debug_assert_eq!(
-            resolved_count,
-            self.spans.len(),
-            "every source marker is in the program"
+        debug_assert!(
+            (0..self.spans.len()).all(|marker| resolved_markers.contains(&marker)),
+            "every allocated source marker is accounted for"
         );
         program.spans = resolved;
     }
@@ -117,25 +116,24 @@ fn extract(
     expression: &mut LashExpr,
     path: AstPath,
     markers: &[Span],
-    resolved_count: &mut usize,
+    resolved_markers: &mut BTreeSet<usize>,
     resolved: &mut BTreeMap<AstPath, Span>,
 ) {
     while let LashExpr::LabelAnnotated { label, expr } = expression {
         if label.description.as_deref() != Some(MARKER_DESCRIPTION) {
             break;
         }
-        let Some(span) = label
+        let Some((marker, span)) = label
             .title
             .parse::<usize>()
             .ok()
-            .and_then(|index| markers.get(index))
-            .copied()
+            .and_then(|index| markers.get(index).copied().map(|span| (index, span)))
         else {
             break;
         };
         let inner = std::mem::replace(expr, Box::new(LashExpr::Undefined));
         *expression = *inner;
-        *resolved_count += 1;
+        resolved_markers.insert(marker);
         resolved.insert(path.clone(), span);
     }
 
@@ -143,6 +141,12 @@ fn extract(
         let Ok(index) = u32::try_from(index) else {
             unreachable!("the source bound keeps a node's child count within u32")
         };
-        extract(child, path.child(index), markers, resolved_count, resolved);
+        extract(
+            child,
+            path.child(index),
+            markers,
+            resolved_markers,
+            resolved,
+        );
     }
 }

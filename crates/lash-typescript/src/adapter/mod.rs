@@ -1,13 +1,12 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::node_label::{NodeLabel, is_label_comment, parse_label_comment};
+use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 use swc_common::comments::{CommentKind, Comments, SingleThreadedComments};
 use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as swc;
 use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
-
-use crate::node_label::{NodeLabel, is_label_comment, parse_label_comment};
-use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod enums;
 mod nesting;
@@ -17,7 +16,6 @@ mod rejections;
 mod tests;
 mod traversal;
 mod types;
-
 use enums::{ConstEnumValue, enum_member_property_name};
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
 use prototype_chain::{
@@ -73,6 +71,7 @@ pub(crate) enum Stmt {
     DoWhile {
         body: Box<Stmt>,
         test: Expr,
+        test_span: SourceSpan,
     },
     For {
         init: Option<Box<Stmt>>,
@@ -759,6 +758,7 @@ impl Adapter {
             swc::Stmt::DoWhile(stmt) => Stmt::DoWhile {
                 body: Box::new(self.convert_stmt(&stmt.body)?),
                 test: self.convert_expr(&stmt.test)?,
+                test_span: source_span(stmt.test.span()),
             },
             swc::Stmt::For(stmt) => Stmt::For {
                 init: stmt

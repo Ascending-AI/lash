@@ -522,13 +522,16 @@ impl Lowerer {
                     body: Box::new(body),
                 }]
             }
-            Stmt::DoWhile { body, test } => {
+            Stmt::DoWhile {
+                body,
+                test,
+                test_span,
+            } => {
                 let (epilogue, body) = self.with_loop(|lowerer| {
+                    let condition = lowerer.lower_expr(test)?;
+                    let condition = lowerer.span_markers.annotate(*test_span, condition);
                     let epilogue = LashExpr::If {
-                        condition: Box::new(js_unary(
-                            JavaScriptUnaryOp::Not,
-                            lowerer.lower_expr(test)?,
-                        )),
+                        condition: Box::new(js_unary(JavaScriptUnaryOp::Not, condition)),
                         then_block: Box::new(LashExpr::Break),
                         else_block: Box::new(LashExpr::Undefined),
                     };
