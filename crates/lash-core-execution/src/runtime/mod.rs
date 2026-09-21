@@ -54,7 +54,7 @@ pub use effect::{
     BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet,
     ChildDrainOutcome, CompletionKeyPreparation, DrainedChild, EffectAddress, EffectGroupHandle,
     EffectGroupMembership, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupDrainReport,
+    EffectOpener, EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupDrainReport,
     GroupExecutors, GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserPolicy,
     NativeEffectHost, NativeRuntimeEffectController, ProcessCommand, ProcessEffectOutcome,
     ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
@@ -70,9 +70,10 @@ pub use effect::{
     StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,
     ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
-    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    concrete_turn_cancellation_authority, refuse_unhonored_group_membership,
-    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
+    TurnControlBindingIdError, TurnControlParticipation, concrete_turn_cancellation_authority,
+    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]
 pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};

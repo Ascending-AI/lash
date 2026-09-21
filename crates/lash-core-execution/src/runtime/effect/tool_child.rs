@@ -112,8 +112,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::tool_dispatch::ToolAttemptEffectIdentity;
 use crate::{
-    ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId, SessionId,
-    ToolExecutionGrant, ToolManifest, ToolRetryPolicy,
+    EffectOpener, ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef,
+    ProcessRef, SessionId, ToolExecutionGrant, ToolManifest, ToolRetryPolicy, TurnControlBindingId,
 };
 
 use super::executor::RuntimeEffectControllerError;
@@ -236,19 +236,30 @@ pub enum ToolChildCompletionRouting {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolChildScope {
-    /// The exact logical opener the group binds (ADR 0099 §1).
+    /// The exact logical opener the group binds (ADR 0099 §1): a turn, or one
+    /// process **incarnation**.
     ///
-    /// Recorded as an [`ExecutionScope`] deliberately. §1 requires a process
-    /// opener to carry its incarnation, and `ExecutionScope::Process` does not
-    /// carry one yet; binding the incarnation into that scope is FIG-3394's, and
-    /// when it lands this field carries it with no change to this shape. A
-    /// parallel opener type minted here would have been a second spelling of the
-    /// same fact, and the two would disagree the first time only one was updated.
-    pub opener: ExecutionScope,
+    /// [`EffectOpener`], not an [`ExecutionScope`]. §1 requires a process
+    /// opener to carry its incarnation and `ExecutionScope::Process` carries
+    /// only `process_id`, so a scope retained here would leave recovery-time
+    /// validation with nothing to validate and would let a process
+    /// re-registered under the same name alias its predecessor's groups and
+    /// fences. The scope is the child's *claim address*, which is
+    /// [`admitted_scope`](Self::admitted_scope); the opener is who owns it.
+    pub opener: EffectOpener,
     /// The scope this child is admitted and claimed under, which a process
     /// opener's child need not share with its opener.
+    ///
+    /// Still an [`ExecutionScope`], and correctly so: this is the address the
+    /// journal fences the child's claim on, not an identity.
     pub admitted_scope: ExecutionScope,
     /// The session the child's work is attributed to.
+    ///
+    /// Carried beside the opener rather than derived from it because a
+    /// **process** opener has no session of its own — ADR 0094 governs its
+    /// lifetime through its own Parent Scope — while its tool work is still
+    /// attributed to a session. For a turn opener the two are one fact, and
+    /// [`validate`](Self::validate) refuses a request where they disagree.
     pub session_id: SessionId,
     /// The agent frame the child's work belongs to.
     ///
@@ -256,6 +267,29 @@ pub struct ToolChildScope {
     /// holds many frames (ADR 0092), so a recovered child that re-derived a
     /// frame from its session would attribute its work to the wrong one.
     pub agent_frame_id: FrameNodeId,
+}
+
+impl ToolChildScope {
+    /// Refuses a binding whose opener and session disagree.
+    ///
+    /// A turn opener already names its session, so the pair is representable
+    /// and invalid in exactly one way. Refused at the boundary, as
+    /// `EffectGroupShape::validate_wire` refuses its own two-halves mismatch,
+    /// rather than left for a recovered child to attribute to the wrong session.
+    pub fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
+        if let Some(opener_session) = self.opener.session_id()
+            && *opener_session != self.session_id
+        {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+                format!(
+                    "retained tool-child request binds opener session `{opener_session}` but                      attributes its work to session `{}`; for a turn opener the two are one                      fact",
+                    self.session_id
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Everything needed to run one tool child of a durable effect group, with no
@@ -276,9 +310,9 @@ pub struct ToolChildScope {
 /// | [`admission`](Self::admission) | group formation, from the grant or the admitted catalog manifest | the driver, for authority, retry policy and argument projection, without the live catalog |
 /// | [`attempt_identity`](Self::attempt_identity) | group formation, as the identity the leaf's attempts derive from | the driver, to derive each attempt's replay key and causal parent |
 /// | [`scope`](Self::scope) | group formation, as the opener, claim scope, session and frame | recovery (FIG-3396 §1) validates the opener; the driver reconstructs the admitted controller and its session-scoped services |
-/// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process | the driver, to set the call's enclosing process |
+/// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process, as a `ProcessRef` | the driver, to set the call's enclosing process incarnation |
 /// | [`cancellation_authority`](Self::cancellation_authority) | group formation, from the opener's turn-control binding | the cooperative cancel path (FIG-2266) and the cancel disposition (FIG-3409) |
-/// | [`execution_env`](Self::execution_env) | group formation, from `captured_process_execution_env_ref` | the driver, to resolve the captured environment; retained under `ArtifactOwner::Execution` until the last dependency |
+/// | [`execution_env`](Self::execution_env) | group formation, from `captured_process_execution_env_ref` (required) | the driver, to resolve the captured environment; retained under `ArtifactOwner::Execution` until the last dependency |
 /// | [`completion_routing`](Self::completion_routing) | group formation, from the admitted deferral and routing facts | the driver and recovery, to refuse a key nothing can resolve |
 ///
 /// # What is deliberately absent
@@ -310,18 +344,44 @@ pub struct ToolChildRequest {
     pub attempt_identity: ToolAttemptEffectIdentity,
     /// Where this child runs and whose work it is.
     pub scope: ToolChildScope,
-    /// The process this call executes inside, when the opener is a process.
+    /// The process **incarnation** this call executes inside, when the opener
+    /// is a process.
+    ///
+    /// A [`ProcessRef`], not a `ProcessId`, for §1's reason: the enclosing
+    /// process a recovered child reports must be the incarnation it was
+    /// admitted under, never whatever process currently carries that name.
+    /// `None` for a turn opener, which encloses no process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enclosing_process: Option<ProcessId>,
-    /// The turn-control binding that authorizes cancelling this child, as
-    /// `turn_control_binding_id_for_scope` derives it. `None` where the opener
-    /// participates in no turn-control authority.
+    pub enclosing_process: Option<ProcessRef>,
+    /// The turn-cancellation authority that may cancel this child.
+    ///
+    /// This is the identity `turn_control_binding_id_for_scope` mints and
+    /// `binding_id_admits_scope` checks — the address the cooperative cancel
+    /// path (FIG-2266) signals and the one FIG-3409's cancel disposition is
+    /// fenced on. Typed rather than a bare string because a frozen durable
+    /// shape may not carry an unvalidated identity.
+    ///
+    /// **`None` is legal in exactly one case**: the opener's controller
+    /// participates in turn control *locally*
+    /// (`TurnControlParticipation::Local`) rather than through a durable
+    /// journaled authority, so there is no durable address to record and a
+    /// recovered child has no cancellation to honour. Every
+    /// `DurableJournaled` opener records `Some`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancellation_authority: Option<String>,
+    pub cancellation_authority: Option<TurnControlBindingId>,
     /// The captured process-execution environment this child resolves, retained
     /// under `ArtifactOwner::Execution` through its last dependency.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_env: Option<ProcessExecutionEnvRef>,
+    ///
+    /// **Required, not optional.** ADR 0099 §3 makes the environment reference
+    /// part of the retained authority, and the capture it comes from is total:
+    /// `RuntimeExecutionContext::captured_process_execution_env_ref` returns
+    /// `Result<ProcessExecutionEnvRef, _>`, inheriting the caller's reference
+    /// when there is one and publishing a fresh one otherwise. There is no path
+    /// that legitimately yields "no environment", so an `Option` here would be a
+    /// representable state with no producer — and a recovered child that found
+    /// `None` would have to invent an environment, which is the silent default
+    /// §3 exists to prevent.
+    pub execution_env: ProcessExecutionEnvRef,
     /// How this child's completion is routed back to it.
     pub completion_routing: ToolChildCompletionRouting,
 }
@@ -338,6 +398,7 @@ impl ToolChildRequest {
         admission: ToolChildAdmission,
         attempt_identity: ToolAttemptEffectIdentity,
         scope: ToolChildScope,
+        execution_env: ProcessExecutionEnvRef,
         completion_routing: ToolChildCompletionRouting,
     ) -> Self {
         Self {
@@ -348,29 +409,24 @@ impl ToolChildRequest {
             scope,
             enclosing_process: None,
             cancellation_authority: None,
-            execution_env: None,
+            execution_env,
             completion_routing,
         }
     }
 
-    /// Binds the process this call executes inside.
+    /// Binds the process incarnation this call executes inside.
     #[must_use]
-    pub fn with_enclosing_process(mut self, process_id: ProcessId) -> Self {
-        self.enclosing_process = Some(process_id);
+    pub fn with_enclosing_process(mut self, process_ref: ProcessRef) -> Self {
+        self.enclosing_process = Some(process_ref);
         self
     }
 
-    /// Binds the turn-control authority that may cancel this child.
+    /// Binds the durable turn-cancellation authority that may cancel this child.
+    ///
+    /// Left unset only for a locally participating opener; see the field.
     #[must_use]
-    pub fn with_cancellation_authority(mut self, binding_id: impl Into<String>) -> Self {
-        self.cancellation_authority = Some(binding_id.into());
-        self
-    }
-
-    /// Binds the captured process-execution environment this child resolves.
-    #[must_use]
-    pub fn with_execution_env(mut self, env: ProcessExecutionEnvRef) -> Self {
-        self.execution_env = Some(env);
+    pub fn with_cancellation_authority(mut self, binding_id: TurnControlBindingId) -> Self {
+        self.cancellation_authority = Some(binding_id);
         self
     }
 
@@ -403,6 +459,7 @@ impl ToolChildRequest {
                 "retained tool-child request requires a non-empty call id",
             ));
         }
+        self.scope.validate()?;
         if self.admission.manifest().id != self.call.tool_id {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildRequestAdmission,
@@ -454,11 +511,22 @@ mod tests {
 
     fn scope() -> ToolChildScope {
         ToolChildScope {
-            opener: ExecutionScope::turn("session", "turn"),
+            opener: EffectOpener::turn("session", "turn"),
             admitted_scope: ExecutionScope::turn("session", "turn"),
             session_id: SessionId::from("session"),
             agent_frame_id: frame(),
         }
+    }
+
+    fn process_ref(name: &str, incarnation: u64) -> ProcessRef {
+        ProcessRef::new(
+            name,
+            crate::ProcessIncarnation::from_registration_sequence(incarnation),
+        )
+    }
+
+    fn env() -> ProcessExecutionEnvRef {
+        ProcessExecutionEnvRef::new("env-ref")
     }
 
     fn request() -> ToolChildRequest {
@@ -470,6 +538,7 @@ mod tests {
             },
             ToolAttemptEffectIdentity::Scalar { parent: None },
             scope(),
+            env(),
             ToolChildCompletionRouting::Durable,
         )
     }
@@ -480,22 +549,27 @@ mod tests {
     #[test]
     fn a_request_round_trips_every_field_through_its_durable_bytes() {
         let original = request()
-            .with_enclosing_process(ProcessId::from("process-9"))
-            .with_cancellation_authority("binding-7")
-            .with_execution_env(ProcessExecutionEnvRef::new("env-ref"));
+            .with_enclosing_process(process_ref("process-9", 3))
+            .with_cancellation_authority(
+                TurnControlBindingId::new("binding-7").expect("a valid binding id"),
+            );
         let json = serde_json::to_string(&original).expect("a request serializes");
         let decoded: ToolChildRequest = serde_json::from_str(&json).expect("a request decodes");
         assert_eq!(decoded, original);
         assert_eq!(decoded.version, TOOL_CHILD_REQUEST_VERSION);
-        assert_eq!(decoded.cancellation_authority.as_deref(), Some("binding-7"));
         assert_eq!(
             decoded
-                .execution_env
+                .cancellation_authority
                 .as_ref()
-                .map(ProcessExecutionEnvRef::as_str),
-            Some("env-ref")
+                .map(TurnControlBindingId::as_str),
+            Some("binding-7")
         );
-        assert_eq!(decoded.enclosing_process.as_deref(), Some("process-9"));
+        assert_eq!(decoded.execution_env.as_str(), "env-ref");
+        assert_eq!(
+            decoded.enclosing_process,
+            Some(process_ref("process-9", 3)),
+            "the enclosing process must survive as an incarnation, not a bare name"
+        );
         assert_eq!(decoded.scope.agent_frame_id.as_str(), "frame-1");
     }
 
@@ -575,6 +649,7 @@ mod tests {
             },
             ToolAttemptEffectIdentity::Scalar { parent: None },
             scope(),
+            env(),
             ToolChildCompletionRouting::Inline,
         );
         let decoded: ToolChildRequest =
@@ -608,15 +683,100 @@ mod tests {
     #[test]
     fn the_opener_and_the_admitted_scope_are_retained_separately() {
         let mut request = request();
-        request.scope.opener = ExecutionScope::process("process-1");
+        request.scope.opener = EffectOpener::process(process_ref("process-1", 4));
         request.scope.admitted_scope = ExecutionScope::runtime_operation("op-1");
         let decoded: ToolChildRequest =
             serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
                 .expect("decodes");
-        assert_eq!(decoded.scope.opener, ExecutionScope::process("process-1"));
+        assert_eq!(
+            decoded.scope.opener,
+            EffectOpener::process(process_ref("process-1", 4))
+        );
         assert_eq!(
             decoded.scope.admitted_scope,
             ExecutionScope::runtime_operation("op-1")
+        );
+        decoded
+            .validate()
+            .expect("a process opener needs no session match");
+    }
+
+    /// The defect ADR 0099 §1 names, at the shape level: a process re-registered
+    /// under the same name is a different opener, and a retained request must
+    /// not compare equal to one admitted under its predecessor. An
+    /// `ExecutionScope::Process` could not express this at all.
+    #[test]
+    fn a_reregistered_process_opener_is_not_the_opener_that_was_admitted() {
+        let mut admitted = request();
+        admitted.scope.opener = EffectOpener::process(process_ref("indexer", 1));
+        let mut successor = request();
+        successor.scope.opener = EffectOpener::process(process_ref("indexer", 2));
+        assert_ne!(admitted.scope.opener, successor.scope.opener);
+
+        let decoded: ToolChildRequest =
+            serde_json::from_str(&serde_json::to_string(&admitted).expect("serializes"))
+                .expect("decodes");
+        assert_eq!(
+            decoded
+                .scope
+                .opener
+                .process_ref()
+                .map(|r| r.incarnation.registration_sequence()),
+            Some(1),
+            "the admitted incarnation is what recovery validates against"
+        );
+    }
+
+    /// A turn opener names its session, so a request attributing its work to a
+    /// different one is representable and invalid. Refused at the boundary.
+    #[test]
+    fn a_turn_opener_disagreeing_with_its_session_is_refused() {
+        let mut crossed = request();
+        crossed.scope.opener = EffectOpener::turn("other-session", "turn");
+        assert_eq!(
+            crossed
+                .validate()
+                .expect_err("a crossed opener session is refused")
+                .code,
+            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
+        );
+    }
+
+    /// The cancellation authority is a validated identity, not free text: an
+    /// authority that cannot exist is refused when the request is decoded, not
+    /// when a recovered child tries to honour a cancellation.
+    #[test]
+    fn a_blank_cancellation_authority_is_refused_at_decode() {
+        let mut value = serde_json::to_value(request()).expect("serializes");
+        value
+            .as_object_mut()
+            .expect("a request is a JSON object")
+            .insert(
+                "cancellation_authority".to_string(),
+                serde_json::Value::String(String::new()),
+            );
+        assert!(
+            serde_json::from_value::<ToolChildRequest>(value).is_err(),
+            "an empty binding id names an authority that cannot exist"
+        );
+    }
+
+    /// The environment reference is required, so "no environment" is not a
+    /// state the shape can hold. `captured_process_execution_env_ref` returns a
+    /// reference or an error, never an absence, so a missing field is a
+    /// truncated record rather than a legal one.
+    #[test]
+    fn a_request_without_an_execution_env_does_not_decode() {
+        let mut value = serde_json::to_value(request()).expect("serializes");
+        value
+            .as_object_mut()
+            .expect("a request is a JSON object")
+            .remove("execution_env");
+        let error = serde_json::from_value::<ToolChildRequest>(value)
+            .expect_err("a missing environment reference must be refused");
+        assert!(
+            error.to_string().contains("execution_env"),
+            "the refusal must name the missing field, got {error}"
         );
     }
 

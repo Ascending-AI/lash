@@ -284,6 +284,36 @@ of `inline`, `durable` or `process-lifetime` the child was admitted under, so a
 recovered child never derives a key nothing will resolve; a process-lifetime
 child recovered in another process is a typed refusal, never a fresh key (§14).
 
+**1b. The opener is a typed identity, not a scope.** §1's opener is
+`Turn(session_id, turn_id)` or `Process(ProcessRef { process_id, incarnation })`,
+and `ExecutionScope::Process` carries only `process_id`, so a retained scope
+leaves recovery-time validation nothing to validate and lets a re-registered
+name alias its predecessor's groups and fences. `EffectOpener`
+(`crates/lash-core-store/src/effect_opener.rs`) is that identity, shared by this
+request, by recovery, and by FIG-3394's Lashlang host bridges. It is an enum
+with a `kind` tag rather than a rendered string because a turn's scope identity
+is free-form text that can spell `{process_id}#{incarnation}` exactly; untagged,
+the two openers would mint one identity. The child's *claim address* stays an
+`ExecutionScope`, which is what the journal fences a row on. An enclosing
+process is likewise a `ProcessRef`, never a bare name.
+
+**2b. The cancellation authority is a validated identity.** It is the value
+`turn_control_binding_id_for_scope` mints and `binding_id_admits_scope` checks —
+the address the cooperative cancel path signals and the one §4's cancel
+disposition is fenced on — carried as `TurnControlBindingId`, a newtype with a
+validated constructor, because a frozen durable shape may not hold an
+unvalidated identity. It is `None` in exactly one case: an opener whose
+controller participates in turn control locally rather than through a durable
+journaled authority, where there is no durable address to record.
+
+**2c. The environment reference is required.** §3 makes it part of the retained
+authority, and the capture is total —
+`RuntimeExecutionContext::captured_process_execution_env_ref` returns
+`Result<ProcessExecutionEnvRef, _>`, inheriting or publishing, never absent. An
+optional field would be a representable state with no producer, and a recovered
+child that met it would have to invent an environment, which is the silent
+default §3 exists to prevent.
+
 **3. `AttachmentSourcePolicy` is deployment wiring.** It is an
 `Arc<dyn AttachmentSourcePolicy>` on `ToolDispatchContext`, exactly as much
 host-installed wiring as the tool implementation behind it, and is not

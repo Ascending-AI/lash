@@ -423,6 +423,8 @@ kind = "rust_items"
 paths = [
   "crates/lash-core-execution/src/runtime/effect/tool_child.rs",
   "crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs",
+  "crates/lash-core-store/src/effect_opener.rs",
+  "crates/lash-core-store/src/turn_control_binding.rs",
 ]
 symbols = [
   "ToolChildRequest",
@@ -430,6 +432,8 @@ symbols = [
   "ToolChildAdmission",
   "ToolChildCompletionRouting",
   "ToolAttemptEffectIdentity",
+  "EffectOpener",
+  "TurnControlBindingId",
 ]
 
 [[surface]]

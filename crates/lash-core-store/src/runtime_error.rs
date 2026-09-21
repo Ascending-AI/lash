@@ -265,6 +265,7 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolBatchId,
     RuntimeEffectToolChildRequestAdmission,
     RuntimeEffectToolChildRequestCallId,
+    RuntimeEffectToolChildRequestOpener,
     RuntimeEffectToolChildRequestVersion,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
@@ -565,6 +566,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolChildRequestCallId => {
                 "runtime_effect_tool_child_request_call_id"
             }
+            Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
             Self::RuntimeEffectToolChildRequestVersion => {
                 "runtime_effect_tool_child_request_version"
             }
@@ -777,6 +779,7 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectToolBatchId
             | Self::RuntimeEffectToolChildRequestAdmission
             | Self::RuntimeEffectToolChildRequestCallId
+            | Self::RuntimeEffectToolChildRequestOpener
             | Self::RuntimeEffectToolChildRequestVersion
             | Self::RuntimeEffectWrongOutcome
             | Self::RuntimeStoreCorrupt
@@ -971,6 +974,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupShape,
         Self::RuntimeEffectToolChildRequestAdmission,
         Self::RuntimeEffectToolChildRequestCallId,
+        Self::RuntimeEffectToolChildRequestOpener,
         Self::RuntimeEffectToolChildRequestVersion,
         Self::RuntimeEffectInvocationSubject,
         Self::RuntimeEffectScopeMismatch,
@@ -1204,6 +1208,7 @@ impl RuntimeErrorCode {
             "runtime_effect_tool_child_request_call_id" => {
                 Self::RuntimeEffectToolChildRequestCallId
             }
+            "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
             "runtime_effect_tool_child_request_version" => {
                 Self::RuntimeEffectToolChildRequestVersion
             }
