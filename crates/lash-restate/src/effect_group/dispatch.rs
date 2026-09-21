@@ -335,8 +335,7 @@ impl EffectGroupDispatch {
             let scoped = controller
                 .scoped_effect_controller(child.scope.admitted_scope.clone())
                 .map_err(TerminalError::from_error)?;
-            let drive = driver.drive(child, scoped);
-            tokio::pin!(drive);
+            let mut drive = driver.drive(child, scoped);
             let outcome = tokio::select! {
                 biased;
                 cancel = &mut cancel_watch => {
