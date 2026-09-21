@@ -117,7 +117,6 @@ fn lent_with_direct_completions(
     let mut other_tool = manifest("opener-tool");
     other_tool.retry_policy = ToolRetryPolicy::Never;
     ToolDispatchContext {
-        probe_private_field: (),
         plugins: crate::plugin::PluginHost::empty()
             .build_session("opener-session")
             .expect("plugin session"),

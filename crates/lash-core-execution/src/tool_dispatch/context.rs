@@ -115,9 +115,6 @@ pub struct ToolDispatchContext<'run> {
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     pub turn_context: crate::TurnContext,
     pub clock: Arc<dyn crate::Clock>,
-    /// FIG-3472 probe: a deliberately unruled field that proves the
-    /// rebind-completeness guard and the version gate refuse unlisted fields.
-    pub(crate) probe_private_field: (),
 }
 
 impl ToolDispatchContext<'_> {
@@ -336,7 +333,6 @@ impl<'run> ToolDispatchContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<ToolDispatchContext<'static>> {
         Some(ToolDispatchContext {
-            probe_private_field: (),
             plugins: Arc::clone(&self.plugins),
             tools: Arc::clone(&self.tools),
             tool_registry: self.tool_registry.clone(),

@@ -229,7 +229,6 @@ fn probe_context_with(
     let attachment_store: Arc<crate::SessionAttachmentStore> =
         Arc::new(crate::SessionAttachmentStore::in_memory());
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_catalog,

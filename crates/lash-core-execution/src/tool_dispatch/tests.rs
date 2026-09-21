@@ -2,6 +2,7 @@
 // access is sanctioned here (the workspace clippy ban targets production
 // library code).
 #![allow(clippy::disallowed_methods)]
+
 use super::*;
 use crate::ProcessRegistrar as _;
 use crate::plugin::{PluginHost, PluginSession, StaticPluginFactory};
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
+
 mod attachment_normalization;
 mod context_source;
 mod directives;
@@ -29,9 +31,12 @@ mod rebind_checklist;
 mod retry_effect_controllers;
 mod retry_turn_cancel_gate;
 mod settlement_order;
+
 use retry_effect_controllers::{FailingSleepEffectController, SleepRecordingEffectController};
+
 type AttemptObservation = (u32, u32, Option<String>);
 type SharedAttemptObservations = Arc<std::sync::Mutex<Vec<AttemptObservation>>>;
+
 fn test_tool(name: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{name}"),
@@ -41,6 +46,7 @@ fn test_tool(name: &str) -> crate::ToolDefinition {
         json!({ "type": "string" }),
     )
 }
+
 fn beta_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:beta",
@@ -57,6 +63,7 @@ fn beta_tool() -> crate::ToolDefinition {
         json!({ "type": "string" }),
     )
 }
+
 fn named_beta_tool(name: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{name}"),
@@ -73,6 +80,7 @@ fn named_beta_tool(name: &str) -> crate::ToolDefinition {
         json!({ "type": "string" }),
     )
 }
+
 fn manifests(definitions: Vec<crate::ToolDefinition>) -> Vec<crate::ToolManifest> {
     definitions
         .into_iter()
@@ -851,7 +859,6 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_registry: None,
@@ -953,7 +960,6 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_registry: None,
@@ -1015,7 +1021,6 @@ fn projection_policy_dispatch_context(
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_registry: None,
@@ -1188,7 +1193,6 @@ fn pinned_contract_dispatch_context(
     let tools = Arc::clone(&provider);
     let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![beta_tool()]));
     ToolDispatchContext {
-        probe_private_field: (),
         plugins: test_plugins(provider),
         tools,
         tool_registry: None,
@@ -1264,7 +1268,6 @@ fn authority_hidden_dispatch_context(
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_registry: None,
@@ -1313,7 +1316,6 @@ fn exact_dispatch_context_with_plugins(
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_registry: None,
@@ -1443,7 +1445,6 @@ fn pending_dispatch_context(
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_registry: None,
@@ -1501,7 +1502,6 @@ fn parallel_dispatch_context(
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools,
         tool_registry: None,

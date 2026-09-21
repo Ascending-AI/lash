@@ -543,7 +543,6 @@ impl Session {
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
         let tool_surface = self.active_tool_surface_entry(session_id)?;
         let dispatch = Arc::new(ToolDispatchContext {
-            probe_private_field: (),
             plugins: Arc::clone(self.plugins()),
             tools: tool_surface.tools(),
             tool_registry: Some(tool_surface.tool_registry()),

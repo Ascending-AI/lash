@@ -72,7 +72,6 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         .expect("plugin session");
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let dispatch = Arc::new(ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,
@@ -137,7 +136,6 @@ fn test_execution_context_with_env_store(
         .expect("plugin session");
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let dispatch = Arc::new(ToolDispatchContext {
-        probe_private_field: (),
         plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,

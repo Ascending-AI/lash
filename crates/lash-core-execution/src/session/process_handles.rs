@@ -505,7 +505,6 @@ mod tests {
         let policy = Arc::new(DenyProcessAwaitAttachments::default());
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
-            probe_private_field: (),
             plugins,
             tools: provider,
             tool_registry: None,
@@ -675,7 +674,6 @@ mod tests {
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
-            probe_private_field: (),
             plugins,
             tools,
             tool_registry: None,
@@ -866,7 +864,6 @@ mod tests {
             .expect("observe target process");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
-            probe_private_field: (),
             plugins,
             tools: provider,
             tool_registry: None,
@@ -971,7 +968,6 @@ mod tests {
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
-            probe_private_field: (),
             plugins,
             tools: provider,
             tool_registry: None,
@@ -1130,7 +1126,6 @@ mod tests {
             .expect("register hidden process");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
-            probe_private_field: (),
             plugins,
             tools: provider,
             tool_registry: None,
@@ -1492,7 +1487,6 @@ mod tests {
             .expect("complete the started child");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(64);
         let dispatch = Arc::new(ToolDispatchContext {
-            probe_private_field: (),
             plugins,
             tools: provider,
             tool_registry: None,
