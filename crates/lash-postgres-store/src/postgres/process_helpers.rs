@@ -394,10 +394,10 @@ pub(crate) async fn apply_process_event_append_tx(
             if record.is_terminal() {
                 crate::process_registry::parent_end::record_tx(
                     tx,
-                    &lash_core::ParentScope::Process {
-                        process_id: process_id.clone(),
-                        incarnation: record.incarnation,
-                    },
+                    &lash_core::ParentScope::process(lash_core::ProcessRef::new(
+                        process_id.clone(),
+                        record.incarnation,
+                    )),
                     occurred_at_ms,
                 )
                 .await?;

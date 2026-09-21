@@ -15,6 +15,8 @@ mod checkpoint_commit_delete_race;
 mod commit_size_benchmark;
 #[path = "orphaned_tombstone_reclaim.rs"]
 mod orphaned_tombstone_reclaim;
+#[path = "parent_end_payload.rs"]
+mod parent_end_payload;
 #[path = "parent_end_registration_race.rs"]
 mod parent_end_registration_race;
 #[path = "postgres_clock_contract.rs"]

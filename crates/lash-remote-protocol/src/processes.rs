@@ -17,7 +17,9 @@ use crate::turn_input::RemoteTurnInput;
 use crate::turn_result::RemoteCausalRef;
 
 mod lifecycle;
-pub use lifecycle::{RemoteOnParentEnd, RemoteParentScope, RemoteProcessLifecyclePolicy};
+pub use lifecycle::{
+    RemoteEffectOpener, RemoteOnParentEnd, RemoteParentScope, RemoteProcessLifecyclePolicy,
+};
 
 mod outcomes;
 pub use outcomes::{

@@ -200,7 +200,14 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
             start_metadata: serde_json::Value::Null,
         })
     };
-    let expected_parent = format!("{process_id}#7");
+    // Derived through the same projection the store writes, never a
+    // hand-formatted rendering: `storage_id` is the canonical
+    // `identity_encoding` of the recorded `ProcessRef`, so the law still
+    // proves the body's parent is the recorded incarnation and not whatever
+    // string a retired delimiter codec would have produced.
+    let expected_parent = crate::ParentScope::process(recorded_ref.clone())
+        .storage_id()
+        .expect("an owned process parent projects a storage id");
 
     // The malformed probe: a process opener that records no enclosing
     // incarnation. `ToolChildRequest::validate` makes the opener and its

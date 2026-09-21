@@ -138,10 +138,10 @@ pub(crate) async fn cancel_processes_parented_by_turn(
 ) -> Vec<String> {
     let filter = lash::process::ProcessListFilter {
         status: lash::process::ProcessStatusFilter::Any,
-        parent_scope: Some(lash::process::ParentScope::Turn {
-            session_id: address.session_id.clone(),
-            turn_id: address.turn_id.clone(),
-        }),
+        parent_scope: Some(lash::process::ParentScope::turn(
+            address.session_id.clone(),
+            address.turn_id.clone(),
+        )),
         ..lash::process::ProcessListFilter::default()
     };
     let observed = match state.process_observer.snapshot_all(&filter).await {

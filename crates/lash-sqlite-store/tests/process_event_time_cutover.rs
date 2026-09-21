@@ -1,7 +1,7 @@
 use lash_sqlite_store::SqliteProcessRegistry;
 
-const RETAINED_PRIOR_PROCESS_GENERATION: i32 = 40;
-const CURRENT_PROCESS_GENERATION: i32 = 41;
+const RETAINED_PRIOR_PROCESS_GENERATION: i32 = 41;
+const CURRENT_PROCESS_GENERATION: i32 = 42;
 
 #[tokio::test]
 async fn sqlite_process_registry_refuses_the_immediate_predecessor_at_open() {

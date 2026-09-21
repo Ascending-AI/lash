@@ -101,16 +101,22 @@ The PostgreSQL and SQLite `lash_processes` tables store and validate:
 
 | Fact | Representation |
 | --- | --- |
-| Parent Scope | `parent_scope_kind` plus nullable `parent_scope_id`; Turn ids render as `session_id/turn_id`, Process ids as `process_id#incarnation`, and only Host has no id |
+| Parent Scope | `parent_scope_kind` plus nullable `parent_scope_id`; the id is the parent's collision-free canonical encoding (`EffectOpener::identity_encoding`), used for equality and index lookups only and never parsed back; only Host has no id |
 | Lifecycle action | Non-null `on_parent_end`, restricted to Abandon or Cancel; Host + Cancel is invalid |
 | Pending cancellation | All-or-none `cancel_origin`, `cancel_requester`, and `cancel_requested_at_ms` |
 | Lookup support | An index on Parent Scope and process id, plus a partial index over pending cancellation for every nonterminal status, including Caller Departed |
 
 The old per-process action-list table is replaced by one
-`lash_parent_end_plans` ledger keyed by `(parent_kind, parent_id)`, with
-`ended_at_ms` and nullable `settled_at_ms`. A plan carries no action list. Its
+`lash_parent_end_plans` ledger keyed by `(parent_kind, parent_id)`, with the
+versioned typed `parent_payload`, `ended_at_ms` and nullable `settled_at_ms`.
+A plan carries no action list. Its
 actions are the index-served query for children with the matching Parent Scope
-and Cancel policy, paged by process id.
+and Cancel policy, paged by process id. The typed payload — not the key — is
+what a reader decodes: the key only projects the scope for equality and
+index ordering, so a ledger row still names the exact scope that ended after
+the parent's own row is pruned, and a payload that is not the current
+versioned shape, or that disagrees with its projection, is refused rather
+than reinterpreted.
 
 On SQL tiers, writing the ledger row and selecting its children occur in one
 registry transaction. Registration reads the ledger in its own transaction, so

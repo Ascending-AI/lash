@@ -1077,10 +1077,8 @@ async fn run_production_chain(
         .filter(|record| record.id != "00-chain-launcher")
     {
         assert_eq!(record.lifecycle.on_parent_end, crate::OnParentEnd::Abandon);
-        let crate::ParentScope::Process {
-            process_id,
-            incarnation,
-        } = &record.lifecycle.parent
+        let crate::ParentScope::Owned(crate::EffectOpener::Process { process_ref }) =
+            &record.lifecycle.parent
         else {
             panic!(
                 "a process-started child must retain its process parent: {}",
@@ -1089,9 +1087,9 @@ async fn run_production_chain(
         };
         let parent = records
             .iter()
-            .find(|candidate| candidate.id == process_id)
+            .find(|candidate| candidate.id == process_ref.process_id)
             .expect("parent is retained in the chain");
-        assert_eq!(*incarnation, parent.incarnation);
+        assert_eq!(process_ref.incarnation, parent.incarnation);
         assert!(
             !matches!(
                 record.provenance.caused_by,

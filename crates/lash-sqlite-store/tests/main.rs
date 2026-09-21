@@ -8,6 +8,10 @@
 mod effect_group_conformance;
 #[path = "graph_sequence_cutover.rs"]
 mod graph_sequence_cutover;
+#[path = "parent_end_payload.rs"]
+mod parent_end_payload;
+#[path = "parent_end_registration_race.rs"]
+mod parent_end_registration_race;
 #[path = "process_definitions_registry.rs"]
 mod process_definitions_registry;
 #[path = "process_event_time_cutover.rs"]

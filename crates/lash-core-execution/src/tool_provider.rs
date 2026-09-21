@@ -1777,10 +1777,10 @@ mod tests {
             attempt
                 .child_process_parent_scope()
                 .expect("the pinned incarnation is the parent"),
-            crate::ParentScope::Process {
-                process_id: ProcessId::from("worker"),
+            crate::ParentScope::process(crate::ProcessRef::new(
+                ProcessId::from("worker"),
                 incarnation,
-            },
+            )),
         );
     }
 
@@ -1809,10 +1809,10 @@ mod tests {
             orchestration
                 .child_process_parent_scope()
                 .expect("the pinned incarnation is the parent"),
-            crate::ParentScope::Process {
-                process_id: ProcessId::from("worker"),
+            crate::ParentScope::process(crate::ProcessRef::new(
+                ProcessId::from("worker"),
                 incarnation,
-            },
+            )),
         );
     }
 }

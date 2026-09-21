@@ -496,14 +496,10 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
         session.as_str(),
         crate::session_graph::frame_node_id(&session, "scope-frame-b"),
     );
-    let turn_scope = lash_core::ParentScope::Turn {
-        session_id: session.clone(),
-        turn_id: crate::TurnId::from("scope-turn-one"),
-    };
-    let other_turn_scope = lash_core::ParentScope::Turn {
-        session_id: session.clone(),
-        turn_id: crate::TurnId::from("scope-turn-two"),
-    };
+    let turn_scope =
+        lash_core::ParentScope::turn(session.clone(), crate::TurnId::from("scope-turn-one"));
+    let other_turn_scope =
+        lash_core::ParentScope::turn(session.clone(), crate::TurnId::from("scope-turn-two"));
 
     for (id, scope, parent) in [
         ("scope-filter-a-child-one", &frame_a, &turn_scope),

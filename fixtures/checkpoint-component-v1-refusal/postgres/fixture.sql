@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15
+-- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -228,9 +228,10 @@ CREATE TABLE lash_durable_read_fixture.lash_node_anchors (
 CREATE TABLE lash_durable_read_fixture.lash_parent_end_plans (
     parent_kind text NOT NULL,
     parent_id text NOT NULL COLLATE pg_catalog."C",
+    parent_payload text NOT NULL,
     ended_at_ms bigint NOT NULL,
     settled_at_ms bigint,
-    CONSTRAINT ck_parent_end_plans_kind CHECK ((parent_kind = ANY (ARRAY['turn'::text, 'process'::text])))
+    CONSTRAINT ck_parent_end_plans_kind CHECK ((parent_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text])))
 );
 
 
@@ -431,8 +432,8 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     cancel_requested_at_ms bigint,
     record_json text NOT NULL,
     CONSTRAINT ck_processes_on_parent_end CHECK ((on_parent_end = ANY (ARRAY['abandon'::text, 'cancel'::text]))),
-    CONSTRAINT ck_processes_parent_scope_id CHECK ((((parent_scope_kind = 'host'::text) AND (parent_scope_id IS NULL)) OR ((parent_scope_kind = ANY (ARRAY['turn'::text, 'process'::text])) AND (parent_scope_id IS NOT NULL)))),
-    CONSTRAINT ck_processes_parent_scope_kind CHECK ((parent_scope_kind = ANY (ARRAY['turn'::text, 'process'::text, 'host'::text]))),
+    CONSTRAINT ck_processes_parent_scope_id CHECK ((((parent_scope_kind = 'host'::text) AND (parent_scope_id IS NULL)) OR ((parent_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text])) AND (parent_scope_id IS NOT NULL)))),
+    CONSTRAINT ck_processes_parent_scope_kind CHECK ((parent_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'host'::text]))),
     CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
 
@@ -1161,7 +1162,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 108);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 109);
 
 
 --

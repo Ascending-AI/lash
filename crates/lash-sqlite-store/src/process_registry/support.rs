@@ -604,10 +604,10 @@ impl SqliteProcessRegistry {
                 if record.is_terminal() {
                     super::parent_end::record_conn(
                         conn,
-                        &lash_core::ParentScope::Process {
-                            process_id: process_id.clone(),
-                            incarnation: record.incarnation,
-                        },
+                        &lash_core::ParentScope::process(lash_core::ProcessRef::new(
+                            process_id.clone(),
+                            record.incarnation,
+                        )),
                         occurred_at_ms,
                     )?;
                 }

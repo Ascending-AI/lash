@@ -1385,7 +1385,7 @@ impl SeedProbe {
             lash_core::OnParentEnd::Abandon
         );
         assert!(
-            matches!(&process.lifecycle.parent, lash_core::ParentScope::Turn { session_id, .. } if session_id.as_str() == "root"),
+            matches!(&process.lifecycle.parent, lash_core::ParentScope::Owned(lash_core::EffectOpener::Turn { session_id, .. }) if session_id.as_str() == "root"),
             "spawn_agent retains its originating turn scope"
         );
         let observers = lash_core::ProcessObserverRegistry::observers_for_process(

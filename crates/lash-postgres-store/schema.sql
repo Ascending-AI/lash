@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 108.
+-- lash-postgres-store schema, component version 109.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -380,8 +380,8 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     cancel_requested_at_ms BIGINT,
     record_json TEXT NOT NULL,
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
-    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'process', 'host')),
-    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)),
+    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')),
+    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)),
     CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel')),
     UNIQUE(process_id, incarnation)
 );
@@ -525,10 +525,11 @@ CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
 CREATE TABLE IF NOT EXISTS lash_parent_end_plans (
     parent_kind TEXT NOT NULL,
     parent_id TEXT COLLATE "C" NOT NULL,
+    parent_payload TEXT NOT NULL,
     ended_at_ms BIGINT NOT NULL,
     settled_at_ms BIGINT,
     PRIMARY KEY (parent_kind, parent_id),
-    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'process'))
+    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'queue_drain', 'process'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_pending
     ON lash_parent_end_plans(ended_at_ms, parent_kind, parent_id)
@@ -797,7 +798,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 108)
+VALUES ('lash-postgres-store', 109)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

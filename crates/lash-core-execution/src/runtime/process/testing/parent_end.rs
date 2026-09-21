@@ -49,10 +49,7 @@ pub(super) fn record_terminal_locked(
     ended_at_ms: u64,
     record: &ProcessRecord,
 ) {
-    let parent = ParentScope::Process {
-        process_id: record.id.clone(),
-        incarnation: record.incarnation,
-    };
+    let parent = ParentScope::process(crate::ProcessRef::from_record(record));
     let Ok(key) = ledger_key(&parent) else {
         return;
     };
@@ -137,7 +134,10 @@ pub(super) async fn list_unrecorded_turn_parents(
             managed.record.lifecycle.on_parent_end == crate::OnParentEnd::Cancel
                 && managed.record.status.is_live()
                 && managed.record.cancel_request.is_none()
-                && matches!(managed.record.lifecycle.parent, ParentScope::Turn { .. })
+                && matches!(
+                    managed.record.lifecycle.parent,
+                    ParentScope::Owned(crate::EffectOpener::Turn { .. })
+                )
         })
         .filter_map(|managed| {
             let parent = &managed.record.lifecycle.parent;

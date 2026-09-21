@@ -818,7 +818,11 @@ pub fn prepare_process_registration(
 // input did not already fix, while making a display label a registration
 // conflict. The v6 preimage of an identity-bearing registration is frozen as a
 // witness in `validation_tests.rs`.
-const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 7;
+// Bumped to 8 (FIG-3418): `ParentScope` becomes `Owned(EffectOpener) | Host` and
+// the preimage gains tag 4 for the queue-drain arm. Turn, process and host
+// preimages encode byte-identically to v7, so an identical replay of an
+// existing registration keeps its fingerprint across the cutover.
+const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 8;
 
 /// Permanent tag registry for the process-registration definition fingerprint.
 ///
@@ -830,7 +834,7 @@ const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 7;
 /// static, 2 from-input-schema. Value selectors: 1
 /// payload, 2 pointer, 3 const, 4 template, 5 present. Process statuses: 1
 /// running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned,
-/// 7 caller departed. Parent scopes: 1 turn, 2 process, 3 host.
+/// 7 caller departed. Parent scopes: 1 turn, 2 process, 3 host, 4 queue drain.
 /// Parent-end actions: 1 abandon, 2 cancel. Retired tags remain burned.
 fn process_registration_fingerprint_preimage(
     registration: &ProcessRegistration,
@@ -908,22 +912,29 @@ fn process_registration_fingerprint_preimage(
     });
     fingerprint.optional(*max_attempts, crate::stable_identity::IdentityEncoder::u32);
     match &lifecycle.parent {
-        super::model::ParentScope::Turn {
-            session_id,
-            turn_id,
-        } => {
-            fingerprint.tag(1);
-            fingerprint.string(session_id.as_str());
-            fingerprint.string(turn_id.as_str());
-        }
-        super::model::ParentScope::Process {
-            process_id,
-            incarnation,
-        } => {
-            fingerprint.tag(2);
-            fingerprint.string(process_id.as_str());
-            fingerprint.u64(incarnation.registration_sequence());
-        }
+        super::model::ParentScope::Owned(opener) => match opener {
+            crate::EffectOpener::Turn {
+                session_id,
+                turn_id,
+            } => {
+                fingerprint.tag(1);
+                fingerprint.string(session_id.as_str());
+                fingerprint.string(turn_id.as_str());
+            }
+            crate::EffectOpener::Process { process_ref } => {
+                fingerprint.tag(2);
+                fingerprint.string(process_ref.process_id.as_str());
+                fingerprint.u64(process_ref.incarnation.registration_sequence());
+            }
+            crate::EffectOpener::QueueDrain {
+                session_id,
+                drain_id,
+            } => {
+                fingerprint.tag(4);
+                fingerprint.string(session_id.as_str());
+                fingerprint.string(drain_id.as_str());
+            }
+        },
         super::model::ParentScope::Host => fingerprint.tag(3),
     }
     fingerprint.tag(match lifecycle.on_parent_end {
@@ -1215,16 +1226,19 @@ pub(crate) fn classify_process_registration(
                 "Host parent scope cannot declare Cancel: a host scope never ends".to_string(),
             ));
         }
-        super::model::ParentScope::Turn { session_id, .. }
-            if !matches!(
-                &registration.provenance.originator,
-                super::model::ProcessOriginator::Session { session_id: originator, .. }
-                    if originator == session_id
-            ) =>
+        super::model::ParentScope::Owned(
+            crate::EffectOpener::Turn { session_id, .. }
+            | crate::EffectOpener::QueueDrain { session_id, .. },
+        ) if !matches!(
+            &registration.provenance.originator,
+            super::model::ProcessOriginator::Session { session_id: originator, .. }
+                if originator == session_id
+        ) =>
         {
             return Err(refuse(
                 ProcessRegistrationRefusal::TurnParentSessionMismatch,
-                "turn parent session must match the process originator session".to_string(),
+                "turn or drain parent session must match the process originator session"
+                    .to_string(),
             ));
         }
         _ => {}

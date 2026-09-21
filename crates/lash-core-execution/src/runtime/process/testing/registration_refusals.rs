@@ -107,10 +107,7 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
         ProcessRegistrationRefusal::TurnParentSessionMismatch => {
             let mut registration = accepted_process_registration();
             registration.lifecycle = ProcessLifecyclePolicy::new(
-                ParentScope::Turn {
-                    session_id: "parent-session".into(),
-                    turn_id: "turn-1".into(),
-                },
+                ParentScope::turn("parent-session", "turn-1"),
                 OnParentEnd::Abandon,
             );
             registration.provenance = ProcessProvenance::session(crate::SessionScope::new(

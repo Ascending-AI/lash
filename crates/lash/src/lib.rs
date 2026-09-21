@@ -621,10 +621,10 @@ pub mod remote {
     pub mod processes {
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
-            RemoteDeclaredProcessIdentity, RemoteLeaseOwnerIdentity, RemoteObservedProcess,
-            RemoteObservedProcessEvent, RemoteObservedProcessFailure, RemoteObservedWorkItemState,
-            RemoteObserverInheritance, RemoteOnParentEnd, RemoteParentScope,
-            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
+            RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
+            RemoteObservedProcess, RemoteObservedProcessEvent, RemoteObservedProcessFailure,
+            RemoteObservedWorkItemState, RemoteObserverInheritance, RemoteOnParentEnd,
+            RemoteParentScope, RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
             RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
             RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
@@ -741,7 +741,8 @@ pub mod process {
     };
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, ArtifactOwner,
-        CausalRef, DeclaredProcessIdentity, HandleId, NativeProcessWork, OnParentEnd, ParentScope,
+        CausalRef, DeclaredProcessIdentity, HandleId, NativeProcessWork, OnParentEnd,
+        PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, ParentScope, ParentScopeStorageError,
         ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
         ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore,
         ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,

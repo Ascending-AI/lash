@@ -12,10 +12,7 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
         .await
         .expect("register parent");
     let policy = ProcessLifecyclePolicy::new(
-        ParentScope::Process {
-            process_id: parent.id.clone(),
-            incarnation: parent.incarnation,
-        },
+        ParentScope::process(crate::ProcessRef::from_record(&parent)),
         OnParentEnd::Cancel,
     );
     let mut child = registration(&ProcessId::from("lifecycle-child"));
@@ -80,10 +77,10 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
     );
     let mut turn_child = registration(&ProcessId::from("lifecycle-turn-child"));
     turn_child.lifecycle = ProcessLifecyclePolicy::new(
-        ParentScope::Turn {
-            session_id: crate::SessionId::from("lifecycle-session"),
-            turn_id: crate::TurnId::from("lifecycle-turn"),
-        },
+        ParentScope::turn(
+            crate::SessionId::from("lifecycle-session"),
+            crate::TurnId::from("lifecycle-turn"),
+        ),
         OnParentEnd::Cancel,
     );
     assert!(matches!(

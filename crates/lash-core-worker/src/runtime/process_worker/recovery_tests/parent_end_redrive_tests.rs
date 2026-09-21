@@ -117,10 +117,7 @@ impl SessionStoreFactory for SharedInMemorySessionStoreFactory {
 }
 
 fn turn_parent(turn_id: &str) -> crate::ParentScope {
-    crate::ParentScope::Turn {
-        session_id: SessionId::from(SESSION),
-        turn_id: crate::TurnId::from(turn_id),
-    }
+    crate::ParentScope::turn(SessionId::from(SESSION), crate::TurnId::from(turn_id))
 }
 
 fn cancel_child(

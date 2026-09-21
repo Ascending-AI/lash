@@ -71,10 +71,12 @@ const POST_FLOOR_TABLES: [&str; 2] = [
 const POST_FLOOR_INDEXES: [&str; 0] = [];
 /// The columns absent from component 101: the trigger mutation-receipt owner
 /// columns component 105 installed (FIG-1956) — the receipts table itself
-/// predates the floor, so its post-floor columns drop by name.
-const POST_FLOOR_COLUMNS: [(&str, &str); 2] = [
+/// predates the floor, so its post-floor columns drop by name — and the typed
+/// parent payload component 109 installed (FIG-3418).
+const POST_FLOOR_COLUMNS: [(&str, &str); 3] = [
     ("lash_trigger_mutation_receipts", "owner_kind"),
     ("lash_trigger_mutation_receipts", "owner_id"),
+    ("lash_parent_end_plans", "parent_payload"),
 ];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
@@ -84,17 +86,18 @@ const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
 ///
-/// Under the component-108 boundary the retained generation is 107, whose
-/// predecessor arm (component 106 → 107) introduces
-/// `lash_runtime_effect_group_child` — the accepted membership of an effect
-/// group (ADR 0099 §3). Component 108 declares no migration arm, so the
-/// pre-cutover refusal is reject-and-recreate and this list is never emitted.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_runtime_effect_group_child"];
+/// Under the component-109 boundary the retained generation is 108, whose
+/// predecessor arm (component 107 → 108) introduces no relation: component
+/// 108 was the journaled `exec_code` outcome cutover, an encoding move with
+/// no relational DDL. The boundary is destructive, so the pre-cutover refusal
+/// is reject-and-recreate and this list is never emitted.
+const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
-/// reject-and-recreate boundary. Component 108 is destructive (journaled
-/// outcome encoding, FIG-2362): the 107 stamp has no applicable migration.
+/// reject-and-recreate boundary. Component 109 is destructive (typed
+/// parent-end plan payload, FIG-3418): the 108 stamp has no applicable
+/// migration.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even

@@ -37,6 +37,21 @@ pub const KEYED_RECORD_COLUMNS: &str = "process_id, record_json";
 /// the arm's name, not a lifecycle label.
 pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, record_json AS payload";
 
+/// What the unrecorded-turn-parent survey reports per scope: the canonical
+/// parent key and one record carrying it.
+///
+/// Narrow on purpose, and dialect-spelled twice because the two backends pick
+/// their representative row differently. `parent_scope_id` is the
+/// collision-free projection and is never parsed back; `record_json` is the
+/// authority. Every row sharing the key names the same typed parent, so any
+/// child row answers for the group — SQLite picks it with `MIN`, Postgres
+/// with `DISTINCT ON` — and neither needs an indexed column the WHERE clause
+/// has already read.
+pub const UNRECORDED_TURN_PARENT_COLUMNS_SQLITE: &str =
+    "child.parent_scope_id, MIN(child.record_json)";
+pub const UNRECORDED_TURN_PARENT_COLUMNS_POSTGRES: &str =
+    "ON (child.parent_scope_id) child.parent_scope_id, child.record_json";
+
 crate::statements! {
     /// `processes` statements both backends issue verbatim.
     pub struct ProcessStatements @ "process" {

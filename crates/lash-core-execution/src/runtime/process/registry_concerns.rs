@@ -569,7 +569,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// the row: these are the candidates, and the caller decides which of them
     /// actually committed before writing anything.
     ///
-    /// Returns distinct `ParentScope::Turn` scopes named by at least one
+    /// Returns distinct turn-owned `ParentScope`s named by at least one
     /// nonterminal child row and carrying no ledger row, ordered by scope id,
     /// resumed strictly after `after` and bounded by `limit`.
     ///

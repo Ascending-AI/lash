@@ -49,6 +49,11 @@ pub(crate) fn reclaim_settled_plans_conn(
     .map_err(process_sqlite_error)
 }
 
+/// The typed payload a ledger row persists beside the projection key.
+fn ledger_payload(parent: &ParentScope) -> Result<String, PluginError> {
+    parent.storage_payload().map_err(process_decode_error)
+}
+
 pub(super) fn record_conn(
     conn: &Connection,
     parent: &ParentScope,
@@ -57,7 +62,7 @@ pub(super) fn record_conn(
     let (kind, id) = ledger_key(parent)?;
     conn.execute(
         process_sql().plan.insert_if_absent.sql(),
-        params![kind, id, ended_at_ms as i64],
+        params![kind, id, ledger_payload(parent)?, ended_at_ms as i64],
     )
     .map_err(process_sqlite_error)?;
     Ok(())
@@ -96,12 +101,12 @@ pub(super) async fn record(
 fn decode_plan(
     kind: String,
     id: String,
+    payload: String,
     ended: i64,
     settled: Option<i64>,
 ) -> Result<ParentEndPlan, PluginError> {
-    let parent = ParentScope::from_storage(&kind, Some(id.as_str())).ok_or_else(|| {
-        PluginError::Session(format!("unreadable parent-end ledger key `{kind}`/`{id}`"))
-    })?;
+    let parent = ParentScope::from_storage_columns(&kind, Some(id.as_str()), &payload)
+        .map_err(|error| PluginError::Session(error.to_string()))?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended.max(0) as u64,
@@ -121,8 +126,9 @@ pub(super) async fn list_pending(
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
                 ))
             })?;
             rows.collect::<Result<Vec<_>, _>>()
@@ -130,7 +136,7 @@ pub(super) async fn list_pending(
         .await
         .map_err(process_sqlite_error)?;
     rows.into_iter()
-        .map(|(kind, id, ended, settled)| decode_plan(kind, id, ended, settled))
+        .map(|(kind, id, payload, ended, settled)| decode_plan(kind, id, payload, ended, settled))
         .collect()
 }
 
@@ -146,13 +152,19 @@ pub(super) async fn get(
             conn.query_row(
                 process_sql().plan.select_stamps.sql(),
                 params![lookup.0, lookup.1],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                    ))
+                },
             )
             .optional()
         })
         .await
         .map_err(process_sqlite_error)?;
-    row.map(|(ended, settled)| decode_plan(kind.to_string(), id, ended, settled))
+    row.map(|(payload, ended, settled)| decode_plan(kind.to_string(), id, payload, ended, settled))
         .transpose()
 }
 
@@ -173,7 +185,7 @@ pub(super) async fn list_unrecorded_turn_parents(
     limit: NonZeroUsize,
 ) -> Result<Vec<ParentScope>, PluginError> {
     let after = after.map(str::to_string);
-    let ids = registry
+    let rows = registry
         .conn
         .call(move |conn| {
             let mut statement = conn.prepare(
@@ -183,16 +195,24 @@ pub(super) async fn list_unrecorded_turn_parents(
                     .sql(),
             )?;
             let rows = statement.query_map(params![after, limit.get() as i64], |row| {
-                row.get::<_, String>(0)
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?;
             rows.collect::<Result<Vec<_>, _>>()
         })
         .await
         .map_err(process_sqlite_error)?;
-    ids.into_iter()
-        .map(|id| {
-            ParentScope::from_storage("turn", Some(id.as_str()))
-                .ok_or_else(|| PluginError::Session(format!("unreadable turn parent scope `{id}`")))
+    rows.into_iter()
+        .map(|(id, record_json)| {
+            let record: ProcessRecord =
+                serde_json::from_str(&record_json).map_err(process_decode_error)?;
+            let parent = record.lifecycle.parent;
+            (parent.storage_kind() == "turn" && parent.storage_id().as_deref() == Some(id.as_str()))
+                .then_some(parent)
+                .ok_or_else(|| {
+                    PluginError::Session(format!(
+                        "turn parent-scope candidate `{id}` names a different scope in its record"
+                    ))
+                })
         })
         .collect()
 }

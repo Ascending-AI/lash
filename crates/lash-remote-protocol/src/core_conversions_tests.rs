@@ -636,14 +636,15 @@ fn process_start_requests_round_trip_core_values() {
     .with_event_types([process_event_type()]);
     assert_process_start_roundtrip(external.clone());
     for parent in [
-        lash_core::ParentScope::Turn {
-            session_id: SessionId::from("session-a"),
-            turn_id: lash_core::TurnId::from("turn-a"),
-        },
-        lash_core::ParentScope::Process {
-            process_id: ProcessId::from("parent"),
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(23),
-        },
+        lash_core::ParentScope::turn(
+            SessionId::from("session-a"),
+            lash_core::TurnId::from("turn-a"),
+        ),
+        lash_core::ParentScope::queue_drain(SessionId::from("session-a"), "drain-a".to_string()),
+        lash_core::ParentScope::process(lash_core::ProcessRef::new(
+            ProcessId::from("parent"),
+            lash_core::ProcessIncarnation::from_registration_sequence(23),
+        )),
     ] {
         let mut scoped = external.clone();
         scoped.originator =
@@ -895,10 +896,10 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         )),
         status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
         originator: Some(lash_core::ProcessOriginatorFilter::session("test")),
-        parent_scope: Some(lash_core::ParentScope::Turn {
-            session_id: lash_sansio::SessionId::from("test".to_string()),
-            turn_id: lash_core::TurnId::from("turn-1".to_string()),
-        }),
+        parent_scope: Some(lash_core::ParentScope::turn(
+            lash_sansio::SessionId::from("test".to_string()),
+            lash_core::TurnId::from("turn-1".to_string()),
+        )),
         cancel_pending_before_ms: Some(99),
         identity_kind: Some("engine".to_string()),
         identity_label: Some("Main".to_string()),

@@ -7,17 +7,32 @@ pub enum RemoteOnParentEnd {
     Cancel,
 }
 
+/// The wire form of the shared opener vocabulary inside an owned parent.
+///
+/// Mirrors `lash_core::EffectOpener` arm for arm so a remote peer names the
+/// exact durable owner — a turn, a queued-work drain, or one process
+/// incarnation — and never a rendered id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RemoteParentScope {
+pub enum RemoteEffectOpener {
     Turn {
         session_id: SessionId,
         turn_id: String,
+    },
+    QueueDrain {
+        session_id: SessionId,
+        drain_id: String,
     },
     Process {
         process_id: ProcessId,
         incarnation: u64,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", content = "opener", rename_all = "snake_case")]
+pub enum RemoteParentScope {
+    Owned(RemoteEffectOpener),
     Host,
 }
 
@@ -40,24 +55,26 @@ impl RemoteProcessLifecyclePolicy {
                     message: "Host parent cannot declare Cancel on parent end".to_string(),
                 });
             }
-            RemoteParentScope::Turn {
+            RemoteParentScope::Owned(RemoteEffectOpener::Turn {
                 session_id,
                 turn_id,
-            } => {
-                require_non_empty(type_name, "parent.session_id", session_id)?;
-                require_non_empty(type_name, "parent.turn_id", turn_id)?;
-                if !matches!(originator, RemoteProcessOriginator::Session { session_id: originating_session, .. } if originating_session == session_id)
-                {
-                    return Err(RemoteProtocolError::InvalidEnvelope {
-                        type_name,
-                        message: "turn parent must belong to the originating session".to_string(),
-                    });
-                }
+            }) => {
+                require_non_empty(type_name, "parent.opener.session_id", session_id)?;
+                require_non_empty(type_name, "parent.opener.turn_id", turn_id)?;
+                require_originating_session(type_name, session_id, originator)?;
             }
-            RemoteParentScope::Process {
+            RemoteParentScope::Owned(RemoteEffectOpener::QueueDrain {
+                session_id,
+                drain_id,
+            }) => {
+                require_non_empty(type_name, "parent.opener.session_id", session_id)?;
+                require_non_empty(type_name, "parent.opener.drain_id", drain_id)?;
+                require_originating_session(type_name, session_id, originator)?;
+            }
+            RemoteParentScope::Owned(RemoteEffectOpener::Process {
                 process_id,
                 incarnation,
-            } => RemoteProcessRef {
+            }) => RemoteProcessRef {
                 process_id: process_id.clone(),
                 incarnation: *incarnation,
             }
@@ -66,4 +83,19 @@ impl RemoteProcessLifecyclePolicy {
         }
         Ok(())
     }
+}
+
+fn require_originating_session(
+    type_name: &'static str,
+    session_id: &SessionId,
+    originator: &RemoteProcessOriginator,
+) -> Result<(), RemoteProtocolError> {
+    if !matches!(originator, RemoteProcessOriginator::Session { session_id: originating_session, .. } if originating_session == session_id)
+    {
+        return Err(RemoteProtocolError::InvalidEnvelope {
+            type_name,
+            message: "turn or drain parent must belong to the originating session".to_string(),
+        });
+    }
+    Ok(())
 }
