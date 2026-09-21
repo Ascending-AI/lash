@@ -53,6 +53,9 @@ const WANING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const EBBING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-89-7e5feb69d/postgres-expected.json",
 ];
+const DWINDLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-90-3cdb48643/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -191,7 +194,13 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 105);
+    // The fixture's catalog tracks the current component by design -- its
+    // regeneration refreshes the catalog and preserves only the component-v1
+    // checkpoint payload -- so this pins that the two were moved together. It
+    // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
+    // this literal following, so the assertion failed before the payload-level
+    // refusal below was ever reached.
+    assert_eq!(PostgresStorage::schema_version(), 107);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await

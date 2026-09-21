@@ -48,6 +48,236 @@ use pretty_assertions::assert_eq;
 /// A caller's whole interaction with one group: open, await, close.
 type Host = Arc<dyn EffectHost>;
 
+/// W1 — a reopen dispatches the **retained accepted membership**, never the
+/// children the reopening caller happened to supply (ADR 0099 §3, crash window
+/// W1).
+///
+/// The window is "after the group open is journaled, before any child is
+/// dispatched": the opener is gone, and a successor holds the group key. Before
+/// §3 the journal held a child *count*, so the successor had no choice but to
+/// re-supply children it could not know, and whatever it passed is what ran.
+///
+/// The law makes that difference observable rather than asserting an internal.
+/// The successor reopens with children carrying **different replay keys**,
+/// staged against their own counter. A host that dispatched the caller's vector
+/// runs them; a host that reconstructs from the journal never touches them and
+/// runs the accepted children instead — which the suite's process-wide staging
+/// table still has executors for, because those envelopes are the ones the
+/// opener staged.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_reopen_dispatches_the_retained_membership<F: Fn() -> Host>(make: &F, prefix: &str) {
+    let opener = make();
+    let scoped = opener
+        .scoped(scope(prefix, "w1-membership"))
+        .expect("a scope binds");
+    let key = group_key(prefix, "w1-membership");
+
+    // Parked children: the group is journaled with its membership retained and
+    // nothing settled, which is exactly the W1 window.
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let handle = scoped
+        .controller()
+        .open_effect_group(staged(
+            group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![counts_then_parks(&accepted), counts_then_parks(&accepted)],
+        ))
+        .await
+        .expect("the group opens");
+    until(|| accepted.load(Ordering::SeqCst) == 2).await;
+    drop(handle);
+    drop(scoped);
+    drop(opener);
+
+    // A successor that never saw the opener's group, reopening with impostors.
+    let successor = make();
+    let scoped = successor
+        .scoped(scope(prefix, "w1-membership"))
+        .expect("a scope binds");
+    let impostor = Arc::new(AtomicUsize::new(0));
+    let reopened = scoped
+        .controller()
+        .open_effect_group(partially_staged(
+            impostor_group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![
+                Some(counts_then_parks(&impostor)),
+                Some(counts_then_parks(&impostor)),
+            ],
+        ))
+        .await
+        .expect("a journaled group reopens");
+
+    assert_eq!(
+        reopened.children(),
+        2,
+        "the reopen's arity is the journal's, not the caller's"
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        impostor.load(Ordering::SeqCst),
+        0,
+        "a reopen must dispatch the children the journal retained, not the ones \
+         this caller supplied"
+    );
+    close(&scoped, reopened, RUN)
+        .await
+        .expect("the group closes");
+}
+
+/// W2 — a reopen reissues each child's **original identity**, never a fresh
+/// unrelated call (ADR 0099 §3, crash window W2).
+///
+/// The window is "after dispatch, before the child's invocation id was
+/// published". Identity here is the child's replay key and its canonical
+/// envelope hash: a dispatch under a different key claims a different journal
+/// row, so the effect runs a second time. The law reads that directly — a
+/// reopen whose caller offers differently-keyed children must still settle at
+/// the *recorded* ranks, with the outcomes the first dispatch recorded, and
+/// must not run any effect again.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_reopen_reissues_each_childs_original_identity<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let opener = make();
+    let scoped = opener
+        .scoped(scope(prefix, "w2-identity"))
+        .expect("a scope binds");
+    let key = group_key(prefix, "w2-identity");
+
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counted = |runs: &Arc<AtomicUsize>, position: usize| {
+        let runs = Arc::clone(runs);
+        RuntimeEffectLocalExecutor::testing(move |_| {
+            let runs = Arc::clone(&runs);
+            async move {
+                runs.fetch_add(1, Ordering::SeqCst);
+                Ok(outcome_of(position))
+            }
+        })
+    };
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(staged(
+            group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![counted(&runs, 0), counted(&runs, 1)],
+        ))
+        .await
+        .expect("the group opens");
+    let first = next(&scoped, &mut handle).await.expect("rank 1 is served");
+    let second = next(&scoped, &mut handle).await.expect("rank 2 is served");
+    assert_eq!(runs.load(Ordering::SeqCst), 2, "each child ran once");
+    drop(handle);
+    drop(scoped);
+    drop(opener);
+
+    let successor = make();
+    let scoped = successor
+        .scoped(scope(prefix, "w2-identity"))
+        .expect("a scope binds");
+    let impostor = Arc::new(AtomicUsize::new(0));
+    let mut reopened = scoped
+        .controller()
+        .open_effect_group(partially_staged(
+            impostor_group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![
+                Some(counts_then_parks(&impostor)),
+                Some(counts_then_parks(&impostor)),
+            ],
+        ))
+        .await
+        .expect("a journaled group reopens");
+
+    // The recorded ranks, with the recorded outcomes. A fresh identity would
+    // have claimed an empty row and run the effect a second time.
+    let replayed_first = next(&scoped, &mut reopened).await.expect("rank 1 replays");
+    let replayed_second = next(&scoped, &mut reopened).await.expect("rank 2 replays");
+    assert_eq!(
+        (replayed_first.position, replayed_second.position),
+        (first.position, second.position),
+        "a reopen serves the settlements the first dispatch recorded"
+    );
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        2,
+        "recovery reissues the original identity, so no effect runs twice"
+    );
+    assert_eq!(
+        impostor.load(Ordering::SeqCst),
+        0,
+        "the caller's differently-keyed children are never dispatched"
+    );
+    close(&scoped, reopened, RUN)
+        .await
+        .expect("the group closes");
+}
+
+/// A group whose children carry replay keys no accepted child has.
+///
+/// Same key, arity, wake rule and declared disposition, so the durable reopen
+/// fence passes and the only difference left is *which children* the caller
+/// offered.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn impostor_group(
+    execution_scope: &ExecutionScope,
+    key: &str,
+    children: usize,
+    wake: GroupWakePolicy,
+    disposition: LoserPolicy,
+) -> RuntimeEffectGroup {
+    RuntimeEffectGroup::try_new(
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(execution_scope.clone(), format!("{key}:group"))
+                .expect("valid group address"),
+            RuntimeAttribution::none(),
+            "group",
+        ),
+        key,
+        (0..children)
+            .map(|position| {
+                RuntimeEffectEnvelope::new(
+                    RuntimeEffectInvocation::new(
+                        EffectAddress::new(
+                            execution_scope.clone(),
+                            format!("{key}:impostor:{position}"),
+                        )
+                        .expect("valid group-child address"),
+                        RuntimeAttribution::none(),
+                        "effect",
+                    ),
+                    RuntimeEffectCommand::LanguageRuntimeValue {
+                        operation: format!("impostor-child-{position}"),
+                    },
+                )
+            })
+            .collect(),
+        wake,
+        disposition,
+    )
+    .expect("a group with at least one child assembles")
+}
+
+/// An executor that records it was dispatched and then never settles.
+fn counts_then_parks(runs: &Arc<AtomicUsize>) -> RuntimeEffectLocalExecutor<'static> {
+    let runs = Arc::clone(runs);
+    RuntimeEffectLocalExecutor::testing(move |_| {
+        let runs = Arc::clone(&runs);
+        async move {
+            runs.fetch_add(1, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+            unreachable!("a parked child is never polled to completion")
+        }
+    })
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -413,8 +643,32 @@ where
     .await
     .expect("a refused retirement fences nothing: the scope still mints");
 
+    // The forward half of ADR 0099 §3's `ArtifactOwner::Execution` protection.
+    //
+    // A retained request names environment bytes held under
+    // `ArtifactOwner::Execution(scope)`, and §3 protects them "through their
+    // last retained dependency". The mechanism is this refusal: an execution
+    // owner is severed only after the scope's authoritative retirement commits,
+    // and `pending_artifact_owner_retirements` is the queue that drives that
+    // severing. A refused retirement writes no fence, so the scope never
+    // enters that queue and the bytes a live child still needs are unreachable
+    // to reclamation. Asserted rather than assumed, because the whole
+    // protection rests on it.
+    assert!(
+        !host
+            .pending_artifact_owner_retirements()
+            .await
+            .expect("the pending execution-owner queue is readable")
+            .contains(&live_scope),
+        "a scope whose group still has a live child must not be queued for \
+         execution-artifact severing: its retained requests still name those bytes"
+    );
+
     gate.release();
     until(|| gate.finished() == 1).await;
+    // ... and once the scope really is quiescent and retired, the same queue is
+    // what makes the bytes reclaimable. The two assertions are one law: the
+    // protection is a delay, not an exemption.
     // The drain journals the loser's terminal after its executor returns;
     // the gate's counter fires before that write lands, so the retirement
     // is retried until the store proves the scope quiescent.
@@ -440,6 +694,19 @@ where
     assert_eq!(
         deleted, 2,
         "the quiescent retirement reports both settled children"
+    );
+
+    // The other half of the protection: once the retirement has committed, the
+    // scope *is* queued for execution-artifact severing. The environment bytes
+    // a retained request named are reclaimable exactly when no retained request
+    // names them any more, which is what "through the last retained dependency"
+    // means.
+    assert!(
+        host.pending_artifact_owner_retirements()
+            .await
+            .expect("the pending execution-owner queue is readable")
+            .contains(&live_scope),
+        "a retired scope must be queued for execution-artifact severing"
     );
 
     let reader = make();

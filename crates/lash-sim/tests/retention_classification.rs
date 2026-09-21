@@ -310,6 +310,12 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "runtime_effect_group_child",
+        LifecycleOwned {
+            scope: "session, process, or runtime-operation retirement",
+        },
+    ),
+    (
         "await_event_meta",
         PermanentlyExempt {
             reason: "singleton signing secret keeps issued promise keys valid across reopen",
@@ -393,7 +399,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 51, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 52, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

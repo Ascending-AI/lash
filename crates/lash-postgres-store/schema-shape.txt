@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 106
+version 107
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -286,6 +286,14 @@ table lash_runtime_effect_group
   column session_id text nullable
   column wake text not-null
   primary-key (group_key)
+table lash_runtime_effect_group_child
+  column created_at_ms bigint not-null
+  column envelope_json text not-null
+  column group_key text not-null
+  column position bigint not-null
+  column replay_key text not-null
+  column request_version bigint not-null
+  primary-key (group_key, position)
 table lash_runtime_effect_replay
   column created_at_ms bigint not-null
   column due_at_ms bigint nullable

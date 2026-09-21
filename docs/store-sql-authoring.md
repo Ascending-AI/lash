@@ -397,8 +397,13 @@ may be parked there.
 kiln test //crates/lash-sqlite-store:all
 python3 scripts/check-store-sql-ownership.py
 python3 scripts/test_check_store_sql_ownership.py
-bash scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh conformance
+bash scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
 ```
+
+`pg-store` is the PostgreSQL conformance run. The suite is package-wide by
+design — narrowing it to the conformance binary would silently drop
+`tests/attempt_atomicity.rs` — so there is no separate `conformance` suite to
+ask for, and asking for one fails with `unknown store suite`.
 
 The conformance and cross-backend suites are the oracle for "no behaviour
 changed", and they pass **unedited**. If a suite needs a change to go green, the

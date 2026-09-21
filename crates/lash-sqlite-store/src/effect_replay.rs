@@ -18,11 +18,12 @@ use std::sync::Arc;
 
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
-    CompletionKeys, EffectClaimDecision, EffectClaimObservation, EffectClaimRequest,
-    EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord, EffectLeaseFence,
-    EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore, EffectReplayVocabulary,
-    EffectRowStatus, EffectTerminal, StoreEffectReplayDriver, StoredEffectRow,
-    StoredGroupSettlement, ToolBatchRedrive, UnsettledGroupChild, decide_effect_claim,
+    AcceptedGroupChild, CompletionKeys, EffectClaimDecision, EffectClaimObservation,
+    EffectClaimRequest, EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord,
+    EffectLeaseFence, EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore,
+    EffectReplayVocabulary, EffectRowStatus, EffectTerminal, StoreEffectReplayDriver,
+    StoredEffectRow, StoredGroupSettlement, ToolBatchRedrive, UnsettledGroupChild,
+    decide_effect_claim,
 };
 use lash_core::{
     EffectJournalRetirement, EffectRetirementGate, ExecutionScope, GroupExecutors,
@@ -34,6 +35,7 @@ use std::sync::LazyLock;
 
 use lash_store_sql::effect::EffectJournalStatements;
 use lash_store_sql::effect::group::GroupStatements;
+use lash_store_sql::effect::group_child::GroupChildStatements;
 use lash_store_sql::effect::replay::ReplayStatements;
 
 use super::*;
@@ -150,6 +152,26 @@ lash_store_sql::statements! {
     }
 }
 
+lash_store_sql::statements! {
+    /// `runtime_effect_group_child` statements only SQLite issues.
+    pub(crate) struct GroupChildSqliteStatements @ "effect_group_child" {
+        /// Retain one accepted child, keeping any existing row.
+        ///
+        /// `DO NOTHING` is reopen semantics, not a swallowed error: a reopen
+        /// re-presents the membership it already accepted, and N1's reason for
+        /// not resetting `next_seq` applies to the membership exactly as it
+        /// does to the counter. SQLite reads the membership back with
+        /// [`GroupChildStatements::select_membership`]; PostgreSQL carries a
+        /// `RETURNING` clause for the same reason it does on the group insert.
+        insert_accepted = "INSERT INTO runtime_effect_group_child (
+                group_key, position, replay_key,
+                envelope_json, request_version, created_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (group_key, position) DO NOTHING";
+    }
+}
+
 /// Every effect-family statement, rendered for one schema.
 pub(crate) struct EffectSql {
     /// Journal-wide statements both backends issue verbatim.
@@ -164,6 +186,10 @@ pub(crate) struct EffectSql {
     pub(crate) group: GroupStatements,
     /// `runtime_effect_group` statements only SQLite issues.
     pub(crate) group_sqlite: GroupSqliteStatements,
+    /// `runtime_effect_group_child` statements both backends issue verbatim.
+    pub(crate) group_child: GroupChildStatements,
+    /// `runtime_effect_group_child` statements only SQLite issues.
+    pub(crate) group_child_sqlite: GroupChildSqliteStatements,
 }
 
 impl EffectSql {
@@ -176,6 +202,8 @@ impl EffectSql {
             replay_sqlite: ReplaySqliteStatements::render(dialect),
             group: GroupStatements::render(dialect),
             group_sqlite: GroupSqliteStatements::render(dialect),
+            group_child: GroupChildStatements::render(dialect),
+            group_child_sqlite: GroupChildSqliteStatements::render(dialect),
         }
     }
 }
@@ -884,14 +912,37 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     async fn open_group(
         &self,
         record: &EffectGroupRecord,
+        membership: &[AcceptedGroupChild],
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
         let record = record.clone();
+        let membership = membership.to_vec();
         let scope_id = record.scope_id.clone();
         let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
                 if fences.is_fenced(tx, &record.scope_id)? {
                     return Ok(None);
+                }
+                // Children before the group row, in one transaction (ADR 0065
+                // N2). The order is the lock order, and it is also what makes
+                // ADR 0099 §3 hold: the group row's existence implies its
+                // complete membership, because nothing can observe the group
+                // before this transaction commits.
+                for child in &membership {
+                    tx.execute(
+                        effect_sql(Schema::Main)
+                            .group_child_sqlite
+                            .insert_accepted
+                            .sql(),
+                        params![
+                            record.group_key.as_str(),
+                            child.position as i64,
+                            child.replay_key.as_str(),
+                            child.envelope_json.as_str(),
+                            i64::from(child.request_version),
+                            record.created_at_ms as i64,
+                        ],
+                    )?;
                 }
                 // `DO NOTHING` rather than an upsert: reopening a group must not
                 // reset `next_seq`, which would re-seat recorded children at
@@ -913,6 +964,34 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .await
             .map_err(effect_sqlite_error)?
             .ok_or_else(|| effect_replay_driver::scope_retired(&scope_id))
+    }
+
+    async fn read_group_membership(
+        &self,
+        group_key: &str,
+    ) -> Result<Vec<AcceptedGroupChild>, RuntimeEffectControllerError> {
+        let group_key = group_key.to_string();
+        self.conn
+            .call(move |connection| {
+                let tx = connection.transaction()?;
+                let mut statement =
+                    tx.prepare(effect_sql(Schema::Main).group_child.select_membership.sql())?;
+                let membership = statement
+                    .query_map(params![group_key.as_str()], |row| {
+                        Ok(AcceptedGroupChild {
+                            position: row.get::<_, i64>(1)? as usize,
+                            replay_key: row.get(2)?,
+                            envelope_json: row.get(3)?,
+                            request_version: row.get::<_, i64>(4)? as u16,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                drop(statement);
+                tx.commit()?;
+                Ok(membership)
+            })
+            .await
+            .map_err(effect_sqlite_error)
     }
 
     /// Reads the group row without writing one, so a drain reads the declared
@@ -1109,6 +1188,15 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         )?;
                         let deleted = tx.execute(
                             sql.replay.delete_by_session.sql(),
+                            params![session_id.as_str()],
+                        )?;
+                        // Membership before the group rows it keys off: the
+                        // statement selects the session's groups, so deleting
+                        // them first would strand every accepted request and
+                        // leave it naming environment bytes the retirement is
+                        // about to reclaim (ADR 0099 §3).
+                        tx.execute(
+                            sql.group_child.delete_by_session.sql(),
                             params![session_id.as_str()],
                         )?;
                         tx.execute(
@@ -1353,6 +1441,8 @@ pub(crate) fn delete_scope_rows(
 ) -> rusqlite::Result<usize> {
     let sql = effect_sql(schema);
     let deleted = tx.execute(sql.replay.delete_by_scope.sql(), params![scope_id])?;
+    // Membership before the group rows it keys off (see the session path).
+    tx.execute(sql.group_child.delete_by_scope.sql(), params![scope_id])?;
     tx.execute(sql.group.delete_by_scope.sql(), params![scope_id])?;
     tx.execute(
         wait_sql(schema).shared.delete_by_scope_json.sql(),

@@ -1185,6 +1185,20 @@ CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_session
 CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_scope
     ON runtime_effect_group(scope_id);
 
+-- One row per accepted child of a group, carrying the request that
+-- reconstructs it (ADR 0099 section 3). Written with the group row in one
+-- transaction, children first (ADR 0065 N2), so a recorded group always has
+-- discoverable complete input. No scope_id: the group row owns that fact.
+CREATE TABLE IF NOT EXISTS runtime_effect_group_child (
+    group_key        TEXT NOT NULL,
+    position         INTEGER NOT NULL,
+    replay_key       TEXT NOT NULL,
+    envelope_json    TEXT NOT NULL,
+    request_version  INTEGER NOT NULL,
+    created_at_ms    INTEGER NOT NULL,
+    PRIMARY KEY (group_key, position)
+);
+
 -- The await-event tables this database shares with durable core and the
 -- scope-retirement fence it shares with the process registry are applied
 -- from the shared AWAIT_EVENT_TABLES and SCOPE_RETIREMENT_TABLE fragments.
@@ -1287,7 +1301,7 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// Version 26 (FIG-3376) moves the `SessionCreateRequest` carried in effect
 /// payloads to the spawn-time plugin-init cutover and drops `usage_source`;
 /// a pre-26 journal is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 26;
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 27;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

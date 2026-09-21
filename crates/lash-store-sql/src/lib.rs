@@ -112,6 +112,7 @@ pub const TABLES: &[&str] = &[
     attachment::manifest::TABLE,
     effect::replay::TABLE,
     effect::group::TABLE,
+    effect::group_child::TABLE,
     effect::scope_retirement::TABLE,
     process::artifact_cleanup::TABLE,
     process::change_clock::TABLE,

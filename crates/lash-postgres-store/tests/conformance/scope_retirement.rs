@@ -218,6 +218,19 @@ lash_conformance::effect_group_quiescent_retirement_tests!({
                 count("SELECT COUNT(*) FROM lash_runtime_effect_group WHERE scope_id = $1").await,
                 0
             );
+            // The accepted membership retires with the group rows it keys off:
+            // a row that outlived them would name environment bytes the
+            // severing is about to reclaim (ADR 0099 section 3).
+            assert_eq!(
+                count(
+                    "SELECT COUNT(*) FROM lash_runtime_effect_group_child
+                     WHERE group_key IN (
+                         SELECT group_key FROM lash_runtime_effect_group WHERE scope_id = $1
+                     )"
+                )
+                .await,
+                0
+            );
             assert_eq!(
                 count("SELECT COUNT(*) FROM lash_effect_scope_retirements WHERE scope_id = $1")
                     .await,

@@ -523,6 +523,20 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group (
 
 
 --
+-- Name: lash_runtime_effect_group_child; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group_child (
+    group_key text NOT NULL,
+    "position" bigint NOT NULL,
+    replay_key text NOT NULL,
+    envelope_json text NOT NULL,
+    request_version bigint NOT NULL,
+    created_at_ms bigint NOT NULL
+);
+
+
+--
 -- Name: lash_runtime_effect_replay; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1122,6 +1136,12 @@ INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-de
 
 
 --
+-- Data for Name: lash_runtime_effect_group_child; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_runtime_effect_replay; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1141,7 +1161,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 106);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 107);
 
 
 --
@@ -1580,6 +1600,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_items
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_release_stamp
     ADD CONSTRAINT lash_release_stamp_pkey PRIMARY KEY (singleton);
+
+
+--
+-- Name: lash_runtime_effect_group_child lash_runtime_effect_group_child_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_group_child
+    ADD CONSTRAINT lash_runtime_effect_group_child_pkey PRIMARY KEY (group_key, "position");
 
 
 --

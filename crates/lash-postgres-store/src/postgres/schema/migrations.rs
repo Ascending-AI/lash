@@ -14,8 +14,12 @@ use super::*;
 /// creation-request cutover (FIG-3376), which moved the session-node body and
 /// payload generations without touching the relational DDL. A component-101
 /// or -102 catalog simply lacks those additions rather than contradicts them.
-/// Component 105 is therefore retained as the refusal-only endpoint and no
-/// row targets component 106.
+/// Component 107 adds `lash_runtime_effect_group_child`, the retained accepted
+/// membership of an effect group (ADR 0099 §3, FIG-3408) — the first component
+/// past 105 to move relational DDL, so the endpoint moves with it and every row
+/// now targets 107. A pre-107 catalog lacks that table rather than contradicting
+/// it, which is why it joins the source-missing lists: the fixture rebuilds an
+/// older published catalog by removing what was introduced above its floor.
 ///
 /// Component 102's child table is why the cutover is a refusal rather than a
 /// creation migration: a component-101 store recorded the evidence as two
@@ -26,11 +30,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
         from: 101,
-        to: 105,
+        to: 107,
         // The lists are keyed to the floor, not to one generation: a relation
         // or column introduced after 105 belongs here too, so the fixture
         // rebuilds the published component-101 catalog by removing them.
-        source_missing_tables: &["lash_turn_cancel_affected_inputs"],
+        source_missing_tables: &[
+            "lash_turn_cancel_affected_inputs",
+            "lash_runtime_effect_group_child",
+        ],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -45,8 +52,8 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 105,
-        source_missing_tables: &[],
+        to: 107,
+        source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -60,8 +67,8 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 105,
-        source_missing_tables: &[],
+        to: 107,
+        source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -70,19 +77,44 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_relations: &[],
         statements: &[],
     },
-    // The immediate predecessor of the retained generation: component 104 to
-    // 105 added the owner columns, which this catalog models, so a
-    // component-104 catalog lacks exactly those columns.
+    // Component 104 to 107: 105 added the owner columns, which this catalog
+    // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 105,
-        source_missing_tables: &[],
+        to: 107,
+        source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
         ],
         source_missing_guards: &[],
         introduced_relations: &[],
+        statements: &[],
+    },
+    // Component 105 to 107: 106 moved no relational DDL, so a component-105
+    // catalog differs from the endpoint by the membership table alone.
+    SchemaMigration {
+        from: 105,
+        to: 107,
+        source_missing_tables: &["lash_runtime_effect_group_child"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
+    },
+    // The immediate predecessor of the retained generation. Component 106 was
+    // the creation-request cutover, which moved payload generations without
+    // touching the relational DDL, so a component-106 catalog is the endpoint
+    // minus exactly the table component 107 adds.
+    SchemaMigration {
+        from: 106,
+        to: 107,
+        source_missing_tables: &["lash_runtime_effect_group_child"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        // The relation this generation creates, which the divergence refusal
+        // over a component-106 catalog enumerates by name.
+        introduced_relations: &["lash_runtime_effect_group_child"],
         statements: &[],
     },
 ];

@@ -398,7 +398,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // process rows, trigger targets, and effect payloads to the spawn-time
 // plugin-init cutover and drops `usage_source`. Component-105 catalogs are
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 106;
+const SCHEMA_VERSION: i32 = 107;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
