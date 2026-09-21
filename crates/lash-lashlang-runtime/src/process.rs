@@ -372,7 +372,10 @@ pub async fn run_lashlang_process(
     // The opener, not the name: a process re-registered under the same name is
     // a different opener and must never mint identities the predecessor used
     // (ADR 0099 §1).
-    let opener = crate::LashlangHostAuthority::process(process_id.clone(), context.incarnation());
+    let identities = crate::LashlangHostIdentities::process_body(lash_core::ProcessRef::new(
+        process_id.clone(),
+        context.incarnation(),
+    ));
     let session_id = process_trace_session_id(&context.registration().provenance.originator);
     let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
         engine.execution_sink.clone(),
@@ -419,7 +422,7 @@ pub async fn run_lashlang_process(
         artifact_store: engine.artifact_store(),
         processes,
         process_id: process_id.clone(),
-        identities: crate::LashlangHostIdentities::new(opener),
+        identities,
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         ordinals,
         child_max_attempts,

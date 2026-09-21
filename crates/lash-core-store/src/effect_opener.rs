@@ -108,6 +108,23 @@ impl EffectOpener {
     /// Tagged because the arms can otherwise spell each other (see the module
     /// documentation). Nothing parses this back into an `EffectOpener`; the
     /// value is the identity and this is a projection of it.
+    ///
+    /// # Why the separator is `:` and not `#`
+    ///
+    /// A rendered opener is embedded in identities that are themselves
+    /// embedded in identities. The Lashlang host bridges mint a tool-call id
+    /// under the opener (FIG-3394), and the subagent spawn tool then builds a
+    /// child's `SessionId` and `ProcessId` out of that call id verbatim
+    /// (`crates/lash-subagents/src/rlm.rs`). `#` and `/` are both reserved
+    /// there: `invalid_process_key_reason`
+    /// (`crates/lash-core-store/src/store/process_key.rs`) refuses any process
+    /// id containing `#` as a "reserved segment separator", and ADR 0094's
+    /// `ParentScope::from_storage`
+    /// (`crates/lash-core-execution/src/runtime/process/model/lifecycle.rs`)
+    /// splits a stored turn scope on `/` and a stored process scope on `#`.
+    /// A `#` here therefore does not misparse — it makes the child process
+    /// unregistrable, which surfaces as the parent turn never finishing.
+    /// Measured: it turned every subagent spawn into `Stopped(MaxTurns)`.
     #[must_use]
     pub fn render(&self) -> String {
         match self {
@@ -116,7 +133,7 @@ impl EffectOpener {
                 turn_id,
             } => format!("turn:{session_id}:{turn_id}"),
             Self::Process { process_ref } => format!(
-                "process:{}#{}",
+                "process:{}:incarnation:{}",
                 process_ref.process_id, process_ref.incarnation
             ),
         }
@@ -155,6 +172,31 @@ mod tests {
         let real = process_opener("indexer", 1);
         assert_ne!(masquerading, real);
         assert_ne!(masquerading.render(), real.render());
+    }
+
+    /// A rendered opener introduces neither reserved separator.
+    ///
+    /// `#` and `/` both carve stored ids apart (see [`EffectOpener::render`]),
+    /// and a rendering that introduced one would make every identity built on
+    /// top of it unusable as a process id. Asserted for ids that carry
+    /// neither, so the rendering is what is being tested rather than the
+    /// caller's input.
+    #[test]
+    fn a_rendered_opener_introduces_no_reserved_separator() {
+        for opener in [
+            EffectOpener::turn("session-1", "turn-7"),
+            process_opener("indexer", 3),
+        ] {
+            let rendered = opener.render();
+            assert!(
+                !rendered.contains('#'),
+                "`#` is refused inside a process id: {rendered}"
+            );
+            assert!(
+                !rendered.contains('/'),
+                "`/` splits a stored turn parent scope: {rendered}"
+            );
+        }
     }
 
     /// Kind-tagged on the wire, so a decoded opener cannot change arm.

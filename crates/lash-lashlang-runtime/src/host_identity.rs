@@ -8,85 +8,103 @@
 //! while the cell host scoped on the effect address it ran under *only when a
 //! leaf carried a call site* and fell back to the bare session id otherwise, so
 //! two cells of one session minted the same identity for their first unsited
-//! call. Keeping the rendering in one place is what makes the authority an
+//! call. Keeping the rendering in one place is what makes the opener an
 //! argument instead of a property of whichever host happened to build the
 //! string.
-//!
-//! The authority stays an explicit choice rather than a derived one: a turn's
-//! cell and a process body are different openers, and an identity minted under
-//! one must never be reachable from the other even when the same module runs
-//! both ways.
 
-use lash_core::{ProcessId, ProcessRef};
+use lash_core::{EffectOpener, ExecutionScope, ProcessRef};
 use lashlang::LashlangExecutionCallSite;
 
-/// The logical opener whose keys a Lashlang host is minting.
+/// A scope that names no opener this contract can express.
 ///
-/// ADR 0099 §1: an opener is a turn or a **process incarnation**, its identity
-/// is stable across worker attempts and segments, and it changes on process
-/// re-registration. Nothing below may be derived from a worker attempt, a lease
-/// or a segment.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LashlangHostAuthority {
-    /// A cell running inside a turn.
-    ///
-    /// The scope is the effect address the cell runs under, whose graph key
-    /// renders the turn opener — `"kind":"turn"` with the session id and the
-    /// turn's execution id — together with the cell's own replay key. It is
-    /// therefore already a binding of the opener and then some: two cells of
-    /// one turn are separated, and no two turns can alias. A cell that runs
-    /// outside an effect falls back to the session id, which the caller
-    /// resolves because only it can see its own invocation.
-    Turn(String),
-    /// A logical process incarnation, as `ProcessRef` pins it: a reusable
-    /// process *name* bound to one store-minted incarnation.
-    ///
-    /// The name alone is not the opener. `ExecutionScope::Process` carries only
-    /// `process_id` (crates/lash-sansio/src/effect_identity.rs), so a process
-    /// re-registered under the same name would mint the identities its
-    /// predecessor already used and alias a prior group, close or cancel fence
-    /// — which is exactly what ADR 0099 §1 refuses. The incarnation is bound
-    /// here, rendered the way ADR 0094 renders a process parent scope.
-    Process(ProcessRef),
+/// ADR 0099 §1 knows two openers, a turn and a process incarnation, and
+/// `ExecutionScope` has three more kinds — `QueueDrain`, `SessionDelete` and
+/// `RuntimeOperation` — which ADR 0094 maps to `ParentScope::Host`. No
+/// Lashlang cell or process body runs under one today, so this is a refusal
+/// rather than a fourth arm: widening the opener is a contract decision, and
+/// inventing a turn id here would hide the site that needed it.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "lashlang execution has no logical opener: {scope_kind} scope names neither a turn nor a process incarnation"
+)]
+pub struct LashlangOpenerError {
+    scope_kind: &'static str,
 }
 
-impl LashlangHostAuthority {
-    /// The process opener, from the name and the incarnation the store minted
-    /// for it.
-    pub fn process(
-        process_id: impl Into<ProcessId>,
-        incarnation: lash_core::ProcessIncarnation,
-    ) -> Self {
-        Self::Process(ProcessRef::new(process_id, incarnation))
-    }
-
-    /// The rendered opener, tagged by kind.
-    ///
-    /// The tag is not decoration: a turn scope is a free-form string (an effect
-    /// graph key, or a host-chosen session id when the cell runs outside an
-    /// effect) and could spell `{process_id}#{incarnation}` exactly. Without
-    /// the tag the two openers would mint one identity, which is the aliasing
-    /// ADR 0099 §1 refuses.
-    fn scope(&self) -> String {
-        match self {
-            Self::Turn(scope) => format!("turn:{scope}"),
-            Self::Process(process_ref) => format!(
-                "process:{}:incarnation:{}",
-                process_ref.process_id, process_ref.incarnation
-            ),
-        }
+/// The opener a scope names, or a refusal.
+///
+/// A process scope cannot answer here: `ExecutionScope::Process` carries the
+/// reusable name and not the store-minted incarnation, so a process body builds
+/// its opener from the incarnation its run was admitted under instead
+/// ([`LashlangHostIdentities::process_body`]).
+pub fn turn_opener_for_scope(scope: &ExecutionScope) -> Result<EffectOpener, LashlangOpenerError> {
+    match scope {
+        ExecutionScope::Turn {
+            session_id,
+            turn_id,
+        } => Ok(EffectOpener::turn(session_id.clone(), turn_id.clone())),
+        ExecutionScope::Process { .. } => Err(LashlangOpenerError {
+            scope_kind: "process",
+        }),
+        ExecutionScope::QueueDrain { .. } => Err(LashlangOpenerError {
+            scope_kind: "queue-drain",
+        }),
+        ExecutionScope::SessionDelete { .. } => Err(LashlangOpenerError {
+            scope_kind: "session-delete",
+        }),
+        ExecutionScope::RuntimeOperation { .. } => Err(LashlangOpenerError {
+            scope_kind: "runtime-operation",
+        }),
     }
 }
 
 /// The identities one Lashlang host mints.
+///
+/// Two facts, and only one of them is the opener. [`EffectOpener`] is the
+/// lifecycle owner (ADR 0099 §1) — a turn, or one process incarnation — and it
+/// is the shared type, never a second spelling of it. `execution` is the part
+/// of the identity the opener is deliberately too coarse to supply: a turn runs
+/// many cells, and two cells of one turn running the same program would
+/// otherwise mint the same leaf ids, because a leaf id is a node id plus an
+/// occurrence counted per VM execution. A process body has no such
+/// subdivision — it is one execution for its whole life, across every segment —
+/// so it carries none, and a segment must never appear here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LashlangHostIdentities {
-    authority: LashlangHostAuthority,
+    opener: EffectOpener,
+    execution: Option<String>,
 }
 
 impl LashlangHostIdentities {
-    pub fn new(authority: LashlangHostAuthority) -> Self {
-        Self { authority }
+    /// The identities one cell of a turn mints.
+    ///
+    /// `execution_key` is the cell's own replay key inside the turn.
+    pub fn cell(opener: EffectOpener, execution_key: impl Into<String>) -> Self {
+        Self {
+            opener,
+            execution: Some(execution_key.into()),
+        }
+    }
+
+    /// The identities one process body mints, for the whole life of the
+    /// incarnation.
+    pub fn process_body(process_ref: ProcessRef) -> Self {
+        Self {
+            opener: EffectOpener::process(process_ref),
+            execution: None,
+        }
+    }
+
+    /// The opener every identity below binds.
+    pub fn opener(&self) -> &EffectOpener {
+        &self.opener
+    }
+
+    fn scope(&self) -> String {
+        match &self.execution {
+            Some(execution) => format!("{}:{execution}", self.opener.render()),
+            None => self.opener.render(),
+        }
     }
 
     /// The identity of one call the program made on its own.
@@ -104,7 +122,7 @@ impl LashlangHostIdentities {
     pub fn leaf(&self, host_operation: &str, call_site: &LashlangExecutionCallSite) -> String {
         format!(
             "lashlang:{}:resource:{host_operation}:{}:{}",
-            self.authority.scope(),
+            self.scope(),
             call_site.site.node_id,
             call_site.occurrence
         )
@@ -132,6 +150,7 @@ impl LashlangHostIdentities {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::ProcessIncarnation;
     use lashlang::{LashlangExecutionSite, WorkflowExecutionSite};
 
     fn call_site(node_id: &str, occurrence: u64) -> LashlangExecutionCallSite {
@@ -153,9 +172,9 @@ mod tests {
     }
 
     fn process_opener(name: &str, incarnation: u64) -> LashlangHostIdentities {
-        LashlangHostIdentities::new(LashlangHostAuthority::process(
+        LashlangHostIdentities::process_body(ProcessRef::new(
             name,
-            lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
+            ProcessIncarnation::from_registration_sequence(incarnation),
         ))
     }
 
@@ -188,12 +207,19 @@ mod tests {
                 .contains("process:worker:incarnation:1"),
             "the incarnation is bound, not merely mixed in"
         );
-        assert!(
-            !first.leaf("tool:send", &site).contains('#'),
-            "`#` is ADR 0094's process parent-scope separator; a minted \
-             identity that carries one is ambiguous with it, and the subagent \
-             spawn tool embeds this id verbatim in a child ProcessId"
-        );
+    }
+
+    /// A minted identity must carry neither reserved separator.
+    ///
+    /// `#` is refused outright inside a process id
+    /// (`invalid_process_key_reason`), and the subagent spawn tool builds a
+    /// child `ProcessId` out of one of these call ids verbatim, so a `#` here
+    /// makes the child unregistrable rather than merely ugly.
+    #[test]
+    fn a_minted_identity_carries_no_reserved_separator() {
+        let minted = process_opener("worker", 1).leaf("tool:send", &call_site("node:aaaa", 1));
+        assert!(!minted.contains('#'), "{minted}");
+        assert!(!minted.contains('/'), "{minted}");
     }
 
     /// A turn cell and a process body that run the same program are different
@@ -201,12 +227,47 @@ mod tests {
     #[test]
     fn a_turn_and_a_process_never_share_an_identity() {
         let site = call_site("resource_operation:aaaa", 1);
-        let turn = LashlangHostIdentities::new(LashlangHostAuthority::Turn("worker#1".to_string()));
+        let turn = LashlangHostIdentities::cell(
+            EffectOpener::turn("process:worker:incarnation:1", "t"),
+            "exec-code:1",
+        );
 
         assert_ne!(
             turn.leaf("tool:send", &site),
             process_opener("worker", 1).leaf("tool:send", &site),
-            "a turn scope that spells a process opener must still not collide with it"
+            "a turn whose ids spell a process opener must still not collide with it"
+        );
+    }
+
+    /// The defect the cell key exists to prevent: one turn, two cells, one
+    /// program.
+    ///
+    /// A leaf id is a node id plus an occurrence counted per VM execution, and
+    /// each cell gets a fresh VM, so two cells of one turn running the same
+    /// source produce the same node id at the same occurrence. The opener is
+    /// the same for both — it is the turn — so without the cell's own
+    /// execution key the two mint one identity.
+    #[test]
+    fn two_cells_of_one_turn_running_one_program_mint_distinct_identities() {
+        let site = call_site("resource_operation:aaaa", 1);
+        let opener = EffectOpener::turn("session-1", "turn-7");
+        let first = LashlangHostIdentities::cell(opener.clone(), "exec-code:1");
+        let second = LashlangHostIdentities::cell(opener.clone(), "exec-code:2");
+
+        assert_eq!(
+            first.opener(),
+            second.opener(),
+            "both cells belong to one opener; that is the point"
+        );
+        assert_ne!(
+            first.leaf("tool:send", &site),
+            second.leaf("tool:send", &site),
+            "two cells of one turn must not mint one leaf identity"
+        );
+        assert_ne!(
+            first.child("tool:send", &site, 0),
+            second.child("tool:send", &site, 0),
+            "two cells of one turn must not mint one child identity"
         );
     }
 
