@@ -524,6 +524,10 @@ fn opener_dispatch(
 
 /// One child envelope: a `ToolInvocation` command whose request reconstructs
 /// the child from the journal alone.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn child_envelope(
     scope: &crate::ExecutionScope,
     group_key: &str,
@@ -547,6 +551,10 @@ fn child_envelope(
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the request's fields are the leaf's parameters; a struct would only rename the list"
 )]
 fn leaf_request(
     scope: &crate::ExecutionScope,
@@ -733,6 +741,10 @@ async fn scenario(
 /// The parent invocation the children's recorded identities derive from — the
 /// cell invocation a real batch would carry, built the way production mints
 /// one rather than spelled as a string.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn parent_invocation(scope: &crate::ExecutionScope) -> crate::RuntimeInvocation {
     crate::RuntimeInvocation::effect(
         crate::EffectAddress::new(scope.clone(), "law:batch-cell")
@@ -744,8 +756,8 @@ fn parent_invocation(scope: &crate::ExecutionScope) -> crate::RuntimeInvocation 
 
 /// The full-lane group: seven children, one per driver lane.
 #[expect(
-    clippy::too_many_arguments,
-    reason = "the scenario's parts are the law's parts; a struct would only rename the list"
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
 )]
 fn lane_group(
     scope: &crate::ExecutionScope,
@@ -1089,6 +1101,10 @@ pub async fn tool_children_run_through_the_invocation_driver(
 
 /// A single-child group: the recovery leaf alone, parked on its deferred
 /// completion key.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn recovery_group(
     scope: &crate::ExecutionScope,
     session_id: &crate::SessionId,
@@ -1171,6 +1187,10 @@ where
 /// probe host rather than sleeping a guessed interval. The probe's resolver is
 /// wired but its opener is absent, so a probe pass answers `NoExecutor` and
 /// writes nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn until_claims_lapse(world: &ToolChildWorld, group_key: &str) {
     let drain = world
         .drain

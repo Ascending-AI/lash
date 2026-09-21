@@ -65,9 +65,23 @@ impl RuntimeTurnDriver<'_> {
         cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
-        let result = self
-            .run_effect_loop(messages, event_tx, cancel, run_offset)
-            .await;
+        // Erased to `dyn` deliberately: the registration this driver holds makes
+        // `run`'s state one subtree deeper, and a caller that spawns a whole
+        // queued-work drain (slack-clone's webhook does) hits the trait
+        // solver's recursion limit proving the composite future `Send`. A
+        // `Pin<Box<dyn ..>>` field is a leaf in that proof, so the effect
+        // loop's interior no longer rides on every outer frame.
+        let result = {
+            let effect_loop: std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(crate::MessageSequence, usize), RuntimeError>,
+                        > + Send
+                        + '_,
+                >,
+            > = Box::pin(self.run_effect_loop(messages, event_tx, cancel, run_offset));
+            effect_loop.await
+        };
         self.live_opener.lock_recover().take();
         result
     }

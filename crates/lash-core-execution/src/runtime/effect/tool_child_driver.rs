@@ -221,7 +221,16 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
                 "the tool-child driver was handed an envelope that is not a tool invocation",
             ));
         };
-        run_tool_child(&self.host, &self.live, &request, CancellationToken::new()).await
+        // Boxed: the driver future carries the whole dispatch, and a group
+        // child is spawned per member — 21 kB of stack per pending child is a
+        // real cost, not a lint's taste.
+        Box::pin(run_tool_child(
+            &self.host,
+            &self.live,
+            &request,
+            CancellationToken::new(),
+        ))
+        .await
     }
 }
 
@@ -360,7 +369,9 @@ pub(crate) async fn run_tool_child(
         &usage_ledger,
     ));
 
-    let mut outcome = drive(&dispatch, request, cancel).await?;
+    // Boxed for the same reason the runner's call is: `drive` holds the
+    // coordinator and its attempt machinery live across every await.
+    let mut outcome = Box::pin(drive(&dispatch, request, cancel)).await?;
     // Realized intent evidence moves into the settlement, where the opener
     // incorporates it as evidence. The journaled terminal keeps the record and
     // the declarations; the outcomes belong to the settlement channel.
