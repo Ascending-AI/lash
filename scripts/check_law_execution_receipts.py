@@ -516,20 +516,21 @@ def deferred_manifest() -> list[dict[str, str]]:
     return list(data.get("deferred", []))
 
 
-def manifest_check(errors: list[str]) -> set[tuple[str, str, str]]:
+def manifest_check(errors: list[str]) -> dict[tuple[str, str, str], Invocation]:
     """Both directions of the deferred-law contract, always on.
 
-    Returns the manifest's ``(file, claimant, suite)`` set for the callers to
-    match ignored invocations against.  Every entry must name a real ignored
-    invocation: the entry's crate is walked and an ignored ``*_tests!(`` with
-    the entry's claimant and suite must exist at the named file.
+    Returns ``(file, claimant, suite)`` -> the real ignored invocation each
+    manifest entry names, for callers to match ignored invocations against
+    and for ``--deferred`` to census the invocation at its true file and
+    line.  Every entry must name a real ignored invocation: the entry's
+    crate is walked and an ignored ``*_tests!(`` with the entry's claimant
+    and suite must exist at the named file.
     """
     entries = deferred_manifest()
-    manifest_set: set[tuple[str, str, str]] = set()
+    matched: dict[tuple[str, str, str], Invocation] = {}
     crate_invocations: dict[Path, list[Invocation]] = {}
     for entry in entries:
         key = (entry.get("file", ""), entry.get("claimant", ""), entry.get("suite", ""))
-        manifest_set.add(key)
         rel = Path(entry.get("file", ""))
         file = ROOT / rel
         if not file.is_file():
@@ -543,24 +544,30 @@ def manifest_check(errors: list[str]) -> set[tuple[str, str, str]]:
             crate = crate.parent
         if crate not in crate_invocations:
             crate_invocations[crate] = invocations_in_crate(crate)
-        match = any(
-            inv.ignored
-            and inv.claimant == entry.get("claimant")
-            and inv.suite == entry.get("suite")
-            and inv.file == file.resolve()
-            for inv in crate_invocations[crate]
+        match = next(
+            (
+                inv
+                for inv in crate_invocations[crate]
+                if inv.ignored
+                and inv.claimant == entry.get("claimant")
+                and inv.suite == entry.get("suite")
+                and inv.file == file.resolve()
+            ),
+            None,
         )
-        if not match:
+        if match is None:
             errors.append(
                 f"deferred-law manifest entry {key} names no real "
                 "#[ignore]d invocation -- stale entry"
             )
-    return manifest_set
+        else:
+            matched[key] = match
+    return matched
 
 
 def check_ignored(
     invocations: list[Invocation],
-    manifest_set: set[tuple[str, str, str]],
+    manifest_set: dict[tuple[str, str, str], Invocation],
     errors: list[str],
 ) -> None:
     """Every ignored invocation in claimed sources must be manifest-named."""
@@ -575,6 +582,43 @@ def check_ignored(
                 "scripts/deferred-law-invocations.toml -- a deferred law "
                 "needs a manifest entry naming the recipe that runs it"
             )
+
+
+def deferred_invocations(
+    recipe: str,
+    manifest_index: dict[tuple[str, str, str], Invocation],
+) -> tuple[list[Invocation], str | None]:
+    """The live expectation a ``--deferred <recipe>`` claim asserts.
+
+    Each manifest entry resolves to the real ignored invocation
+    ``manifest_check`` already matched -- its true file and line, not a
+    synthetic ``line=0``, so two entries sharing a file and claimant stay
+    two distinct obligations instead of deduping to the first.
+    """
+    entries = [e for e in deferred_manifest() if e.get("recipe") == recipe]
+    if not entries:
+        return [], f"deferred recipe `{recipe}` has no manifest entries"
+    invocations: list[Invocation] = []
+    for entry in entries:
+        key = (
+            entry.get("file", ""),
+            entry.get("claimant", ""),
+            entry.get("suite", ""),
+        )
+        inv = manifest_index.get(key)
+        if inv is None:
+            # manifest_check already reported the stale entry.
+            continue
+        invocations.append(
+            Invocation(
+                claimant=inv.claimant,
+                suite=inv.suite,
+                ignored=False,
+                file=inv.file,
+                line=inv.line,
+            )
+        )
+    return invocations, None
 
 
 def expected_from_invocations(
@@ -684,7 +728,7 @@ def census_testlogs(
     testlogs_dir: Path,
     batches: dict[str, list[str]],
     macros: dict[str, Macro],
-    manifest_set: set[tuple[str, str, str]],
+    manifest_set: dict[tuple[str, str, str], Invocation],
 ) -> tuple[list[str], int]:
     """The per-target census over one Bazel testlogs tree.
 
@@ -822,20 +866,10 @@ def main() -> int:
                 for prefix, root_file in resolve_bazel_label(crate_root, target):
                     invocations.extend(invocations_in_root(root_file, prefix))
     for recipe in args.deferred:
-        entries = [e for e in deferred_manifest() if e.get("recipe") == recipe]
-        if not entries:
-            errors.append(f"deferred recipe `{recipe}` has no manifest entries")
-        for entry in entries:
-            suite = entry.get("suite", "")
-            invocations.append(
-                Invocation(
-                    claimant=entry.get("claimant", ""),
-                    suite=suite,
-                    ignored=False,
-                    file=ROOT / entry.get("file", ""),
-                    line=0,
-                )
-            )
+        deferred, deferred_error = deferred_invocations(recipe, manifest_set)
+        if deferred_error is not None:
+            errors.append(deferred_error)
+        invocations.extend(deferred)
 
     check_ignored(invocations, manifest_set, errors)
     expected = expected_from_invocations(invocations, macros)

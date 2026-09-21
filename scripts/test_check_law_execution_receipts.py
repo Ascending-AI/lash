@@ -397,6 +397,93 @@ class BazelBatchCensusTests(unittest.TestCase):
         )
 
 
+class DeferredCensusTests(unittest.TestCase):
+    """``--deferred`` must owe every manifest suite, not just the first.
+
+    Two manifest entries sharing one file and claimant must stay two
+    distinct expectations: the deferred claim resolves each entry to its
+    real ignored invocation (true file and line), so receipt-covering both
+    passes and covering only one fails naming the other's laws.
+    """
+
+    MACROS = """\
+macro_rules! suite_a_tests {
+    ($fixture:block) => {};
+    (@catalogue $fixture:block) => { [(law_a1, "a1"), (law_a2, "a2")] };
+}
+macro_rules! suite_b_tests {
+    ($fixture:block) => {};
+    (@catalogue $fixture:block) => { [(law_b1, "b1")] };
+}
+"""
+
+    def setUp(self) -> None:
+        self.macros = MODULE.macro_blocks(self.MACROS)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._old_root = MODULE.ROOT
+        self._old_manifest = MODULE.DEFERRED_MANIFEST
+        MODULE.ROOT = self.root
+        crate = self.root / "crates" / "fakepkg"
+        (crate / "src").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(
+            '[package]\nname = "fakepkg"\n', encoding="utf-8"
+        )
+        (crate / "src" / "lib.rs").write_text(
+            'suite_a_tests!(#[ignore = "deferred"] { f });\n'
+            'suite_b_tests!(#[ignore = "deferred"] { f });\n',
+            encoding="utf-8",
+        )
+        MODULE.DEFERRED_MANIFEST = self.root / "deferred.toml"
+        MODULE.DEFERRED_MANIFEST.write_text(
+            """\
+[[deferred]]
+file = "crates/fakepkg/src/lib.rs"
+claimant = "fakepkg"
+suite = "suite_a_tests"
+recipe = "deferred-e2e"
+
+[[deferred]]
+file = "crates/fakepkg/src/lib.rs"
+claimant = "fakepkg"
+suite = "suite_b_tests"
+recipe = "deferred-e2e"
+""",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        MODULE.ROOT = self._old_root
+        MODULE.DEFERRED_MANIFEST = self._old_manifest
+        self._tmp.cleanup()
+
+    def deferred_expected(self) -> dict[str, Counter]:
+        errors: list[str] = []
+        index = MODULE.manifest_check(errors)
+        self.assertEqual(errors, [])
+        invocations, error = MODULE.deferred_invocations("deferred-e2e", index)
+        self.assertIsNone(error)
+        return MODULE.expected_from_invocations(invocations, self.macros)
+
+    def test_receipts_for_both_suites_pass(self) -> None:
+        expected = self.deferred_expected()
+        observed = {
+            "fakepkg": Counter(
+                {("law_a1", "a1"): 1, ("law_a2", "a2"): 1, ("law_b1", "b1"): 1}
+            )
+        }
+        self.assertEqual(MODULE.census_compare(expected, observed, ""), [])
+
+    def test_receipts_for_one_suite_fail_naming_the_other(self) -> None:
+        expected = self.deferred_expected()
+        observed = {"fakepkg": Counter({("law_a1", "a1"): 1, ("law_a2", "a2"): 1})}
+        errors = MODULE.census_compare(expected, observed, "")
+        self.assertTrue(
+            any("law_b1" in error and "fakepkg" in error for error in errors),
+            f"the second suite's laws must be owed under the claimant: {errors}",
+        )
+
+
 class RealTreeTests(unittest.TestCase):
     """The real macros.rs keeps its delegation invariants under the census."""
 
@@ -437,6 +524,42 @@ class RealTreeTests(unittest.TestCase):
             manifest_set,
         )
 
+    def test_the_real_deferred_recipe_owes_all_three_suites(self) -> None:
+        """A receipts file covering all three manifest suites passes, and
+        dropping one suite's rows fails naming that suite's laws -- the
+        entries share one file and claimant, so this pins the deferred
+        claim resolving each entry to its own real invocation."""
+        macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
+        errors: list[str] = []
+        index = MODULE.manifest_check(errors)
+        self.assertEqual(errors, [])
+        invocations, error = MODULE.deferred_invocations(
+            "effect-group-conformance-e2e", index
+        )
+        self.assertIsNone(error)
+        self.assertEqual(len(invocations), 3)
+        expected = MODULE.expected_from_invocations(invocations, macros)
+        observed: dict[str, Counter] = {
+            claimant: Counter(pairs) for claimant, pairs in expected.items()
+        }
+        self.assertEqual(MODULE.census_compare(expected, observed, ""), [])
+        dropped_suite = "effect_host_await_event_witness_tests"
+        dropped = MODULE.suite_expected(macros, dropped_suite)
+        self.assertTrue(dropped)
+        claimant = "lash_restate::tests::conformance_and_poison"
+        for pair in dropped:
+            del observed[claimant][pair]
+        census_errors = MODULE.census_compare(expected, observed, "")
+        self.assertTrue(
+            any(
+                pair[0] in error and claimant in error
+                for pair in dropped
+                for error in census_errors
+            ),
+            f"dropping {dropped_suite} rows must fail naming its laws: "
+            f"{census_errors}",
+        )
+
 
 def recipe_block(justfile: str, recipe: str) -> str:
     match = re.search(rf"^{re.escape(recipe)}:\n(?P<body>(?:  .*\n|\n)*)", justfile, re.MULTILINE)
@@ -469,9 +592,14 @@ class DeferredWiringTests(unittest.TestCase):
                 recipe = entry["recipe"]
                 body = recipe_block(self.justfile, recipe)
                 artifact_dir = str(Path(entry["receipt_artifact"]).parent)
-                # The recipe exports LASH_LAW_RECEIPTS under the artifact dir.
+                # The recipe exports LASH_LAW_RECEIPTS under the artifact dir,
+                # anchored at the repo root: the test binaries run with the
+                # crate dir as cwd, so a relative artifact dir must be
+                # prefixed with {{repo}} or the receipts land under
+                # crates/lash-restate/target/... and the census reads nothing.
                 self.assertIn("export LASH_LAW_RECEIPTS=", body)
                 self.assertIn(artifact_dir, body)
+                self.assertIn('receipts_dir="{{repo}}/', body)
                 # And censuses the deferred laws it ran.
                 self.assertIn("--deferred", body)
                 self.assertIn(recipe, body.split("--deferred", 1)[1])

@@ -187,6 +187,14 @@ effect-group-conformance-e2e:
   # execution receipts like every other suite, and the census below fails the
   # recipe when one left none.
   receipts_dir="${LASH_EFFECT_GROUP_ARTIFACT_DIR:-target/functional-e2e-artifacts/effect-group-conformance}"
+  # The test binaries run with the crate dir as cwd, so a relative artifact
+  # dir (which is what CI exports) must be anchored at the repo root or the
+  # receipts land under crates/lash-restate/target/... and the census reads
+  # an empty file.
+  case "$receipts_dir" in
+    /*) ;;
+    *) receipts_dir="{{repo}}/$receipts_dir" ;;
+  esac
   mkdir -p "$receipts_dir"
   export LASH_LAW_RECEIPTS="$receipts_dir/law-receipts.txt"
   rm -f "$LASH_LAW_RECEIPTS"
