@@ -6,6 +6,8 @@ Accepted. Ratified on FIG-3380, which converts the effect and wait families and
 builds the crate, the renderer, the manifest and the gate the rest of the arc
 (FIG-3379) uses. Amended by FIG-3399, which adds the vocabulary render axis,
 cross-family ownership, and SQL structure to the gate's reading of a literal.
+Amended by FIG-3406, which makes the SQLite schema a property of the table
+under a deployment layout rather than of the statement.
 
 ## Context
 
@@ -97,8 +99,48 @@ and lints that they agree, which is FIG-2815 inverted.
 No path builds a statement per call. Where SQLite reaches a table through more
 than one schema — the journal's own file as `main`, the same file `ATTACH`ed as
 `effect_journal` for the retention sweep, a bound process registry as
-`process_registry` — the statement set is rendered once per schema into a
+`process_registry` — the statement set is rendered once per layout into a
 three-element table and indexed, rather than `format!`ed at the call site.
+
+**On SQLite the schema qualifier is a property of the table, under a
+deployment layout (FIG-3406).** A `Dialect` used to carry one qualifier for a
+whole statement, which made a statement that joins two databases
+unrenderable — and lash has such statements: the attachment manifest lives in
+the session catalog while the `processes` rows that prove a process owner dead
+live in an `ATTACH`ed registry, so the GC's live-root probe and its aged-intent
+forget were still `format!`-built after the rest of their family converted. A
+SQLite dialect now carries a `TableLayout`: an ordered list of the databases a
+connection reaches and the tables each one holds. The renderer resolves every
+table name through it separately, and a table the layout does not place is a
+startup refusal naming the table and the databases the layout does reach.
+
+That refusal is load-bearing rather than defensive. The two operations above
+have two production shapes each — with and without a bound registry — and
+"where a query's shape varies, name a statement per production shape" is
+already this ADR's rule, because `COALESCE(?N, column)` and `?N IS NULL OR …`
+are not sargable. The shape that proves a process owner dead is rendered only
+under the layout that has a registry; the connection that has none cannot
+render it at all, so the two shapes cannot be confused for one parameterised
+statement.
+
+What did **not** survive is the per-statement schema: nothing staples a
+qualifier onto every table any more, and there is exactly one way a table
+acquires one. What remains is rendering **once per layout**, indexed — which
+is the same count of rendered sets as before, for the same reason it existed:
+a SQLite connection reaches the journal's tables through more than one database
+name, and the alternative is building the statement per call. A layout whose
+table list is every table the crate owns is still per-table resolution; it is
+the truth for a deployment whose catalog and journal are one file, and it is
+why the effect and wait families render byte-identically across this change
+(pinned, per statement and per layout, in
+`crates/lash-{sqlite,postgres}-store/src/rendered_sql_pin_tests.rs`).
+
+One table is in two databases at once: `effect_scope_retirements` is carried
+by both the effect journal and a bound process registry, which is ADR 0049's
+design and not an accident. A layout therefore places it in exactly one of
+them, and the registry's copy is reached through a different layout —
+`FenceLocations` already named those two locations and now selects between
+them.
 
 **Every fork is a checked-in declaration.** `crates/lash-store-sql/dialect-only.toml`
 lists each dialect-only statement, the backends that declare it, and why. A

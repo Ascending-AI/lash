@@ -8,9 +8,9 @@
 use std::sync::LazyLock;
 
 use lash_sansio::SessionId;
-use lash_store_sql::Dialect;
 use lash_store_sql::attachment::condemnation::CondemnationStatements;
-use lash_store_sql::attachment::manifest::ManifestStatements;
+use lash_store_sql::attachment::manifest::{ManifestProcessOwnerStatements, ManifestStatements};
+use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
 use crate::*;
 
@@ -83,12 +83,31 @@ lash_store_sql::statements! {
     }
 }
 
+/// The attachment owner classes, spelled once in `lash-core` and named as
+/// tokens by the GC predicates that compare against them.
+const ATTACHMENT_OWNER: Vocabulary = Vocabulary::new(&[
+    VocabularyTerm::new(
+        "turn_attachment_owner",
+        lash_core::store_backend_support::turn_attachment_owner_predicate_sql,
+    ),
+    VocabularyTerm::new(
+        "process_attachment_owner",
+        lash_core::store_backend_support::process_attachment_owner_predicate_sql,
+    ),
+]);
+
 /// Every attachment-family statement, rendered once.
 pub(crate) struct AttachmentSql {
     /// `attachment_manifest` statements both backends issue verbatim.
     pub(crate) manifest: ManifestStatements,
     /// `attachment_manifest` statements only PostgreSQL issues.
     pub(crate) manifest_postgres: ManifestPostgresStatements,
+    /// The GC probes that prove a process owner dead. PostgreSQL keeps the
+    /// process registry in the same database, so there is one dialect here
+    /// and no layout to choose; whether the tier *shares* a registry is still
+    /// a call-site decision, because a deployment that does not cannot prove
+    /// owner death from rows it has no claim on.
+    pub(crate) manifest_process_owner: ManifestProcessOwnerStatements,
     /// `attachment_condemnations` statements both backends issue verbatim.
     pub(crate) condemnation: CondemnationStatements,
     /// `attachment_condemnations` statements only PostgreSQL issues.
@@ -96,10 +115,11 @@ pub(crate) struct AttachmentSql {
 }
 
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
-    let dialect = Dialect::postgres();
+    let dialect = Dialect::postgres().with_vocabulary(ATTACHMENT_OWNER);
     AttachmentSql {
         manifest: ManifestStatements::render(dialect),
         manifest_postgres: ManifestPostgresStatements::render(dialect),
+        manifest_process_owner: ManifestProcessOwnerStatements::render(dialect),
         condemnation: CondemnationStatements::render(dialect),
         condemnation_postgres: CondemnationPostgresStatements::render(dialect),
     }
@@ -110,78 +130,35 @@ pub(crate) fn attachment_sql() -> &'static AttachmentSql {
     &ATTACHMENT_SQL
 }
 
-fn process_owner_death_sql(process_registry_shared: bool) -> String {
+/// The live-root probe this tier may issue, parameterised
+/// `$1 = attachment_id`, `$2 = intent_grace_cutoff_ms`.
+///
+/// The targeted probe and the condemn CAS read the same one so the fence and
+/// the probe cannot drift apart.
+pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> &'static str {
     if process_registry_shared {
-        format!(
-            "OR (
-                manifest.owner_kind = '{}'
-                AND NOT EXISTS (
-                    SELECT 1 FROM lash_processes AS process
-                    WHERE process.process_id = manifest.owner_id
-                      AND process.incarnation = manifest.owner_incarnation
-                )
-            )",
-            AttachmentOwnerKind::Process.as_str()
-        )
+        attachment_sql()
+            .manifest_process_owner
+            .select_live_root_proving_process_death
+            .sql()
     } else {
-        String::new()
+        attachment_sql().manifest.select_live_root.sql()
     }
 }
 
-pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> String {
-    let process_dead = process_owner_death_sql(process_registry_shared);
-    format!(
-        "SELECT 1 FROM lash_attachment_manifest AS manifest
-         WHERE manifest.attachment_id = $1
-           AND NOT (
-                manifest.committed_at_ms IS NULL
-                AND manifest.intent_at_ms <= $2
-                AND (
-                    manifest.owner_kind IS NULL
-                    OR EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
-                               WHERE deleted.session_id = manifest.session_id)
-                    OR (
-                        manifest.owner_kind = '{}'
-                        AND EXISTS (
-                            SELECT 1 FROM lash_runtime_turn_commits AS turn_commit
-                            WHERE turn_commit.session_id = manifest.session_id
-                              AND turn_commit.turn_id <> manifest.owner_id
-                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                        )
-                    )
-                    {process_dead}
-                )
-           )
-         LIMIT 1",
-        AttachmentOwnerKind::Turn.as_str()
-    )
-}
-
+/// The aged-intent forget this tier may issue, the negation of
+/// [`live_attachment_ref_sql`] over every digest at once.
 pub(crate) fn forget_aged_uncommitted_attachment_intents_sql(
     process_registry_shared: bool,
-) -> String {
-    let process_dead = process_owner_death_sql(process_registry_shared);
-    format!(
-        "DELETE FROM lash_attachment_manifest AS manifest
-         WHERE manifest.committed_at_ms IS NULL
-           AND manifest.intent_at_ms <= $1
-           AND (
-                manifest.owner_kind IS NULL
-                    OR EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
-                               WHERE deleted.session_id = manifest.session_id)
-                OR (
-                    manifest.owner_kind = '{}'
-                    AND EXISTS (
-                        SELECT 1 FROM lash_runtime_turn_commits AS turn_commit
-                        WHERE turn_commit.session_id = manifest.session_id
-                          AND turn_commit.turn_id <> manifest.owner_id
-                          AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                    )
-                )
-                {process_dead}
-           )",
-        AttachmentOwnerKind::Turn.as_str()
-    )
+) -> &'static str {
+    if process_registry_shared {
+        attachment_sql()
+            .manifest_process_owner
+            .delete_aged_uncommitted_proving_process_death
+            .sql()
+    } else {
+        attachment_sql().manifest.delete_aged_uncommitted.sql()
+    }
 }
 
 /// Advisory-lock namespace for the attachment GC fence. Both halves of the

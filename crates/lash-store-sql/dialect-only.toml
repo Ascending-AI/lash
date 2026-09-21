@@ -20,7 +20,7 @@
 # `converted` is what makes the gate total for what is converted and silent
 # about what is not. FIG-3387 closes it over every family.
 
-converted = ["artifact", "effect", "wait"]
+converted = ["artifact", "attachment", "effect", "wait"]
 
 # Production sources that may name a converted family's tables in SQL although
 # they own no statements. Each one needs a reason; the list is not a place to
@@ -105,6 +105,37 @@ artifact_refs = "crates/lash-store-sql/src/artifact/refs.rs"
 artifact_owners = "crates/lash-store-sql/src/artifact/owners.rs"
 artifact_owner_retirements = "crates/lash-store-sql/src/artifact/owner_retirements.rs"
 
+[families.attachment]
+tables = ["attachment_manifest", "attachment_condemnations"]
+statement_prefixes = ["attachment_manifest", "attachment_condemnation"]
+shared = [
+    "crates/lash-store-sql/src/attachment/manifest.rs",
+    "crates/lash-store-sql/src/attachment/condemnation.rs",
+]
+sqlite = ["crates/lash-sqlite-store/src/attachments.rs"]
+postgres = ["crates/lash-postgres-store/src/postgres/attachments.rs"]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+# `owner_kind` carries `AttachmentOwnerKind`, whose labels are also the SQL
+# literals `ck_attachment_manifest_owner_kind` admits. The GC predicates name
+# them as `{{turn_attachment_owner(…)}}` / `{{process_attachment_owner(…)}}`
+# tokens and the renderer expands them from the enum, so the two labels keep
+# one source the way the process lifecycle ones do (FIG-2815, FIG-2844).
+[families.attachment.vocabulary_columns]
+attachment_manifest = ["owner_kind"]
+
+[families.attachment.table_modules]
+attachment_manifest = "crates/lash-store-sql/src/attachment/manifest.rs"
+attachment_condemnations = "crates/lash-store-sql/src/attachment/condemnation.rs"
+
 [families.effect]
 tables = ["runtime_effect_replay", "runtime_effect_group", "effect_scope_retirements"]
 statement_prefixes = [
@@ -169,6 +200,69 @@ schema = [
 await_event_waits = "crates/lash-store-sql/src/wait/waits.rs"
 await_event_meta = "crates/lash-store-sql/src/wait/meta.rs"
 await_event_revoked_sessions = "crates/lash-store-sql/src/wait/revoked_sessions.rs"
+
+# ---------------------------------------------------------------------------
+# attachment family
+# ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "attachment_manifest.delete_deleted_session_roots"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = """
+graph_nodes.tombstoned is INTEGER 0/1 on SQLite and BOOLEAN on PostgreSQL, so
+the predicate literal forks. The retention rule itself is the same on both:
+owner-level retention deliberately includes suffix attachments, because the
+manifest carries no node edge (FIG-653).
+"""
+
+[[dialect_only]]
+statement = "attachment_manifest.forget_for_session"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = "Same tombstone-literal fork as attachment_manifest.delete_deleted_session_roots."
+
+[[dialect_only]]
+statement = "attachment_manifest.select_uncommitted"
+backends = ["sqlite", "postgres"]
+kind = "result ordering"
+reason = """
+SQLite reports oldest intent first and PostgreSQL reports digest order. Both
+orders are total and neither caller depends on the other's, so the two are
+left exactly as they stand rather than unified inside a refactor. The
+projection itself is one column list, shared.
+"""
+
+[[dialect_only]]
+statement = "attachment_condemnation.select_deleting"
+backends = ["sqlite", "postgres"]
+kind = "scalar versus optional row"
+reason = """
+PostgreSQL wraps the predicate in SELECT EXISTS(…) because its driver reads a
+scalar that is always present; SQLite reads the row's presence instead.
+"""
+
+[[dialect_only]]
+statement = "attachment_condemnation.select_exists"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite reads the absence of a condemnation and inserts under one BEGIN
+IMMEDIATE lock, so this read *is* its contention check. PostgreSQL cannot hold
+that across statements at READ COMMITTED and detects a peer sweeper through the
+insert's ON CONFLICT instead, so it has no counterpart read.
+"""
+
+[[dialect_only]]
+statement = "attachment_condemnation.insert_condemned"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+PostgreSQL's ON CONFLICT DO NOTHING is the fork and the contention check both;
+SQLite has already proven the absence under the write lock this insert commits
+under, so a conflict there is a defect and the constraint error is kept rather
+than swallowed.
+"""
 
 # ---------------------------------------------------------------------------
 # effect family

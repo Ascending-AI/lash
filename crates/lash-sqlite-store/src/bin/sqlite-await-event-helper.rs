@@ -17,12 +17,20 @@ use lash_sqlite_store::{
 };
 use lash_store_sql::wait::waits::WaitStatements;
 
+/// The helper opens one database and reads it as `main`, so every table the
+/// statement below names is in that file.
+const HELPER_LAYOUT: lash_store_sql::TableLayout =
+    lash_store_sql::TableLayout::new(&[lash_store_sql::SchemaTables::new(
+        "main",
+        lash_store_sql::TABLES,
+    )]);
+
 /// The one statement this helper issues, rendered once. The helper observes
 /// the durable row from outside the runtime, so it reads the same named
 /// statement the store does rather than a second spelling of it.
 static WAIT_COUNT_BY_KEY: std::sync::LazyLock<lash_store_sql::Rendered> =
     std::sync::LazyLock::new(|| {
-        WaitStatements::render(lash_store_sql::Dialect::sqlite("main")).count_by_key
+        WaitStatements::render(lash_store_sql::Dialect::sqlite(HELPER_LAYOUT)).count_by_key
     });
 
 #[path = "../../../lash-core/tests/support/cold_process_effect_driver.rs"]

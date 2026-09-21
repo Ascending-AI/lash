@@ -132,6 +132,77 @@ impl fmt::Debug for Vocabulary {
     }
 }
 
+/// One database a deployment reaches, and the tables it holds.
+///
+/// `qualifier` is the name SQL addresses that database by on the connection
+/// being rendered for — `main` for the connection's own file, or the name it
+/// was `ATTACH`ed under. `tables` are the unprefixed table names that database
+/// carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SchemaTables {
+    qualifier: &'static str,
+    tables: &'static [&'static str],
+}
+
+impl SchemaTables {
+    /// Name one database and the tables it holds.
+    #[must_use]
+    pub const fn new(qualifier: &'static str, tables: &'static [&'static str]) -> Self {
+        Self { qualifier, tables }
+    }
+
+    /// The name SQL addresses this database by.
+    #[must_use]
+    pub const fn qualifier(&self) -> &'static str {
+        self.qualifier
+    }
+}
+
+/// Where one deployment layout puts each table a statement can name.
+///
+/// This is what makes the schema a property of the **table** rather than of
+/// the statement (FIG-3406). A SQLite connection can reach two databases at
+/// once — the session catalog as `main` and a bound process registry as
+/// `process_registry` — and a statement that joins them needs a different
+/// qualifier per table, which a single per-statement schema cannot express.
+///
+/// Resolution is by first match, in declaration order. One table really does
+/// live in two databases (`effect_scope_retirements` is carried by both the
+/// effect journal and a bound process registry, ADR 0049); a layout places it
+/// in exactly one of them, and the other copy is reached through a different
+/// layout rather than through a second entry here.
+///
+/// A table no entry places is a render refusal, so a statement a connection
+/// must not issue cannot be rendered for that connection's layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableLayout {
+    schemas: &'static [SchemaTables],
+}
+
+impl TableLayout {
+    /// Declare where each database's tables live, in resolution order.
+    #[must_use]
+    pub const fn new(schemas: &'static [SchemaTables]) -> Self {
+        Self { schemas }
+    }
+
+    /// The qualifier `table` is addressed through, or `None` when this layout
+    /// does not place it.
+    #[must_use]
+    pub fn qualifier_for(&self, table: &str) -> Option<&'static str> {
+        self.schemas
+            .iter()
+            .find(|schema| schema.tables.contains(&table))
+            .map(|schema| schema.qualifier)
+    }
+
+    /// Every database this layout reaches, in declaration order.
+    #[must_use]
+    pub fn qualifiers(&self) -> Vec<&'static str> {
+        self.schemas.iter().map(SchemaTables::qualifier).collect()
+    }
+}
+
 /// How a backend spells a bound parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Placeholder {
@@ -149,32 +220,39 @@ pub struct Dialect {
     placeholder: Placeholder,
     /// Prepended to every table name. `lash_` on PostgreSQL, empty on SQLite.
     table_prefix: &'static str,
-    /// Database qualifier written before the table name, `None` for no
-    /// qualifier. SQLite reaches the same tables through `main` on the
-    /// journal's own connection and through an `ATTACH`ed name from the
-    /// retention sweep, so the qualifier is a render parameter rather than a
-    /// `format!` at every call site.
-    schema: Option<&'static str>,
+    /// Where this deployment puts each table, `None` when no table is
+    /// qualified at all. SQLite reaches the effect journal through `main` on
+    /// its own connection and through an `ATTACH`ed name from the retention
+    /// sweep, and reaches a bound process registry beside either of them, so
+    /// the qualifier is resolved per table from the layout rather than
+    /// `format!`ed at every call site.
+    layout: Option<TableLayout>,
     /// The terms `{{term(column)}}` tokens expand from. Empty until a backend
     /// attaches one, because this crate has no source for the vocabulary.
     vocabulary: Vocabulary,
 }
 
 impl Dialect {
-    /// The SQLite dialect, addressing tables through `schema`.
+    /// The SQLite dialect, addressing each table through the database
+    /// `layout` places it in.
+    ///
+    /// A table the layout does not place is a render refusal
+    /// ([`RenderError::TableNotPlaced`]), which is how a statement that can
+    /// only be issued on a connection with a process registry attached fails
+    /// to render for the layout that has none.
     #[must_use]
-    pub const fn sqlite(schema: &'static str) -> Self {
+    pub const fn sqlite(layout: TableLayout) -> Self {
         Self {
             placeholder: Placeholder::Question,
             table_prefix: "",
-            schema: Some(schema),
+            layout: Some(layout),
             vocabulary: Vocabulary::EMPTY,
         }
     }
 
     /// The SQLite dialect, addressing tables with no schema qualifier.
     ///
-    /// The qualifier exists because the effect journal's tables are reached
+    /// Qualifiers exist because the effect journal's tables are reached
     /// through an `ATTACH`ed name as well as through `main`. A table family
     /// that lives on one connection only — the process registry's own
     /// database — is addressed the way it always has been, unqualified, so
@@ -185,19 +263,20 @@ impl Dialect {
         Self {
             placeholder: Placeholder::Question,
             table_prefix: "",
-            schema: None,
+            layout: None,
             vocabulary: Vocabulary::EMPTY,
         }
     }
 
     /// The PostgreSQL dialect. Tables carry the `lash_` prefix that every
-    /// existing database on this tier was provisioned with.
+    /// existing database on this tier was provisioned with, and there is one
+    /// database, so no table is qualified.
     #[must_use]
     pub const fn postgres() -> Self {
         Self {
             placeholder: Placeholder::Dollar,
             table_prefix: "lash_",
-            schema: None,
+            layout: None,
             vocabulary: Vocabulary::EMPTY,
         }
     }
@@ -241,6 +320,16 @@ pub enum RenderError {
         name: String,
         /// Byte offset of the identifier.
         at: usize,
+    },
+    /// A table this crate owns that the dialect's layout does not place in
+    /// any database the connection reaches.
+    TableNotPlaced {
+        /// The table the statement named.
+        name: String,
+        /// Byte offset of the identifier.
+        at: usize,
+        /// The databases the layout does reach.
+        schemas: Vec<&'static str>,
     },
     /// A `{` or `}` that is not a well-formed `{{term(column)}}` token.
     MalformedVocabularyToken {
@@ -293,6 +382,13 @@ impl fmt::Display for RenderError {
                 "`{name}` at byte {at} is in a table position but is not a table \
                  `lash-store-sql` owns; add it to `TABLES` or spell the statement elsewhere"
             ),
+            Self::TableNotPlaced { name, at, schemas } => write!(
+                f,
+                "`{name}` at byte {at} is not placed by this deployment layout, which reaches \
+                 {schemas:?}. A statement may only name tables the connection it is rendered \
+                 for can reach; if this one belongs to a layout with more databases attached, \
+                 render it for that layout."
+            ),
             Self::MalformedVocabularyToken { at, reason } => write!(
                 f,
                 "byte {at}: {reason}; a vocabulary token is spelled \
@@ -324,9 +420,12 @@ impl std::error::Error for RenderError {}
 ///
 /// `tables` is the set of table names that may appear; every occurrence of one
 /// as a whole token is rewritten, and a table position naming anything else is
-/// refused. `{{term(column)}}` tokens expand from the vocabulary the dialect
-/// carries, once, here — a token inside a string literal or a comment is that
-/// literal's or comment's own text and survives verbatim.
+/// refused. A dialect carrying a [`TableLayout`] resolves each of those names
+/// to the database that layout places it in, so one statement can address two
+/// databases; a table the layout does not place is refused rather than
+/// rendered unqualified. `{{term(column)}}` tokens expand from the vocabulary
+/// the dialect carries, once, here — a token inside a string literal or a
+/// comment is that literal's or comment's own text and survives verbatim.
 ///
 /// # Errors
 ///
@@ -430,7 +529,14 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                 let word = &neutral[start..end];
                 let qualified = start > 0 && bytes[start - 1] == b'.';
                 if !qualified && tables.contains(&word) {
-                    if let Some(schema) = dialect.schema {
+                    if let Some(layout) = dialect.layout {
+                        let Some(schema) = layout.qualifier_for(word) else {
+                            return Err(RenderError::TableNotPlaced {
+                                name: word.to_string(),
+                                at: start,
+                                schemas: layout.qualifiers(),
+                            });
+                        };
                         out.push_str(schema);
                         out.push('.');
                     }

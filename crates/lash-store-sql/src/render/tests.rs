@@ -10,10 +10,33 @@ const TABLES: &[&str] = &[
     "await_event_waits",
     "await_event_waits_archive",
     "runtime_effect_replay",
+    "processes",
 ];
 
+/// Every table in this module's `TABLES`, in the connection's own database:
+/// the layout of a deployment that holds one file.
+const MAIN: TableLayout = TableLayout::new(&[SchemaTables::new("main", TABLES)]);
+
+/// The catalog beside a bound process registry: the two-database layout the
+/// attachment GC's owner-death proof needs.
+const MAIN_BESIDE_REGISTRY: TableLayout = TableLayout::new(&[
+    SchemaTables::new(
+        "main",
+        &[
+            "await_event_waits",
+            "await_event_waits_archive",
+            "runtime_effect_replay",
+        ],
+    ),
+    SchemaTables::new("process_registry", &["processes"]),
+]);
+
+/// The same tables, reached through an `ATTACH`ed journal instead.
+const ATTACHED_JOURNAL: TableLayout =
+    TableLayout::new(&[SchemaTables::new("effect_journal", TABLES)]);
+
 fn sqlite(neutral: &str) -> String {
-    render(neutral, Dialect::sqlite("main"), TABLES).expect("renders")
+    render(neutral, Dialect::sqlite(MAIN), TABLES).expect("renders")
 }
 
 fn postgres(neutral: &str) -> String {
@@ -29,6 +52,14 @@ fn live_status(column: &str) -> String {
 
 fn retired_status(column: &str) -> String {
     format!("{column} NOT IN ('running', 'waiting')")
+}
+
+fn turn_owner(column: &str) -> String {
+    format!("{column} = 'turn'")
+}
+
+fn process_owner(column: &str) -> String {
+    format!("{column} = 'process'")
 }
 
 const VOCABULARY: Vocabulary = Vocabulary::new(&[
@@ -57,7 +88,7 @@ fn a_vocabulary_token_expands_once_for_both_backends() {
     assert_eq!(
         render(
             neutral,
-            Dialect::sqlite("main").with_vocabulary(VOCABULARY),
+            Dialect::sqlite(MAIN).with_vocabulary(VOCABULARY),
             TABLES,
         )
         .expect("renders"),
@@ -352,11 +383,28 @@ fn malformed_neutral_text_is_refused_rather_than_rendered() {
 
 #[test]
 fn every_owned_statement_renders_for_both_backends() {
+    // Over the crate's real table list rather than this module's fixture: a
+    // statement set is only renderable for a layout that places every table
+    // it names, and this self-test asks whether the text is well formed, not
+    // where a deployment puts it.
+    const EVERY_TABLE_IN_MAIN: TableLayout =
+        TableLayout::new(&[SchemaTables::new("main", crate::TABLES)]);
+    const EVERY_TABLE_ATTACHED: TableLayout =
+        TableLayout::new(&[SchemaTables::new("effect_journal", crate::TABLES)]);
+    // Stand-ins for the backends' `AttachmentOwnerKind` expansions, which
+    // live in `lash-core` and cannot be reached from this crate. Both
+    // backends really do register these names; the gate and the
+    // `attachment_owner_sql` unit tests hold the expansions themselves.
+    const OWNER_TERMS: Vocabulary = Vocabulary::new(&[
+        VocabularyTerm::new("turn_attachment_owner", turn_owner),
+        VocabularyTerm::new("process_attachment_owner", process_owner),
+    ]);
+
     for statement in crate::all_statements() {
         for dialect in [
-            Dialect::sqlite("main"),
-            Dialect::sqlite("effect_journal"),
-            Dialect::postgres(),
+            Dialect::sqlite(EVERY_TABLE_IN_MAIN).with_vocabulary(OWNER_TERMS),
+            Dialect::sqlite(EVERY_TABLE_ATTACHED).with_vocabulary(OWNER_TERMS),
+            Dialect::postgres().with_vocabulary(OWNER_TERMS),
         ] {
             statement
                 .render(dialect)
@@ -395,13 +443,142 @@ fn a_statement_heading_update_still_demands_a_table_it_owns() {
     // startup failure it was.
     assert_eq!(
         render(
-            "UPDATE processes SET status = 'running'",
+            "UPDATE session_head SET turn_id = ?1",
             Dialect::postgres(),
             TABLES
         ),
         Err(RenderError::UnknownTable {
-            name: "processes".to_string(),
+            name: "session_head".to_string(),
             at: 7,
         })
+    );
+}
+
+// --- FIG-3406: the schema is a property of the table, under a layout ------
+
+#[test]
+fn one_statement_addresses_two_databases_at_once() {
+    // The attachment GC's shape: the manifest is in the session catalog and
+    // the rows that prove a process owner dead are in an ATTACHed registry.
+    // A dialect carrying one schema for the whole statement cannot spell it.
+    let neutral = "SELECT 1 FROM await_event_waits AS wait
+         WHERE NOT EXISTS (
+             SELECT 1 FROM processes AS process
+             WHERE process.process_id = wait.owner_id
+         )";
+
+    assert_eq!(
+        render(neutral, Dialect::sqlite(MAIN_BESIDE_REGISTRY), TABLES).expect("renders"),
+        "SELECT 1 FROM main.await_event_waits AS wait
+         WHERE NOT EXISTS (
+             SELECT 1 FROM process_registry.processes AS process
+             WHERE process.process_id = wait.owner_id
+         )"
+    );
+    // PostgreSQL holds both in one database, so the same neutral text is one
+    // shared statement: the difference really is a render axis.
+    assert_eq!(
+        postgres(neutral),
+        "SELECT 1 FROM lash_await_event_waits AS wait
+         WHERE NOT EXISTS (
+             SELECT 1 FROM lash_processes AS process
+             WHERE process.process_id = wait.owner_id
+         )"
+    );
+}
+
+#[test]
+fn the_same_table_renders_per_layout_and_identically_within_one() {
+    let neutral = "SELECT key_id FROM await_event_waits WHERE key_id = ?1
+         AND scope_json IN (SELECT scope_json FROM await_event_waits WHERE key_id <> ?1)";
+
+    let main = render(neutral, Dialect::sqlite(MAIN), TABLES).expect("renders");
+    let attached = render(neutral, Dialect::sqlite(ATTACHED_JOURNAL), TABLES).expect("renders");
+
+    // Different per layout …
+    assert!(main.contains("FROM main.await_event_waits"));
+    assert!(attached.contains("FROM effect_journal.await_event_waits"));
+    assert_ne!(main, attached);
+    // … and the same within one: both occurrences of the table in a single
+    // statement resolve through the same layout, so a statement cannot reach
+    // two copies of one table by accident.
+    assert_eq!(main.matches("main.await_event_waits").count(), 2);
+    assert_eq!(
+        attached.matches("effect_journal.await_event_waits").count(),
+        2
+    );
+    assert_eq!(
+        main.replace("main.", "effect_journal."),
+        attached,
+        "a layout changes the database, never the statement"
+    );
+}
+
+#[test]
+fn a_table_the_layout_does_not_place_is_refused() {
+    // The registry is not attached, so this connection cannot see `processes`
+    // at all. Refusing at render time is what keeps the with-registry shape of
+    // a statement from being issued on a connection that has none.
+    const NO_REGISTRY: TableLayout =
+        TableLayout::new(&[SchemaTables::new("main", &["await_event_waits"])]);
+
+    let error = render(
+        "SELECT 1 FROM processes WHERE process_id = ?1",
+        Dialect::sqlite(NO_REGISTRY),
+        TABLES,
+    )
+    .expect_err("the layout places no `processes`");
+
+    assert_eq!(
+        error,
+        RenderError::TableNotPlaced {
+            name: "processes".to_string(),
+            at: 14,
+            schemas: vec!["main"],
+        }
+    );
+    assert!(
+        error.to_string().contains("[\"main\"]"),
+        "the refusal names the databases the layout does reach: {error}"
+    );
+}
+
+#[test]
+fn an_unqualified_sqlite_dialect_places_nothing_and_qualifies_nothing() {
+    // `Dialect::sqlite_unqualified()` keeps its meaning: a family on one
+    // connection addresses its tables the way its INDEXED BY plans were
+    // measured against, and no layout decides anything for it.
+    assert_eq!(
+        render(
+            "SELECT 1 FROM processes WHERE process_id = ?1",
+            Dialect::sqlite_unqualified(),
+            TABLES,
+        )
+        .expect("renders"),
+        "SELECT 1 FROM processes WHERE process_id = ?1"
+    );
+}
+
+#[test]
+fn a_layout_resolves_a_two_database_table_by_declaration_order() {
+    // `effect_scope_retirements` is carried by both the effect journal and a
+    // bound process registry (ADR 0049). A layout places it in exactly one,
+    // and the other copy is a different layout — never a second entry here.
+    const TWO: &[&str] = &["runtime_effect_replay"];
+    const JOURNAL_FIRST: TableLayout = TableLayout::new(&[
+        SchemaTables::new("main", TWO),
+        SchemaTables::new("process_registry", TWO),
+    ]);
+    const REGISTRY_ONLY: TableLayout =
+        TableLayout::new(&[SchemaTables::new("process_registry", TWO)]);
+
+    let neutral = "SELECT scope_id FROM runtime_effect_replay";
+    assert_eq!(
+        render(neutral, Dialect::sqlite(JOURNAL_FIRST), TABLES).expect("renders"),
+        "SELECT scope_id FROM main.runtime_effect_replay"
+    );
+    assert_eq!(
+        render(neutral, Dialect::sqlite(REGISTRY_ONLY), TABLES).expect("renders"),
+        "SELECT scope_id FROM process_registry.runtime_effect_replay"
     );
 }

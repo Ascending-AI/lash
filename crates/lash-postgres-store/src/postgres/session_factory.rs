@@ -566,7 +566,7 @@ impl PostgresSessionStoreFactory {
     /// it is eligible for the same conditional forget reconciliation applies.
     /// The targeted probe and the condemn CAS share it so the fence and the
     /// probe cannot drift apart.
-    fn live_attachment_ref_sql(&self) -> String {
+    fn live_attachment_ref_sql(&self) -> &'static str {
         crate::attachments::live_attachment_ref_sql(self.process_registry_shared)
     }
 }
@@ -599,7 +599,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
             self.process_registry_shared,
         );
         let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        sqlx::query(&delete_sql)
+        sqlx::query(delete_sql)
             .bind(cutoff)
             .execute(&mut *tx)
             .await
@@ -631,7 +631,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash_core::StoreError> {
         let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        let row = sqlx::query(&self.live_attachment_ref_sql())
+        let row = sqlx::query(self.live_attachment_ref_sql())
             .bind(id.as_str())
             .bind(cutoff)
             .fetch_optional(&self.pool)
@@ -655,7 +655,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         // interleave.
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        let rooted = sqlx::query(&self.live_attachment_ref_sql())
+        let rooted = sqlx::query(self.live_attachment_ref_sql())
             .bind(id.as_str())
             .bind(cutoff)
             .fetch_optional(&mut *tx)

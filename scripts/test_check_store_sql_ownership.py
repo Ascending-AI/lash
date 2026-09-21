@@ -186,8 +186,8 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_a_family_removed_from_converted_makes_the_gate_silent_about_it(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "effect", "wait"]',
-            'converted = ["artifact", "effect"]',
+            'converted = ["artifact", "attachment", "effect", "wait"]',
+            'converted = ["artifact", "attachment", "effect"]',
         )
         self.tree.substitute(
             "crates/lash-sqlite-store/src/retention.rs",
@@ -321,6 +321,63 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         self.assertEqual(self.tree.failures(), [])
         self.tree.write("runbooks/other-harness/src/probe_fig3399.rs", stray)
         self.assert_refused("runbooks/other-harness/src/probe_fig3399.rs")
+
+    # --- FIG-3406 -------------------------------------------------------
+
+    def test_a_stray_attachment_literal_is_refused_now_the_family_is_converted(self) -> None:
+        """The attachment family joined `converted`, so the gate is total for it.
+
+        `session_factory.rs` is exactly where the PostgreSQL half of the
+        live-root probe was read from while it was still `format!`-built, so a
+        literal reappearing there is the regression this rule exists to catch.
+        """
+        stray = (
+            'const STRAY: &str = "SELECT 1 FROM lash_attachment_manifest '
+            'WHERE attachment_id = $1";\n'
+        )
+        self.tree.substitute(
+            "crates/lash-postgres-store/src/postgres/session_factory.rs",
+            "impl PostgresSessionStoreFactory {",
+            f"{stray}\nimpl PostgresSessionStoreFactory {{",
+        )
+        self.assert_refused("attachment_manifest")
+
+    def test_the_gate_was_silent_about_that_literal_before_the_family_converted(self) -> None:
+        """The red side of the case above: the rule, not the seed, is new."""
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            'converted = ["artifact", "attachment", "effect", "wait"]',
+            'converted = ["artifact", "effect", "wait"]',
+        )
+        stray = (
+            'const STRAY: &str = "SELECT 1 FROM lash_attachment_manifest '
+            'WHERE attachment_id = $1";\n'
+        )
+        self.tree.substitute(
+            "crates/lash-postgres-store/src/postgres/session_factory.rs",
+            "impl PostgresSessionStoreFactory {",
+            f"{stray}\nimpl PostgresSessionStoreFactory {{",
+        )
+        # Removing the family from `converted` also orphans its manifest
+        # entries, which the gate reports; the claim here is narrower, and it
+        # is the whole claim: the stray literal itself goes unreported.
+        self.assertFalse(
+            any("session_factory.rs" in failure for failure in self.tree.failures()),
+            "the gate must be silent about a family that is not in `converted`",
+        )
+
+    def test_an_attachment_statement_spelling_an_owner_label_itself_is_refused(self) -> None:
+        """`owner_kind` is vocabulary-valued, so the label may only be named.
+
+        The live-root probe carries `{{turn_attachment_owner(…)}}`; spelling
+        `= 'turn'` instead is FIG-2815 undone one statement at a time.
+        """
+        self.tree.substitute(
+            "crates/lash-store-sql/src/attachment/manifest.rs",
+            "{{turn_attachment_owner(manifest.owner_kind)}}",
+            "manifest.owner_kind = 'turn'",
+        )
+        self.assert_refused("spells `owner_kind = '…'` over `attachment_manifest`")
 
     def test_a_test_module_may_spell_sql_freely(self) -> None:
         self.tree.substitute(
