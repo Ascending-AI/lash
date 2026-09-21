@@ -12,3 +12,86 @@
 # reasoned crate-root `#![expect(...)]` instead.
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true
+
+# FIG-2971: hosts supply the world. Production code must not ambient-read the
+# filesystem, the process environment, or spawn processes — a host injects
+# paths, config, and handles so library code stays replayable and testable.
+# The lint level (`disallowed_methods = "deny"`) is workspace-wide; this list
+# is the workspace inventory of banned entry points.
+#
+# Scope: this file covers every crate without a nearer `clippy.toml`. Host and
+# tooling crates (examples/, runbooks/, lash-sim, lash-perf, lash-conformance,
+# lash-regress) opt out with a crate-local `clippy.toml`, which shadows this
+# one entirely. Sanctioned production call sites carry
+# `#[expect(clippy::disallowed_methods, reason = "...")]` at the smallest
+# enclosing item; each one is a shrink candidate, not a permanent waiver.
+disallowed-methods = [
+    # Ambient filesystem (std and tokio faces).
+    { path = "std::fs::canonicalize", reason = "hosts supply the world: take the resolved path by parameter (FIG-2971)" },
+    { path = "std::fs::copy", reason = "hosts supply the world: take the paths by parameter (FIG-2971)" },
+    { path = "std::fs::create_dir", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "std::fs::create_dir_all", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "std::fs::exists", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "std::fs::hard_link", reason = "hosts supply the world: take the paths by parameter (FIG-2971)" },
+    { path = "std::fs::metadata", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "std::fs::read", reason = "hosts supply the world: take the path or bytes by parameter (FIG-2971)" },
+    { path = "std::fs::read_dir", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "std::fs::read_link", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "std::fs::read_to_string", reason = "hosts supply the world: take the path or contents by parameter (FIG-2971)" },
+    { path = "std::fs::remove_dir", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "std::fs::remove_dir_all", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "std::fs::remove_file", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "std::fs::rename", reason = "hosts supply the world: take the paths by parameter (FIG-2971)" },
+    { path = "std::fs::set_permissions", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "std::fs::symlink_metadata", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "std::fs::write", reason = "hosts supply the world: take the path or sink by parameter (FIG-2971)" },
+    { path = "std::fs::File::create", reason = "hosts supply the world: take the path or writer by parameter (FIG-2971)" },
+    { path = "std::fs::File::open", reason = "hosts supply the world: take the path or reader by parameter (FIG-2971)" },
+    { path = "std::fs::OpenOptions::open", reason = "hosts supply the world: take the path or handle by parameter (FIG-2971)" },
+    { path = "tokio::fs::canonicalize", reason = "hosts supply the world: take the resolved path by parameter (FIG-2971)" },
+    { path = "tokio::fs::copy", reason = "hosts supply the world: take the paths by parameter (FIG-2971)" },
+    { path = "tokio::fs::create_dir", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "tokio::fs::create_dir_all", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "tokio::fs::metadata", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "tokio::fs::read", reason = "hosts supply the world: take the path or bytes by parameter (FIG-2971)" },
+    { path = "tokio::fs::read_dir", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "tokio::fs::read_link", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "tokio::fs::read_to_string", reason = "hosts supply the world: take the path or contents by parameter (FIG-2971)" },
+    { path = "tokio::fs::remove_dir", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "tokio::fs::remove_dir_all", reason = "hosts supply the world: take the directory by parameter (FIG-2971)" },
+    { path = "tokio::fs::remove_file", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "tokio::fs::rename", reason = "hosts supply the world: take the paths by parameter (FIG-2971)" },
+    { path = "tokio::fs::set_permissions", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "tokio::fs::symlink_metadata", reason = "hosts supply the world: take the path by parameter (FIG-2971)" },
+    { path = "tokio::fs::write", reason = "hosts supply the world: take the path or sink by parameter (FIG-2971)" },
+    { path = "tokio::fs::File::create", reason = "hosts supply the world: take the path or writer by parameter (FIG-2971)" },
+    { path = "tokio::fs::File::open", reason = "hosts supply the world: take the path or reader by parameter (FIG-2971)" },
+    { path = "tokio::fs::OpenOptions::open", reason = "hosts supply the world: take the path or handle by parameter (FIG-2971)" },
+    # Ambient process environment.
+    { path = "std::env::args", reason = "hosts supply the world: parse argv in main, pass config by parameter (FIG-2971)" },
+    { path = "std::env::args_os", reason = "hosts supply the world: parse argv in main, pass config by parameter (FIG-2971)" },
+    { path = "std::env::current_dir", reason = "hosts supply the world: take the working directory by parameter (FIG-2971)" },
+    { path = "std::env::current_exe", reason = "hosts supply the world: take the executable path by parameter (FIG-2971)" },
+    { path = "std::env::home_dir", reason = "hosts supply the world: take the home directory by parameter (FIG-2971)" },
+    { path = "std::env::join_paths", reason = "hosts supply the world: take the path list by parameter (FIG-2971)" },
+    { path = "std::env::remove_var", reason = "hosts supply the world: mutate the child Command's env, not the process's (FIG-2971)" },
+    { path = "std::env::set_current_dir", reason = "hosts supply the world: take the working directory by parameter (FIG-2971)" },
+    { path = "std::env::set_var", reason = "hosts supply the world: mutate the child Command's env, not the process's (FIG-2971)" },
+    { path = "std::env::split_paths", reason = "hosts supply the world: take the path list by parameter (FIG-2971)" },
+    { path = "std::env::temp_dir", reason = "hosts supply the world: take the temp directory by parameter (FIG-2971)" },
+    { path = "std::env::var", reason = "hosts supply the world: read env in the host, pass config by parameter (FIG-2971)" },
+    { path = "std::env::var_os", reason = "hosts supply the world: read env in the host, pass config by parameter (FIG-2971)" },
+    { path = "std::env::vars", reason = "hosts supply the world: read env in the host, pass config by parameter (FIG-2971)" },
+    { path = "std::env::vars_os", reason = "hosts supply the world: read env in the host, pass config by parameter (FIG-2971)" },
+    # Process lifecycle and spawning.
+    { path = "std::process::abort", reason = "production code reports failure, it does not kill the host process (FIG-2971)" },
+    { path = "std::process::exit", reason = "production code reports failure, it does not kill the host process (FIG-2971)" },
+    { path = "std::process::Command::new", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+    { path = "std::process::Command::output", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+    { path = "std::process::Command::spawn", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+    { path = "std::process::Command::status", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+    { path = "tokio::process::Command::new", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+    { path = "tokio::process::Command::output", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+    { path = "tokio::process::Command::spawn", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+    { path = "tokio::process::Command::status", reason = "hosts supply the world: process spawning is host capability (FIG-2971)" },
+]

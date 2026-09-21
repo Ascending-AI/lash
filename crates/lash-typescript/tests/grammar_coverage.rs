@@ -15,6 +15,11 @@
 //!   process on the stack contract, where an abort is a failure rather than a
 //!   crash nobody sees.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use swc_ecma_ast as swc;
 
 /// How the preflight pays for a node kind.

@@ -1,3 +1,8 @@
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use sqlx::{Connection, PgConnection};
 
 // "LASH_PGT" encoded as a positive i64. Every test process that uses the

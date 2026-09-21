@@ -742,6 +742,7 @@ pub(super) fn append_request_identity_hash(
 mod commit_identity_v4_effect_tests;
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod append_request_identity_tests {
     use super::*;
 

@@ -7,6 +7,11 @@
 //! One exemption, intentional: `prelude` duplicates a curated subset of root
 //! names for ergonomic glob imports.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 

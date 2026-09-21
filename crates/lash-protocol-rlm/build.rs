@@ -11,6 +11,10 @@
 //! `generated_snapshot_field_schemas_match_all_fields_set_serialization`
 //! (FIG-3032).
 
+// FIG-2971: build scripts run on the host and may read env/fs; the
+// workspace ambient-access ban targets compiled production code.
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;

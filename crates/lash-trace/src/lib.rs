@@ -1618,6 +1618,10 @@ impl JsonlTraceSink {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "JsonlTraceSink is the filesystem trace sink; the host injects the path (FIG-2971)"
+)]
 impl TraceSink for JsonlTraceSink {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
         let line = serde_json::to_string(record)?;

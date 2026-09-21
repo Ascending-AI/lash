@@ -3,6 +3,11 @@
 //! These live in their own file so `lib.rs` carries only the durable schema
 //! types it defines.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 
 /// A sink that fails every call, standing in for a closed stderr.

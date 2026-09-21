@@ -368,6 +368,7 @@ impl ModelToolReturnPartCoreSupport for ModelToolReturnPart {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod blake3_domain_tests {
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};

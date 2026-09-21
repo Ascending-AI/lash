@@ -706,6 +706,7 @@ fn json_value_type(value: &Value) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {
     use super::*;
     use lash_core::TurnId;

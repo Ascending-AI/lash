@@ -1,3 +1,8 @@
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use lash_sansio::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

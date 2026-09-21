@@ -796,6 +796,10 @@ impl SqliteSessionStoreFactory {
 impl SqliteSessionStoreFactory {
     /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
     /// gated conformance factory shares it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the sqlite store factory ensures the host-supplied store root exists before opening (FIG-2971)"
+    )]
     pub(crate) async fn create_bound_store(
         &self,
         request: &SessionStoreCreateRequest,
