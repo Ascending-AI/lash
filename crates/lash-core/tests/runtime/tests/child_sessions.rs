@@ -339,7 +339,7 @@ async fn snapshot_start_propagates_unknown_checkpoint_component_into_child_first
         .get(&child.session_id)
         .cloned()
         .expect("managed child runtime");
-    let child_state = child_handle.observe().persisted_state.clone();
+    let child_state = child_handle.runtime.lock().await.export_persistence_state();
     let first_root = child_state
         .checkpoint_components
         .build_checkpoint(lash_core::PersistedTurnState::default())

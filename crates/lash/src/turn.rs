@@ -13,8 +13,8 @@ use crate::support::{
 };
 use futures_util::Stream;
 use lash_core::facade_support::{
-    RuntimeSessionStateFacadeOps, SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError,
-    TurnCancelMode, TurnContextFacadeOps,
+    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnCancelMode,
+    TurnContextFacadeOps,
 };
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
@@ -329,7 +329,7 @@ impl TurnBuilder {
 
     fn turn_scope(&self, turn_id: &TurnId) -> lash_core::ExecutionScope {
         let observation = self.runtime.observe();
-        observation.persisted_state.turn_scope(turn_id)
+        observation.turn_scope(turn_id)
     }
 
     pub(crate) fn prepare(
@@ -705,18 +705,13 @@ impl QueuedTurnBuilder {
 
     fn turn_scope(&self, turn_id: &TurnId) -> lash_core::ExecutionScope {
         let observation = self.runtime.observe();
-        observation.persisted_state.turn_scope(turn_id)
+        observation.turn_scope(turn_id)
     }
 
     fn execution_scope(&self, drain_id: String) -> Result<lash_core::ExecutionScope> {
         self.validate_scope_identity_configuration()?;
         Ok(self.resolved_turn_id(None).map_or_else(
-            || {
-                lash_core::facade_support::RuntimeSessionStateFacadeOps::queue_drain_scope(
-                    &self.runtime.observe().persisted_state,
-                    drain_id,
-                )
-            },
+            || self.runtime.observe().queue_drain_scope(drain_id),
             |turn_id| self.turn_scope(&turn_id),
         ))
     }

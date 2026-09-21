@@ -90,7 +90,7 @@ async fn resolve_start_state(
         SessionStartPoint::Snapshot { snapshot } => {
             let mut state = current
                 .resident_state_by_id(managed, &snapshot.session_id)
-                .await
+                .await?
                 .unwrap_or_else(|| RuntimeSessionState::from_snapshot((**snapshot).clone()));
             state.apply_snapshot(snapshot);
             state
