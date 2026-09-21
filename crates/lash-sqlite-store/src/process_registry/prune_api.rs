@@ -100,10 +100,7 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
     ) -> Result<Vec<lash_core::ProcessArtifactCleanup>, lash_core::PluginError> {
         self.conn
             .call(|conn| {
-                let mut statement = conn.prepare(
-                    "SELECT cleanup_json FROM process_artifact_cleanup
-                     ORDER BY process_id, incarnation",
-                )?;
+                let mut statement = conn.prepare(process_sql().cleanup.list_pending.sql())?;
                 statement
                     .query_map([], |row| row.get::<_, String>(0))?
                     .map(|row| {
@@ -132,14 +129,13 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
             .write(move |tx| {
                 let current_incarnation = tx
                     .query_row(
-                        "SELECT incarnation FROM processes WHERE process_id = ?1",
+                        process_sql().process_sqlite.select_incarnation.sql(),
                         params![process_id.as_str()],
                         |row| row.get::<_, i64>(0),
                     )
                     .optional()?;
                 let removed = tx.execute(
-                    "DELETE FROM process_artifact_cleanup
-                     WHERE process_id = ?1 AND incarnation = ?2",
+                    process_sql().cleanup_sqlite.delete_for_incarnation.sql(),
                     params![
                         process_id.as_str(),
                         incarnation.registration_sequence() as i64

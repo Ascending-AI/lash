@@ -202,7 +202,10 @@ pub(super) async fn delete_session_from_catalog(
             )
             .map_err(sqlite_error)?;
             tx.execute(
-                "DELETE FROM wake_redelivery_fences WHERE session_id = ?1",
+                crate::process_registry::sql::process_sql()
+                    .fence
+                    .delete_by_session
+                    .sql(),
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
@@ -314,7 +317,10 @@ pub(super) async fn delete_wake_allocation_floors_from_process_registry(
     conn.write_flow(move |tx| {
         let outcome = tx
             .execute(
-                "DELETE FROM wake_allocation_floors WHERE target_session_id = ?1",
+                crate::process_registry::sql::process_sql()
+                    .floor
+                    .delete_by_session
+                    .sql(),
                 params![target_session_id.as_str()],
             )
             .map(|_| ())

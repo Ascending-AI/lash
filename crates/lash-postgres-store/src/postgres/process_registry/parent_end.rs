@@ -6,13 +6,12 @@
 //! `lash_processes` cannot express the fact this table records.
 
 use std::num::NonZeroUsize;
-use std::sync::LazyLock;
 
 use lash_core::{ParentEndPlan, ParentScope, PluginError, ProcessRecord};
 use lash_sansio::ProcessId;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
-use crate::process_lifecycle_sql::live_process_status;
+use crate::process_sql::process_sql;
 use crate::{plugin_sqlx_error, process_decode_error};
 
 /// The storage key for a parent scope, refusing `Host`.
@@ -76,18 +75,14 @@ pub(crate) async fn record_tx(
 ) -> Result<(), PluginError> {
     lock_parent_scope_tx(tx, parent).await?;
     let (kind, id) = ledger_key(parent)?;
-    sqlx::query(
-        "INSERT INTO lash_parent_end_plans (parent_kind, parent_id, ended_at_ms)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (parent_kind, parent_id) DO NOTHING",
-    )
-    .bind(kind)
-    .bind(id)
-    .bind(ended_at_ms as i64)
-    .execute(&mut **tx)
-    .await
-    .map(drop)
-    .map_err(plugin_sqlx_error)
+    sqlx::query(process_sql().plan.insert_if_absent.sql())
+        .bind(kind)
+        .bind(id)
+        .bind(ended_at_ms as i64)
+        .execute(&mut **tx)
+        .await
+        .map(drop)
+        .map_err(plugin_sqlx_error)
 }
 
 /// Whether a ledger row exists for this scope, settled or not.
@@ -96,14 +91,12 @@ pub(crate) async fn plan_exists_tx(
     parent: &ParentScope,
 ) -> Result<bool, PluginError> {
     let (kind, id) = ledger_key(parent)?;
-    let row = sqlx::query(
-        "SELECT 1 FROM lash_parent_end_plans WHERE parent_kind = $1 AND parent_id = $2",
-    )
-    .bind(kind)
-    .bind(id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let row = sqlx::query(process_sql().plan.exists.sql())
+        .bind(kind)
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(row.is_some())
 }
 
@@ -126,17 +119,11 @@ pub(super) async fn list_pending(
     pool: &PgPool,
     limit: NonZeroUsize,
 ) -> Result<Vec<ParentEndPlan>, PluginError> {
-    let rows = sqlx::query(
-        "SELECT parent_kind, parent_id, ended_at_ms, settled_at_ms
-         FROM lash_parent_end_plans
-         WHERE settled_at_ms IS NULL
-         ORDER BY ended_at_ms, parent_kind, parent_id
-         LIMIT $1",
-    )
-    .bind(limit.get() as i64)
-    .fetch_all(pool)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let rows = sqlx::query(process_sql().plan.list_pending.sql())
+        .bind(limit.get() as i64)
+        .fetch_all(pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
     rows.into_iter()
         .map(|row| decode_plan(row.get(0), row.get(1), row.get(2), row.get(3)))
         .collect()
@@ -147,15 +134,12 @@ pub(super) async fn get(
     parent: &ParentScope,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
     let (kind, id) = ledger_key(parent)?;
-    let row = sqlx::query(
-        "SELECT ended_at_ms, settled_at_ms FROM lash_parent_end_plans
-         WHERE parent_kind = $1 AND parent_id = $2",
-    )
-    .bind(kind)
-    .bind(id.as_str())
-    .fetch_optional(pool)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let row = sqlx::query(process_sql().plan.select_stamps.sql())
+        .bind(kind)
+        .bind(id.as_str())
+        .fetch_optional(pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
     row.map(|row| decode_plan(kind.to_string(), id, row.get(0), row.get(1)))
         .transpose()
 }
@@ -171,36 +155,22 @@ pub(super) async fn get(
 /// The predicate is the pending-cancel partial index, so a scope whose
 /// children are all terminal or already cancelled needs no row and is not
 /// reported.
-pub(crate) static UNRECORDED_TURN_PARENTS_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT DISTINCT child.parent_scope_id FROM lash_processes AS child
-         WHERE child.parent_scope_kind = 'turn'
-           AND child.on_parent_end = 'cancel'
-           AND child.cancel_requested_at_ms IS NULL
-           AND {live}
-           AND NOT EXISTS (
-               SELECT 1 FROM lash_parent_end_plans AS plan
-               WHERE plan.parent_kind = 'turn'
-                 AND plan.parent_id = child.parent_scope_id
-           )
-           AND ($1::text IS NULL OR child.parent_scope_id > $1::text)
-         ORDER BY child.parent_scope_id
-         LIMIT $2",
-        live = live_process_status("child.status")
-    )
-});
-
 pub(super) async fn list_unrecorded_turn_parents(
     pool: &PgPool,
     after: Option<&str>,
     limit: NonZeroUsize,
 ) -> Result<Vec<ParentScope>, PluginError> {
-    let rows = sqlx::query(UNRECORDED_TURN_PARENTS_SQL.as_str())
-        .bind(after)
-        .bind(limit.get() as i64)
-        .fetch_all(pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+    let rows = sqlx::query(
+        process_sql()
+            .process_postgres
+            .list_unrecorded_turn_parents
+            .sql(),
+    )
+    .bind(after)
+    .bind(limit.get() as i64)
+    .fetch_all(pool)
+    .await
+    .map_err(plugin_sqlx_error)?;
     rows.into_iter()
         .map(|row| {
             let id: String = row.get(0);
@@ -216,21 +186,6 @@ pub(super) async fn list_unrecorded_turn_parents(
 /// no cancel request yet, and a live status. `caller_departed` is excluded for
 /// the reason it is excluded from every other worklist — lash may never act on
 /// such a row nor assert an outcome for it, and a cancel request is both.
-pub(crate) static PARENT_END_CHILDREN_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM lash_processes
-         WHERE parent_scope_kind = $1
-           AND parent_scope_id = $2
-           AND on_parent_end = 'cancel'
-           AND cancel_requested_at_ms IS NULL
-           AND {live}
-           AND ($3::text IS NULL OR process_id > $3::text)
-         ORDER BY process_id ASC
-         LIMIT $4",
-        live = live_process_status("status")
-    )
-});
-
 pub(super) async fn children(
     pool: &PgPool,
     parent: &ParentScope,
@@ -238,14 +193,19 @@ pub(super) async fn children(
     limit: NonZeroUsize,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
     let (kind, id) = ledger_key(parent)?;
-    let rows = sqlx::query(PARENT_END_CHILDREN_SQL.as_str())
-        .bind(kind)
-        .bind(id)
-        .bind(after.map(|value| value.to_string()))
-        .bind(limit.get() as i64)
-        .fetch_all(pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+    let rows = sqlx::query(
+        process_sql()
+            .process_postgres
+            .list_parent_end_children
+            .sql(),
+    )
+    .bind(kind)
+    .bind(id)
+    .bind(after.map(|value| value.to_string()))
+    .bind(limit.get() as i64)
+    .fetch_all(pool)
+    .await
+    .map_err(plugin_sqlx_error)?;
     rows.into_iter()
         .map(|row| {
             let json: String = row.get(0);
@@ -267,15 +227,12 @@ pub(super) async fn settle(
     let (kind, id) = ledger_key(parent)?;
     let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
     lock_parent_scope_tx(&mut tx, parent).await?;
-    sqlx::query(
-        "UPDATE lash_parent_end_plans SET settled_at_ms = $3
-         WHERE parent_kind = $1 AND parent_id = $2 AND settled_at_ms IS NULL",
-    )
-    .bind(kind)
-    .bind(id)
-    .bind(settled_at_ms as i64)
-    .execute(&mut *tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    sqlx::query(process_sql().plan.settle.sql())
+        .bind(kind)
+        .bind(id)
+        .bind(settled_at_ms as i64)
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     tx.commit().await.map_err(plugin_sqlx_error)
 }

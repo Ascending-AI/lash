@@ -14,8 +14,7 @@ impl SqliteProcessRegistry {
                     Self::require_process_conn(tx, &process_id)?;
                     let existing: Option<String> = tx
                         .query_row(
-                            "SELECT handover_json FROM process_segment_handovers
-                             WHERE process_id = ?1 AND segment_ordinal = ?2",
+                            process_sql().handover.select_by_ordinal.sql(),
                             params![process_id.as_str(), handover.segment_ordinal as i64],
                             |row| row.get(0),
                         )
@@ -32,14 +31,12 @@ impl SqliteProcessRegistry {
                         )));
                     }
                     tx.execute(
-                        "DELETE FROM process_segment_handovers
-                         WHERE process_id = ?1 AND segment_ordinal < ?2 - 1",
+                        process_sql().handover.delete_superseded.sql(),
                         params![process_id.as_str(), handover.segment_ordinal as i64],
                     )
                     .map_err(process_sqlite_error)?;
                     tx.execute(
-                        "INSERT INTO process_segment_handovers
-                         (process_id, segment_ordinal, handover_json) VALUES (?1, ?2, ?3)",
+                        process_sql().handover_sqlite.insert.sql(),
                         params![
                             process_id.as_str(),
                             handover.segment_ordinal as i64,
@@ -66,8 +63,7 @@ impl SqliteProcessRegistry {
                 Ok((|| {
                     let encoded: Option<String> = conn
                         .query_row(
-                            "SELECT handover_json FROM process_segment_handovers
-                             WHERE process_id = ?1 AND segment_ordinal = ?2",
+                            process_sql().handover.select_by_ordinal.sql(),
                             params![process_id.as_str(), segment_ordinal as i64],
                             |row| row.get(0),
                         )
@@ -92,8 +88,7 @@ impl SqliteProcessRegistry {
                 Ok((|| {
                     let encoded: Option<String> = conn
                         .query_row(
-                            "SELECT handover_json FROM process_segment_handovers
-                             WHERE process_id = ?1 ORDER BY segment_ordinal DESC LIMIT 1",
+                            process_sql().handover.select_latest.sql(),
                             params![process_id.as_str()],
                             |row| row.get(0),
                         )
@@ -117,7 +112,7 @@ impl SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     tx.execute(
-                        "DELETE FROM process_segment_handovers WHERE process_id = ?1",
+                        process_sql().handover.delete_by_process.sql(),
                         params![process_id.as_str()],
                     )
                     .map_err(process_sqlite_error)?;

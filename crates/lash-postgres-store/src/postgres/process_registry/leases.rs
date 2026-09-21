@@ -24,16 +24,12 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
             registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {
                 // Same incarnation re-enters its own live lease: extend the
                 // expiry, keep token and fencing token.
-                sqlx::query(
-                    "UPDATE lash_process_leases
-                     SET lease_expires_at_ms = $2
-                     WHERE process_id = $1",
-                )
-                .bind(process_id.as_str())
-                .bind(lease.expires_at_epoch_ms as i64)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
+                sqlx::query(process_sql().lease.extend_unfenced.sql())
+                    .bind(process_id.as_str())
+                    .bind(lease.expires_at_epoch_ms as i64)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(plugin_sqlx_error)?;
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
             }
@@ -107,17 +103,13 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
             expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
             ..lease.clone()
         };
-        sqlx::query(
-            "UPDATE lash_process_leases
-             SET lease_expires_at_ms = $2
-             WHERE process_id = $1 AND lease_token = $3",
-        )
-        .bind(renewed.process_id.as_str())
-        .bind(renewed.expires_at_epoch_ms as i64)
-        .bind(&renewed.lease_token)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        sqlx::query(process_sql().lease.renew_fenced.sql())
+            .bind(renewed.process_id.as_str())
+            .bind(renewed.expires_at_epoch_ms as i64)
+            .bind(&renewed.lease_token)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(renewed)
     }
@@ -139,22 +131,16 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
         if process_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let rows = sqlx::query(
-            "SELECT process_id, lease_owner_id, lease_token,
-                    lease_fencing_token, lease_claimed_at_ms,
-                    lease_expires_at_ms, lease_owner_incarnation_id
-             FROM lash_process_leases
-             WHERE process_id = ANY($1)",
-        )
-        .bind(
-            process_ids
-                .iter()
-                .map(ProcessId::as_str)
-                .collect::<Vec<_>>(),
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows = sqlx::query(process_sql().lease_postgres.list_by_process_ids.sql())
+            .bind(
+                process_ids
+                    .iter()
+                    .map(ProcessId::as_str)
+                    .collect::<Vec<_>>(),
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let mut leases_by_id = std::collections::HashMap::with_capacity(rows.len());
         for row in rows {
             let process_id: ProcessId = ProcessId::from(row.get::<String, _>(0));
@@ -179,19 +165,12 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
         &self,
         completion: &ProcessLeaseCompletion,
     ) -> Result<(), PluginError> {
-        sqlx::query(
-            "UPDATE lash_process_leases
-             SET lease_owner_id = NULL,
-                 lease_token = NULL,
-                 lease_claimed_at_ms = 0,
-                 lease_expires_at_ms = 0
-             WHERE process_id = $1 AND lease_token = $2",
-        )
-        .bind(completion.process_id.as_str())
-        .bind(&completion.lease_token)
-        .execute(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        sqlx::query(process_sql().lease.release_claimed.sql())
+            .bind(completion.process_id.as_str())
+            .bind(&completion.lease_token)
+            .execute(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         Ok(())
     }
 }

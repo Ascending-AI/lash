@@ -54,6 +54,12 @@ fn retired_status(column: &str) -> String {
     format!("{column} NOT IN ('running', 'waiting')")
 }
 
+/// A stand-in for the process family's lifecycle expansions, which are
+/// generated from `lash_core`'s enums and cannot be reached from this crate.
+fn stub_predicate(column: &str) -> String {
+    format!("{column} = ?")
+}
+
 fn turn_owner(column: &str) -> String {
     format!("{column} = 'turn'")
 }
@@ -433,6 +439,15 @@ fn every_owned_statement_renders_for_both_backends() {
     const OWNER_TERMS: Vocabulary = Vocabulary::new(&[
         VocabularyTerm::new("turn_attachment_owner", turn_owner),
         VocabularyTerm::new("process_attachment_owner", process_owner),
+        VocabularyTerm::new("live_process_status", stub_predicate),
+        VocabularyTerm::new("retired_process_status", stub_predicate),
+        VocabularyTerm::new("nonterminal_process_status", stub_predicate),
+        VocabularyTerm::new("undelivered_wake_delivery_state", stub_predicate),
+        VocabularyTerm::new("pending_wake_delivery_state", stub_predicate),
+        VocabularyTerm::new("pending_wake_delivery_state_value", stub_predicate),
+        VocabularyTerm::new("enqueuing_wake_delivery_state", stub_predicate),
+        VocabularyTerm::new("discarded_wake_delivery_state", stub_predicate),
+        VocabularyTerm::new("not_enqueued_wake_delivery_state", stub_predicate),
     ]);
 
     for statement in crate::all_statements() {
@@ -615,5 +630,39 @@ fn a_layout_resolves_a_two_database_table_by_declaration_order() {
     assert_eq!(
         render(neutral, Dialect::sqlite(REGISTRY_ONLY), TABLES).expect("renders"),
         "SELECT scope_id FROM process_registry.runtime_effect_replay"
+    );
+}
+
+/// A common table expression may state its inlining, and is still a relation
+/// the statement binds: the process family's PostgreSQL prune opens with
+/// `event_count AS MATERIALIZED ( … )`.
+#[test]
+fn a_materialized_common_table_expression_is_still_a_binding() {
+    assert_eq!(
+        postgres(
+            "WITH counted AS MATERIALIZED (
+                 SELECT count(*) AS value FROM await_event_waits
+             )
+             SELECT value FROM counted"
+        ),
+        "WITH counted AS MATERIALIZED (
+                 SELECT count(*) AS value FROM lash_await_event_waits
+             )
+             SELECT value FROM counted"
+    );
+}
+
+/// `FOR UPDATE OF <alias> SKIP LOCKED` names an alias, not a relation: the
+/// claim statement the process family's wake queue issues ends that way, and
+/// reading its `OF` as a table position refused the statement at startup.
+#[test]
+fn a_for_update_lock_clause_is_not_a_table_position() {
+    assert_eq!(
+        postgres(
+            "SELECT 1 FROM await_event_waits AS candidate
+             FOR UPDATE OF candidate SKIP LOCKED"
+        ),
+        "SELECT 1 FROM lash_await_event_waits AS candidate
+             FOR UPDATE OF candidate SKIP LOCKED"
     );
 }

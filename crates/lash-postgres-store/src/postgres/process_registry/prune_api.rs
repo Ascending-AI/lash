@@ -1,31 +1,6 @@
 use super::*;
 use lash_sansio::ProcessId;
 
-/// The prune eligibility predicate. The prune appends `FOR UPDATE`; the
-/// survey reads it as is.
-pub(crate) static PRUNABLE_TERMINAL_SELECT: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| {
-        format!(
-            "SELECT process_id, record_json FROM lash_processes
-         WHERE {retired}
-           AND updated_at_ms < $1
-           AND ($2::BIGINT IS NULL OR change_seq <= $2)
-           AND NOT EXISTS (
-               SELECT 1 FROM lash_process_wake_deliveries AS delivery
-               WHERE delivery.process_id = lash_processes.process_id
-                 AND {undelivered}
-           )
-         ORDER BY process_id ASC",
-            retired = crate::process_lifecycle_sql::retired_process_status("status"),
-            undelivered =
-                crate::process_lifecycle_sql::undelivered_wake_delivery_state("delivery.state"),
-        )
-    });
-
-fn prune_terminal_sql() -> String {
-    format!("{}\n         FOR UPDATE", PRUNABLE_TERMINAL_SELECT.as_str())
-}
-
 fn watermark_change_seq(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
     match watermark {
         lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
@@ -70,7 +45,7 @@ pub(super) async fn prunable_terminal_processes(
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     select_prunable(
         &registry.pool,
-        PRUNABLE_TERMINAL_SELECT.as_str(),
+        process_sql().process_postgres.list_prunable_terminal.sql(),
         cutoff,
         watermark_change_seq(watermark),
         filter.as_ref(),
@@ -84,13 +59,10 @@ pub(super) async fn complete_process_artifact_cleanup(
     incarnation: lash_core::ProcessIncarnation,
 ) -> Result<lash_core::ProcessArtifactCleanupAck, PluginError> {
     let (removed, current_incarnation): (bool, Option<i64>) = sqlx::query_as(
-        "WITH deleted AS (
-             DELETE FROM lash_process_artifact_cleanup
-             WHERE process_id = $1 AND incarnation = $2
-             RETURNING 1
-         )
-         SELECT EXISTS(SELECT 1 FROM deleted),
-                (SELECT incarnation FROM lash_processes WHERE process_id = $1)",
+        process_sql()
+            .cleanup_postgres
+            .delete_for_incarnation_reporting_incarnation
+            .sql(),
     )
     .bind(process_id.as_str())
     .bind(incarnation.registration_sequence() as i64)
@@ -136,27 +108,11 @@ pub(super) async fn complete_process_artifact_cleanup(
 /// `ParentEnded`. That is the deliberate trade — past the retention horizon the
 /// scope is beyond anything lash reasons about, and a registration arriving
 /// there is a new fact, not a late one.
-pub(crate) static RECLAIMABLE_PARENT_END_PLANS_DELETE: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| {
-        format!(
-            "DELETE FROM lash_parent_end_plans AS plan
-         WHERE plan.settled_at_ms IS NOT NULL
-           AND plan.settled_at_ms < $1
-           AND NOT EXISTS (
-               SELECT 1 FROM lash_processes AS child
-               WHERE child.parent_scope_kind = plan.parent_kind
-                 AND child.parent_scope_id = plan.parent_id
-                 AND {live}
-           )",
-            live = crate::process_lifecycle_sql::live_process_status("child.status"),
-        )
-    });
-
 async fn reclaim_settled_parent_end_plans_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     cutoff: i64,
 ) -> Result<u64, PluginError> {
-    sqlx::query(RECLAIMABLE_PARENT_END_PLANS_DELETE.as_str())
+    sqlx::query(process_sql().plan_postgres.delete_reclaimable.sql())
         .bind(cutoff)
         .execute(&mut **tx)
         .await
@@ -176,7 +132,10 @@ pub(super) async fn prune_terminal_processes(
     let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
     let prunable = select_prunable(
         &mut *tx,
-        &prune_terminal_sql(),
+        process_sql()
+            .process_postgres
+            .list_prunable_terminal_for_update
+            .sql(),
         cutoff,
         max_change_seq,
         filter.as_ref(),

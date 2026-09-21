@@ -2,21 +2,7 @@ use crate::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
-use crate::process_lifecycle_sql::wake_delivery_state;
-use lash_core::WakeDeliveryState;
-use std::sync::LazyLock;
-
-pub(crate) static INSERT_WAKE_DELIVERY_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "INSERT INTO lash_process_wake_deliveries (
-            delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
-            claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
-            discard_reason, delivery_json
-         ) VALUES ($1, $2, $3, $4, $5, {pending}, NULL, 0, NULL, $6, $7, NULL, $8)
-         ON CONFLICT (delivery_id) DO NOTHING",
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-    )
-});
+use crate::process_sql::process_sql;
 
 pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
@@ -37,10 +23,10 @@ pub(crate) async fn process_change_horizon_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
     let horizon: i64 = sqlx::query_scalar(
-        "SELECT tombstone_compaction_horizon
-         FROM lash_process_change_clock
-         WHERE singleton = TRUE
-         FOR SHARE",
+        process_sql()
+            .clock_postgres
+            .select_compaction_horizon_for_share
+            .sql(),
     )
     .fetch_one(&mut **tx)
     .await
@@ -60,10 +46,10 @@ pub(crate) async fn load_process_tx(
         return Err(PluginError::Session(reason.into()));
     }
     let json: Option<String> = sqlx::query_scalar(
-        "SELECT record_json
-             FROM lash_processes
-             WHERE process_id = $1
-             FOR UPDATE",
+        process_sql()
+            .process_postgres
+            .select_record_json_for_update
+            .sql(),
     )
     .bind(process_id.as_str())
     .fetch_optional(&mut **tx)
@@ -81,7 +67,7 @@ pub(crate) async fn load_process(
         return Err(PluginError::Session(reason.into()));
     }
     let json: Option<String> =
-        sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
+        sqlx::query_scalar(process_sql().process.select_record_json_by_id.sql())
             .bind(process_id.as_str())
             .fetch_optional(pool)
             .await
@@ -97,15 +83,11 @@ pub(crate) async fn require_process_tx(
     if let Some(record) = load_process_tx(tx, process_id).await? {
         return Ok(record);
     }
-    let row = sqlx::query(
-        "SELECT terminal_label, pruned_at_ms
-         FROM lash_process_tombstones WHERE process_id = $1
-         ORDER BY incarnation DESC LIMIT 1",
-    )
-    .bind(process_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let row = sqlx::query(process_sql().tombstone.select_latest_terminal.sql())
+        .bind(process_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     let tombstone = row
         .map(|row| {
             Ok::<_, PluginError>(registry_transitions::ProcessTombstoneStamp {
@@ -133,8 +115,10 @@ pub(crate) async fn require_process_ref_tx(
         ));
     }
     let exact = sqlx::query(
-        "SELECT terminal_label, pruned_at_ms FROM lash_process_tombstones
-         WHERE process_id = $1 AND incarnation = $2",
+        process_sql()
+            .tombstone
+            .select_terminal_for_incarnation
+            .sql(),
     )
     .bind(process_ref.process_id.as_str())
     .bind(process_ref.incarnation.registration_sequence() as i64)
@@ -149,14 +133,12 @@ pub(crate) async fn require_process_ref_tx(
             },
         ));
     }
-    let latest: Option<i64> = sqlx::query_scalar(
-        "SELECT incarnation FROM lash_process_tombstones
-         WHERE process_id = $1 ORDER BY incarnation DESC LIMIT 1",
-    )
-    .bind(process_ref.process_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let latest: Option<i64> =
+        sqlx::query_scalar(process_sql().tombstone.select_latest_incarnation.sql())
+            .bind(process_ref.process_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
     match latest {
         Some(incarnation) => Err(registry_transitions::process_incarnation_superseded(
             process_ref,
@@ -187,14 +169,12 @@ pub(crate) async fn wake_session_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &ProcessId,
 ) -> Result<Option<SessionId>, PluginError> {
-    sqlx::query_scalar::<_, Option<String>>(
-        "SELECT wake_session_id FROM lash_processes WHERE process_id = $1",
-    )
-    .bind(process_id.as_str())
-    .fetch_one(&mut **tx)
-    .await
-    .map(|session_id| session_id.map(SessionId::from))
-    .map_err(plugin_sqlx_error)
+    sqlx::query_scalar::<_, Option<String>>(process_sql().process.select_wake_session_id.sql())
+        .bind(process_id.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map(|session_id| session_id.map(SessionId::from))
+        .map_err(plugin_sqlx_error)
 }
 
 pub(crate) async fn save_process_tx(
@@ -202,22 +182,17 @@ pub(crate) async fn save_process_tx(
     record: &ProcessRecord,
 ) -> Result<(), PluginError> {
     let change_seq = next_process_change_seq_tx(tx).await?;
-    sqlx::query(
-        "UPDATE lash_processes
-         SET updated_at_ms = $2, change_seq = $3, status = $4,
-             last_event_sequence = $5, cancel_requested_at_ms = $6, record_json = $7
-         WHERE process_id = $1",
-    )
-    .bind(record.id.as_str())
-    .bind(record.updated_at_ms as i64)
-    .bind(change_seq as i64)
-    .bind(process_status_label(record))
-    .bind(record.last_event_sequence as i64)
-    .bind(cancel_requested_at_ms(record))
-    .bind(serde_json::to_string(record).map_err(process_decode_error)?)
-    .execute(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    sqlx::query(process_sql().process.update_mutable_columns.sql())
+        .bind(record.id.as_str())
+        .bind(record.updated_at_ms as i64)
+        .bind(change_seq as i64)
+        .bind(process_status_label(record))
+        .bind(record.last_event_sequence as i64)
+        .bind(cancel_requested_at_ms(record))
+        .bind(serde_json::to_string(record).map_err(process_decode_error)?)
+        .execute(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(())
 }
 
@@ -236,15 +211,10 @@ pub(crate) async fn apply_process_replay_repair_tx(
 pub(crate) async fn next_process_change_seq_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
-    let seq: i64 = sqlx::query_scalar(
-        "UPDATE lash_process_change_clock
-         SET current_seq = current_seq + 1
-         WHERE singleton = TRUE
-         RETURNING current_seq",
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let seq: i64 = sqlx::query_scalar(process_sql().clock_postgres.bump_returning.sql())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     plugin_u64_from_sql("ProcessChangeClock", "current_seq", seq)
 }
 
@@ -253,16 +223,12 @@ pub(crate) async fn load_event_by_key_tx(
     process_id: &ProcessId,
     replay_key: &str,
 ) -> Result<Option<ProcessEvent>, PluginError> {
-    let row = sqlx::query(
-        "SELECT event_json
-         FROM lash_process_events
-         WHERE process_id = $1 AND idempotency_key = $2",
-    )
-    .bind(process_id.as_str())
-    .bind(replay_key)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let row = sqlx::query(process_sql().event.select_by_replay_key.sql())
+        .bind(process_id.as_str())
+        .bind(replay_key)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     row.map(|row| {
         let json: String = row.get(0);
         serde_json::from_str(&json).map_err(process_decode_error)
@@ -275,30 +241,24 @@ pub(crate) async fn next_process_event_sequence_tx(
     process_id: &ProcessId,
     target_session_id: Option<&SessionId>,
 ) -> Result<(Option<u64>, u64), PluginError> {
-    let last_sequence: Option<i64> = sqlx::query_scalar(
-        "SELECT MAX(sequence)
-         FROM lash_process_events
-         WHERE process_id = $1",
-    )
-    .bind(process_id.as_str())
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let last_sequence: Option<i64> =
+        sqlx::query_scalar(process_sql().event.select_max_sequence.sql())
+            .bind(process_id.as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
     let last_sequence = last_sequence
         .map(|sequence| plugin_u64_from_sql("ProcessEvent", "sequence", sequence))
         .transpose()?;
     let sender_floor = if let Some(target_session_id) = target_session_id {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT allocation_floor FROM lash_wake_allocation_floors
-             WHERE target_session_id = $1 AND process_id = $2",
-        )
-        .bind(target_session_id.as_str())
-        .bind(process_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .map(|floor| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", floor))
-        .transpose()?
+        sqlx::query_scalar::<_, i64>(process_sql().floor.select_floor.sql())
+            .bind(target_session_id.as_str())
+            .bind(process_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .map(|floor| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", floor))
+            .transpose()?
     } else {
         None
     };
@@ -406,21 +366,16 @@ pub(crate) async fn apply_process_event_append_tx(
                     )?;
                 }
             }
-            sqlx::query(
-                "INSERT INTO lash_process_events (
-                    process_id, process_incarnation, sequence, event_type, idempotency_key, event_json
-                 )
-                 VALUES ($1, $2, $3, $4, $5, $6)",
-            )
-            .bind(process_id.as_str())
-            .bind(event.process_incarnation.registration_sequence() as i64)
-            .bind(sequence as i64)
-            .bind(event.event_type.as_str())
-            .bind(event.invocation.replay_key())
-            .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
-            .execute(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+            sqlx::query(process_sql().event.insert.sql())
+                .bind(process_id.as_str())
+                .bind(event.process_incarnation.registration_sequence() as i64)
+                .bind(sequence as i64)
+                .bind(event.event_type.as_str())
+                .bind(event.invocation.replay_key())
+                .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
+                .execute(&mut **tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
             *record = projected_record;
             save_process_tx(tx, record).await?;
             // A process that just reached a terminal status is an ended parent
@@ -481,22 +436,13 @@ pub(crate) async fn advance_wake_allocation_floor_tx(
     let Some(target_session_id) = target_session_id else {
         return Ok(());
     };
-    sqlx::query(
-        "INSERT INTO lash_wake_allocation_floors (
-            target_session_id, process_id, allocation_floor
-         ) VALUES ($1, $2, $3)
-         ON CONFLICT (target_session_id, process_id) DO UPDATE SET
-            allocation_floor = GREATEST(
-                lash_wake_allocation_floors.allocation_floor,
-                EXCLUDED.allocation_floor
-            )",
-    )
-    .bind(target_session_id.as_str())
-    .bind(process_id.as_str())
-    .bind(sequence as i64)
-    .execute(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    sqlx::query(process_sql().floor_postgres.upsert_max.sql())
+        .bind(target_session_id.as_str())
+        .bind(process_id.as_str())
+        .bind(sequence as i64)
+        .execute(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(())
 }
 
@@ -509,7 +455,7 @@ pub(crate) async fn insert_wake_delivery_tx(
         return Ok(());
     };
     let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
-    sqlx::query(INSERT_WAKE_DELIVERY_SQL.as_str())
+    sqlx::query(process_sql().wake_postgres.insert_pending.sql())
         .bind(&delivery.delivery_id)
         .bind(delivery.wake.process_id.as_str())
         .bind(delivery.wake.process_incarnation.registration_sequence() as i64)
@@ -529,12 +475,10 @@ pub(crate) async fn load_process_lease_tx(
     process_id: &ProcessId,
 ) -> Result<Option<ProcessLease>, PluginError> {
     let row = sqlx::query(
-        "SELECT lease_owner_id, lease_token, lease_fencing_token,
-                lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id
-         FROM lash_process_leases
-         WHERE process_id = $1
-         FOR UPDATE",
+        process_sql()
+            .lease_postgres
+            .select_by_process_for_update
+            .sql(),
     )
     .bind(process_id.as_str())
     .fetch_optional(&mut **tx)
@@ -576,31 +520,17 @@ pub(crate) async fn acquire_process_lease_tx(
         fencing_token.saturating_sub(1),
         lease.fencing_token,
     )?;
-    sqlx::query(
-        "INSERT INTO lash_process_leases (
-            process_id, lease_owner_id, lease_owner_incarnation_id,
-            lease_token, lease_fencing_token,
-            lease_claimed_at_ms, lease_expires_at_ms
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (process_id) DO UPDATE SET
-            lease_owner_id = EXCLUDED.lease_owner_id,
-            lease_owner_incarnation_id = EXCLUDED.lease_owner_incarnation_id,
-            lease_token = EXCLUDED.lease_token,
-            lease_fencing_token = EXCLUDED.lease_fencing_token,
-            lease_claimed_at_ms = EXCLUDED.lease_claimed_at_ms,
-            lease_expires_at_ms = EXCLUDED.lease_expires_at_ms",
-    )
-    .bind(lease.process_id.as_str())
-    .bind(&lease.owner.owner_id)
-    .bind(&lease.owner.incarnation_id)
-    .bind(&lease.lease_token)
-    .bind(sql_fencing_token)
-    .bind(lease.claimed_at_epoch_ms as i64)
-    .bind(lease.expires_at_epoch_ms as i64)
-    .execute(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    sqlx::query(process_sql().lease_postgres.upsert_acquired.sql())
+        .bind(lease.process_id.as_str())
+        .bind(&lease.owner.owner_id)
+        .bind(&lease.owner.incarnation_id)
+        .bind(&lease.lease_token)
+        .bind(sql_fencing_token)
+        .bind(lease.claimed_at_epoch_ms as i64)
+        .bind(lease.expires_at_epoch_ms as i64)
+        .execute(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(lease)
 }
 
@@ -609,7 +539,10 @@ pub(crate) async fn retained_process_lease_fencing_token(
     process_id: &ProcessId,
 ) -> Result<u64, PluginError> {
     let existing_fence: Option<i64> = sqlx::query_scalar(
-        "SELECT lease_fencing_token FROM lash_process_leases WHERE process_id = $1 FOR UPDATE",
+        process_sql()
+            .lease_postgres
+            .select_fencing_token_for_update
+            .sql(),
     )
     .bind(process_id.as_str())
     .fetch_optional(&mut **tx)

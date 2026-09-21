@@ -183,10 +183,39 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         )
         self.assert_refused("is not one of the column lists")
 
+    def test_a_delete_from_is_not_read_as_a_projection_but_a_sibling_select_is(
+        self,
+    ) -> None:
+        """`DELETE FROM t` names what a statement writes, not a column list.
+
+        PostgreSQL's prune and the session-delete cascade are single `WITH`
+        statements whose arms delete from converted tables; pairing those
+        `FROM`s with whatever `SELECT` came earlier reads a column list out of
+        text that is not one. The rule has to skip exactly those and no more,
+        so this asserts both halves over one statement.
+        """
+        sql = (
+            "WITH gone AS ( DELETE FROM processes WHERE process_id = ?1 "
+            "RETURNING process_id ) "
+            "SELECT process_id, record_json FROM processes WHERE change_seq > ?2"
+        )
+        self.assertEqual(GATE.projections(sql, "processes"), ["process_id, record_json"])
+
+    def test_a_column_subset_inside_a_union_arm_is_refused(self) -> None:
+        """The change feed's arms are subqueries, and still answer the rule."""
+        self.tree.substitute(
+            "crates/lash-postgres-store/src/postgres/process_sql.rs",
+            "                 SELECT change_seq, 'upsert' AS kind, record_json AS payload\n"
+            "                 FROM processes WHERE change_seq > ?1",
+            "                 SELECT change_seq, status, 'upsert' AS kind, record_json AS payload\n"
+            "                 FROM processes WHERE change_seq > ?1",
+        )
+        self.assert_refused("is not one of the column lists")
+
     def test_a_family_removed_from_converted_makes_the_gate_silent_about_it(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "attachment", "effect", "trigger", "wait"]',
+            'converted = ["artifact", "attachment", "effect", "process", "trigger", "wait"]',
             'converted = ["artifact", "attachment", "effect"]',
         )
         self.tree.substitute(
@@ -346,7 +375,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         """The red side of the case above: the rule, not the seed, is new."""
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "attachment", "effect", "trigger", "wait"]',
+            'converted = ["artifact", "attachment", "effect", "process", "trigger", "wait"]',
             'converted = ["artifact", "effect", "trigger", "wait"]',
         )
         stray = (

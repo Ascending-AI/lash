@@ -13,72 +13,10 @@ pub(super) async fn prune_process_rows_tx(
     // process delete cascades observers, leases, handovers, and terminal wake
     // deliveries through their existing foreign keys.
     let (pruned_events, pruned_processes) = sqlx::query_as::<_, (i64, i64)>(
-        "WITH candidates AS (
-             SELECT process_id, ordinality
-             FROM unnest($1::TEXT[]) WITH ORDINALITY
-                  AS candidate(process_id, ordinality)
-         ),
-         deleted_events AS (
-             DELETE FROM lash_process_events AS event
-             USING candidates AS candidate
-             WHERE event.process_id = candidate.process_id
-             RETURNING event.process_id
-         ),
-         event_count AS MATERIALIZED (
-             SELECT count(*) AS value FROM deleted_events
-         ),
-         advanced_clock AS (
-             UPDATE lash_process_change_clock
-             SET current_seq = current_seq + (SELECT count(*) FROM candidates)
-             WHERE singleton = TRUE
-             RETURNING current_seq
-         ),
-         inserted_tombstones AS (
-             INSERT INTO lash_process_tombstones (
-                 process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
-             )
-             SELECT candidate.process_id,
-                    process.incarnation,
-                    process.status,
-                    $2,
-                    clock.current_seq - (SELECT count(*) FROM candidates)
-                        + candidate.ordinality
-             FROM candidates AS candidate
-             JOIN lash_processes AS process USING (process_id)
-             CROSS JOIN advanced_clock AS clock
-             CROSS JOIN event_count
-             WHERE event_count.value >= 0
-             ORDER BY candidate.ordinality
-             RETURNING process_id, incarnation
-         ),
-         inserted_artifact_cleanup AS (
-             INSERT INTO lash_process_artifact_cleanup (
-                 process_id, incarnation, cleanup_json
-             )
-             SELECT tombstone.process_id,
-                    tombstone.incarnation,
-                    jsonb_build_object(
-                        'process_id', process.process_id,
-                        'incarnation', process.incarnation,
-                        'env_ref', process.record_json::jsonb -> 'env_ref',
-                        'input', process.record_json::jsonb -> 'input'
-                    )::text
-             FROM inserted_tombstones AS tombstone
-             JOIN lash_processes AS process USING (process_id, incarnation)
-             RETURNING process_id
-         ),
-         deleted_processes AS (
-             DELETE FROM lash_processes AS process
-             USING candidates AS candidate,
-                   (SELECT count(*) FROM inserted_tombstones) AS tombstones,
-                   (SELECT count(*) FROM inserted_artifact_cleanup) AS cleanup
-             WHERE process.process_id = candidate.process_id
-               AND tombstones.count = (SELECT count(*) FROM candidates)
-               AND cleanup.count = (SELECT count(*) FROM candidates)
-             RETURNING process.process_id
-         )
-         SELECT (SELECT value FROM event_count),
-                (SELECT count(*) FROM deleted_processes)",
+        crate::process_sql::process_sql()
+            .registry_postgres
+            .prune_rows
+            .sql(),
     )
     .bind(
         process_ids

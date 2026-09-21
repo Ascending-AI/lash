@@ -600,7 +600,7 @@ enum TablePosition {
 
 /// Whether `word` opens a table position, given the identifier before it.
 ///
-/// `previous` decides one case: an upsert's `ON CONFLICT … DO UPDATE SET`
+/// `previous` decides two cases: an upsert's `ON CONFLICT … DO UPDATE SET`
 /// writes `UPDATE` with no table after it, because the table is the one the
 /// insert already named. Every other `UPDATE` is a statement head and does
 /// take a table.
@@ -608,8 +608,12 @@ fn table_position(word: &str, previous: Option<&str>) -> Option<TablePosition> {
     if word.eq_ignore_ascii_case("from") {
         Some(TablePosition::From)
     } else if word.eq_ignore_ascii_case("update") {
-        let upsert_action = previous.is_some_and(|before| before.eq_ignore_ascii_case("do"));
-        (!upsert_action).then_some(TablePosition::Other)
+        // `ON CONFLICT … DO UPDATE SET` writes the row the insert conflicted
+        // with; `FOR UPDATE OF <alias>` names an alias. Neither takes a table.
+        let names_no_relation = previous.is_some_and(|before| {
+            before.eq_ignore_ascii_case("do") || before.eq_ignore_ascii_case("for")
+        });
+        (!names_no_relation).then_some(TablePosition::Other)
     } else if word.eq_ignore_ascii_case("into") || word.eq_ignore_ascii_case("join") {
         Some(TablePosition::Other)
     } else {
@@ -732,8 +736,23 @@ fn followed_by_as_open_paren(text: &str, from: usize) -> bool {
     {
         return false;
     }
-    tail.trim_start_matches(|character: char| character.is_ascii_whitespace())
-        .starts_with('(')
+    let mut tail = tail.trim_start_matches(|character: char| character.is_ascii_whitespace());
+    // PostgreSQL lets a common table expression state its inlining:
+    // `AS MATERIALIZED (`, `AS NOT MATERIALIZED (`. It is still a binding.
+    for hint in ["NOT", "MATERIALIZED"] {
+        if tail.len() >= hint.len()
+            && tail[..hint.len()].eq_ignore_ascii_case(hint)
+            && !tail
+                .as_bytes()
+                .get(hint.len())
+                .copied()
+                .is_some_and(is_identifier_byte)
+        {
+            tail = tail[hint.len()..]
+                .trim_start_matches(|character: char| character.is_ascii_whitespace());
+        }
+    }
+    tail.starts_with('(')
 }
 
 const fn is_identifier_start(byte: u8) -> bool {

@@ -88,6 +88,7 @@ mod render;
 pub mod artifact;
 pub mod attachment;
 pub mod effect;
+pub mod process;
 pub mod trigger;
 pub mod wait;
 
@@ -110,6 +111,19 @@ pub const TABLES: &[&str] = &[
     effect::replay::TABLE,
     effect::group::TABLE,
     effect::scope_retirement::TABLE,
+    process::artifact_cleanup::TABLE,
+    process::change_clock::TABLE,
+    process::definitions::TABLE,
+    process::events::TABLE,
+    process::leases::TABLE,
+    process::observers::TABLE,
+    process::parent_end_plans::TABLE,
+    process::processes::TABLE,
+    process::segment_handovers::TABLE,
+    process::tombstones::TABLE,
+    process::wake_allocation_floors::TABLE,
+    process::wake_deliveries::TABLE,
+    process::wake_redelivery_fences::TABLE,
     trigger::deliveries::TABLE,
     trigger::mutation_receipts::TABLE,
     trigger::occurrences::TABLE,
@@ -130,17 +144,21 @@ pub const TABLES: &[&str] = &[
     // is named only by the backend that has it.
     "checkpoint_blob_refs",
     "deleted_sessions",
+    "fork_lineage",
     "graph_nodes",
     "lashlang_artifacts",
     "node_anchors",
-    // The process registry's own table, reached from the session catalog
-    // through an `ATTACH`ed database on SQLite and as `lash_processes` in the
-    // one database on PostgreSQL. The attachment GC's owner-death proof is
-    // SQL over it; FIG-3384 converts the family.
-    "processes",
+    "pending_turn_inputs",
+    "queued_work_batches",
+    "queued_work_items",
     "runtime_turn_commits",
+    "session_execution_leases",
     "session_head",
+    "session_meta",
     "sessions",
+    "turn_cancel_closure_authorizations",
+    "turn_cancel_requests",
+    "turn_cancellation_bindings",
 ];
 
 /// Every shared statement this crate owns, across every family.
@@ -165,6 +183,15 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
     statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
     statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);
+    statements.extend_from_slice(process::artifact_cleanup::ArtifactCleanupStatements::NEUTRAL);
+    statements.extend_from_slice(process::definitions::DefinitionStatements::NEUTRAL);
+    statements.extend_from_slice(process::events::EventStatements::NEUTRAL);
+    statements.extend_from_slice(process::leases::LeaseStatements::NEUTRAL);
+    statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);
+    statements.extend_from_slice(process::parent_end_plans::ParentEndPlanStatements::NEUTRAL);
+    statements.extend_from_slice(process::processes::ProcessStatements::NEUTRAL);
+    statements.extend_from_slice(process::segment_handovers::SegmentHandoverStatements::NEUTRAL);
+    statements.extend_from_slice(process::tombstones::TombstoneStatements::NEUTRAL);
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
     statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
     statements

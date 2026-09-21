@@ -20,136 +20,7 @@ pub(crate) mod prune_api;
 mod retention;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
-use crate::process_lifecycle_sql::{
-    live_process_status, nonterminal_process_status, wake_delivery_state,
-};
-use lash_core::WakeDeliveryState;
-use std::sync::LazyLock;
-
-/// The always-bound filters. `{{extra}}` is where the optional, index-served
-/// clauses land: they are spelled as bare conjuncts rather than as
-/// `($n IS NULL OR ...)` because an `OR` over a parameter costs the planner
-/// the partial index those filters exist to use, so an absent filter must
-/// leave no predicate behind at all.
-static LIST_PROCESSES_SQL_TEMPLATE: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM lash_processes
-             WHERE ($1::TEXT[] IS NULL OR status = ANY($1))
-               AND ($2::TEXT IS NULL OR originator_id = $2)
-               AND ($3::TEXT IS NULL OR identity_kind = $3)
-               AND ($4::TEXT IS NULL OR identity_label = $4)
-               AND ($5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{{identity,definition,definition}}') = $5)
-               AND ($6::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{{provenance,caused_by,occurrence_id}}') = $6)
-               AND ($7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{{provenance,caused_by,subscription_id}}') = $7)
-               AND ($8::BIGINT IS NULL OR created_at_ms >= $8)
-               AND ($9::BIGINT IS NULL OR created_at_ms < $9)
-               AND ($10::BIGINT IS NULL OR {live}
-                    OR updated_at_ms >= $10){{extra}}
-             ORDER BY process_id ASC",
-        live = live_process_status("status"),
-    )
-});
-
-pub(crate) static LIST_PROCESSES_SQL: LazyLock<String> =
-    LazyLock::new(|| LIST_PROCESSES_SQL_TEMPLATE.replace("{extra}", ""));
-
-/// The optional clauses and the parameter numbers they read, rendered
-/// together so a clause and its bind cannot drift apart.
-fn list_processes_extra_sql(filter: &lash_core::ProcessListFilter) -> String {
-    let mut next = 10;
-    let mut extra = String::new();
-    if filter.parent_scope.is_some() {
-        let kind = next + 1;
-        let id = next + 2;
-        next += 2;
-        // `IS NOT DISTINCT FROM` rather than `=`: a Host scope stores a NULL
-        // id, tied to the kind by the check constraint, so the pair is still
-        // an equality lookup on `idx_lash_processes_parent_scope`.
-        extra.push_str(&format!(
-            "\n               AND parent_scope_kind = ${kind}\n               AND parent_scope_id IS NOT DISTINCT FROM ${id}::TEXT"
-        ));
-    }
-    if filter.cancel_pending_before_ms.is_some() {
-        let before = next + 1;
-        extra.push_str(&format!(
-            "\n               AND cancel_requested_at_ms IS NOT NULL\n               AND cancel_requested_at_ms < ${before}\n               AND {nonterminal}",
-            nonterminal = nonterminal_process_status("status"),
-        ));
-    }
-    extra
-}
-
-/// The exact statement this build sends for `filter`, so a planner witness
-/// cannot drift from the query it claims to exercise.
-pub(crate) fn list_processes_sql(filter: &lash_core::ProcessListFilter) -> String {
-    let extra = list_processes_extra_sql(filter);
-    // The unnarrowed statement is the common case, so it is rendered once and
-    // reused rather than rebuilt per call.
-    if extra.is_empty() {
-        return LIST_PROCESSES_SQL.clone();
-    }
-    LIST_PROCESSES_SQL_TEMPLATE.replace("{extra}", &extra)
-}
-
-pub(crate) static LIST_OBSERVED_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT p.record_json
-             FROM lash_process_observers o
-             JOIN lash_processes p ON p.process_id = o.process_id
-                                    AND p.incarnation = o.process_incarnation
-             WHERE o.session_id = $1
-               AND ($2::TEXT[] IS NULL OR p.status = ANY($2))
-               AND ($3::BIGINT IS NULL OR {live}
-                    OR p.updated_at_ms >= $3)
-             ORDER BY p.process_id",
-        live = live_process_status("p.status"),
-    )
-});
-
-pub(crate) static DISCARD_RETARGETED_WAKES_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE lash_process_wake_deliveries
-                 SET state = {discarded}, discard_reason = 'retargeted'
-                 WHERE process_id = $1 AND target_session_id = $2 AND state = {pending}",
-        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-    )
-});
-
-pub(crate) static DISCARD_TARGET_GONE_WAKES_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE lash_process_wake_deliveries
-             SET state = {discarded}, discard_reason = 'target_gone'
-             WHERE target_session_id = $1 AND state = {pending}",
-        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-    )
-});
-
-pub(crate) static REDRIVE_DISCARDED_WAKE_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE lash_process_wake_deliveries
-             SET state = {pending}, attempts = 0, first_attempt_ms = NULL,
-                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
-                 discard_reason = NULL
-             WHERE delivery_id = $1 AND state = {discarded}",
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
-    )
-});
-
-pub(crate) static RELEASE_WAKE_CLAIM_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE lash_process_wake_deliveries
-             SET state = {pending}, claim_token = NULL, next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = {enqueuing} AND claim_token = $2",
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
-    )
-});
+use crate::process_sql::{list_processes_sql, process_sql};
 
 pub(crate) mod wake_delivery;
 #[path = "process_registry/worklist.rs"]
@@ -169,15 +40,11 @@ impl lash_core::ProcessQuery for PostgresProcessRegistry {
         if let Some(record) = load_process(&self.pool, process_id).await? {
             return Ok(Some(record));
         }
-        let row = sqlx::query(
-            "SELECT terminal_label, pruned_at_ms
-             FROM lash_process_tombstones WHERE process_id = $1
-             ORDER BY incarnation DESC LIMIT 1",
-        )
-        .bind(process_id.as_str())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let row = sqlx::query(process_sql().tombstone.select_latest_terminal.sql())
+            .bind(process_id.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         if let Some(row) = row {
             return Err(registry_transitions::process_no_longer_retained(
                 registry_transitions::ProcessTombstoneStamp {
@@ -219,8 +86,7 @@ impl lash_core::ProcessQuery for PostgresProcessRegistry {
             .map(serde_json::to_value)
             .transpose()
             .map_err(process_decode_error)?;
-        let sql = list_processes_sql(filter);
-        let mut query = sqlx::query(&sql)
+        let mut query = sqlx::query(list_processes_sql(filter))
             .bind(filter.status.labels())
             .bind(filter.originator.as_ref().map(|o| o.originator_id()))
             .bind(filter.identity_kind.as_deref())
@@ -267,29 +133,12 @@ impl lash_core::ProcessQuery for PostgresProcessRegistry {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok((Vec::new(), cursor));
         }
-        let rows = sqlx::query(
-            "SELECT change_seq, kind, payload FROM (
-                 SELECT change_seq, 'upsert' AS kind, record_json AS payload
-                 FROM lash_processes WHERE change_seq > $1
-                 UNION ALL
-                 SELECT pruned_change_seq, 'deleted' AS kind,
-                        json_build_object(
-                            'process_id', process_id,
-                            'incarnation', incarnation,
-                            'terminal_label', terminal_label,
-                            'pruned_at_ms', pruned_at_ms,
-                            'pruned_change_seq', pruned_change_seq
-                        )::TEXT AS payload
-                 FROM lash_process_tombstones WHERE pruned_change_seq > $1
-             ) changes
-             ORDER BY change_seq ASC
-             LIMIT $2",
-        )
-        .bind(cursor.store_sequence() as i64)
-        .bind(limit as i64)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows = sqlx::query(process_sql().process_postgres.list_changes_after.sql())
+            .bind(cursor.store_sequence() as i64)
+            .bind(limit as i64)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let mut records = Vec::new();
         let mut next_cursor = cursor;
         for row in rows {
@@ -406,38 +255,27 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
             now,
         );
         let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
-        let result = sqlx::query(
-            "INSERT INTO lash_processes (
-                process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
-                identity_kind, identity_label,
-                created_at_ms, updated_at_ms, last_event_sequence,
-                change_seq, status,
-                parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
-                record_json
-             )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-             ON CONFLICT (process_id) DO NOTHING",
-        )
-        .bind(record.id.as_str())
-        .bind(record.incarnation.registration_sequence() as i64)
-        .bind(&record.registration_fingerprint)
-        .bind(record.originator_id().as_str())
-        .bind(wake_session_id.as_deref())
-        .bind(record.identity.kind.as_str())
-        .bind(&record.identity.label)
-        .bind(record.created_at_ms as i64)
-        .bind(record.updated_at_ms as i64)
-        .bind(record.last_event_sequence as i64)
-        .bind(change_seq as i64)
-        .bind(process_status_label(&record))
-        .bind(record.lifecycle.parent.storage_kind())
-        .bind(record.lifecycle.parent.storage_id())
-        .bind(record.lifecycle.on_parent_end.storage_label())
-        .bind(cancel_requested_at_ms(&record))
-        .bind(record_json)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let result = sqlx::query(process_sql().process_postgres.insert_registration.sql())
+            .bind(record.id.as_str())
+            .bind(record.incarnation.registration_sequence() as i64)
+            .bind(&record.registration_fingerprint)
+            .bind(record.originator_id().as_str())
+            .bind(wake_session_id.as_deref())
+            .bind(record.identity.kind.as_str())
+            .bind(&record.identity.label)
+            .bind(record.created_at_ms as i64)
+            .bind(record.updated_at_ms as i64)
+            .bind(record.last_event_sequence as i64)
+            .bind(change_seq as i64)
+            .bind(process_status_label(&record))
+            .bind(record.lifecycle.parent.storage_kind())
+            .bind(record.lifecycle.parent.storage_id())
+            .bind(record.lifecycle.on_parent_end.storage_label())
+            .bind(cancel_requested_at_ms(&record))
+            .bind(record_json)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         // Registration is idempotent by fingerprint, and on this tier alone the
         // read that decides that and the insert that acts on it are two
         // statements in one `READ COMMITTED` transaction, so each takes its own
@@ -497,16 +335,13 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?;
         let process_id = record.id.clone();
         for session_id in observers {
-            sqlx::query(
-                "INSERT INTO lash_process_observers (session_id, process_id, process_incarnation)
-                 VALUES ($1, $2, $3)",
-            )
-            .bind(session_id.as_str())
-            .bind(process_id.as_str())
-            .bind(record.incarnation.registration_sequence() as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+            sqlx::query(process_sql().observer.insert.sql())
+                .bind(session_id.as_str())
+                .bind(process_id.as_str())
+                .bind(record.incarnation.registration_sequence() as i64)
+                .execute(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
             append_process_event_tx(
                 &mut tx,
                 &mut record,
@@ -586,17 +421,14 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
     ) -> Result<(), PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let changed = sqlx::query(
-            "INSERT INTO lash_process_observers (session_id, process_id, process_incarnation)
-             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-        )
-        .bind(session_id.as_str())
-        .bind(process_id.as_str())
-        .bind(record.incarnation.registration_sequence() as i64)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+        let changed = sqlx::query(process_sql().observer_postgres.insert_if_absent.sql())
+            .bind(session_id.as_str())
+            .bind(process_id.as_str())
+            .bind(record.incarnation.registration_sequence() as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
         if changed > 0 {
             append_process_event_tx(
                 &mut tx,
@@ -619,17 +451,14 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
     ) -> Result<(), PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_ref_tx(&mut tx, process_ref).await?;
-        let changed = sqlx::query(
-            "INSERT INTO lash_process_observers (session_id, process_id, process_incarnation)
-             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-        )
-        .bind(session_id.as_str())
-        .bind(process_ref.process_id.as_str())
-        .bind(process_ref.incarnation.registration_sequence() as i64)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+        let changed = sqlx::query(process_sql().observer_postgres.insert_if_absent.sql())
+            .bind(session_id.as_str())
+            .bind(process_ref.process_id.as_str())
+            .bind(process_ref.incarnation.registration_sequence() as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
         if changed > 0 {
             append_process_event_tx(
                 &mut tx,
@@ -651,17 +480,14 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
     ) -> Result<(), PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let changed = sqlx::query(
-            "DELETE FROM lash_process_observers
-             WHERE session_id = $1 AND process_id = $2 AND process_incarnation = $3",
-        )
-        .bind(session_id.as_str())
-        .bind(process_id.as_str())
-        .bind(record.incarnation.registration_sequence() as i64)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+        let changed = sqlx::query(process_sql().observer.delete.sql())
+            .bind(session_id.as_str())
+            .bind(process_id.as_str())
+            .bind(record.incarnation.registration_sequence() as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
         if changed > 0 {
             append_process_event_tx(
                 &mut tx,
@@ -686,32 +512,26 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         for process_id in process_ids {
             let mut record = require_process_tx(&mut tx, process_id).await?;
-            let removed = sqlx::query(
-                "DELETE FROM lash_process_observers
-                 WHERE session_id = $1 AND process_id = $2 AND process_incarnation = $3",
-            )
-            .bind(from_session_id.as_str())
-            .bind(process_id.as_str())
-            .bind(record.incarnation.registration_sequence() as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected();
+            let removed = sqlx::query(process_sql().observer.delete.sql())
+                .bind(from_session_id.as_str())
+                .bind(process_id.as_str())
+                .bind(record.incarnation.registration_sequence() as i64)
+                .execute(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected();
             if removed == 0 {
                 return Err(PluginError::Session(format!(
                     "process `{process_id}` is not observed by `{from_session_id}`"
                 )));
             }
-            sqlx::query(
-                "INSERT INTO lash_process_observers (session_id, process_id, process_incarnation)
-                 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-            )
-            .bind(to_session_id.as_str())
-            .bind(process_id.as_str())
-            .bind(record.incarnation.registration_sequence() as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+            sqlx::query(process_sql().observer_postgres.insert_if_absent.sql())
+                .bind(to_session_id.as_str())
+                .bind(process_id.as_str())
+                .bind(record.incarnation.registration_sequence() as i64)
+                .execute(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
             append_process_event_tx(
                 &mut tx,
                 &mut record,
@@ -737,7 +557,7 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         session_id: &SessionId,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
-        let rows = sqlx::query(LIST_OBSERVED_SQL.as_str())
+        let rows = sqlx::query(process_sql().registry_postgres.list_observed.sql())
             .bind(session_id.as_str())
             .bind(filter.status.labels())
             .bind(filter.retired_since_ms.map(clamp_epoch_ms))
@@ -763,12 +583,10 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         process_id: &ProcessId,
     ) -> Result<bool, PluginError> {
         let (retained, observer): (bool, bool) = sqlx::query_as(
-            "SELECT
-                 EXISTS(SELECT 1 FROM lash_processes WHERE process_id = $2),
-                 EXISTS(
-                     SELECT 1 FROM lash_process_observers
-                     WHERE session_id = $1 AND process_id = $2
-                 )",
+            process_sql()
+                .registry_postgres
+                .observation_and_registration_exist
+                .sql(),
         )
         .bind(session_id.as_str())
         .bind(process_id.as_str())
@@ -790,8 +608,10 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
             return Err(registry_transitions::unknown_process(process_id));
         }
         sqlx::query_scalar(
-            "SELECT session_id FROM lash_process_observers
-             WHERE process_id = $1 ORDER BY session_id",
+            process_sql()
+                .observer_postgres
+                .list_sessions_for_process
+                .sql(),
         )
         .bind(process_id.as_str())
         .fetch_all(&self.pool)
@@ -808,7 +628,7 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let previous: Option<String> =
-            sqlx::query_scalar("SELECT wake_session_id FROM lash_processes WHERE process_id = $1")
+            sqlx::query_scalar(process_sql().process.select_wake_session_id.sql())
                 .bind(process_id.as_str())
                 .fetch_one(&mut *tx)
                 .await
@@ -825,14 +645,14 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
             self.wake_delivery_config,
         )
         .await?;
-        sqlx::query("UPDATE lash_processes SET wake_session_id = $2 WHERE process_id = $1")
+        sqlx::query(process_sql().process.set_wake_session_id.sql())
             .bind(process_id.as_str())
             .bind(target)
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
         if let Some(previous) = previous {
-            sqlx::query(DISCARD_RETARGETED_WAKES_SQL.as_str())
+            sqlx::query(process_sql().wake.discard_retargeted.sql())
                 .bind(process_id.as_str())
                 .bind(previous)
                 .execute(&mut *tx)
@@ -847,28 +667,27 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         session_id: &SessionId,
     ) -> Result<lash_core::ProcessSessionDeleteReport, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let discarded_wake_delivery_count = sqlx::query(DISCARD_TARGET_GONE_WAKES_SQL.as_str())
-            .bind(session_id.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected() as usize;
-        let removed_observer_count =
-            sqlx::query("DELETE FROM lash_process_observers WHERE session_id = $1")
+        let discarded_wake_delivery_count =
+            sqlx::query(process_sql().wake.discard_target_gone.sql())
                 .bind(session_id.as_str())
                 .execute(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
-        let cleared_subscription_count = sqlx::query(
-            "UPDATE lash_processes SET wake_session_id = NULL WHERE wake_session_id = $1",
-        )
-        .bind(session_id.as_str())
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected() as usize;
-        sqlx::query("DELETE FROM lash_wake_allocation_floors WHERE target_session_id = $1")
+        let removed_observer_count = sqlx::query(process_sql().observer.delete_by_session.sql())
+            .bind(session_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected() as usize;
+        let cleared_subscription_count =
+            sqlx::query(process_sql().process.clear_wake_session_for_session.sql())
+                .bind(session_id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected() as usize;
+        sqlx::query(process_sql().floor.delete_by_session.sql())
             .bind(session_id.as_str())
             .execute(&mut *tx)
             .await
@@ -965,17 +784,13 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
             .get_process(process_id)
             .await?
             .ok_or_else(|| registry_transitions::unknown_process(process_id))?;
-        let rows = sqlx::query(
-            "SELECT event_json FROM lash_process_events
-             WHERE process_id = $1 AND process_incarnation = $2 AND sequence > $3
-             ORDER BY sequence ASC",
-        )
-        .bind(process_id.as_str())
-        .bind(record.incarnation.registration_sequence() as i64)
-        .bind(after_sequence as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows = sqlx::query(process_sql().event.list_after_sequence.sql())
+            .bind(process_id.as_str())
+            .bind(record.incarnation.registration_sequence() as i64)
+            .bind(after_sequence as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let mut events = Vec::new();
         for row in rows {
             let json: String = row.get(0);
@@ -991,17 +806,13 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         require_process_ref_tx(&mut tx, process_ref).await?;
-        let rows = sqlx::query(
-            "SELECT event_json FROM lash_process_events
-             WHERE process_id = $1 AND process_incarnation = $2 AND sequence > $3
-             ORDER BY sequence ASC",
-        )
-        .bind(process_ref.process_id.as_str())
-        .bind(process_ref.incarnation.registration_sequence() as i64)
-        .bind(after_sequence as i64)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows = sqlx::query(process_sql().event.list_after_sequence.sql())
+            .bind(process_ref.process_id.as_str())
+            .bind(process_ref.incarnation.registration_sequence() as i64)
+            .bind(after_sequence as i64)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         rows.into_iter()
             .map(|row| serde_json::from_str(&row.get::<String, _>(0)).map_err(process_decode_error))
@@ -1017,16 +828,13 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
         if self.get_process(process_id).await?.is_none() {
             return Err(registry_transitions::unknown_process(process_id));
         }
-        let row = sqlx::query(
-            "SELECT COUNT(*) FROM lash_process_events
-             WHERE process_id = $1 AND event_type = $2 AND sequence <= $3",
-        )
-        .bind(process_id.as_str())
-        .bind(event_type)
-        .bind(up_to_sequence as i64)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let row = sqlx::query(process_sql().event.count_by_type_through_sequence.sql())
+            .bind(process_id.as_str())
+            .bind(event_type)
+            .bind(up_to_sequence as i64)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let count: i64 = row.get(0);
         Ok(count as u64)
     }
@@ -1040,9 +848,10 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         require_process_ref_tx(&mut tx, process_ref).await?;
         let row = sqlx::query(
-            "SELECT COUNT(*) FROM lash_process_events
-             WHERE process_id = $1 AND process_incarnation = $2
-               AND event_type = $3 AND sequence <= $4",
+            process_sql()
+                .event
+                .count_by_incarnation_type_through_sequence
+                .sql(),
         )
         .bind(process_ref.process_id.as_str())
         .bind(process_ref.incarnation.registration_sequence() as i64)
@@ -1063,17 +872,12 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
         if self.get_process(process_id).await?.is_none() {
             return Err(registry_transitions::unknown_process(process_id));
         }
-        let rows = sqlx::query(
-            "SELECT event_json FROM lash_process_events
-             WHERE process_id = $1
-             ORDER BY sequence DESC
-             LIMIT $2",
-        )
-        .bind(process_id.as_str())
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows = sqlx::query(process_sql().event.list_recent.sql())
+            .bind(process_id.as_str())
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let mut events = Vec::new();
         for row in rows {
             let json: String = row.get(0);
@@ -1120,27 +924,16 @@ impl lash_core::ProcessWakeOutbox for PostgresProcessRegistry {
         state: Option<lash_core::WakeDeliveryState>,
     ) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
         let rows = if let Some(state) = state {
-            sqlx::query(
-                "SELECT delivery_id, state, claim_token, attempts, first_attempt_ms,
-                        next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
-                 FROM lash_process_wake_deliveries
-                 WHERE state = $1
-                 ORDER BY delivery_id ASC",
-            )
-            .bind(state.as_str())
-            .fetch_all(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?
+            sqlx::query(process_sql().wake_postgres.list_by_state.sql())
+                .bind(state.as_str())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(plugin_sqlx_error)?
         } else {
-            sqlx::query(
-                "SELECT delivery_id, state, claim_token, attempts, first_attempt_ms,
-                        next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
-                 FROM lash_process_wake_deliveries
-                 ORDER BY delivery_id ASC",
-            )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?
+            sqlx::query(process_sql().wake_postgres.list_all.sql())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(plugin_sqlx_error)?
         };
         rows.into_iter().map(decode_wake_delivery_row).collect()
     }
@@ -1175,7 +968,7 @@ impl lash_core::ProcessWakeOutbox for PostgresProcessRegistry {
             .timestamp_ms()
             .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
         let next_attempt_at_ms = self.clock.timestamp_ms();
-        let changed = sqlx::query(REDRIVE_DISCARDED_WAKE_SQL.as_str())
+        let changed = sqlx::query(process_sql().wake.redrive_discarded.sql())
             .bind(delivery_id)
             .bind(expires_at_ms as i64)
             .bind(next_attempt_at_ms as i64)
@@ -1197,7 +990,7 @@ impl lash_core::ProcessWakeOutbox for PostgresProcessRegistry {
         claim_token: &str,
         next_attempt_at_ms: u64,
     ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
-        let changed = sqlx::query(RELEASE_WAKE_CLAIM_SQL.as_str())
+        let changed = sqlx::query(process_sql().wake.release_claim.sql())
             .bind(delivery_id)
             .bind(claim_token)
             .bind(next_attempt_at_ms as i64)
@@ -1221,13 +1014,10 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
     async fn pending_process_artifact_cleanup(
         &self,
     ) -> Result<Vec<lash_core::ProcessArtifactCleanup>, PluginError> {
-        let rows: Vec<String> = sqlx::query_scalar(
-            "SELECT cleanup_json FROM lash_process_artifact_cleanup
-             ORDER BY process_id, incarnation",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows: Vec<String> = sqlx::query_scalar(process_sql().cleanup.list_pending.sql())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         rows.into_iter()
             .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
             .collect()
@@ -1257,70 +1047,46 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
         };
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        sqlx::query(
-            "SELECT current_seq FROM lash_process_change_clock
-             WHERE singleton = TRUE FOR UPDATE",
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let compacted_through: Option<i64> = sqlx::query_scalar(
-            "SELECT MAX(pruned_change_seq) FROM lash_process_tombstones
-             WHERE pruned_at_ms < $1
-               AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
-               AND NOT (process_id = ANY($3::TEXT[]))
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_process_artifact_cleanup AS cleanup
-                   WHERE cleanup.process_id = lash_process_tombstones.process_id
-                     AND cleanup.incarnation = lash_process_tombstones.incarnation
-               )",
-        )
-        .bind(cutoff_epoch_ms)
-        .bind(max_change_seq)
-        .bind(
-            outstanding_trigger_delivery_process_ids
-                .iter()
-                .map(ProcessId::as_str)
-                .collect::<Vec<_>>(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let deleted = sqlx::query(
-            "DELETE FROM lash_process_tombstones
-                 WHERE pruned_at_ms < $1
-                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
-                   AND NOT (process_id = ANY($3::TEXT[]))
-                   AND NOT EXISTS (
-                       SELECT 1 FROM lash_process_artifact_cleanup AS cleanup
-                       WHERE cleanup.process_id = lash_process_tombstones.process_id
-                         AND cleanup.incarnation = lash_process_tombstones.incarnation
-                   )",
-        )
-        .bind(cutoff_epoch_ms)
-        .bind(max_change_seq)
-        .bind(
-            outstanding_trigger_delivery_process_ids
-                .iter()
-                .map(ProcessId::as_str)
-                .collect::<Vec<_>>(),
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected() as usize;
-        if let Some(compacted_through) = compacted_through {
-            sqlx::query(
-                "UPDATE lash_process_change_clock
-                 SET tombstone_compaction_horizon = GREATEST(
-                     tombstone_compaction_horizon, $1
-                 )
-                 WHERE singleton = TRUE",
-            )
-            .bind(compacted_through)
-            .execute(&mut *tx)
+        sqlx::query(process_sql().clock_postgres.select_current_for_update.sql())
+            .fetch_one(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
+        let compacted_through: Option<i64> = sqlx::query_scalar(
+            process_sql()
+                .tombstone_postgres
+                .select_max_compactable_change_seq
+                .sql(),
+        )
+        .bind(cutoff_epoch_ms)
+        .bind(max_change_seq)
+        .bind(
+            outstanding_trigger_delivery_process_ids
+                .iter()
+                .map(ProcessId::as_str)
+                .collect::<Vec<_>>(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let deleted = sqlx::query(process_sql().tombstone_postgres.delete_compactable.sql())
+            .bind(cutoff_epoch_ms)
+            .bind(max_change_seq)
+            .bind(
+                outstanding_trigger_delivery_process_ids
+                    .iter()
+                    .map(ProcessId::as_str)
+                    .collect::<Vec<_>>(),
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected() as usize;
+        if let Some(compacted_through) = compacted_through {
+            sqlx::query(process_sql().clock_postgres.raise_compaction_horizon.sql())
+                .bind(compacted_through)
+                .execute(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(deleted)
@@ -1360,17 +1126,14 @@ impl lash_core::ProcessRegistryTestSupport for PostgresProcessRegistry {
         target_session_id: &SessionId,
         process_id: &ProcessId,
     ) -> Result<Option<u64>, PluginError> {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT allocation_floor FROM lash_wake_allocation_floors
-             WHERE target_session_id = $1 AND process_id = $2",
-        )
-        .bind(target_session_id.as_str())
-        .bind(process_id.as_str())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .map(|value| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
-        .transpose()
+        sqlx::query_scalar::<_, i64>(process_sql().floor.select_floor.sql())
+            .bind(target_session_id.as_str())
+            .bind(process_id.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .map(|value| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
+            .transpose()
     }
 }
 /// This registry's registration truth for a bound effect host (ADR 0049).
@@ -1381,12 +1144,10 @@ struct PostgresRegistrationProbe {
 #[async_trait::async_trait]
 impl lash_core::ProcessRegistrationProbe for PostgresRegistrationProbe {
     async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, PluginError> {
-        sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM lash_processes WHERE process_id = $1)",
-        )
-        .bind(process_id.as_str())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)
+        sqlx::query_scalar::<_, bool>(process_sql().process.exists_by_id.sql())
+            .bind(process_id.as_str())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)
     }
 }

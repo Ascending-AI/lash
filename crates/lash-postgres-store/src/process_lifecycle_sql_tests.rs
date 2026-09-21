@@ -4,133 +4,153 @@
 //! the statement carried before the cutover, so a generated fragment cannot
 //! change a query's bytes without failing here. The fragments themselves are
 //! pinned in `lash_core::store_backend_support::process_lifecycle_sql`.
+//!
+//! FIG-3384 moved these statements onto the single-owner layout: the
+//! predicates are now `{{term(column)}}` tokens the renderer expands at
+//! startup rather than `format!` holes. The assertions are unchanged, and
+//! that is the point — they now witness that the rendered statement is
+//! character for character what the `format!` site produced.
 
-use crate::preflight::walk::{PARKED_SEGMENT_SQL, PENDING_WAKE_SQL};
-use crate::process_helpers::INSERT_WAKE_DELIVERY_SQL;
-use crate::process_registry::prune_api::PRUNABLE_TERMINAL_SELECT;
-use crate::process_registry::wake_delivery::{
-    RECLAIM_LAPSED_WAKE_CLAIMS_SQL, SELECT_CLAIMABLE_WAKE_SQL, SETTLE_WAKE_CLAIM_SQL,
-    START_WAKE_ENQUEUING_SQL,
-};
-use crate::process_registry::worklist::{
-    COLLECT_NON_TERMINAL_SQL, CONTINUE_WORKLIST_PAGE_SQL, COUNT_NON_TERMINAL_SQL,
-    FIRST_WORKLIST_PAGE_SQL, MAX_WORKLIST_PROCESS_ID_SQL,
-};
-use crate::process_registry::{
-    DISCARD_RETARGETED_WAKES_SQL, DISCARD_TARGET_GONE_WAKES_SQL, LIST_OBSERVED_SQL,
-    LIST_PROCESSES_SQL, REDRIVE_DISCARDED_WAKE_SQL, RELEASE_WAKE_CLAIM_SQL,
-};
+use crate::process_sql::process_sql;
 
 #[test]
 fn worklist_statements_keep_their_previous_bytes() {
     assert_eq!(
-        COUNT_NON_TERMINAL_SQL.as_str(),
+        process_sql().process_postgres.count_live_worklist.sql(),
         "SELECT COUNT(*) FROM lash_processes WHERE status IN ('running', 'waiting')"
     );
     assert_eq!(
-        MAX_WORKLIST_PROCESS_ID_SQL.as_str(),
+        process_sql()
+            .process_postgres
+            .select_max_worklist_process_id
+            .sql(),
         "SELECT MAX(process_id) FROM lash_processes WHERE status IN ('running', 'waiting')"
     );
     assert_eq!(
-        FIRST_WORKLIST_PAGE_SQL.as_str(),
+        process_sql()
+            .process_postgres
+            .list_first_worklist_page
+            .sql(),
         "SELECT record_json FROM lash_processes
      WHERE status IN ('running', 'waiting') AND process_id <= $1
      ORDER BY process_id ASC LIMIT $2"
     );
     assert_eq!(
-        CONTINUE_WORKLIST_PAGE_SQL.as_str(),
+        process_sql().process_postgres.list_next_worklist_page.sql(),
         "SELECT record_json FROM lash_processes
      WHERE status IN ('running', 'waiting')
        AND process_id <= $1 AND process_id > $2
      ORDER BY process_id ASC LIMIT $3"
     );
     assert_eq!(
-        COLLECT_NON_TERMINAL_SQL.as_str(),
+        process_sql().process.collect_non_terminal_records.sql(),
         "SELECT record_json FROM lash_processes
-         WHERE status IN ('running', 'waiting')
-         ORDER BY process_id ASC"
+                         WHERE status IN ('running', 'waiting')
+                         ORDER BY process_id ASC"
     );
 }
 
 #[test]
 fn list_and_prune_statements_keep_their_previous_predicates() {
-    assert!(LIST_PROCESSES_SQL.contains(
+    assert!(process_sql().process_postgres.list.sql().contains(
         "               AND ($10::BIGINT IS NULL OR status IN ('running', 'waiting')\n                    OR updated_at_ms >= $10)\n"
     ));
     assert!(
-        LIST_PROCESSES_SQL
+        process_sql()
+            .process_postgres
+            .list
+            .sql()
             .contains("(record_json::JSONB #> '{identity,definition,definition}') = $5")
     );
-    assert!(LIST_OBSERVED_SQL.contains(
+    assert!(process_sql().registry_postgres.list_observed.sql().contains(
         "               AND ($3::BIGINT IS NULL OR p.status IN ('running', 'waiting')\n                    OR p.updated_at_ms >= $3)\n"
     ));
     assert!(
-        PRUNABLE_TERMINAL_SELECT.contains("         WHERE status NOT IN ('running', 'waiting')\n")
+        process_sql()
+            .process_postgres
+            .list_prunable_terminal
+            .sql()
+            .contains("         WHERE status NOT IN ('running', 'waiting')\n")
     );
     assert!(
-        PRUNABLE_TERMINAL_SELECT
+        process_sql()
+            .process_postgres
+            .list_prunable_terminal
+            .sql()
             .contains("                 AND delivery.state IN ('pending', 'enqueuing')\n")
     );
 }
 
 #[test]
 fn preflight_statements_keep_their_previous_predicates() {
-    assert!(PARKED_SEGMENT_SQL.contains("     WHERE processes.status IN ('running', 'waiting')\n"));
-    assert!(PENDING_WAKE_SQL.contains("     WHERE state IN ('pending', 'enqueuing')\n"));
+    assert!(
+        process_sql()
+            .handover_postgres
+            .list_parked_segments
+            .sql()
+            .contains("     WHERE process.status IN ('running', 'waiting')\n")
+    );
+    assert!(
+        process_sql()
+            .wake_postgres
+            .list_undelivered_for_walk
+            .sql()
+            .contains("     WHERE state IN ('pending', 'enqueuing')\n")
+    );
 }
 
 #[test]
 fn wake_delivery_statements_keep_their_previous_bytes() {
     assert_eq!(
-        RECLAIM_LAPSED_WAKE_CLAIMS_SQL.as_str(),
+        process_sql().wake.reclaim_lapsed_claims.sql(),
         "UPDATE lash_process_wake_deliveries
-         SET state = 'pending', claim_token = NULL
-         WHERE state = 'enqueuing' AND next_attempt_at_ms <= $1"
+                         SET state = 'pending', claim_token = NULL
+                         WHERE state = 'enqueuing' AND next_attempt_at_ms <= $1"
     );
     assert_eq!(
-        START_WAKE_ENQUEUING_SQL.as_str(),
+        process_sql().wake.start_enqueuing.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'enqueuing',
-                 claim_token = $4,
-                 attempts = attempts + 1,
-                 first_attempt_ms = COALESCE(first_attempt_ms, $2),
-                 next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = 'pending'"
+                             SET state = 'enqueuing',
+                                 claim_token = $4,
+                                 attempts = attempts + 1,
+                                 first_attempt_ms = COALESCE(first_attempt_ms, $2),
+                                 next_attempt_at_ms = $3
+                             WHERE delivery_id = $1 AND state = 'pending'"
     );
     assert_eq!(
-        SETTLE_WAKE_CLAIM_SQL.as_str(),
+        process_sql().wake.settle_claim.sql(),
         "UPDATE lash_process_wake_deliveries
-         SET state = $3, claim_token = NULL, discard_reason = $4
-         WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
+                     SET state = $3, claim_token = NULL, discard_reason = $4
+                     WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
     );
     assert_eq!(
-        REDRIVE_DISCARDED_WAKE_SQL.as_str(),
+        process_sql().wake.redrive_discarded.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
-                 discard_reason = NULL
-             WHERE delivery_id = $1 AND state = 'discarded'"
+                             SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
+                                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
+                                 discard_reason = NULL
+                             WHERE delivery_id = $1 AND state = 'discarded'"
     );
     assert_eq!(
-        RELEASE_WAKE_CLAIM_SQL.as_str(),
+        process_sql().wake.release_claim.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
+                             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = $3
+                             WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
     );
     assert_eq!(
-        DISCARD_TARGET_GONE_WAKES_SQL.as_str(),
+        process_sql().wake.discard_target_gone.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'discarded', discard_reason = 'target_gone'
-             WHERE target_session_id = $1 AND state = 'pending'"
+                             SET state = 'discarded', discard_reason = 'target_gone'
+                             WHERE target_session_id = $1 AND state = 'pending'"
     );
     assert_eq!(
-        DISCARD_RETARGETED_WAKES_SQL.as_str(),
+        process_sql().wake.discard_retargeted.sql(),
         "UPDATE lash_process_wake_deliveries
-                 SET state = 'discarded', discard_reason = 'retargeted'
-                 WHERE process_id = $1 AND target_session_id = $2 AND state = 'pending'"
+                             SET state = 'discarded', discard_reason = 'retargeted'
+                             WHERE process_id = $1 AND target_session_id = $2 AND state = 'pending'"
     );
     assert_eq!(
-        INSERT_WAKE_DELIVERY_SQL.as_str(),
+        process_sql().wake_postgres.insert_pending.sql(),
         "INSERT INTO lash_process_wake_deliveries (
             delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
             claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
@@ -138,12 +158,26 @@ fn wake_delivery_statements_keep_their_previous_bytes() {
          ) VALUES ($1, $2, $3, $4, $5, 'pending', NULL, 0, NULL, $6, $7, NULL, $8)
          ON CONFLICT (delivery_id) DO NOTHING"
     );
-    assert!(SELECT_CLAIMABLE_WAKE_SQL.contains("         WHERE candidate.state = 'pending'\n"));
     assert!(
-        SELECT_CLAIMABLE_WAKE_SQL.contains("               WHERE earlier.state <> 'enqueued'\n")
+        process_sql()
+            .wake_postgres
+            .select_claimable
+            .sql()
+            .contains("         WHERE candidate.state = 'pending'\n")
     );
     assert!(
-        SELECT_CLAIMABLE_WAKE_SQL.contains("                     earlier.state = 'discarded'\n")
+        process_sql()
+            .wake_postgres
+            .select_claimable
+            .sql()
+            .contains("               WHERE earlier.state <> 'enqueued'\n")
+    );
+    assert!(
+        process_sql()
+            .wake_postgres
+            .select_claimable
+            .sql()
+            .contains("                     earlier.state = 'discarded'\n")
     );
 }
 
@@ -158,10 +192,7 @@ fn wake_delivery_statements_keep_their_previous_bytes() {
 /// rendered predicates are character for character what the schema's partial
 /// indexes declare. No production statement moves here — FIG-3384 owns that.
 mod vocabulary_tokens {
-    use super::{
-        COLLECT_NON_TERMINAL_SQL, CONTINUE_WORKLIST_PAGE_SQL, COUNT_NON_TERMINAL_SQL,
-        FIRST_WORKLIST_PAGE_SQL, MAX_WORKLIST_PROCESS_ID_SQL,
-    };
+    use super::process_sql;
     use lash_core::store_backend_support as vocabulary;
     use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm, render};
 
@@ -201,11 +232,14 @@ mod vocabulary_tokens {
     fn a_worklist_statement_renders_to_the_bytes_the_format_site_produces() {
         assert_eq!(
             rendered("SELECT COUNT(*) FROM processes WHERE {{live_process_status(status)}}"),
-            COUNT_NON_TERMINAL_SQL.as_str()
+            process_sql().process_postgres.count_live_worklist.sql()
         );
         assert_eq!(
             rendered("SELECT MAX(process_id) FROM processes WHERE {{live_process_status(status)}}"),
-            MAX_WORKLIST_PROCESS_ID_SQL.as_str()
+            process_sql()
+                .process_postgres
+                .select_max_worklist_process_id
+                .sql()
         );
         assert_eq!(
             rendered(
@@ -213,7 +247,10 @@ mod vocabulary_tokens {
      WHERE {{live_process_status(status)}} AND process_id <= ?1
      ORDER BY process_id ASC LIMIT ?2"
             ),
-            FIRST_WORKLIST_PAGE_SQL.as_str()
+            process_sql()
+                .process_postgres
+                .list_first_worklist_page
+                .sql()
         );
         assert_eq!(
             rendered(
@@ -222,15 +259,15 @@ mod vocabulary_tokens {
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3"
             ),
-            CONTINUE_WORKLIST_PAGE_SQL.as_str()
+            process_sql().process_postgres.list_next_worklist_page.sql()
         );
         assert_eq!(
             rendered(
                 "SELECT record_json FROM processes
-         WHERE {{live_process_status(status)}}
-         ORDER BY process_id ASC"
+                         WHERE {{live_process_status(status)}}
+                         ORDER BY process_id ASC"
             ),
-            COLLECT_NON_TERMINAL_SQL.as_str()
+            process_sql().process.collect_non_terminal_records.sql()
         );
     }
 

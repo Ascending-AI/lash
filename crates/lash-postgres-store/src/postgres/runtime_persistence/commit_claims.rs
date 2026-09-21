@@ -60,14 +60,10 @@ pub(super) async fn complete_queued_work_claims_tx(
             }
             if let Some((process_id, sequence)) = wake_source {
                 sqlx::query(
-                    "INSERT INTO lash_wake_redelivery_fences (
-                        session_id, process_id, allocation_floor
-                     ) VALUES ($1, $2, $3)
-                     ON CONFLICT (session_id, process_id) DO UPDATE
-                     SET allocation_floor = GREATEST(
-                         lash_wake_redelivery_fences.allocation_floor,
-                         EXCLUDED.allocation_floor
-                     )",
+                    crate::process_sql::process_sql()
+                        .fence_postgres
+                        .upsert_max
+                        .sql(),
                 )
                 .bind(completed.session_id.as_str())
                 .bind(process_id.as_str())
