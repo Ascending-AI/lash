@@ -94,7 +94,7 @@ fn openers_are_keyed_by_value_not_by_rendered_text() {
     let turn_like_a_process = EffectOpener::turn("indexer#7", "turn-1");
     let real_process = process_opener("indexer", 7);
 
-    let _guard = registry.register(turn_like_a_process.clone(), live_context());
+    let (_guard, _ended) = registry.register(turn_like_a_process.clone(), live_context());
 
     assert!(registry.is_live(&turn_like_a_process));
     assert!(
@@ -113,7 +113,7 @@ fn a_new_incarnation_is_a_different_opener() {
     let first = process_opener("indexer", 1);
     let second = process_opener("indexer", 2);
 
-    let _guard = registry.register(first.clone(), live_context());
+    let (_guard, _ended) = registry.register(first.clone(), live_context());
 
     assert!(registry.is_live(&first));
     assert!(
@@ -129,7 +129,7 @@ fn dropping_the_guard_deregisters_the_opener() {
     let registry = Arc::new(LiveOpenerRegistry::new());
     let opener = EffectOpener::turn("session", "turn-1");
 
-    let guard = registry.register(opener.clone(), live_context());
+    let (guard, _ended) = registry.register(opener.clone(), live_context());
     assert!(registry.is_live(&opener));
 
     drop(guard);
@@ -151,8 +151,8 @@ fn a_superseded_registration_does_not_evict_its_replacement() {
     let registry = Arc::new(LiveOpenerRegistry::new());
     let opener = EffectOpener::turn("session", "turn-1");
 
-    let stale = registry.register(opener.clone(), live_context());
-    let fresh = registry.register(opener.clone(), live_context());
+    let (stale, _stale_ended) = registry.register(opener.clone(), live_context());
+    let (fresh, _fresh_ended) = registry.register(opener.clone(), live_context());
     assert_eq!(
         registry.len(),
         1,
@@ -170,6 +170,34 @@ fn a_superseded_registration_does_not_evict_its_replacement() {
     assert!(!registry.is_live(&opener));
 }
 
+/// The token `register` hands back is the registration's own lifetime: it
+/// fires when the guard drops and when a redrive supersedes the entry, so work
+/// owned by the registration ends with it rather than with the last borrower.
+#[test]
+fn the_registration_token_ends_with_the_entry() {
+    let registry = Arc::new(LiveOpenerRegistry::new());
+    let opener = EffectOpener::turn("session", "turn-1");
+
+    let (guard, ended) = registry.register(opener.clone(), live_context());
+    assert!(!ended.is_cancelled());
+    drop(guard);
+    assert!(
+        ended.is_cancelled(),
+        "dropping the guard must end the registration's token"
+    );
+
+    let (_stale, stale_ended) = registry.register(opener.clone(), live_context());
+    let (_fresh, fresh_ended) = registry.register(opener, live_context());
+    assert!(
+        stale_ended.is_cancelled(),
+        "a superseded registration's token fires even while its guard lives"
+    );
+    assert!(
+        !fresh_ended.is_cancelled(),
+        "the superseding entry's token is its own, not the evicted one's"
+    );
+}
+
 /// Two hosts in one process do not see each other's openers.
 #[test]
 fn registries_are_per_host_with_no_shared_state() {
@@ -177,7 +205,7 @@ fn registries_are_per_host_with_no_shared_state() {
     let second = Arc::new(LiveOpenerRegistry::new());
     let opener = EffectOpener::turn("session", "turn-1");
 
-    let _guard = first.register(opener.clone(), live_context());
+    let (_guard, _ended) = first.register(opener.clone(), live_context());
 
     assert!(first.is_live(&opener));
     assert!(

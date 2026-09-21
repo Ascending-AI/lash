@@ -79,6 +79,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use lash_sansio::sync::MutexExt;
+use tokio_util::sync::CancellationToken;
 
 use crate::EffectOpener;
 
@@ -127,6 +128,27 @@ impl LiveOpenerContext {
         })
     }
 
+    /// Captures the context with its event sender replaced.
+    ///
+    /// A turn's dispatch context carries the *per-phase* event channel, which
+    /// the phase closes — and whose forwarder it awaits — when the phase ends.
+    /// Registered as-is, the capture would pin that sender for the opener's
+    /// whole life and the phase forwarder would wait on a channel that never
+    /// closes. The sender lent to children is therefore a channel whose
+    /// lifetime is the registration's, owned by whoever registered the opener.
+    #[must_use]
+    pub fn capture_with_event_sender(
+        dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
+        event_tx: tokio::sync::mpsc::Sender<crate::SessionStreamEvent>,
+    ) -> Option<Self> {
+        dispatch.to_static().map(|mut dispatch| {
+            dispatch.event_tx = event_tx;
+            Self {
+                dispatch: Arc::new(dispatch),
+            }
+        })
+    }
+
     /// The opener's dispatch context, for the driver to rebind against one
     /// child's recorded request.
     #[must_use]
@@ -148,12 +170,29 @@ impl std::fmt::Debug for LiveOpenerContext {
 /// read once per child resolution, so a plain mutex is the right primitive.
 #[derive(Default)]
 pub struct LiveOpenerRegistry {
-    openers: Mutex<HashMap<EffectOpener, (u64, LiveOpenerContext)>>,
+    openers: Mutex<HashMap<EffectOpener, LiveOpenerEntry>>,
     /// Monotonic, so a re-registration can be told from the registration it
     /// replaced. Without it a redriven opener's predecessor guard — which may
     /// drop at any moment, since the old worker is winding down concurrently —
     /// would deregister the newcomer and silently strand its children.
     next_generation: Mutex<u64>,
+}
+
+/// One registered opener: its generation, the context it lends, and the
+/// cancellation that fires the moment this entry stops being the live one —
+/// the guard dropped or a redrive superseding it.
+///
+/// The token exists because a registration can own live work that must end
+/// with it, not with the last borrower: the turn path runs an event forwarder
+/// whose sender would otherwise hold the turn's stream open past its drain.
+/// Children never see it — [`context_for`](LiveOpenerRegistry::context_for)
+/// hands out the context alone — so a child outliving its opener cannot keep
+/// the registration's work alive.
+struct LiveOpenerEntry {
+    generation: u64,
+    context: LiveOpenerContext,
+    /// Drops with the entry, cancelling the token `register` handed the caller.
+    _ended: tokio_util::sync::DropGuard,
 }
 
 impl LiveOpenerRegistry {
@@ -163,7 +202,8 @@ impl LiveOpenerRegistry {
         Self::default()
     }
 
-    /// Registers `opener` as live here, returning the guard that deregisters it.
+    /// Registers `opener` as live here, returning the guard that deregisters it
+    /// and a token cancelled the moment this entry stops being the live one.
     ///
     /// The guard is the deregistration, so an opener cannot be left registered
     /// by an early return, a cancelled future or an unwind — the same reason
@@ -172,6 +212,11 @@ impl LiveOpenerRegistry {
     /// "this worker is no longer running that opener", never "that opener is
     /// closed", which is a durable fact §7 owns.
     ///
+    /// The token fires on either end — guard drop or a re-registration
+    /// superseding the entry — so work owned by the registration (the turn
+    /// path's child-event forwarder) ends with it rather than lingering for
+    /// the last borrowed context to drop.
+    ///
     /// **A re-registration of the same opener replaces the entry**, which is
     /// what a redrive is: the new worker's context supersedes a stale one, and
     /// the previous guard becomes inert rather than removing the newcomer.
@@ -179,20 +224,29 @@ impl LiveOpenerRegistry {
         self: &Arc<Self>,
         opener: EffectOpener,
         context: LiveOpenerContext,
-    ) -> LiveOpenerGuard {
+    ) -> (LiveOpenerGuard, CancellationToken) {
         let generation = {
             let mut next = self.next_generation.lock_recover();
             *next = next.saturating_add(1);
             *next
         };
-        self.openers
-            .lock_recover()
-            .insert(opener.clone(), (generation, context));
-        LiveOpenerGuard {
-            registry: Arc::clone(self),
-            opener,
-            generation,
-        }
+        let ended = CancellationToken::new();
+        self.openers.lock_recover().insert(
+            opener.clone(),
+            LiveOpenerEntry {
+                generation,
+                context,
+                _ended: ended.clone().drop_guard(),
+            },
+        );
+        (
+            LiveOpenerGuard {
+                registry: Arc::clone(self),
+                opener,
+                generation,
+            },
+            ended,
+        )
     }
 
     /// The live context for `opener`, or `None` when this host is not running
@@ -205,7 +259,7 @@ impl LiveOpenerRegistry {
         self.openers
             .lock_recover()
             .get(opener)
-            .map(|(_, context)| context.clone())
+            .map(|entry| entry.context.clone())
     }
 
     /// Whether `opener` is live in this host.
@@ -232,7 +286,7 @@ impl LiveOpenerRegistry {
         let mut openers = self.openers.lock_recover();
         if openers
             .get(opener)
-            .is_some_and(|(current, _)| *current == generation)
+            .is_some_and(|entry| entry.generation == generation)
         {
             openers.remove(opener);
         }

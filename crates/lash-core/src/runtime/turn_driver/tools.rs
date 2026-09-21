@@ -31,6 +31,7 @@ impl RuntimeTurnDriver<'_> {
         });
         let context = match self.execution_context(
             tool_event_tx.clone(),
+            event_tx,
             Arc::new(crate::ChronologicalProjection::default()),
         ) {
             Ok(context) => context
@@ -84,6 +85,7 @@ impl RuntimeTurnDriver<'_> {
         let prepare_context = self
             .execution_context(
                 tool_event_tx.clone(),
+                event_tx,
                 Arc::new(crate::ChronologicalProjection::default()),
             )
             .map_err(|err| {
@@ -238,6 +240,7 @@ impl RuntimeTurnDriver<'_> {
             .unwrap_or_default();
         let context = match self.execution_context(
             tool_event_tx.clone(),
+            event_tx,
             Arc::new(crate::ChronologicalProjection::default()),
         ) {
             Ok(context) => context

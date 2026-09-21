@@ -48,7 +48,31 @@ impl ProtocolReplyTracker {
 }
 
 impl RuntimeTurnDriver<'_> {
+    /// Runs the turn's effect loop and releases the live-opener registration
+    /// before returning, on every exit.
+    ///
+    /// The release cannot wait for the driver's own drop: the registered
+    /// context's event forwarder holds a sender on the very channel the caller
+    /// drains next (`drive_turn_to_completion`), so an opener still registered
+    /// when the run ends would keep that drain — and the turn — open forever.
+    /// This is still "registered until the opener settles" in ADR 0099 §2's
+    /// sense: on today's path the effect loop *is* the turn, and the durable
+    /// live-to-closing transition of §7 does not exist yet.
     pub(in crate::runtime) async fn run(
+        &mut self,
+        messages: crate::MessageSequence,
+        event_tx: mpsc::Sender<RuntimeStreamEvent>,
+        cancel: CancellationToken,
+        run_offset: usize,
+    ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+        let result = self
+            .run_effect_loop(messages, event_tx, cancel, run_offset)
+            .await;
+        self.live_opener.lock_recover().take();
+        result
+    }
+
+    async fn run_effect_loop(
         &mut self,
         messages: crate::MessageSequence,
         event_tx: mpsc::Sender<RuntimeStreamEvent>,
