@@ -22,10 +22,12 @@ use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
 mod attachment_normalization;
+mod context_source;
 mod directives;
 mod intent_drain;
 mod internal_activation;
 mod orchestrating;
+mod rebind_checklist;
 mod retry_effect_controllers;
 mod retry_turn_cancel_gate;
 mod settlement_order;

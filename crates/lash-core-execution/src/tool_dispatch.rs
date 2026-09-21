@@ -10,7 +10,10 @@ mod scheduling;
 #[cfg(test)]
 mod tests;
 
-pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
+pub use context::{
+    REBIND_FIELDS, RebindDisposition, RebindField, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
+    ToolTriggerEffectOutcome,
+};
 pub use pending_resolver::arm_pending_resolver;
 
 pub use attempt_coordinator::{

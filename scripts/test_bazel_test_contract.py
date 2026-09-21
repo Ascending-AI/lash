@@ -651,9 +651,18 @@ class BazelTestContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_cargo.chmod(0o755)
+            python_log = temporary_path / "python-args"
+            python_log.write_text("", encoding="utf-8")
+            fake_python = temporary_path / "python3"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\nprintf '%q ' \"$@\" >> \"$PYTHON_ARGS_LOG\"\nprintf '\\n' >> \"$PYTHON_ARGS_LOG\"\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
             environment = os.environ | {
                 "BAZEL_TRUSTED": str(trusted).lower(),
                 "CARGO_ARGS_LOG": str(args_log),
+                "PYTHON_ARGS_LOG": str(python_log),
                 "LASH_CI_FEATURES": "",
                 "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
             }
@@ -671,7 +680,11 @@ class BazelTestContractTests(unittest.TestCase):
                 shlex.split(line)
                 for line in args_log.read_text(encoding="utf-8").splitlines()
             ]
-            return completed, invocations
+            python_invocations = [
+                shlex.split(line)
+                for line in python_log.read_text(encoding="utf-8").splitlines()
+            ]
+            return completed, invocations, python_invocations
 
     def test_a_trusted_event_runs_no_cargo_rust_workspace_partition(self) -> None:
         """The Bazel partition owns every deterministic Rust binary.
@@ -686,7 +699,7 @@ class BazelTestContractTests(unittest.TestCase):
             .read_text(encoding="utf-8")
             .strip(),
         )
-        completed, invocations = self.run_workspace_test_step(
+        completed, invocations, _ = self.run_workspace_test_step(
             trusted=True, workbench=False
         )
         self.assertEqual(1, completed.returncode)
@@ -697,7 +710,7 @@ class BazelTestContractTests(unittest.TestCase):
         expected_filter = (
             ROOT / "tools/bazel/workbench_nextest_filter.txt"
         ).read_text(encoding="utf-8").strip()
-        completed, invocations = self.run_workspace_test_step(
+        completed, invocations, _ = self.run_workspace_test_step(
             trusted=True, workbench=True
         )
         self.assertEqual(0, completed.returncode, completed.stderr)
@@ -716,7 +729,7 @@ class BazelTestContractTests(unittest.TestCase):
         else; the store conformance helper example belongs to the untrusted
         full-workspace path, which still spawns it.
         """
-        _, invocations = self.run_workspace_test_step(trusted=True, workbench=True)
+        _, invocations, _ = self.run_workspace_test_step(trusted=True, workbench=True)
         build, nextest = invocations
         self.assertEqual("build", build[0])
         self.assertNotIn("--workspace", build)
@@ -774,7 +787,7 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertIn('Command::new("node")', source)
 
     def test_an_untrusted_event_keeps_the_full_cargo_workspace_run(self) -> None:
-        completed, invocations = self.run_workspace_test_step(
+        completed, invocations, python_invocations = self.run_workspace_test_step(
             trusted=False, workbench=False
         )
         self.assertEqual(0, completed.returncode, completed.stderr)
@@ -784,6 +797,14 @@ class BazelTestContractTests(unittest.TestCase):
         expression = nextest[nextest.index("-E") + 1]
         self.assertIn("not (", expression)
         self.assertIn("lash-internal-postgres-store", expression)
+        # FIG-3429 item 8: the untrusted leg must census law execution
+        # receipts over every crate whose conformance suites it ran.
+        self.assertEqual(1, len(python_invocations))
+        self.assertEqual(
+            "scripts/check_law_execution_receipts.py", python_invocations[0][0]
+        )
+        self.assertIn("--crate", python_invocations[0])
+        self.assertIn("crates/lash-sqlite-store", python_invocations[0])
 
     def test_doctests_are_removed_from_bazel_and_from_cargo(self) -> None:
         """Doctests were removed by ruling (2026-09-13), Bazel and Cargo alike.

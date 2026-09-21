@@ -425,7 +425,11 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 let key = child.invocation.replay_key();
                 match offered.remove(key) {
                     Some((envelope_json, executor))
-                        if retained_envelopes.get(key) == Some(&envelope_json) =>
+                        if self.offered_executor_may_run(
+                            key,
+                            &envelope_json,
+                            &retained_envelopes,
+                        ) =>
                     {
                         Some(executor)
                     }
@@ -522,6 +526,46 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         )))
     }
 
+    /// Whether an executor the caller staged for its own offered child may run
+    /// the retained child of the same replay key.
+    ///
+    /// Outside `testing` the only honest answer is byte-identical envelopes:
+    /// the staged runner is bound to the *offered* envelope's authority, and
+    /// the replay key is the child's durable identity rather than its
+    /// request's — two envelopes sharing a key is exactly what a reoffering
+    /// successor presents. The testing build's `KeyOnly` strategy is the leak
+    /// the two-opener differential is red-proved against; it is selected per
+    /// host through [`StoreEffectReplayDriver::set_offered_child_selection`],
+    /// never here.
+    #[cfg(not(feature = "testing"))]
+    fn offered_executor_may_run(
+        &self,
+        key: &str,
+        offered_envelope_json: &str,
+        retained_envelopes: &HashMap<String, String>,
+    ) -> bool {
+        retained_envelopes.get(key) == Some(&offered_envelope_json.to_string())
+    }
+
+    /// The `testing` build reads the strategy installed on this host. See the
+    /// non-testing twin for what the honest answer is.
+    #[cfg(feature = "testing")]
+    fn offered_executor_may_run(
+        &self,
+        key: &str,
+        offered_envelope_json: &str,
+        retained_envelopes: &HashMap<String, String>,
+    ) -> bool {
+        if self.offered_child_selection.load(Ordering::SeqCst)
+            == OfferedChildSelection::KeyOnly as usize
+        {
+            return true;
+        }
+        retained_envelopes.get(key) == Some(&offered_envelope_json.to_string())
+    }
+
+    /// Spawns one host-owned task per child this host has a runner for.
+    ///
     /// The task set is the host's, not the caller's: a group whose children ran
     /// inside the caller's future would drop its losers the moment the caller
     /// was dropped, which is precisely what `RunToCompletion` forbids.

@@ -83,6 +83,8 @@ pub use adapter::{
 #[doc(hidden)]
 pub use tokio_util::sync::CancellationToken as ReplayCancellationToken;
 
+#[cfg(feature = "testing")]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -1064,6 +1066,37 @@ pub struct StoreEffectReplayDriver<P, A> {
     /// all the same registry — two registries on one host would mean a turn
     /// registering in one while the resolver read the other.
     tool_children: OnceLock<Arc<super::ToolChildHost>>,
+    /// Testing seam (FIG-3429): which offered-child executor the group-open
+    /// selector may reuse. `RetainedEnvelope` in every real deployment; the
+    /// two-opener differential flips one host to `KeyOnly` to prove its
+    /// assertions kill the replay-key-only leak the envelope check exists to
+    /// stop.
+    #[cfg(feature = "testing")]
+    offered_child_selection: AtomicUsize,
+}
+
+/// How a group open decides whether an executor the caller staged for its own
+/// offered child may run the retained child of the same replay key (ADR 0099
+/// §3, W1).
+///
+/// [`OfferedChildSelection::RetainedEnvelope`] is the only correct answer: an
+/// offered runner is bound to the *offered* envelope's authority and may be
+/// reused only when the offered envelope is byte-identical to the retained
+/// row — which is exactly the honest-reopen case the staging fast-path exists
+/// for. [`OfferedChildSelection::KeyOnly`] is the injected leak the two-opener
+/// differential is red-proved against: a replay key is the child's durable
+/// identity, not its request's, and matching on it alone hands retained
+/// authority to whatever a reoffering successor staged under that key.
+#[cfg(feature = "testing")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OfferedChildSelection {
+    /// Reuse the staged runner only when the offered envelope is
+    /// byte-identical to the retained row.
+    #[default]
+    RetainedEnvelope = 0,
+    /// Reuse the staged runner on a replay-key match alone, whatever
+    /// authority the retained envelope records.
+    KeyOnly = 1,
 }
 
 impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A> {
@@ -1098,7 +1131,21 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             groups: groups::DurableEffectGroups::default(),
             group_executors: OnceLock::new(),
             tool_children: OnceLock::new(),
+            #[cfg(feature = "testing")]
+            offered_child_selection: AtomicUsize::new(
+                OfferedChildSelection::RetainedEnvelope as usize,
+            ),
         }
+    }
+
+    /// Testing seam: install this host's offered-child selection strategy.
+    ///
+    /// Per driver, never global: a test flips exactly the host it means to
+    /// poison, and a sibling test's host keeps the honest answer.
+    #[cfg(feature = "testing")]
+    pub fn set_offered_child_selection(&self, selection: OfferedChildSelection) {
+        self.offered_child_selection
+            .store(selection as usize, Ordering::SeqCst);
     }
 
     /// This driver's tool-child wiring cell. See the field.

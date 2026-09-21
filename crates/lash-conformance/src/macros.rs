@@ -15,6 +15,7 @@ macro_rules! __runtime_persistence_register {
             async fn $store_law() {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 $crate::runtime_persistence_macro_support::$store_law(make($store_label)).await;
+                $crate::law_receipt::record(stringify!($store_law), $store_label);
             }
         )*
         $(
@@ -23,6 +24,7 @@ macro_rules! __runtime_persistence_register {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 let store = make($store_ref_label);
                 $crate::runtime_persistence_macro_support::$store_ref_law(store.as_ref()).await;
+                $crate::law_receipt::record(stringify!($store_ref_law), $store_ref_label);
             }
         )*
         $(
@@ -31,6 +33,7 @@ macro_rules! __runtime_persistence_register {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 $crate::runtime_persistence_macro_support::$factory_law(make, $factory_label)
                     .await;
+                $crate::law_receipt::record(stringify!($factory_law), $factory_label);
             }
         )*
         $(
@@ -42,6 +45,7 @@ macro_rules! __runtime_persistence_register {
                     &lease_timing,
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($timed_law), $timed_label);
             }
         )*
         $(
@@ -53,6 +57,7 @@ macro_rules! __runtime_persistence_register {
                     &lease_timing,
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($timed_factory_law), $timed_factory_label);
             }
         )*
     };
@@ -69,6 +74,7 @@ macro_rules! __runtime_persistence_register {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 $crate::runtime_persistence_macro_support::$store_law(make($store_label).open)
                     .await;
+                $crate::law_receipt::record(stringify!($store_law), $store_label);
             }
         )*
         $(
@@ -77,6 +83,7 @@ macro_rules! __runtime_persistence_register {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 let store = make($store_ref_label).open;
                 $crate::runtime_persistence_macro_support::$store_ref_law(store.as_ref()).await;
+                $crate::law_receipt::record(stringify!($store_ref_law), $store_ref_label);
             }
         )*
         $(
@@ -88,6 +95,7 @@ macro_rules! __runtime_persistence_register {
                     $factory_label,
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($factory_law), $factory_label);
             }
         )*
         $(
@@ -99,6 +107,7 @@ macro_rules! __runtime_persistence_register {
                     &lease_timing,
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($timed_law), $timed_label);
             }
         )*
         $(
@@ -110,6 +119,7 @@ macro_rules! __runtime_persistence_register {
                     &lease_timing,
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($timed_factory_law), $timed_factory_label);
             }
         )*
     };
@@ -128,6 +138,7 @@ macro_rules! runtime_persistence_tests {
             async fn $law() {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 $crate::runtime_persistence_macro_support::$law(make, $label).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -270,6 +281,7 @@ macro_rules! runtime_persistence_reopenable_tests {
             async fn $law() {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 $crate::runtime_persistence_macro_support::$law(make($label)).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -290,6 +302,7 @@ macro_rules! __process_registry_register {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $probe_label;
                 $crate::registration_macro_support::$probe_law(&make).await;
+                $crate::law_receipt::record(stringify!($probe_law), $probe_label);
             }
         )*
         $(
@@ -300,6 +313,7 @@ macro_rules! __process_registry_register {
                     make($cancellation_label),
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($cancellation_law), $cancellation_label);
             }
         )*
         $(
@@ -310,6 +324,7 @@ macro_rules! __process_registry_register {
                     make($conformance_label),
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($conformance_law), $conformance_label);
             }
         )*
         $(
@@ -321,6 +336,7 @@ macro_rules! __process_registry_register {
                 > =
                     make($registry_label);
                 $crate::registration_macro_support::$registry_law(registry).await;
+                $crate::law_receipt::record(stringify!($registry_law), $registry_label);
             }
         )*
     };
@@ -337,6 +353,7 @@ macro_rules! __process_registry_register {
                 let _ = $probe_label;
                 let open = |label: &str| make(label).open;
                 $crate::registration_macro_support::$probe_law(&open).await;
+                $crate::law_receipt::record(stringify!($probe_law), $probe_label);
             }
         )*
         $(
@@ -347,6 +364,7 @@ macro_rules! __process_registry_register {
                     make($cancellation_label),
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($cancellation_law), $cancellation_label);
             }
         )*
         $(
@@ -357,6 +375,7 @@ macro_rules! __process_registry_register {
                     make($conformance_label).open,
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($conformance_law), $conformance_label);
             }
         )*
         $(
@@ -368,6 +387,7 @@ macro_rules! __process_registry_register {
                 > =
                     make($registry_label).open;
                 $crate::registration_macro_support::$registry_law(registry).await;
+                $crate::law_receipt::record(stringify!($registry_law), $registry_label);
             }
         )*
     };
@@ -486,6 +506,7 @@ macro_rules! store_recovery_tests {
                     &lease_timing,
                 )
                 .await;
+                $crate::law_receipt::record(stringify!($timed_law), $timed_label);
             }
         )*
         $(
@@ -493,6 +514,7 @@ macro_rules! store_recovery_tests {
             async fn $plain_law() {
                 let (_fixture_guard, make, _lease_timing) = $fixture;
                 $crate::registration_macro_support::$plain_law(&make, $plain_label).await;
+                $crate::law_receipt::record(stringify!($plain_law), $plain_label);
             }
         )*
     };
@@ -523,6 +545,7 @@ macro_rules! store_maintenance_tests {
                 let (_fixture_guard, backend, _make) = $fixture;
                 let _ = $sync_label;
                 $crate::registration_macro_support::$sync_law(backend);
+                $crate::law_receipt::record(stringify!($sync_law), $sync_label);
             }
         )*
         $(
@@ -531,6 +554,7 @@ macro_rules! store_maintenance_tests {
                 let (_fixture_guard, backend, make) = $fixture;
                 let _ = $async_label;
                 $crate::registration_macro_support::$async_law(backend, make()).await;
+                $crate::law_receipt::record(stringify!($async_law), $async_label);
             }
         )*
     };
@@ -550,6 +574,7 @@ macro_rules! store_maintenance_fault_tests {
                 let (_fixture_guard, backend, make, fault) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, make(), fault.as_ref()).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -570,6 +595,7 @@ macro_rules! __effect_group_host_register {
             };
             let prefix = $crate::registration_macro_support::effect_group_test_prefix($label);
             $crate::registration_macro_support::$law(&make, &prefix).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, unwired) => {
@@ -580,6 +606,7 @@ macro_rules! __effect_group_host_register {
             let make = || factory(None);
             let prefix = $crate::registration_macro_support::effect_group_test_prefix($label);
             $crate::registration_macro_support::$law(&make, &prefix).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, mixed) => {
@@ -595,6 +622,7 @@ macro_rules! __effect_group_host_register {
             };
             let prefix = $crate::registration_macro_support::effect_group_test_prefix($label);
             $crate::registration_macro_support::$law(&unwired, &make, &prefix).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -651,6 +679,7 @@ macro_rules! __effect_group_cancelled_child_terminal_register {
             let (_fixture_guard, factory) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(factory).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -692,6 +721,7 @@ macro_rules! effect_host_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -711,6 +741,7 @@ macro_rules! effect_host_await_event_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -730,6 +761,7 @@ macro_rules! effect_host_cold_await_event_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -750,6 +782,7 @@ macro_rules! attachment_condemnation_recovery_tests {
                 let (_fixture_guard, factory, reopen) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory, reopen).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -771,6 +804,7 @@ macro_rules! attachment_adoption_tests {
                 let (_fixture_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -793,6 +827,7 @@ macro_rules! lineage_tests {
                 let (_fixture_guard, handles) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(handles).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -812,6 +847,7 @@ macro_rules! process_change_horizon_tests {
                 let (_fixture_guard, registry) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(registry).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -832,6 +868,7 @@ macro_rules! process_projection_repair_tests {
                 let (_fixture_guard, registry, corrupt_projection) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(registry, corrupt_projection).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -851,6 +888,7 @@ macro_rules! retention_tests {
                 let (_fixture_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -871,6 +909,7 @@ macro_rules! observer_intent_tests {
                 let (_fixture_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -890,6 +929,7 @@ macro_rules! process_continuation_store_tests {
                 let (_fixture_guard, registry, store) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(registry, store).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -909,6 +949,7 @@ macro_rules! process_trigger_retention_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -929,6 +970,7 @@ macro_rules! store_contract_state_machine_tests {
                 let (_fixture_guard, backend, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -948,6 +990,7 @@ macro_rules! runtime_persistence_state_machine_tests {
                 let (_fixture_guard, backend, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -967,6 +1010,7 @@ macro_rules! session_graph_state_machine_tests {
                 let (_fixture_guard, backend, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -986,6 +1030,7 @@ macro_rules! session_delete_blob_reclaim_tests {
                 let (_fixture_guard, backend, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1006,6 +1051,7 @@ macro_rules! session_execution_lease_renewal_tests {
                 let (_fixture_guard, handles) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(handles).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1026,6 +1072,7 @@ macro_rules! tool_access_persistence_tests {
                 let (_fixture_guard, persistence) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(persistence).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1045,6 +1092,7 @@ macro_rules! trigger_store_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1065,6 +1113,7 @@ macro_rules! trigger_store_reopenable_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1079,6 +1128,7 @@ macro_rules! __trigger_retention_fault_register {
             let (_fixture_guard, store, fault) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(store, fault.as_ref()).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -1114,6 +1164,7 @@ macro_rules! trigger_occurrence_listing_tests {
                 let (_fixture_guard, store, injector) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, injector.as_ref()).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1138,6 +1189,7 @@ macro_rules! direct_turn_acceptance_tests {
                 let (_fixture_guard, prefix, store) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(prefix, store).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1167,6 +1219,7 @@ macro_rules! effect_controller_replay_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1177,6 +1230,7 @@ macro_rules! effect_controller_replay_tests {
                 let (fixture_guard, make) = $fixture;
                 $crate::registration_macro_support::$law(make).await;
                 ($verify)($label, &fixture_guard);
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1197,6 +1251,7 @@ macro_rules! effect_controller_replay_mismatch_tests {
                 let (_fixture_guard, make, mismatch_code) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make, mismatch_code).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1217,6 +1272,7 @@ macro_rules! effect_controller_lease_fencing_tests {
                 let (_fixture_guard, backend) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1239,6 +1295,7 @@ macro_rules! effect_host_retirement_tests {
                 let (_fixture_guard, host) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(host.as_ref()).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1253,6 +1310,7 @@ macro_rules! __process_prune_reclaim_register {
             let (_fixture_guard, _backend, factory, registry, _probe) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(factory, registry).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ($fixture:block; $law:ident, $label:literal, blob) => {
@@ -1261,6 +1319,7 @@ macro_rules! __process_prune_reclaim_register {
             let (_fixture_guard, backend, factory, registry, probe) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(backend, factory, registry, probe).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -1297,6 +1356,7 @@ macro_rules! attachment_store_tests {
                 let (_fixture_guard, make, persistence) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make, persistence).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1317,6 +1377,7 @@ macro_rules! attachment_store_reopenable_tests {
                 let (_fixture_guard, make, persistence) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make, persistence).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1348,6 +1409,7 @@ macro_rules! process_execution_env_store_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $probe_label;
                 $crate::registration_macro_support::$probe_law(&make).await;
+                $crate::law_receipt::record(stringify!($probe_law), $probe_label);
             }
         )*
         $(
@@ -1356,6 +1418,7 @@ macro_rules! process_execution_env_store_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $store_label;
                 $crate::registration_macro_support::$store_law(make()).await;
+                $crate::law_receipt::record(stringify!($store_law), $store_label);
             }
         )*
     };
@@ -1392,6 +1455,7 @@ macro_rules! artifact_store_reopenable_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::fused_artifact_store::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1412,6 +1476,7 @@ macro_rules! fence_integrity_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1432,6 +1497,7 @@ macro_rules! graph_integrity_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1451,6 +1517,7 @@ macro_rules! signed_counter_write_domain_tests {
                 let (_fixture_guard, store) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1481,6 +1548,7 @@ macro_rules! session_store_factory_tests {
                 let (_fixture_guard, backend, unbound, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, unbound, make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1494,6 +1562,7 @@ macro_rules! session_store_factory_tests {
                 > = _unbound;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make()).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1513,6 +1582,7 @@ macro_rules! fresh_session_admission_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1527,6 +1597,7 @@ macro_rules! __session_read_view_register {
             let (_fixture_guard, factory, advance) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(factory, advance).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ($fixture:block; $law:ident, $label:literal, read) => {
@@ -1535,6 +1606,7 @@ macro_rules! __session_read_view_register {
             let (_fixture_guard, factory, _advance) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(factory).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -1569,6 +1641,7 @@ macro_rules! process_prune_session_store_tests {
                 let (_fixture_guard, factory, registry) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory, registry).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1583,6 +1656,7 @@ macro_rules! __live_replay_register {
             let (_guard, make, _capacity, _ttl, _wait, _incarnations) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(make).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ($fixture:block; $law:ident, $label:literal, capacity) => {
@@ -1591,6 +1665,7 @@ macro_rules! __live_replay_register {
             let (_guard, _make, capacity, _ttl, _wait, _incarnations) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(capacity).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ($fixture:block; $law:ident, $label:literal, ttl) => {
@@ -1599,6 +1674,7 @@ macro_rules! __live_replay_register {
             let (_guard, _make, _capacity, ttl, wait, _incarnations) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(ttl, wait).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ($fixture:block; $law:ident, $label:literal, incarnation) => {
@@ -1607,6 +1683,7 @@ macro_rules! __live_replay_register {
             let (_guard, _make, _capacity, _ttl, _wait, (original, fresh, preserved)) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(original, fresh, preserved).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -1644,6 +1721,7 @@ macro_rules! checkpoint_component_reopen_tests {
                 let (_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1663,6 +1741,7 @@ macro_rules! session_graph_append_tests {
                 let (_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1683,6 +1762,7 @@ macro_rules! runtime_persistence_clock_tests {
                 let _ = $label;
                 $crate::registration_macro_support::$law(::std::sync::Arc::clone(&store), advance).await;
                 verify(store).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1702,6 +1782,7 @@ macro_rules! turn_work_driver_tests {
                 let (_guard, host, registration_barrier) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(host, registration_barrier).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1716,6 +1797,7 @@ macro_rules! __turn_crash_matrix_register {
             let (_guard, make, _make_invocation) = $fixture;
             let _ = $label;
             Box::pin($crate::registration_macro_support::$law(make)).await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
     ($fixture:block; $law:ident, $label:literal, matrix) => {
@@ -1728,6 +1810,7 @@ macro_rules! __turn_crash_matrix_register {
                 make_invocation,
             ))
             .await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -1772,6 +1855,7 @@ macro_rules! wake_delivery_crash_tests {
                 )
                 .await;
                 verify().await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1800,6 +1884,7 @@ macro_rules! wake_delivery_ordering_tests {
                 )
                 .await;
                 verify().await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1821,6 +1906,7 @@ macro_rules! abandoned_attachment_recovery_tests {
                 let _ = $label;
                 let (factory, reopen) = make().await;
                 $crate::registration_macro_support::$law(factory, reopen).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1841,6 +1927,7 @@ macro_rules! attachment_owner_cold_replay_tests {
                 let (_guard, backend) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1860,6 +1947,7 @@ macro_rules! attachment_owner_degraded_tests {
                 let (_guard, factory) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1879,6 +1967,7 @@ macro_rules! store_effect_group_drain_tests {
                 let (_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1899,6 +1988,7 @@ macro_rules! signal_intent_tests {
                 let _ = $label;
                 $crate::registration_macro_support::$law(prefix, host, registry, work).await;
                 verify().await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1937,6 +2027,7 @@ macro_rules! tool_batch_parallelism_tests {
                     )
                     .await;
                 }
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -1981,8 +2072,8 @@ macro_rules! tool_child_invocation_tests {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
                 let (_guard, prefix, fixture) = $fixture;
-                let _ = $label;
                 $crate::registration_macro_support::$law(&fixture, prefix).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2004,6 +2095,7 @@ macro_rules! effect_group_runtime_retirement_tests {
                 let _ = $label;
                 let observation = $crate::registration_macro_support::$law(make).await;
                 verify(observation).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2024,6 +2116,7 @@ macro_rules! effect_group_quiescent_retirement_tests {
                 let _ = $label;
                 let observation = $crate::registration_macro_support::$law(make).await;
                 verify(observation).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2046,6 +2139,7 @@ macro_rules! append_head_switch_tests {
                 let (_guard, store, switch_head) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, switch_head).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2067,6 +2161,7 @@ macro_rules! append_tombstone_tests {
                 let (_guard, store, tombstone) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, tombstone).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2086,6 +2181,7 @@ macro_rules! append_receipt_envelope_tests {
                 let (_guard, store) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2119,6 +2215,7 @@ macro_rules! runtime_persistence_targeted_tests {
                 let (_guard, store, _timing) = $fixture;
                 let _ = $store_ref_label;
                 $crate::registration_macro_support::$store_ref_law(store.as_ref()).await;
+                $crate::law_receipt::record(stringify!($store_ref_law), $store_ref_label);
             }
         )*
         $(
@@ -2127,6 +2224,7 @@ macro_rules! runtime_persistence_targeted_tests {
                 let (_guard, store, timing) = $fixture;
                 let _ = $timed_label;
                 $crate::registration_macro_support::$timed_law(store, timing).await;
+                $crate::law_receipt::record(stringify!($timed_law), $timed_label);
             }
         )*
         $(
@@ -2135,6 +2233,7 @@ macro_rules! runtime_persistence_targeted_tests {
                 let (_guard, store, _timing) = $fixture;
                 let _ = $store_label;
                 $crate::registration_macro_support::$store_law(store).await;
+                $crate::law_receipt::record(stringify!($store_law), $store_label);
             }
         )*
     };
@@ -2156,6 +2255,7 @@ macro_rules! append_receipt_rewrite_tests {
                 let (_guard, store, rewrite) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, rewrite).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2177,6 +2277,7 @@ macro_rules! append_receipt_identity_corruption_tests {
                 let (_guard, store, corrupt) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, corrupt).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2198,6 +2299,7 @@ macro_rules! append_usage_cancellation_tests {
                 let (_guard, store, arm_and_wait) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, arm_and_wait).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2218,6 +2320,7 @@ macro_rules! unbound_session_read_tests {
                 let (_guard, make_axis) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make_axis).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2238,6 +2341,7 @@ macro_rules! unbound_session_meta_tests {
                 let (_guard, backend_name, load) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend_name, load).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2260,6 +2364,7 @@ macro_rules! checkpoint_claim_probe_tests {
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, &session_id, counts).await;
                 teardown.await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2280,6 +2385,7 @@ macro_rules! durable_queued_drain_wait_resolver_tests {
                 let (_fixture_guard, make_engine, make_deployment) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make_engine, make_deployment).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };
@@ -2300,6 +2406,7 @@ macro_rules! __effect_host_await_event_witness_register {
             .await
             .unwrap_or_else(|_| panic!("{} exceeded {deadline:?}", $label));
             finish.await;
+            $crate::law_receipt::record(stringify!($law), $label);
         }
     };
 }
@@ -2344,6 +2451,7 @@ macro_rules! backend_clock_queued_work_tests {
                 let (_guard, store, timing) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, &timing).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };

@@ -85,6 +85,12 @@ REGISTRATION_BASELINES = {
     "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_ATTEMPT_CAPTURE_VERSION": (
         "sha256:eb503301a493453e2312503176fd7f6a9a24721cb53c398432928c86db28fcec"
     ),
+    # FIG-3429: the tool-child rebind checklist enrols REBIND_FIELDS alongside
+    # the struct it rules, so a field added to ToolDispatchContext is a
+    # guarded-shape change the same day it lands. New surface, not renamed.
+    "crates/lash-core-execution/src/tool_dispatch/context.rs:TOOL_CHILD_REBIND_VERSION": (
+        "sha256:cba79f85602c06a7d319e64f4f0953f543b8aa7d83205a3eee235085e129391a"
+    ),
     # FIG-3408: ADR 0099 section 3 mints the retained tool-child request and the
     # invocation-level tool command together, as one new durable format. The
     # constant has no merge-base value because the surface is new, not renamed.

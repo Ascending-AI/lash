@@ -255,6 +255,26 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "two_opener_differential__test",
+    crate_features = [],
+    crate_name = "two_opener_differential",
+    crate_root = "tests/two_opener_differential.rs",
+    declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    extra_compile_data = [
+        "//crates/lash-postgres-store:package_files",
+        "//crates/lash-sqlite-store:package_files",
+    ],
+    library = ":lash-sim",
+    library_crate_name = "lash_sim",
+    manifest_dir = "crates/lash-sim",
+    package_name = "lash-sim",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
@@ -266,6 +286,7 @@ lash_batch_test(
         ":retention_classification__test",
         ":schema_congruence__test",
         ":signal_replay_key_constructor__test",
+        ":two_opener_differential__test",
     ],
 )
 
