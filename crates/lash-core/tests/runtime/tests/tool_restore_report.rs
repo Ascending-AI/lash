@@ -96,6 +96,15 @@ fn environment(
     .build()
 }
 
+fn environment_preserving_tools(
+    tools: Option<Arc<dyn lash_core::ToolProvider>>,
+    policy: lash_core::ToolSourcePolicy,
+) -> lash_core::facade_support::RuntimeEnvironment {
+    let mut env = environment(tools, policy);
+    env.core.control.tool_surface_open_mode = lash_core::ToolSurfaceOpenMode::PreservePersisted;
+    env
+}
+
 fn owner(label: &str) -> lash_core::LeaseOwnerIdentity {
     lash_core::LeaseOwnerIdentity::opaque(format!("fig3367-{label}"), "fig3367-boot")
 }
@@ -126,6 +135,37 @@ async fn open_runtime(
     let state = loaded.map_or_else(|| state_for(session_id), |loaded| loaded.state);
     Box::pin(LashRuntime::from_environment(
         &env,
+        standard_test_policy(),
+        state,
+        Some(Arc::clone(store)),
+        owner(session_id.as_str()),
+    ))
+    .await
+}
+
+/// Same admitted-open sequence as [`open_runtime`], but on an environment the
+/// host has already built — used to open under
+/// [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
+async fn open_runtime_on(
+    session_id: &SessionId,
+    store: &Arc<dyn lash_core::RuntimePersistence>,
+    env: &lash_core::facade_support::RuntimeEnvironment,
+) -> Result<LashRuntime, lash_core::SessionError> {
+    let loaded = lash_core::store::load_persisted_session_admitted(
+        store.as_ref(),
+        session_id,
+        &owner(session_id.as_str()),
+        &uuid::Uuid::new_v4().to_string(),
+        env.core.control.lease_timings.ttl_ms(),
+    )
+    .await
+    .map_err(|error| lash_core::SessionError::Store {
+        context: format!("failed to load session `{session_id}`"),
+        source: error,
+    })?;
+    let state = loaded.map_or_else(|| state_for(session_id), |loaded| loaded.state);
+    Box::pin(LashRuntime::from_environment(
+        env,
         standard_test_policy(),
         state,
         Some(Arc::clone(store)),
@@ -330,6 +370,129 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     assert!(
         !beta.is_orphaned() && !beta.member,
         "the opt-out made before the grantless open is still an opt-out"
+    );
+}
+
+/// The FIG-3353 contract: an open that will not run a turn declares
+/// `PreservePersisted` and cannot touch the durable tool surface at all.
+///
+/// open with source → open without source under `PreservePersisted` → commit
+/// pending input → open with the source again. The middle open produces no
+/// report and no orphaning; the commit it takes carries the persisted snapshot
+/// forward untouched; the tools are catalog members on the third open.
+#[tokio::test]
+async fn preserve_persisted_open_neither_reconciles_nor_restamps_tool_state() {
+    let session_id = SessionId::from("fig3353-preserve");
+    let store = in_memory_store();
+
+    // Step 1: open with the source, opt out of beta, park.
+    let mut granted = open_runtime(
+        &session_id,
+        &store,
+        Some(both_tools()),
+        lash_core::ToolSourcePolicy::Tolerate,
+    )
+    .await
+    .expect("granted open");
+    let mut curated = granted.tool_state().expect("live tool state");
+    curated
+        .set_membership(&lash_core::ToolId::from(BETA_ID), false)
+        .expect("opt out beta");
+    Box::pin(granted.apply_tool_state(curated))
+        .await
+        .expect("apply the opt-out");
+    let persisted_generation = granted.tool_state().expect("tool state").generation();
+    Box::pin(granted.park())
+        .await
+        .expect("park the granted open");
+
+    // Step 2: an enqueue-only open on a core that does not carry the source.
+    // Under PreservePersisted the open never reconciles, so there is nothing
+    // to report and nothing to warn about.
+    let preserve_env = environment_preserving_tools(None, lash_core::ToolSourcePolicy::Tolerate);
+    let mut enqueue_only = open_runtime_on(&session_id, &store, &preserve_env)
+        .await
+        .expect("enqueue-only open");
+    assert!(
+        enqueue_only.tool_restore_report().is_none(),
+        "a PreservePersisted open produces no restore report"
+    );
+
+    // Step 3: enqueue pending input — a real durable commit taken on the
+    // grantless open.
+    enqueue_only.stamp_live_plugin_state();
+    Box::pin(
+        enqueue_only.append_session_nodes(lash_core::AppendSessionNodesRequest {
+            operation_id: "fig3353-enqueue-commit".to_string(),
+            nodes: vec![lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(
+                    lash_core::session_model::MessageRole::User,
+                    "queued while the sources are absent",
+                ),
+            )],
+            requires_ancestor_node_id: None,
+        }),
+    )
+    .await
+    .expect("commit on the enqueue-only open");
+    Box::pin(enqueue_only.park())
+        .await
+        .expect("park the enqueue-only open");
+
+    // The durable truth, read with no runtime in the way: the commit carried
+    // the persisted surface forward — same generation, no orphan flags.
+    let preserved = persisted_tool_state(&store).await;
+    assert_eq!(
+        preserved.generation(),
+        persisted_generation,
+        "the enqueue-only commit must not bump the catalog generation"
+    );
+    let alpha = preserved
+        .get(&lash_core::ToolId::from(ALPHA_ID))
+        .expect("alpha survives the grantless commit");
+    assert!(
+        !alpha.is_orphaned() && alpha.is_member(),
+        "alpha is still a bound catalog member: the grantless open never reconciled"
+    );
+    let beta = preserved
+        .get(&lash_core::ToolId::from(BETA_ID))
+        .expect("beta survives the grantless commit");
+    assert!(
+        !beta.is_orphaned() && !beta.member,
+        "beta is still a bound opt-out"
+    );
+
+    // Step 4: the source returns. The snapshot was never orphaned, so the
+    // restore adopts it unchanged and both tools are catalog members.
+    let regranted = open_runtime(
+        &session_id,
+        &store,
+        Some(both_tools()),
+        lash_core::ToolSourcePolicy::Tolerate,
+    )
+    .await
+    .expect("regranted open");
+    let regranted_report = regranted.tool_restore_report().expect("the reopen reports");
+    assert!(
+        regranted_report.is_clean(),
+        "nothing was ever orphaned: {regranted_report:?}"
+    );
+    assert_eq!(
+        regranted_report.generation, persisted_generation,
+        "the surface never changed, so the generation never moved"
+    );
+    let regranted_state = regranted.tool_state().expect("regranted tool state");
+    assert!(
+        regranted_state
+            .get(&lash_core::ToolId::from(ALPHA_ID))
+            .is_some_and(|entry| entry.is_member() && !entry.is_orphaned()),
+        "alpha is a catalog member on the third open"
+    );
+    assert!(
+        regranted_state
+            .get(&lash_core::ToolId::from(BETA_ID))
+            .is_some_and(|entry| !entry.member && !entry.is_orphaned()),
+        "beta is still the recorded opt-out"
     );
 }
 

@@ -281,6 +281,40 @@ pub enum ToolSourcePolicy {
     Require,
 }
 
+/// What a session **open** does with the persisted tool surface (FIG-3353).
+///
+/// The default is [`Reconcile`](Self::Reconcile): the open installs the
+/// persisted `ToolState` through `install_persisted_tool_state`, reconciling
+/// every persisted id against live sources — unresolved ids orphan, the
+/// catalog generation bumps when the surface changed, and a report classifies
+/// the loss.
+///
+/// [`PreservePersisted`](Self::PreservePersisted) is the host's declaration
+/// that this open will not run a turn — an enqueue-only or read-only open on a
+/// core that may not carry the session's tool sources at all. The open skips
+/// the reconcile entirely: the persisted snapshot is not installed, the
+/// catalog is not rebuilt, no generation bumps, no report is produced and no
+/// loss warning fires (the intentional mode is silent, not merely quieter).
+/// The runtime keeps the loaded snapshot on its state instead of restamping it
+/// from the live registry, so a commit the open takes — a host append, a
+/// config write — carries the persisted surface forward untouched rather than
+/// recording every tool as orphaned or dropping it.
+///
+/// The mode is a claim, not a fence: it does not prevent a turn from running.
+/// A host that runs a turn on a `PreservePersisted` open executes against
+/// whatever live surface the sources advertise, and the durable snapshot still
+/// reflects the last reconciled open.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolSurfaceOpenMode {
+    /// Install the persisted snapshot and rebuild the catalog, reporting any
+    /// lost members under the host's [`ToolSourcePolicy`].
+    #[default]
+    Reconcile,
+    /// Leave the persisted snapshot untouched: no reconcile, no catalog
+    /// rebuild, no report, no warning, and no restamp at commit time.
+    PreservePersisted,
+}
+
 #[derive(Clone)]
 pub struct ToolRegistry {
     /// The source map and admitted surface share one lock so readers cannot

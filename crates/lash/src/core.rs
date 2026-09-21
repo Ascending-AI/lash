@@ -148,6 +148,7 @@ impl LashCore {
             plugin_factories: Vec::new(),
             plugin_options: PluginOptions::default(),
             tool_source_policy: None,
+            tool_surface_open_mode: None,
         }
     }
 

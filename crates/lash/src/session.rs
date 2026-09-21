@@ -45,6 +45,8 @@ pub struct SessionBuilder {
     pub(crate) plugin_options: PluginOptions,
     /// Per-open override of the core's tool-source policy (FIG-3367).
     pub(crate) tool_source_policy: Option<lash_core::ToolSourcePolicy>,
+    /// Set when the host declares this open will not run a turn (FIG-3353).
+    pub(crate) tool_surface_open_mode: Option<lash_core::ToolSurfaceOpenMode>,
 }
 
 struct ResolvedSessionStore {
@@ -127,6 +129,23 @@ impl SessionBuilder {
     /// which carries the report.
     pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
         self.tool_source_policy = Some(policy);
+        self
+    }
+
+    /// Declare that this open will not run a turn — the host is opening the
+    /// session only to enqueue input or take a commit, possibly on a core that
+    /// does not carry the session's tool sources at all.
+    ///
+    /// The open skips the persisted-tool reconcile and catalog rebuild: the
+    /// durable `ToolState` is not installed, no generation bumps, no
+    /// [`ToolRestoreReport`](lash_core::ToolRestoreReport) is produced and no
+    /// lost-tools warning fires. Commits the open takes carry the persisted
+    /// surface forward byte-for-byte instead of restamping an unreconciled
+    /// registry, so the session's tools are still catalog members on the next
+    /// ordinary open. See
+    /// [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
+    pub fn enqueue_only(mut self) -> Self {
+        self.tool_surface_open_mode = Some(lash_core::ToolSurfaceOpenMode::PreservePersisted);
         self
     }
 
@@ -342,6 +361,9 @@ impl SessionBuilder {
             // host config so every construction this open performs below the
             // facade sees the same choice.
             env.core.control.tool_source_policy = policy;
+        }
+        if let Some(mode) = self.tool_surface_open_mode {
+            env.core.control.tool_surface_open_mode = mode;
         }
         if let Some(provider) = self.provider.clone().or_else(|| self.core.provider.clone()) {
             env.core.providers.provider_resolver = Arc::new(

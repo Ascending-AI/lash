@@ -234,3 +234,31 @@ effective membership is derived (`member && !orphaned`), and rebind restores it
 against the live manifest. The orphan flag and the catalog generation are the
 only durable trace. Alias replacement is the exception: a superseded identity is
 dropped rather than orphaned and its opt-out does not transfer to the new id.
+
+### Opens that will not run a turn (FIG-3353, continued)
+
+A *reconciling* open is still the wrong tool for a host that only wants to
+commit durable input on a runtime — e.g. a worker that opens a session to
+append pending input on a core that does not carry the session's tool sources.
+`ToolSurfaceOpenMode` states which open it is:
+
+* **Reconcile** (the default) installs the persisted `ToolState` and rebuilds
+  the catalog exactly as before.
+* **PreservePersisted** declares the open will not run a turn. The persisted
+  snapshot is not installed, the catalog is not rebuilt, no generation bumps,
+  no `ToolRestoreReport` is produced and the lost-tools warning does not fire —
+  for an intentional no-source open the warning is absent, not merely
+  downgraded. The runtime keeps the loaded snapshot on its state rather than
+  restamping it from an unreconciled registry, so any commit the open takes
+  carries the persisted surface forward untouched: no orphans, no generation
+  movement, and the tools are still catalog members on the next reconciling
+  open. The same skip applies to the resident re-sync on such a runtime.
+
+The mode is a claim, not a fence: nothing stops a turn from running on a
+`PreservePersisted` open, and a turn that does run executes against whatever
+live surface the sources advertise while the durable snapshot still reflects
+the last reconciled open. The facade exposes it as
+`SessionBuilder::enqueue_only()`; below the facade it rides the runtime host
+config (`RuntimeControlConfig::tool_surface_open_mode`), so every construction
+the open performs sees the same choice. Hosts that need durable input without
+a runtime at all should still prefer `durable()`, which builds nothing.

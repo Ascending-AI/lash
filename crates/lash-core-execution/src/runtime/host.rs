@@ -121,6 +121,15 @@ pub struct RuntimeControlConfig {
     /// It is carried on the host config, not on the session, so every
     /// runtime-initiated construction honours the host's choice.
     pub tool_source_policy: crate::ToolSourcePolicy,
+    /// What an open does with the persisted tool surface. Defaults to
+    /// [`ToolSurfaceOpenMode::Reconcile`](crate::ToolSurfaceOpenMode). An open
+    /// that will not run a turn — enqueue-only or read-only — is declared with
+    /// [`PreservePersisted`](crate::ToolSurfaceOpenMode::PreservePersisted),
+    /// which skips the tool-state reconcile and catalog rebuild so an open on
+    /// a core without the session's sources cannot orphan or restamp its
+    /// persisted tools (FIG-3353). Carried on the host config so every
+    /// construction below the facade sees the same choice.
+    pub tool_surface_open_mode: crate::ToolSurfaceOpenMode,
     /// Attempt bound stamped onto every child a script engine starts on the
     /// model's behalf, where no host or tool author is present to state one.
     /// Resolved once per execution segment and recorded on the child's record,
@@ -185,6 +194,7 @@ impl RuntimeHostConfig {
                 )
                 .expect("the managed-turn concurrency default is non-zero"),
                 tool_source_policy: crate::ToolSourcePolicy::default(),
+                tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
                 engine_child_max_attempts: DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
             },
             tracing: RuntimeTracingConfig {
