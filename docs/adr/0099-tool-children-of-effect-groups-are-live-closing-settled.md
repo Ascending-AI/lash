@@ -163,6 +163,26 @@ first tool call out: the child's `task.fail(...)` came back as "has no logical
 opener", its driver re-asked the provider to the cap, and the parent read
 `Stopped(MaxTurns)` instead of the child's own reason.
 
+**One derivation, and no name lookup (FIG-3417).** `EffectOpener` is the single
+owner vocabulary, and it is derived exactly once — `EffectOpener::for_scope`
+(`crates/lash-core-store/src/effect_opener.rs`) — from the admitted
+`ExecutionScope` plus the `ProcessRef` the process runner pinned onto it. Every
+surface that must name the owner calls it: the lifecycle parent a child start
+declares, the recorded attempt a tool body runs inside, and the host identities
+the Lashlang bridges mint. There is no second derivation, and none of it asks a
+registry. `ProcessQuery::resolve_process_ref` is a host-facing *name* lookup —
+it answers "the current incarnation of this name" — and using it for owner
+derivation is the rebind defect this section refuses: under same-name
+re-registration the current incarnation is the *successor*, and prior work
+would rebind to it. A recovery path validating a retained pair uses
+`ProcessQuery::get_process_ref`, which answers the exact
+`(process_id, incarnation)` or refuses it as superseded. The incarnation stays
+beside `ExecutionScope`, never inside it: the scope remains the claim address
+and the pin is the admission-time fact. Where the derived opener is minted into
+a key preimage or an embedded id, `EffectOpener::identity_encoding` — the
+length-prefixed canonical form — is the only encoding; `render` is the
+diagnostic projection and is free to collide.
+
 **A dead worker is neither live-ended nor closed.** Recovery classifies an
 opener by the durable closing fact of §7, never by the liveness of a lease. The
 existing drain guard is explicitly local and cannot answer this:

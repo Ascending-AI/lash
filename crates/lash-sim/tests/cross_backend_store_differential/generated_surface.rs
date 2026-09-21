@@ -239,7 +239,6 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
         let parent_scope = call
             .context
             .child_process_parent_scope()
-            .await
             .expect("recorded attempt carries its parent scope");
 
         assert_eq!(call.context.session_id(), SURFACE_SESSION);

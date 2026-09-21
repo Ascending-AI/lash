@@ -71,6 +71,37 @@ impl ParentScope {
         }
     }
 
+    /// The lifecycle parent one owner identity maps to.
+    ///
+    /// [`crate::EffectOpener`] is the one owner vocabulary (ADR 0099 §1) —
+    /// derived once, at admission, by [`crate::EffectOpener::for_scope`] from
+    /// the admitted scope plus its pinned `ProcessRef` — and this is the only
+    /// projection of that vocabulary into a `ParentScope`.
+    ///
+    /// A `QueueDrain` opener is a durable owner in exactly §1's sense, but it
+    /// cannot yet parent a process: a drain has no end protocol, so there is
+    /// no moment a child's `OnParentEnd` could fire. Until FIG-3419 lands that
+    /// protocol, drain-owned children take `Host`.
+    pub fn from_owner(opener: &crate::EffectOpener) -> Self {
+        match opener {
+            crate::EffectOpener::Turn {
+                session_id,
+                turn_id,
+            } => Self::Turn {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            },
+            crate::EffectOpener::Process { process_ref } => Self::Process {
+                process_id: process_ref.process_id.clone(),
+                incarnation: process_ref.incarnation,
+            },
+            // A drain is the logical owner, but parenting on it needs the
+            // drain-end protocol FIG-3419 owns; until then its children attach
+            // to the host.
+            crate::EffectOpener::QueueDrain { .. } => Self::Host,
+        }
+    }
+
     /// Rebuilds a scope from the two stored columns.
     ///
     /// Returns `None` for any pair the storage check constraint forbids: an

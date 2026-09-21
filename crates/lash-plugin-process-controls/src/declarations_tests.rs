@@ -45,10 +45,19 @@ fn refusal(outcome: ToolAttemptOutcome) -> String {
 /// is derived from, and names the process the body runs inside when there is
 /// one.
 fn attempt_context(enclosing_process: Option<&str>) -> lash_core::ToolContext<'static> {
-    lash_core::testing::mock_tool_context().__with_attempt_binding_for_testing(
-        Some("declaration-call".to_string()),
-        enclosing_process.map(|id| lash_core::ProcessId::from(id.to_string())),
+    // A recorded attempt always runs under a real owner scope; the mock
+    // default is `RuntimeOperation`, which names no opener.
+    let scoped = lash_core::ScopedEffectController::shared(
+        std::sync::Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+        lash_core::ExecutionScope::turn("test-session", "declaration-turn"),
     )
+    .expect("the test scope validates");
+    lash_core::testing::mock_tool_context()
+        .__with_scoped_effect_controller_for_testing(scoped)
+        .__with_attempt_binding_for_testing(
+            Some("declaration-call".to_string()),
+            enclosing_process.map(|id| lash_core::ProcessId::from(id.to_string())),
+        )
 }
 
 macro_rules! attempt {

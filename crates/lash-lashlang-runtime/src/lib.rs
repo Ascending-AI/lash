@@ -8,7 +8,7 @@ pub use error::{
     LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError, ToolBindingError,
 };
 mod host_identity;
-pub use host_identity::{LashlangHostIdentities, LashlangOpenerError, cell_opener_for_scope};
+pub use host_identity::LashlangHostIdentities;
 mod process_identity;
 pub use process_identity::deterministic_lashlang_process_id;
 mod trigger_commands;

@@ -875,7 +875,6 @@ impl crate::ProcessEngine for ProductionChainEngine {
                     crate::ProcessLifecyclePolicy::new(
                         runtime
                             .child_process_parent_scope()
-                            .await
                             .expect("runtime parent"),
                         crate::OnParentEnd::Abandon,
                     ),
@@ -949,7 +948,6 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 crate::ProcessLifecyclePolicy::new(
                     runtime
                         .child_process_parent_scope()
-                        .await
                         .expect("runtime parent"),
                     crate::OnParentEnd::Abandon,
                 ),

@@ -793,49 +793,20 @@ impl<'run> RuntimeExecutionContext<'run> {
             .and_then(|exec| exec.env_ref.clone())
     }
 
-    pub(crate) fn child_process_query(&self) -> Option<Arc<dyn crate::ProcessQuery>> {
-        self.process_execution
-            .as_ref()
-            .and_then(|process| process.event_context.as_ref())
-            .map(|context| {
-                let query: Arc<dyn crate::ProcessQuery> = context.process_work.registry().clone();
-                query
-            })
-    }
-
-    /// Resolve the enclosing durable scope for a code-executor's child start.
-    pub async fn child_process_parent_scope(
-        &self,
-    ) -> Result<crate::ParentScope, crate::PluginError> {
-        if let Some(process) = &self.process_execution {
-            let context = process.event_context.as_ref().ok_or_else(|| {
-                crate::PluginError::Session(
-                    "child start requires process execution authority".to_string(),
-                )
-            })?;
-            let parent = context
-                .process_work
-                .registry()
-                .resolve_process_ref(&process.process_id)
-                .await?;
-            return Ok(crate::ParentScope::Process {
-                process_id: parent.process_id,
-                incarnation: parent.incarnation,
-            });
-        }
-        let turn_id = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .turn_id()
-            .cloned()
-            .ok_or_else(|| {
-                crate::PluginError::Session("child start requires a turn parent".to_string())
-            })?;
-        Ok(crate::ParentScope::Turn {
-            session_id: self.session_id.clone(),
-            turn_id,
-        })
+    /// The enclosing durable parent for a code-executor's child start.
+    ///
+    /// Derived through the one owner derivation — the admitted scope plus the
+    /// incarnation the process runner pinned onto it — so a same-name
+    /// successor in the registry cannot rebind a child this execution's
+    /// opener still owns (FIG-3417). There is no registry access here by
+    /// design: `resolve_process_ref` is a name lookup, and a name is not an
+    /// owner.
+    pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, crate::PluginError> {
+        let scoped = self.dispatch.effect_controller.scoped();
+        let opener =
+            crate::EffectOpener::for_scope(scoped.execution_scope(), scoped.admitted_process())
+                .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        Ok(crate::ParentScope::from_owner(&opener))
     }
 
     /// Starts a child process for code-executor implementors with the current execution context as

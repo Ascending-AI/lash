@@ -73,7 +73,6 @@ impl RlmSubagentToolsProvider {
             lash_core::ProcessLifecyclePolicy::new(
                 context
                     .child_process_parent_scope()
-                    .await
                     .map_err(|error| error.to_string())?,
                 lash_core::OnParentEnd::Abandon,
             ),

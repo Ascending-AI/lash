@@ -542,7 +542,6 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
         let parent_scope = call
             .context
             .child_process_parent_scope()
-            .await
             .expect("recorded attempt carries its parent scope");
 
         self.calls.fetch_add(1, Ordering::SeqCst);

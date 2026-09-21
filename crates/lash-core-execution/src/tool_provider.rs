@@ -18,7 +18,6 @@ mod completion_support;
 mod direct_completion;
 mod dispatch;
 pub mod orchestration;
-mod parent_scope;
 mod process;
 pub mod process_events;
 mod session;
@@ -128,7 +127,12 @@ pub(crate) enum ToolExecutionRoute {
 pub struct AttemptContext<'run> {
     session_id: SessionId,
     parent_scope: crate::ExecutionScope,
-    parent_process_query: Option<Arc<dyn crate::ProcessQuery>>,
+    /// The incarnation the process runner pinned onto `parent_scope` at
+    /// admission, when the scope is a process. Together with `parent_scope`
+    /// this is the whole input to the one owner derivation —
+    /// [`crate::EffectOpener::for_scope`] — and it is never re-resolved by
+    /// name (ADR 0099 §1, FIG-3417).
+    admitted_process: Option<crate::ProcessRef>,
     execution_scope_id: String,
     agent_frame_id: crate::FrameNodeId,
     sessions: AttemptSessionReads,
@@ -170,32 +174,17 @@ pub struct AttemptContext<'run> {
 }
 
 impl<'run> AttemptContext<'run> {
-    /// Resolve the runtime-owned parent scope for an explicit child lifecycle declaration.
-    pub async fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
-        match &self.parent_scope {
-            crate::ExecutionScope::Turn {
-                session_id,
-                turn_id,
-            } => Ok(crate::ParentScope::Turn {
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-            }),
-            crate::ExecutionScope::Process { process_id } => {
-                let query = self.parent_process_query.as_ref().ok_or_else(|| {
-                    PluginError::Session(
-                        "process parent scope requires process query authority".to_string(),
-                    )
-                })?;
-                let parent = query.resolve_process_ref(process_id).await?;
-                Ok(crate::ParentScope::Process {
-                    process_id: parent.process_id,
-                    incarnation: parent.incarnation,
-                })
-            }
-            crate::ExecutionScope::QueueDrain { .. }
-            | crate::ExecutionScope::SessionDelete { .. }
-            | crate::ExecutionScope::RuntimeOperation { .. } => Ok(crate::ParentScope::Host),
-        }
+    /// The runtime-owned parent scope for an explicit child lifecycle
+    /// declaration.
+    ///
+    /// Derived through the one owner derivation — the admitted scope plus the
+    /// pinned `ProcessRef` — so a same-name successor in the registry cannot
+    /// rebind a child this attempt's opener still owns (FIG-3417).
+    pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
+        let opener =
+            crate::EffectOpener::for_scope(&self.parent_scope, self.admitted_process.as_ref())
+                .map_err(|error| PluginError::Session(error.to_string()))?;
+        Ok(crate::ParentScope::from_owner(&opener))
     }
 
     pub(crate) fn from_tool_context(
@@ -214,20 +203,11 @@ impl<'run> AttemptContext<'run> {
             .and_then(|dispatch| dispatch.turn_context.provider().cloned());
         Self {
             parent_scope: context.effect_controller.scoped().execution_scope().clone(),
-            parent_process_query: context
-                .process_events
-                .as_ref()
-                .map(|events| {
-                    let query: Arc<dyn crate::ProcessQuery> =
-                        events.process_work.registry().clone();
-                    query
-                })
-                .or_else(|| {
-                    context
-                        .runtime_execution_context
-                        .as_ref()
-                        .and_then(crate::RuntimeExecutionContext::child_process_query)
-                }),
+            admitted_process: context
+                .effect_controller
+                .scoped()
+                .admitted_process()
+                .cloned(),
             session_id: context.session_id.clone(),
             execution_scope_id,
             agent_frame_id: context.agent_frame_id.clone(),
@@ -1094,6 +1074,23 @@ impl<'run> ToolContext<'run> {
         self
     }
 
+    /// Test-only: bind the scoped effect controller the runtime would have
+    /// installed for this attempt.
+    ///
+    /// [`mock_tool_context`](crate::testing::mock_tool_context) runs under a
+    /// `RuntimeOperation` scope, which names no opener — production attempts
+    /// always run under a turn, drain or process scope. A fixture that
+    /// exercises an owner-derived answer (a declared child's parent scope)
+    /// binds the real scope here rather than leaning on the mock default.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn __with_scoped_effect_controller_for_testing(
+        mut self,
+        scoped: crate::ScopedEffectController<'static>,
+    ) -> Self {
+        self.effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
+        self
+    }
+
     pub(crate) fn with_tool_execution_binding(mut self, binding: serde_json::Value) -> Self {
         self.tool_execution_binding = binding;
         self
@@ -1718,5 +1715,106 @@ mod tests {
             .await
             .expect_err("controller ownership alone must not permit completion keys");
         assert_eq!(error.code.as_str(), "tool_completion_key_process_lifetime");
+    }
+
+    // -----------------------------------------------------------------------
+    // FIG-3417: the lifecycle parent a child start declares comes from ONE
+    // shared derivation — the admitted execution scope plus the incarnation
+    // the process runner pinned onto it. Nothing on this path re-resolves the
+    // reusable process name against a registry.
+    // -----------------------------------------------------------------------
+
+    fn tool_context_under_scope(
+        scope: crate::ExecutionScope,
+        admitted_process: Option<crate::ProcessRef>,
+    ) -> ToolContext<'static> {
+        let controller = crate::ScopedEffectController::shared(
+            Arc::new(crate::NativeRuntimeEffectController::default()),
+            scope,
+        )
+        .expect("the test scope validates");
+        let controller = match admitted_process {
+            Some(process_ref) => controller
+                .with_admitted_process(process_ref)
+                .expect("the pin names the scope's process"),
+            None => controller,
+        };
+        ToolContext::builder(
+            SessionId::from("session-1"),
+            Arc::new(crate::testing::MockSessionManager::default()),
+            Arc::new(crate::testing::MockSessionManager::default()),
+            Arc::new(crate::testing::MockSessionManager::default()),
+            Arc::new(crate::UnavailableProcessService),
+            crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
+            Arc::new(crate::SessionAttachmentStore::in_memory()),
+            crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+        )
+        .build()
+    }
+
+    /// A recorded leaf attempt under a process scope parents on the pinned
+    /// incarnation — the attempt carries no registry query to re-resolve the
+    /// name, only the admission-time pin.
+    #[tokio::test]
+    async fn an_attempt_under_a_process_scope_parents_on_the_pinned_incarnation() {
+        let incarnation = crate::ProcessIncarnation::from_registration_sequence(3);
+        let context = tool_context_under_scope(
+            crate::ExecutionScope::process("worker"),
+            Some(crate::ProcessRef::new(
+                ProcessId::from("worker"),
+                incarnation,
+            )),
+        );
+        let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
+        assert_eq!(
+            attempt
+                .child_process_parent_scope()
+                .expect("the pinned incarnation is the parent"),
+            crate::ParentScope::Process {
+                process_id: ProcessId::from("worker"),
+                incarnation,
+            },
+        );
+    }
+
+    /// A recorded leaf attempt under a process scope nobody bound an admitted
+    /// incarnation to is refused — the reusable name is not a fallback.
+    #[tokio::test]
+    async fn an_attempt_under_a_process_scope_without_an_admitted_incarnation_is_refused() {
+        let context = tool_context_under_scope(crate::ExecutionScope::process("worker"), None);
+        let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
+        let error = attempt
+            .child_process_parent_scope()
+            .expect_err("a process scope without an admitted incarnation cannot parent a child");
+        assert!(
+            error.to_string().contains("incarnation"),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    /// The orchestrating surface takes the same shared derivation: the pinned
+    /// incarnation, not a registry lookup.
+    #[tokio::test]
+    async fn an_orchestrating_context_parents_on_the_pinned_incarnation() {
+        let incarnation = crate::ProcessIncarnation::from_registration_sequence(2);
+        let context = tool_context_under_scope(
+            crate::ExecutionScope::process("worker"),
+            Some(crate::ProcessRef::new(
+                ProcessId::from("worker"),
+                incarnation,
+            )),
+        );
+        let orchestration = crate::OrchestrationContext::new(context);
+        assert_eq!(
+            orchestration
+                .child_process_parent_scope()
+                .expect("the pinned incarnation is the parent"),
+            crate::ParentScope::Process {
+                process_id: ProcessId::from("worker"),
+                incarnation,
+            },
+        );
     }
 }

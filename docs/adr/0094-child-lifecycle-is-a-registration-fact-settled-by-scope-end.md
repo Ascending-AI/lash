@@ -374,3 +374,34 @@ Cancellation vocabulary is unchanged: a child cancelled by the parent-end sweep
 carries origin `ParentEnded`, and closing a group is not a new `CancelOrigin`
 because it cancels *tool attempts*, which are not processes and carry no
 `CancelRequest`.
+
+## Amendment: one owner derivation, and a drain is not yet a parent (FIG-3417)
+
+**Landed.**
+
+`ParentScope` is a projection of the owner, not a second derivation of it. The
+owner is `EffectOpener` (ADR 0099 §1), derived once at admission from the
+admitted `ExecutionScope` plus the `ProcessRef` the process runner pinned onto
+it — `EffectOpener::for_scope` — and `ParentScope::from_owner`
+(`crates/lash-core-execution/src/runtime/process/model/lifecycle.rs`) is the
+only projection of that vocabulary into this ADR's. The builders that used to
+re-resolve the reusable process name through `ProcessQuery::resolve_process_ref`
+are gone: a name lookup answers "the current incarnation", which under same-name
+re-registration is the *successor* — silently rebinding a retired incarnation's
+children onto a process that never started them. A process parent is therefore
+the exact admitted incarnation, and a same-name successor registration does not
+rebind prior work. Where a retained pair must be validated — recovery — the
+check is `ProcessQuery::get_process_ref`, which answers the exact
+`(process_id, incarnation)` or refuses it as superseded.
+
+`QueueDrain` is a durable owner (ADR 0099 §1) but not yet a lifecycle parent: a
+drain has no end protocol, so there is no moment a child's `OnParentEnd` could
+fire. `from_owner` maps a drain opener to `Host` until FIG-3419 lands the
+drain-end protocol — the mapping is deliberate, and substituting the drain's
+first physical turn for "drain end" is not the fix. Explicit host
+administration may still select `Host` directly.
+
+The incarnation stays *beside* `ExecutionScope`, not inside it: the scope
+remains the claim address, the pin is the admission-time fact, and
+`ParentScope`'s storage shape is unchanged — FIG-3418 owns any restructuring of
+how the pair is stored.

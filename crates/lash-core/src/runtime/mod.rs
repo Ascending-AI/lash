@@ -246,6 +246,7 @@ pub use in_memory_store::RawSessionExecutionLeaseRow;
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
+pub use lash_core_execution::runtime::EffectOpenerError;
 #[cfg(any(test, feature = "testing"))]
 pub use native_substrate::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
 pub use native_substrate::{

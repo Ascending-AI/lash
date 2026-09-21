@@ -77,7 +77,7 @@ enum LashlangCellOpener {
     #[error("lashlang cell runs outside a code-execution effect, so it has no logical opener")]
     NoEffect,
     #[error(transparent)]
-    Scope(lash_lashlang_runtime::LashlangOpenerError),
+    Scope(lash_core::EffectOpenerError),
 }
 
 type HostAbilityFuture<'a> =
@@ -96,7 +96,7 @@ impl<'run> HostBridge<'run> {
             .and_then(lash_core::RuntimeInvocation::effect_address)
             .ok_or(LashlangCellOpener::NoEffect)
             .and_then(|address| {
-                lash_lashlang_runtime::cell_opener_for_scope(
+                lash_core::EffectOpener::for_scope(
                     &address.execution_scope,
                     admitted_process.as_ref(),
                 )
