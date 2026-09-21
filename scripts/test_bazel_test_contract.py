@@ -153,9 +153,9 @@ class BazelTestContractTests(unittest.TestCase):
 
         dev_labels = set(generated_list("WORKSPACE_DEV_TEST_TARGETS"))
 
-        self.assertEqual(123, len(all_labels))
-        self.assertEqual(105, len(bazel_labels))
-        self.assertEqual(103, len(dev_labels))
+        self.assertEqual(124, len(all_labels))
+        self.assertEqual(106, len(bazel_labels))
+        self.assertEqual(104, len(dev_labels))
         self.assertEqual(17, len(cargo_labels))
         self.assertEqual(1, len(deferred_labels))
         self.assertEqual(
@@ -819,7 +819,7 @@ class BazelTestContractTests(unittest.TestCase):
             set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
             clippy,
         )
-        self.assertEqual(195, len(clippy))
+        self.assertEqual(196, len(clippy))
         # The half that actually compiles `build.rs` is linted, not exempted.
         self.assertIn("//crates/lash-protocol-rlm:build_script_", clippy)
         self.assertTrue(

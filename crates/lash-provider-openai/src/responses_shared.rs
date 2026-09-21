@@ -854,8 +854,38 @@ impl ResponsesStreamState {
         self.set_text_part(part_index, text.to_string());
     }
 
+    /// Azure can omit `encrypted_content` from `response.output_item.done` and
+    /// provide it only in the terminal `response.output`. Backfill the replay
+    /// blob onto streamed reasoning parts so store:false multi-turn replay
+    /// stays stateless even when item.done was incomplete.
+    fn backfill_reasoning_replay(&mut self, response: &Value) {
+        let Some(items) = response.get("output").and_then(|v| v.as_array()) else {
+            return;
+        };
+        for item in items {
+            if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+                continue;
+            }
+            let Some(item_id) = item.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(blob) = item.get("encrypted_content").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(existing) = self.parts.iter_mut().find(|part| {
+                matches!(part, LlmOutputPart::Reasoning { replay, .. } if replay.as_ref().and_then(|meta| meta.item_id.as_deref()) == Some(item_id))
+            }) && let LlmOutputPart::Reasoning { replay, .. } = existing
+                && let Some(meta) = replay
+                && meta.encrypted_content.is_none()
+            {
+                meta.encrypted_content = Some(blob.to_string());
+            }
+        }
+    }
+
     pub fn merge_final_response(&mut self, response: &Value) {
         if self.streamed_item_content_received {
+            self.backfill_reasoning_replay(response);
             return;
         }
         let structured_message_text = has_structured_message_text(response);

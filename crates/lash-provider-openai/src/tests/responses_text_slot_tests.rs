@@ -334,3 +334,32 @@ fn responses_indexed_reasoning_summary_parts_reuse_the_output_owner() {
         .collect::<Vec<_>>();
     assert_eq!(reasoning, vec!["FirstSecond"]);
 }
+
+/// Azure can omit `encrypted_content` from `response.output_item.done` and only
+/// provide it in the terminal `response.output` — the same workaround pi-mono
+/// documents for store:false replay (pi issue #6409). The streamed reasoning
+/// part must gain the blob at the terminal merge.
+#[test]
+fn responses_terminal_output_backfills_reasoning_encrypted_content() {
+    let mut state = ResponsesStreamState::default();
+    for event in [
+        r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_azure","summary":[]}}"#,
+        r#"{"type":"response.reasoning_summary_part.added","output_index":0,"item_id":"rs_azure","summary_index":0}"#,
+        r#"{"type":"response.reasoning_summary_text.delta","output_index":0,"item_id":"rs_azure","summary_index":0,"delta":"chain"}"#,
+        r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_azure","summary":[{"type":"summary_text","text":"chain"}]}}"#,
+        r#"{"type":"response.completed","response":{"id":"resp_azure","status":"completed","output":[{"type":"reasoning","id":"rs_azure","summary":[{"type":"summary_text","text":"chain"}],"encrypted_content":"opaque-azure"}]}}"#,
+    ] {
+        OpenAiCompatibleProvider::process_sse_event(event, &mut state, None).unwrap();
+    }
+
+    let replay = state
+        .response_parts()
+        .into_iter()
+        .find_map(|part| match part {
+            LlmOutputPart::Reasoning { replay, .. } => replay,
+            _ => None,
+        })
+        .expect("reasoning part");
+    assert_eq!(replay.item_id.as_deref(), Some("rs_azure"));
+    assert_eq!(replay.encrypted_content.as_deref(), Some("opaque-azure"));
+}
