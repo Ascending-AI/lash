@@ -647,6 +647,70 @@ jobs:
           path: target/confidence/stages/mutation-sim/**
           if-no-files-found: error
 
+  confidence-mutation-authority:
+    name: Confidence mutation-authority
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    # 43 mutants over the FIG-3429 authority sites (rebind checklist, retained
+    # tool-child request, group reopen settlement capture). Sized like
+    # mutation-sim: ~2 min/mutant plus the ~23 minutes spent downloading and
+    # restoring the shared build.
+    timeout-minutes: 160
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run mutation-authority
+        env:
+          LASH_CONFIDENCE_STAGE: mutation-authority
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-authority
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload mutation-authority evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-mutation-authority-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/mutation-authority/**
+          if-no-files-found: error
+
   confidence-mutation-packages:
     name: Confidence mutation-packages-${{ matrix.package }}-${{ matrix.shard }}
     needs: confidence-build
@@ -867,7 +931,7 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-packages, sim-search]
+    needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-authority, confidence-mutation-packages, sim-search]
     steps:
       - name: Check out repository
         env:

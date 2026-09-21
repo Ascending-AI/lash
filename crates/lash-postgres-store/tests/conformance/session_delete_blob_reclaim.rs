@@ -10,7 +10,7 @@ lash_conformance::session_delete_blob_reclaim_tests!({
     (database_lock, "postgres", move || {
         let storage = Arc::clone(&make_storage);
         sync_await(async move {
-            reset(&storage).await;
+            reset(storage.pool()).await;
             lash_conformance::SessionDeleteBlobHandles {
                 factory: Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
                 probe: Arc::new(crate::blob_probe::PostgresBlobProbe::new(

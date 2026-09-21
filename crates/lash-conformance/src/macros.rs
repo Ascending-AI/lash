@@ -732,6 +732,10 @@ macro_rules! effect_host_await_event_tests {
     ($fixture:block) => {
         $crate::effect_host_await_event_tests!(@catalogue $fixture; [
             (effect_host_await_events, "effect-host-await-event"),
+            (
+                completion_routing_pairwise_refusal,
+                "completion-routing-pairwise"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1539,6 +1543,7 @@ macro_rules! session_store_factory_tests {
             (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
             (turn_cancel_conflicting_repeat_leaves_no_durable_trace, "turn-cancel-conflicting-repeat"),
             (turn_cancel_concurrent_opposing_requests_converge, "turn-cancel-concurrent-opposing"),
+            (turn_cancel_wrong_binding_is_refused_at_every_phase, "turn-cancel-wrong-binding"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1958,6 +1963,10 @@ macro_rules! store_effect_group_drain_tests {
     ($fixture:block) => {
         $crate::store_effect_group_drain_tests!(@catalogue $fixture; [
             (store_effect_group_drain_conformance, "store-effect-group-drain"),
+            (
+                store_effect_group_crash_matrix_conformance,
+                "store-effect-group-crash-matrix"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -2064,6 +2073,10 @@ macro_rules! tool_child_invocation_tests {
             (
                 a_crashed_child_replays_its_committed_attempts_facts,
                 "tool-child-attempt-capture"
+            ),
+            (
+                every_billed_provider_attempt_is_conserved_once_on_its_opener,
+                "tool-child-usage-conservation"
             ),
         ]);
     };

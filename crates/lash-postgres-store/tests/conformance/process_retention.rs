@@ -99,7 +99,7 @@ async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
         eprintln!("skipping PostgreSQL waiting-retention regression: database URL is not set");
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let registry = storage.process_registry();
     let process_id = ProcessId::from(format!("waiting-retention:{}", uuid::Uuid::new_v4()));
     assert_waiting_process_is_live_not_prunable(&registry, &process_id).await;

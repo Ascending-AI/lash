@@ -47,6 +47,11 @@ case "$LASH_CONFIDENCE_STAGE" in
     test "$mutation_commands_run" -gt 0
     test "$mutation_failures" -eq 0
     ;;
+  mutation-authority)
+    run_authority_rebind_mutation_evidence
+    test "$mutation_commands_run" -gt 0
+    test "$mutation_failures" -eq 0
+    ;;
   mutation-packages)
     case "${LASH_CONFIDENCE_PACKAGE:-}" in
       lash-internal-core|lash-internal-lashlang|lash-internal-protocol-rlm|lash-internal-protocol-standard|lash-internal-sqlite-store|lash-internal-postgres-store) ;;

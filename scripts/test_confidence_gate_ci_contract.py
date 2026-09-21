@@ -219,7 +219,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
                      "confidence-backends", "confidence-coverage",
                      "confidence-mutation-core", "confidence-mutation-sim",
-                     "confidence-mutation-packages", "sim-search"}
+                     "confidence-mutation-authority", "confidence-mutation-packages", "sim-search"}
         self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion"}, set(jobs))
         artifact = "confidence-build-${{ github.sha }}-${{ github.run_attempt }}"
         producer = jobs["confidence-build"]
@@ -261,6 +261,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "mutation-core": ["run_lash_core_direct_model_mutation_evidence",
                               "run_process_lease_preimage_mutation_evidence"],
             "mutation-sim": ["run_lash_sim_runtime_completion_mutation_evidence"],
+            "mutation-authority": ["run_authority_rebind_mutation_evidence"],
             "mutation-packages": ["run_mutation_smoke", "run_mutation_full", "finalize_mutation_gate"],
         }
         all_functions = {f for fs in functions.values() for f in fs}
@@ -821,7 +822,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         expected_consumed_paths.update(
             f"target/confidence/stages/{stage}/**"
             for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
-                           "coverage", "mutation-core", "mutation-sim",
+                           "coverage", "mutation-core", "mutation-sim", "mutation-authority",
                            "mutation-packages-${{ matrix.package }}-${{ matrix.shard }}")
         )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)

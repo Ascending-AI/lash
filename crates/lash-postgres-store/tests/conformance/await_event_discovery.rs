@@ -8,7 +8,7 @@ async fn postgres_await_event_discovery_refuses_inconsistent_persisted_rows_when
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let host = storage.effect_host();
 
     let inconsistent_session = SessionId::from("inconsistent-discovery-session");

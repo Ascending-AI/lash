@@ -5,7 +5,7 @@ async fn postgres_cross_owner_attachment_adoption_conformance() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     Box::pin(
         lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
             storage.session_store_factory(),
@@ -19,7 +19,7 @@ async fn postgres_attachment_condemnation_enumeration_conformance() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     lash_conformance::attachment_condemnation_enumeration_conformance(Arc::new(
         storage.session_store_factory(),
     ))

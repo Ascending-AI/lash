@@ -13,7 +13,7 @@ async fn postgres_real_turn_cancel_closure_survives_every_cold_process_crash_cut
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let url = database_url().expect("configured PostgreSQL database URL");
     let dir = tempfile::tempdir().expect("PostgreSQL cancellation cold-process tempdir");
     cold_process_turn_parent::assert_real_turn_cancel_kill_recovery(

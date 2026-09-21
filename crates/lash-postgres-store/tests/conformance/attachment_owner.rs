@@ -7,7 +7,7 @@ lash_conformance::attachment_owner_cold_replay_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let storage = Arc::new(storage);
     let scope = durable_turn_scope("attachment-owner-cold-replay", "attachment-owner-turn");
     let first = Arc::new(storage.runtime_effect_controller(scope.clone()))

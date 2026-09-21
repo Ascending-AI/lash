@@ -941,13 +941,13 @@ async fn a_reopen_offering_a_retained_key_under_a_different_request_lends_nothin
 // Fixtures
 // =============================================================================
 
-const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
+pub(crate) const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
 const CANCEL: LoserPolicy = LoserPolicy::Cancel;
 
 /// The lease window a crash law uses: long enough that a claim is not lost while
 /// the pre-crash process is still working, short enough that a dead process's
 /// rows become reclaimable inside a test's patience.
-const CRASH_LEASE_MS: u64 = 900;
+pub(crate) const CRASH_LEASE_MS: u64 = 900;
 
 /// The lease window a live-group law uses: longer than the law, so a lease
 /// expiring mid-test can never be mistaken for the drain honoring it.
@@ -958,7 +958,7 @@ const POLL: Duration = Duration::from_millis(25);
 /// Hang detector for the entire conformance law, not a latency expectation.
 const AWAIT_BUDGET: Duration = Duration::from_secs(60);
 
-fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
+pub(crate) fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
         executors: Some(Arc::clone(executors) as Arc<dyn GroupExecutors>),
@@ -966,7 +966,7 @@ fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpe
 }
 
 /// The same world with no resolver registered on its host at all.
-fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
+pub(crate) fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
         executors: None,
@@ -981,7 +981,7 @@ fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn crashed_process<P>(make: &DrainWorldFactory, phase: P)
+pub(crate) async fn crashed_process<P>(make: &DrainWorldFactory, phase: P)
 where
     P: FnOnce(DrainWorld) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static,
 {
@@ -1021,7 +1021,7 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn orphan_two_losers(make: &DrainWorldFactory, key: &str, scope: &ExecutionScope) {
+pub(crate) async fn orphan_two_losers(make: &DrainWorldFactory, key: &str, scope: &ExecutionScope) {
     crashed_process(make, {
         let key = key.to_string();
         let scope = scope.clone();
@@ -1047,7 +1047,7 @@ async fn orphan_two_losers(make: &DrainWorldFactory, key: &str, scope: &Executio
     .await;
 }
 
-fn outcome_of(report: &GroupDrainReport, replay_key: &str) -> ChildDrainOutcome {
+pub(crate) fn outcome_of(report: &GroupDrainReport, replay_key: &str) -> ChildDrainOutcome {
     report
         .children
         .iter()
@@ -1058,7 +1058,7 @@ fn outcome_of(report: &GroupDrainReport, replay_key: &str) -> ChildDrainOutcome 
 }
 
 /// One pass nobody is cancelling.
-async fn pass(
+pub(crate) async fn pass(
     world: &DrainWorld,
     group_key: &str,
 ) -> Result<GroupDrainReport, RuntimeEffectControllerError> {
@@ -1076,7 +1076,7 @@ async fn pass(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn until_leases_lapse(make: &DrainWorldFactory, group_key: &str) {
+pub(crate) async fn until_leases_lapse(make: &DrainWorldFactory, group_key: &str) {
     let probe = make(spec(CRASH_LEASE_MS, &RecordingExecutors::refusing())).await;
     tokio::time::timeout(AWAIT_BUDGET, async {
         loop {
@@ -1101,7 +1101,10 @@ async fn until_leases_lapse(make: &DrainWorldFactory, group_key: &str) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn drain_until_no_live_lease(world: &DrainWorld, group_key: &str) -> GroupDrainReport {
+pub(crate) async fn drain_until_no_live_lease(
+    world: &DrainWorld,
+    group_key: &str,
+) -> GroupDrainReport {
     tokio::time::timeout(AWAIT_BUDGET, async {
         loop {
             let report = world
@@ -1123,15 +1126,15 @@ async fn drain_until_no_live_lease(world: &DrainWorld, group_key: &str) -> Group
     .expect("the orphaned losers become reclaimable once their leases expire")
 }
 
-fn scope(prefix: &str, label: &str) -> ExecutionScope {
+pub(crate) fn scope(prefix: &str, label: &str) -> ExecutionScope {
     ExecutionScope::runtime_operation(format!("{prefix}-{label}"))
 }
 
-fn group_key(prefix: &str, label: &str) -> String {
+pub(crate) fn group_key(prefix: &str, label: &str) -> String {
     format!("{prefix}:group:{label}:0")
 }
 
-fn child_replay_key(group_key: &str, position: usize) -> String {
+pub(crate) fn child_replay_key(group_key: &str, position: usize) -> String {
     format!("{group_key}:child:{position}")
 }
 
@@ -1217,7 +1220,7 @@ fn group(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-fn impostor_group(
+pub(crate) fn impostor_group(
     execution_scope: &ExecutionScope,
     key: &str,
     children: usize,
@@ -1261,7 +1264,7 @@ fn staged_executors() -> &'static StagedGroupExecutors {
     STAGED.get_or_init(StagedGroupExecutors::new)
 }
 
-async fn open(
+pub(crate) async fn open(
     scoped: &ScopedEffectController<'_>,
     key: &str,
     children: usize,
@@ -1284,7 +1287,7 @@ async fn open(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn open_with(
+pub(crate) async fn open_with(
     scoped: &ScopedEffectController<'_>,
     group: RuntimeEffectGroup,
     executors: Vec<RuntimeEffectLocalExecutor<'static>>,
@@ -1310,7 +1313,7 @@ async fn reopen(
     open(scoped, key, children, disposition, executors).await
 }
 
-async fn next(
+pub(crate) async fn next(
     scoped: &ScopedEffectController<'_>,
     handle: &mut EffectGroupHandle,
 ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
@@ -1330,7 +1333,7 @@ async fn next(
     })
 }
 
-async fn close(
+pub(crate) async fn close(
     scoped: &ScopedEffectController<'_>,
     handle: EffectGroupHandle,
     disposition: LoserPolicy,
@@ -1345,7 +1348,7 @@ async fn close(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn until(mut condition: impl FnMut() -> bool) {
+pub(crate) async fn until(mut condition: impl FnMut() -> bool) {
     tokio::time::timeout(AWAIT_BUDGET, async {
         while !condition() {
             tokio::time::sleep(POLL).await;
@@ -1355,7 +1358,7 @@ async fn until(mut condition: impl FnMut() -> bool) {
     .expect("the host reaches the awaited state");
 }
 
-fn settles(position: usize) -> RuntimeEffectLocalExecutor<'static> {
+pub(crate) fn settles(position: usize) -> RuntimeEffectLocalExecutor<'static> {
     RuntimeEffectLocalExecutor::testing(move |_| async move {
         Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
             value: serde_json::json!({ "position": position }),
@@ -1369,7 +1372,7 @@ fn settles(position: usize) -> RuntimeEffectLocalExecutor<'static> {
 /// commits, so "entered" means the child's row exists and holds a lease. Without
 /// it a crash law would race the claim and sometimes leave nothing behind to
 /// drain.
-fn blocking(entered: &Arc<AtomicUsize>) -> RuntimeEffectLocalExecutor<'static> {
+pub(crate) fn blocking(entered: &Arc<AtomicUsize>) -> RuntimeEffectLocalExecutor<'static> {
     let entered = Arc::clone(entered);
     RuntimeEffectLocalExecutor::testing(move |_| async move {
         entered.fetch_add(1, Ordering::SeqCst);
@@ -1378,7 +1381,7 @@ fn blocking(entered: &Arc<AtomicUsize>) -> RuntimeEffectLocalExecutor<'static> {
     })
 }
 
-fn never() -> RuntimeEffectLocalExecutor<'static> {
+pub(crate) fn never() -> RuntimeEffectLocalExecutor<'static> {
     RuntimeEffectLocalExecutor::testing(|_| async {
         std::future::pending::<()>().await;
         unreachable!("a never-settling child is never polled to completion")
@@ -1392,7 +1395,7 @@ fn never() -> RuntimeEffectLocalExecutor<'static> {
 /// The recorded operation is the leak's signature — an impostor staged for
 /// `impostor-child-N` that reports having seen `group-child-N` was bound to one
 /// request and ran another.
-fn impostor(
+pub(crate) fn impostor(
     runs: &Arc<AtomicUsize>,
     saw: &Arc<std::sync::Mutex<Vec<String>>>,
 ) -> RuntimeEffectLocalExecutor<'static> {
@@ -1478,7 +1481,7 @@ impl ExecutorAnswer {
 /// Answers are per group position, because the laws that put two drains in a
 /// race need one host to hold one child while another host reaches for a
 /// different one — a uniform answer cannot express that.
-struct RecordingExecutors {
+pub(crate) struct RecordingExecutors {
     asked: std::sync::Mutex<Vec<String>>,
     executed: ExecutionLog,
     by_position: Vec<ExecutorAnswer>,
@@ -1495,12 +1498,12 @@ impl RecordingExecutors {
         })
     }
 
-    fn settling() -> Arc<Self> {
+    pub(crate) fn settling() -> Arc<Self> {
         Self::uniform(ExecutorAnswer::Settle)
     }
 
     /// A host that cannot run these commands at all.
-    fn refusing() -> Arc<Self> {
+    pub(crate) fn refusing() -> Arc<Self> {
         Self::uniform(ExecutorAnswer::Refuse)
     }
 
@@ -1520,7 +1523,7 @@ impl RecordingExecutors {
     /// The replay keys this host was *asked* about, sorted, with duplicates
     /// kept — an ask twice is exactly the defect these laws are looking for, so
     /// the multiset is the assertion and a deduplicated set would hide it.
-    fn asked_about(&self) -> Vec<String> {
+    pub(crate) fn asked_about(&self) -> Vec<String> {
         let mut keys = self.asked.lock_recover().clone();
         keys.sort();
         keys
@@ -1533,7 +1536,7 @@ impl RecordingExecutors {
     /// honestly: a pass asks for an executor and then loses the claim, so the ask
     /// happened and the execution did not. Exactly-once is a statement about
     /// this list.
-    fn executions(&self) -> Vec<String> {
+    pub(crate) fn executions(&self) -> Vec<String> {
         let mut keys = self.executed.lock_recover().clone();
         keys.sort();
         keys

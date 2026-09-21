@@ -19,7 +19,7 @@ use lash_conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
 use lash_core::EffectHost;
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
-use crate::support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url, reset};
 
 /// A world over the configured database.
 ///
@@ -59,6 +59,15 @@ lash_conformance::store_effect_group_drain_tests!({
         return;
     };
     let database_lock = SharedDatabaseLock::acquire(&url).await;
+    // The laws' scenario ids are deterministic and this database outlives the
+    // test process: a rerun must not inherit a previous run's journaled rows.
+    reset(
+        PostgresStorage::connect(&url)
+            .await
+            .expect("PostgreSQL drain-conformance reset storage")
+            .pool(),
+    )
+    .await;
     let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {
         let url = url.clone();
         Box::pin(async move { world(url, spec).await })

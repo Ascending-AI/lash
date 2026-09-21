@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 144,
+  "cargo_target_count": 145,
   "feature_lane_units": [
     {
       "features": [],
@@ -17368,7 +17368,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 198,
+  "generated_label_count": 199,
   "packages": [
     {
       "declared_features": [
@@ -19208,6 +19208,12 @@
           "tags": []
         },
         {
+          "cargo": "possession_conservation",
+          "kind": "test",
+          "label": "//crates/lash-sim:possession_conservation__test",
+          "tags": []
+        },
+        {
           "cargo": "process_lifecycle_vocabulary",
           "kind": "test",
           "label": "//crates/lash-sim:process_lifecycle_vocabulary__test",
@@ -19249,6 +19255,7 @@
         "members": [
           "//crates/lash-sim:lash-sim__bin__unit_test",
           "//crates/lash-sim:logical_turn__test",
+          "//crates/lash-sim:possession_conservation__test",
           "//crates/lash-sim:process_lifecycle_vocabulary__test",
           "//crates/lash-sim:retention_classification__test",
           "//crates/lash-sim:schema_congruence__test",

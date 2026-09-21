@@ -34,6 +34,12 @@
 //! the child stays accepted — and once the opener registers on the recovering
 //! host, a further reopen runs it to a settlement the first host never saw.
 //!
+//! A third scenario covers §13's usage conservation: every provider attempt
+//! that reported usage — including one that billed and then failed — lands
+//! exactly once on the settlement of the child that spent it, across tool
+//! retry, cancellation, crash and replay, and never under an opener the
+//! request did not record.
+//!
 //! The tier arrives as a host factory: two calls are two views of one
 //! substrate (for the SQL tiers, two connections over one store; for the
 //! in-memory reference host, the same object, whose substrate is the
@@ -76,6 +82,13 @@ const LEAF_RECOVERY: &str = "tool:law_recovery";
 /// inside the attempt before deferring, so the committed `Pending` row's
 /// capture carries a fact the replay must restore exactly once.
 const LEAF_SPEND_DEFERRED: &str = "tool:law_spend_deferred";
+/// The leaf the conservation law retried: each of its attempts makes the
+/// managed-LLM call whose sealed record bills a *failed* provider attempt
+/// beside the retry that succeeded — two spends per call, not one.
+const LEAF_BILLED: &str = "tool:law_billed";
+/// The leaf whose spend precedes a cancellation: §13 keeps a cancelled
+/// attempt's known usage on the settlement its outcome never completes.
+const LEAF_SPEND_CANCEL: &str = "tool:law_spend_cancel";
 
 /// One host over the substrate under test, plus the drain it hands out.
 pub struct ToolChildWorld {
@@ -277,6 +290,8 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_USAGE,
         LEAF_RECOVERY,
         LEAF_SPEND_DEFERRED,
+        LEAF_BILLED,
+        LEAF_SPEND_CANCEL,
     ]
     .into_iter()
     .map(|id| {
@@ -288,7 +303,7 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         );
-        if id == LEAF_RETRY {
+        if id == LEAF_RETRY || id == LEAF_BILLED {
             definition = definition.with_retry_policy(crate::ToolRetryPolicy::safe(3, 0, 0));
         }
         definition
@@ -485,6 +500,53 @@ impl crate::ToolProvider for LawLeafProvider {
                     }
                 }
             }
+            name if name == LEAF_BILLED.trim_start_matches("tool:") => {
+                // Every attempt makes the billed call: the fake provider's
+                // sealed record carries a failed attempt's spend beside the
+                // retry's, so the attempt's capture holds two facts.
+                if let Err(error) = context
+                    .direct_completions()
+                    .complete(
+                        crate::DirectRequest::text("law-billed-model", "billed spend"),
+                        "law-billed-leaf",
+                    )
+                    .await
+                {
+                    return crate::ToolOutcome::err_fmt(format!(
+                        "direct completion failed: {error}"
+                    ))
+                    .into();
+                }
+                if context.attempt_number() == 1 {
+                    crate::ToolOutcome::failure(crate::ToolFailure::safe_retry(
+                        crate::ToolFailureClass::Internal,
+                        "law_billed_first_attempt",
+                        "the first attempt is journaled as a retryable failure after spending",
+                        Some(0),
+                    ))
+                    .into()
+                } else {
+                    crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
+                        serde_json::json!({ "leaf": "billed", "attempt": context.attempt_number() }),
+                    ))
+                }
+            }
+            name if name == LEAF_SPEND_CANCEL.trim_start_matches("tool:") => {
+                if let Err(error) = context
+                    .direct_completions()
+                    .complete(
+                        crate::DirectRequest::text("law-model", "spend before the cancel"),
+                        "law-spend-cancel-leaf",
+                    )
+                    .await
+                {
+                    return crate::ToolOutcome::err_fmt(format!(
+                        "direct completion failed: {error}"
+                    ))
+                    .into();
+                }
+                crate::ToolOutcome::cancelled("the attempt cancelled after spending").into()
+            }
             other => {
                 crate::ToolOutcome::err_fmt(format!("the law has no leaf named {other}")).into()
             }
@@ -526,6 +588,75 @@ fn law_direct_completion() -> crate::DirectCompletion {
                 }),
                 usage_disposition: crate::AttemptUsageDisposition::default(),
             }],
+        },
+    }
+}
+
+/// The canned completion the billed leaf's call is answered with: one logical
+/// call whose sealed record carries a *failed* provider attempt that still
+/// reported usage beside the retry that succeeded. ADR 0099 §13 keeps those
+/// as two facts — a per-call fact would either drop the billed failure or
+/// double-count the retry.
+fn law_billed_completion() -> crate::DirectCompletion {
+    let billed_usage = |input_tokens: i64, output_tokens: i64| {
+        Some(crate::llm::types::LlmUsage {
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
+        })
+    };
+    crate::DirectCompletion {
+        text: "law billed completion".to_string(),
+        usage: crate::TokenUsage {
+            input_tokens: 52,
+            output_tokens: 10,
+            ..crate::TokenUsage::default()
+        },
+        llm_call: crate::LlmCallRecord {
+            call_id: crate::LlmCallId("law-billed-call".to_string()),
+            label: None,
+            replay_drops: Vec::new(),
+            attempts: vec![
+                crate::AttemptRecord {
+                    ordinal: 1,
+                    started_at: 0,
+                    duration: std::time::Duration::ZERO,
+                    outcome: crate::AttemptOutcome::Failed,
+                    protocol_position: crate::ProtocolPosition::ResponseObserved,
+                    retry_budget_consumed: false,
+                    retry_decision: None,
+                    error: Some(crate::NormalizedError {
+                        class: "provider_error".to_string(),
+                        provider_code: None,
+                        adapter_code: None,
+                        refusal_code: None,
+                        http_status: Some(503),
+                        provider_request_id: None,
+                        retry_after: None,
+                        diagnostic: None,
+                    }),
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: billed_usage(41, 7),
+                    usage_disposition: crate::AttemptUsageDisposition::default(),
+                },
+                crate::AttemptRecord {
+                    ordinal: 2,
+                    started_at: 0,
+                    duration: std::time::Duration::ZERO,
+                    outcome: crate::AttemptOutcome::Completed,
+                    protocol_position: crate::ProtocolPosition::ResponseObserved,
+                    retry_budget_consumed: false,
+                    retry_decision: None,
+                    error: None,
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: billed_usage(11, 3),
+                    usage_disposition: crate::AttemptUsageDisposition::default(),
+                },
+            ],
         },
     }
 }
@@ -675,7 +806,13 @@ fn opener_dispatch(
         .tool_registry(Arc::new(tool_registry))
         .processes(crate::testing::effect_backed_process_service(registry))
         .direct_completions(crate::DirectCompletionClient::from_fn(
-            |_request, _source| Ok(law_direct_completion()),
+            |request, _source| {
+                Ok(if request.model == "law-billed-model" {
+                    law_billed_completion()
+                } else {
+                    law_direct_completion()
+                })
+            },
         ))
         .process_env_store(process_env_store)
         .borrowed_effect_controller(controller)
@@ -1161,9 +1298,11 @@ mod driver;
 mod foreign_opener;
 mod incarnation;
 mod recovery;
+mod usage;
 
 pub use capture::*;
 pub use driver::*;
 pub use foreign_opener::*;
 pub use incarnation::*;
 pub use recovery::*;
+pub use usage::*;
