@@ -271,12 +271,14 @@ impl RunRecorder {
 
     /// Pushes a pre-measured stage entry — for sites that fabricate rather
     /// than measure their spans (the report test fixture).
+    #[cfg(test)]
     pub(crate) fn record_stage(&mut self, name: &'static str, result: RuntimePerfStageRunResult) {
         self.stage_entries.push((name, result));
     }
 
     /// Pushes a pre-assembled turn — the fabricated counterpart of
     /// [`RunRecorder::turn`].
+    #[cfg(test)]
     pub(crate) fn record_turn(&mut self, turn: RuntimePerfTurnResult) {
         self.turns.push(turn);
     }

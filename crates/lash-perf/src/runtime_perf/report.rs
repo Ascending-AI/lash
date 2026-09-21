@@ -722,30 +722,19 @@ mod tests {
         bytes_allocated: usize,
     ) -> RuntimePerfRunResult {
         let turn = turn_result(total_ms, bytes_allocated);
-        RuntimePerfRunResult {
-            scenario: scenario.name().to_string(),
-            scenario_harness: scenario.scenario_harness().name().to_string(),
-            chat_turns: 1,
-            stack_profile: None,
-            stages: run_stages(
-                [
-                    (stage::BUILD_RUNTIME, stage_result(1.0, 1)),
-                    (stage::SEED_STATE, stage_result(1.0, 2)),
-                    (stage::EXPORT_STATE, stage_result(1.0, 3)),
-                    (stage::TOTAL, stage_result(total_ms, bytes_allocated)),
-                ],
-                std::slice::from_ref(&turn),
-            ),
+        let mut run = RunRecorder::start(scenario, 1);
+        run.record_stage(stage::BUILD_RUNTIME, stage_result(1.0, 1));
+        run.record_stage(stage::SEED_STATE, stage_result(1.0, 2));
+        run.record_stage(stage::EXPORT_STATE, stage_result(1.0, 3));
+        run.record_turn(turn);
+        run.finish(RunTail {
             session_nodes: 1,
             active_path_messages: 1,
-            extra_counters: BTreeMap::new(),
-            metric_samples: BTreeMap::new(),
-            metric_samples_ms: BTreeMap::new(),
-            memory: memory_run(),
-            phase_profile: BTreeMap::new(),
-            turns: vec![turn],
-            cumulative_usage: SessionUsageReport::default(),
-        }
+            memory: Some(memory_run()),
+            phase_profile: Some(BTreeMap::new()),
+            total_stage: Some(stage_result(total_ms, bytes_allocated)),
+            ..RunTail::default()
+        })
     }
 
     #[test]
