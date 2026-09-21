@@ -4,6 +4,7 @@ use crate::*;
 
 use crate::await_event::wait_sql;
 use crate::scope_fence::Schema;
+use crate::session_sql::session_sql;
 
 /// The schema the bound effect journal is attached under for a sweep.
 const EFFECT_JOURNAL_SCHEMA: Schema = Schema::EffectJournal;
@@ -96,44 +97,35 @@ pub(crate) async fn reclaim(
             };
             // Phase 1: terminal evidence roots. deleted_sessions is permanent
             // identity evidence, exempt from retention (FIG-754 / FIG-748).
+            // Two named statements, one per filter shape the sweep actually
+            // issues. SQLite has no spelling for an empty `NOT IN (...)`, and
+            // the exclusion list rides as one JSON array rather than as a
+            // per-call placeholder run.
             let removed_receipt_count = if live_scope_receipt_keys.is_empty() {
                 tx.execute(
-                    "DELETE FROM runtime_turn_commits AS receipt
-                 WHERE receipt.committed_at_ms < ?1
-                   AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                               WHERE deleted.session_id = receipt.session_id)",
+                    session_sql().turn_commits_sqlite.delete_retained.sql(),
                     params![cutoff],
                 )?
             } else {
-                let placeholders = (0..live_scope_receipt_keys.len())
-                    .map(|index| format!("?{}", index + 2))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut bindings: Vec<rusqlite::types::Value> = vec![cutoff.into()];
-                bindings.extend(live_scope_receipt_keys.into_iter().map(Into::into));
+                let live_keys =
+                    serde_json::to_string(&live_scope_receipt_keys).map_err(|error| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                            format!("failed to encode live scope receipt keys: {error}"),
+                        )))
+                    })?;
                 tx.execute(
-                    &format!(
-                        "DELETE FROM runtime_turn_commits AS receipt
-                     WHERE receipt.committed_at_ms < ?1
-                       AND receipt.turn_id NOT IN ({placeholders})
-                       AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                                   WHERE deleted.session_id = receipt.session_id)"
-                    ),
-                    rusqlite::params_from_iter(bindings),
+                    session_sql()
+                        .turn_commits_sqlite
+                        .delete_retained_except_live
+                        .sql(),
+                    params![cutoff, live_keys],
                 )?
             };
             // Phase 2: correlated anti-joins reconcile dependent rows after the
             // receipt sweep, under the same BEGIN IMMEDIATE fence. Live ledgers
             // are never eligible; they rebuild resumed-session accounting.
-            let removed_usage_delta_count = tx.execute(
-                "DELETE FROM usage_deltas AS usage
-             WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                           WHERE deleted.session_id = usage.session_id)
-               AND NOT EXISTS (SELECT 1 FROM runtime_turn_commits AS receipt
-                               WHERE receipt.session_id = usage.session_id
-                                 AND receipt.turn_id = usage.operation_storage_key)",
-                [],
-            )?;
+            let removed_usage_delta_count =
+                tx.execute(session_sql().usage.delete_reclaimable.sql(), [])?;
             // The permanent terminal marker proves intent-owner death even after
             // the positive supersession receipt is gone. Retained graph prefixes
             // protect committed attachments independently of receipt retention.
@@ -214,7 +206,7 @@ fn retire_quiescent_operation_scopes(
         )]
         let scope_json = serde_json::to_string(&scope).expect("execution scopes serialize");
         let receipt_recorded: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE turn_id = ?1)",
+            session_sql().turn_commits.exists_for_operation.sql(),
             params![receipt_key],
             |row| row.get(0),
         )?;

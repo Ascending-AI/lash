@@ -87,8 +87,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
-             FROM session_head WHERE session_id = ?1",
+            crate::session_sql::session_sql().head.select_meta.sql(),
             params![session_id.as_str()],
             |row| {
                 Ok((

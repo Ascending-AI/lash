@@ -20,6 +20,7 @@
 use lash_core::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
 use sqlx::{PgPool, Postgres, Transaction};
 
+use crate::session_sql::session_sql;
 use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION};
 
 /// The release this build stamps into every database it writes.
@@ -72,7 +73,7 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
         return Ok(());
     }
     let existing: Option<String> =
-        sqlx::query_scalar("SELECT release_version FROM lash_release_stamp WHERE singleton = TRUE")
+        sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
             .fetch_optional(&mut **tx)
             .await?;
     if let Some(existing) = existing
@@ -80,23 +81,13 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
     {
         return Ok(());
     }
-    sqlx::query(
-        "INSERT INTO lash_release_stamp (
-             singleton, release_version, schema_versions, written_at_epoch_ms
-         ) VALUES (
-             TRUE, $1, $2, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
-         )
-         ON CONFLICT (singleton) DO UPDATE SET
-             release_version = EXCLUDED.release_version,
-             schema_versions = EXCLUDED.schema_versions,
-             written_at_epoch_ms = EXCLUDED.written_at_epoch_ms",
-    )
-    .bind(BUILD_RELEASE)
-    .bind(StoreReleaseStamp::encode_schema_versions(
-        &build_schema_versions(),
-    ))
-    .execute(&mut **tx)
-    .await?;
+    sqlx::query(session_sql().release_stamp.upsert.sql())
+        .bind(BUILD_RELEASE)
+        .bind(StoreReleaseStamp::encode_schema_versions(
+            &build_schema_versions(),
+        ))
+        .execute(&mut **tx)
+        .await?;
     Ok(())
 }
 
@@ -107,12 +98,10 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
 /// build that stamps has written it. A read that fails for any other reason is
 /// [`StoreReleaseState::Unreadable`] — an undecided stamp is not an absent one.
 pub(crate) async fn read(pool: &PgPool) -> StoreReleaseState {
-    let row: Result<Option<(String, String, i64)>, sqlx::Error> = sqlx::query_as(
-        "SELECT release_version, schema_versions, written_at_epoch_ms
-         FROM lash_release_stamp WHERE singleton = TRUE",
-    )
-    .fetch_optional(pool)
-    .await;
+    let row: Result<Option<(String, String, i64)>, sqlx::Error> =
+        sqlx::query_as(session_sql().release_stamp.select_stamp.sql())
+            .fetch_optional(pool)
+            .await;
     match row {
         Ok(Some((release, encoded, written_at_epoch_ms))) => {
             let Some(schema_versions) = StoreReleaseStamp::decode_schema_versions(&encoded) else {
@@ -144,7 +133,7 @@ pub(crate) async fn read(pool: &PgPool) -> StoreReleaseState {
 /// database this build has already declined, so anything but a readable stamp
 /// yields `None` and the message simply says less.
 pub(crate) async fn read_release_in_tx(tx: &mut Transaction<'_, Postgres>) -> Option<String> {
-    sqlx::query_scalar("SELECT release_version FROM lash_release_stamp WHERE singleton = TRUE")
+    sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
         .fetch_optional(&mut **tx)
         .await
         .ok()

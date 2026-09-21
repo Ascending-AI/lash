@@ -634,10 +634,10 @@ impl QueuedWorkStore for PostgresSessionStore {
         )?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query_scalar(
-            "SELECT EXISTS (
-                SELECT 1 FROM lash_runtime_turn_commits
-                WHERE session_id = $1 AND turn_id = $2
-             )",
+            crate::session_sql::session_sql()
+                .turn_commits
+                .exists_for_turn
+                .sql(),
         )
         .bind(session_id.as_str())
         .bind(marker)

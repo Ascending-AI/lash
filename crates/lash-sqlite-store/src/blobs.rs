@@ -264,8 +264,10 @@ impl Store {
                 .collect::<Vec<_>>(),
         )?;
         conn.execute(
-            "INSERT OR IGNORE INTO checkpoint_blob_refs (checkpoint_ref, blob_ref)
-             SELECT ?1, CAST(value AS TEXT) FROM json_each(?2)",
+            crate::session_sql::session_sql()
+                .checkpoint_edges
+                .insert_batch
+                .sql(),
             params![checkpoint_ref.as_str(), component_refs_json],
         )
         .map_err(sqlite_error)?;
@@ -411,8 +413,10 @@ impl Store {
     ) -> Result<Vec<lash_core::TokenLedgerEntry>, StoreError> {
         let mut stmt = conn
             .prepare(
-                "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
-             FROM usage_deltas WHERE session_id = ?1 ORDER BY seq ASC",
+                crate::session_sql::session_sql()
+                    .usage
+                    .select_for_session
+                    .sql(),
             )
             .map_err(sqlite_error)?;
         let rows = stmt

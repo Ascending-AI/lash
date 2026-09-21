@@ -1,3 +1,4 @@
+use crate::session_sql::session_sql;
 use crate::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -73,14 +74,6 @@ pub(crate) fn decode_catalog_relation(
     .relation)
 }
 
-const SELECT_COLUMNS: &str = "session_id, relation_kind, parent_session_id,
-    caused_by_kind, caused_by_session_id, caused_by_turn_id,
-    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_occurrence_id,
-    caused_by_subscription_id, caused_by_subscription_incarnation,
-    caused_by_subscription_revision, caused_by_node_id, source_session_id,
-    source_node_id, observer_inheritance_kind";
-
 /// Read the durable lineage recorded for `session_id`, if the row exists.
 ///
 /// Admission calls this inside its own transaction and needs only the lineage
@@ -90,14 +83,11 @@ pub(crate) async fn load_recorded_lineage_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
 ) -> Result<Option<lash_core::SessionLineage>, StoreError> {
-    let row = sqlx::query(
-        "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
-         FROM lash_session_meta WHERE session_id = $1",
-    )
-    .bind(session_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let row = sqlx::query(session_sql().meta.select_lineage.sql())
+        .bind(session_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     let Some(row) = row else {
         return Ok(None);
     };
@@ -121,49 +111,8 @@ pub(crate) async fn write_session_meta_tx(
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = match mode {
-        SessionMetaWrite::Insert => {
-            "INSERT INTO lash_session_meta
-             (session_id, session_state_version, relation_kind, parent_session_id,
-              caused_by_kind, caused_by_session_id, caused_by_turn_id,
-              caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES ($1, $20, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                     $13, $14, $15, $16, $17, $18, $19, NULL)
-             ON CONFLICT (session_id) DO NOTHING"
-        }
-        SessionMetaWrite::Replace => {
-            "INSERT INTO lash_session_meta
-             (session_id, session_state_version, relation_kind, parent_session_id,
-              caused_by_kind, caused_by_session_id, caused_by_turn_id,
-              caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES ($1, $20, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                     $13, $14, $15, $16, $17, $18, $19, NULL)
-             ON CONFLICT (session_id) DO UPDATE SET
-               relation_kind = EXCLUDED.relation_kind,
-               parent_session_id = EXCLUDED.parent_session_id,
-               caused_by_kind = EXCLUDED.caused_by_kind,
-               caused_by_session_id = EXCLUDED.caused_by_session_id,
-               caused_by_turn_id = EXCLUDED.caused_by_turn_id,
-               caused_by_effect_id = EXCLUDED.caused_by_effect_id,
-               caused_by_call_id = EXCLUDED.caused_by_call_id,
-               caused_by_process_id = EXCLUDED.caused_by_process_id,
-               caused_by_process_event_sequence = EXCLUDED.caused_by_process_event_sequence,
-               caused_by_occurrence_id = EXCLUDED.caused_by_occurrence_id,
-               caused_by_subscription_id = EXCLUDED.caused_by_subscription_id,
-               caused_by_subscription_incarnation = EXCLUDED.caused_by_subscription_incarnation,
-               caused_by_subscription_revision = EXCLUDED.caused_by_subscription_revision,
-               caused_by_node_id = EXCLUDED.caused_by_node_id,
-               source_session_id = EXCLUDED.source_session_id,
-               source_node_id = EXCLUDED.source_node_id,
-               observer_inheritance_kind = EXCLUDED.observer_inheritance_kind"
-        }
+        SessionMetaWrite::Insert => session_sql().meta_postgres.insert.sql(),
+        SessionMetaWrite::Replace => session_sql().meta_postgres.upsert.sql(),
     };
     let result = sqlx::query(sql)
         .bind(stored.session_id.as_str())
@@ -193,42 +142,33 @@ pub(crate) async fn write_session_meta_tx(
         return Ok(false);
     }
 
-    for table in [
-        "lash_session_meta_pending_observer_intents",
-        "lash_session_meta_fork_inheritance_processes",
+    for statement in [
+        session_sql().observer_intents.delete_by_session.sql(),
+        session_sql().fork_inheritance.delete_by_session.sql(),
     ] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE session_id = $1"))
+        sqlx::query(statement)
             .bind(stored.session_id.as_str())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
     }
     for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
-        sqlx::query(
-            "INSERT INTO lash_session_meta_pending_observer_intents
-             (session_id, process_index, process_id, process_incarnation, attribution)
-             VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(stored.session_id.as_str())
-        .bind(SessionMetaCodec::write_index(
-            SESSION_META_CODEC,
-            process_index,
-            "observer-intent process",
-        )?)
-        .bind(intent.process_id.as_str())
-        .bind(intent.process_incarnation)
-        .bind(&intent.attribution)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        sqlx::query(session_sql().observer_intents.insert.sql())
+            .bind(stored.session_id.as_str())
+            .bind(SessionMetaCodec::write_index(
+                SESSION_META_CODEC,
+                process_index,
+                "observer-intent process",
+            )?)
+            .bind(intent.process_id.as_str())
+            .bind(intent.process_incarnation)
+            .bind(&intent.attribution)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     }
-    write_process_list(
-        tx,
-        "lash_session_meta_fork_inheritance_processes",
-        &stored.session_id,
-        &stored.fork_inheritance_processes,
-    )
-    .await?;
+    write_fork_inheritance_processes(tx, &stored.session_id, &stored.fork_inheritance_processes)
+        .await?;
     Ok(true)
 }
 
@@ -239,18 +179,18 @@ pub(crate) async fn load_session_meta(
     let mut connection = acquire_runtime_connection(pool).await?;
     let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
     let row = if let Some(session_id) = selected_session_id {
-        sqlx::query(&format!(
-            "SELECT {SELECT_COLUMNS} FROM lash_session_meta WHERE session_id = $1 FOR SHARE"
-        ))
-        .bind(session_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
+        sqlx::query(session_sql().meta_postgres.select_relation_for_share.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
     } else {
-        let mut rows = sqlx::query(&format!(
-            "SELECT {SELECT_COLUMNS} FROM lash_session_meta
-             ORDER BY session_id ASC LIMIT 2 FOR SHARE"
-        ))
+        let mut rows = sqlx::query(
+            session_sql()
+                .meta_postgres
+                .select_sole_relation_for_share
+                .sql(),
+        )
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -266,9 +206,7 @@ pub(crate) async fn load_session_meta(
     };
     let mut stored = stored_relation_from_row(&row);
     let observer_rows = sqlx::query_as::<_, (i64, String, Option<i64>, String)>(
-        "SELECT process_index, process_id, process_incarnation, attribution
-         FROM lash_session_meta_pending_observer_intents
-         WHERE session_id = $1 ORDER BY process_index",
+        session_sql().observer_intents.select_for_session.sql(),
     )
     .bind(stored.session_id.as_str())
     .fetch_all(&mut *tx)
@@ -294,54 +232,44 @@ pub(crate) async fn load_session_meta(
             },
         );
     }
-    stored.fork_inheritance_processes = read_process_list(
-        &mut tx,
-        "lash_session_meta_fork_inheritance_processes",
-        &stored.session_id,
-    )
-    .await?;
+    stored.fork_inheritance_processes =
+        read_fork_inheritance_processes(&mut tx, &stored.session_id).await?;
     let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(Some(meta))
 }
 
-async fn write_process_list(
+async fn write_fork_inheritance_processes(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    table: &str,
     session_id: &SessionId,
     process_ids: &[ProcessId],
 ) -> Result<(), StoreError> {
     for (process_index, process_id) in process_ids.iter().enumerate() {
-        sqlx::query(&format!(
-            "INSERT INTO {table} (session_id, process_index, process_id) VALUES ($1, $2, $3)"
-        ))
-        .bind(session_id.as_str())
-        .bind(SessionMetaCodec::write_index(
-            SESSION_META_CODEC,
-            process_index,
-            "process",
-        )?)
-        .bind(process_id.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        sqlx::query(session_sql().fork_inheritance.insert.sql())
+            .bind(session_id.as_str())
+            .bind(SessionMetaCodec::write_index(
+                SESSION_META_CODEC,
+                process_index,
+                "process",
+            )?)
+            .bind(process_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     }
     Ok(())
 }
 
-async fn read_process_list(
+async fn read_fork_inheritance_processes(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    table: &str,
     session_id: &SessionId,
 ) -> Result<Vec<ProcessId>, StoreError> {
-    let rows = sqlx::query_as::<_, (i64, String)>(&format!(
-        "SELECT process_index, process_id FROM {table}
-         WHERE session_id = $1 ORDER BY process_index"
-    ))
-    .bind(session_id.as_str())
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let rows =
+        sqlx::query_as::<_, (i64, String)>(session_sql().fork_inheritance.select_for_session.sql())
+            .bind(session_id.as_str())
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     let mut process_ids = Vec::with_capacity(rows.len());
     for (process_index, process_id) in rows {
         if SessionMetaCodec::read_index(SESSION_META_CODEC, process_index, "process_index")?

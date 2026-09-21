@@ -86,6 +86,20 @@ class SeededTree:
         shutil.rmtree(self.directory, ignore_errors=True)
 
 
+# The `converted` list as the manifest spells it. Seeds that turn a family off
+# substitute against this, so adding a family re-points every one of them here
+# rather than in each case.
+CONVERTED_ANCHOR = """converted = [
+    "artifact",
+    "attachment",
+    "effect",
+    "process",
+    "session_core",
+    "trigger",
+    "wait",
+]"""
+
+
 class StoreSqlOwnershipGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tree = SeededTree()
@@ -215,8 +229,8 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_a_family_removed_from_converted_makes_the_gate_silent_about_it(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "attachment", "effect", "process", "trigger", "wait"]',
-            'converted = ["artifact", "attachment", "effect"]',
+            CONVERTED_ANCHOR,
+            'converted = ["artifact", "attachment", "effect", "process", "session_core"]',
         )
         self.tree.substitute(
             "crates/lash-sqlite-store/src/retention.rs",
@@ -257,7 +271,22 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
             'owner = "crates/lash-store-sql/src/effect.rs"\ntouches = ["await_event_waits"]',
             'owner = "crates/lash-store-sql/src/wait/waits.rs"\ntouches = ["await_event_waits"]',
         )
-        self.assert_refused("names owner `crates/lash-store-sql/src/wait/waits.rs`")
+        self.assert_refused("which no cross-family entry names as its owner")
+
+    def test_two_owners_of_one_statement_name_get_one_entry_each(self) -> None:
+        """A dialect-only name exists once per backend, and the two copies can
+        reach different tables: the durable head is `session_head` on SQLite and
+        `sessions` on PostgreSQL. Each copy therefore needs its own entry, and
+        dropping one must be refused rather than covered by its twin."""
+        text = self.tree.read("crates/lash-store-sql/dialect-only.toml")
+        marker = (
+            '[[cross_family]]\nstatement = "blob.reclaim_session_candidate"\n'
+            'owner = "crates/lash-postgres-store/src/postgres/blobs.rs"'
+        )
+        start = text.index(marker)
+        end = text.index('"""', text.index("reason =", start) + len('reason = """')) + 3
+        self.tree.write("crates/lash-store-sql/dialect-only.toml", text[:start] + text[end:])
+        self.assert_refused("which no cross-family entry names as its owner")
 
     def test_a_cross_family_entry_for_a_statement_that_is_not_cross_family_is_refused(
         self,
@@ -375,8 +404,8 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         """The red side of the case above: the rule, not the seed, is new."""
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "attachment", "effect", "process", "trigger", "wait"]',
-            'converted = ["artifact", "effect", "trigger", "wait"]',
+            CONVERTED_ANCHOR,
+            'converted = ["artifact", "effect", "process", "session_core", "trigger", "wait"]',
         )
         stray = (
             'const STRAY: &str = "SELECT 1 FROM lash_attachment_manifest '
@@ -407,6 +436,24 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
             "manifest.owner_kind = 'turn'",
         )
         self.assert_refused("spells `owner_kind = '…'` over `attachment_manifest`")
+    def test_a_brace_in_a_statement_literal_does_not_swallow_the_next_block(self) -> None:
+        # A `{` inside a SQL string literal is the literal's own text. Before
+        # the block scanner learned that, it counted the brace, never closed
+        # the block, and attributed every later `statements!` block in the file
+        # to the first block's family — which reads as silence, not as a
+        # refusal. The seed puts a brace-carrying statement in the first block
+        # of a file that has more blocks after it, and asserts the gate still
+        # attributes the later ones correctly by refusing a violation seeded in
+        # the LAST block of the same file.
+        self.tree.substitute(
+            "crates/lash-sqlite-store/src/session_sql.rs",
+            '        select_stamp = "SELECT release_version, schema_versions, written_at_epoch_ms',
+            "        /// A second name for a statement that already has one.\n"
+            '        select_stamp_again = "SELECT release_version,   schema_versions, '
+            'written_at_epoch_ms\n             FROM release_stamp WHERE singleton = 1";\n\n'
+            '        select_stamp = "SELECT release_version, schema_versions, written_at_epoch_ms',
+        )
+        self.assert_refused("has the same text as")
 
     def test_a_test_module_may_spell_sql_freely(self) -> None:
         self.tree.substitute(

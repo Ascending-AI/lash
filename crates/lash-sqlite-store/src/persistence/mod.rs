@@ -24,16 +24,11 @@
 //!   cloned into an owned value before being moved in.
 
 use super::*;
+use crate::session_sql::session_sql;
 use lash_core::SelectedQueuedWorkClaimOutcome;
 use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-
-pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
-     FROM runtime_turn_commits
-     WHERE session_id = ?1
-       AND result_json LIKE '%\"failure_evidence\"%'
-     ORDER BY committed_at_ms, turn_id";
 
 struct CorruptTurnFailureReceipt {
     /// Operation storage key of the corrupt receipt, not a turn identity.
@@ -56,7 +51,7 @@ fn load_turn_failure_settlements_conn(
     session_id: &SessionId,
 ) -> Result<TurnFailureSettlementLoad, StoreError> {
     let mut statement = conn
-        .prepare(LOAD_TURN_FAILURE_SETTLEMENTS_SQL)
+        .prepare(session_sql().turn_commits.select_failure_settlements.sql())
         .map_err(sqlite_error)?;
     let rows = statement
         .query_map(params![session_id.as_str()], |row| {
@@ -97,7 +92,7 @@ fn read_session_state_version_conn(
 ) -> Result<u32, StoreError> {
     let marker = conn
         .query_row(
-            "SELECT session_state_version FROM session_meta WHERE session_id = ?1",
+            session_sql().meta.select_state_version.sql(),
             params![session_id.as_str()],
             |row| row.get::<_, Option<i64>>(0),
         )
@@ -123,7 +118,7 @@ pub(crate) fn ensure_session_not_deleted_conn(
 ) -> Result<(), StoreError> {
     let deleted = conn
         .query_row(
-            "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
+            session_sql().deleted_sqlite.exists.sql(),
             params![session_id.as_str()],
             |_| Ok(()),
         )
@@ -263,22 +258,7 @@ pub(crate) fn retire_unreachable_ancestry_conn(
     loop {
         let parent_node_id = conn
             .query_row(
-                "SELECT g.parent_node_id
-                 FROM graph_nodes AS g
-                 WHERE g.node_id = ?1 AND g.tombstoned = 0
-                   AND NOT EXISTS (
-                       SELECT 1 FROM graph_nodes AS child
-                       WHERE child.parent_node_id = g.node_id
-                         AND child.tombstoned = 0
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM session_head AS head
-                       WHERE head.leaf_node_id = g.node_id
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM node_anchors AS anchor
-                       WHERE anchor.node_id = g.node_id
-                   )",
+                session_sql().graph_sqlite.select_retirable_parent.sql(),
                 params![node_id],
                 |row| row.get::<_, Option<String>>(0),
             )
@@ -287,11 +267,8 @@ pub(crate) fn retire_unreachable_ancestry_conn(
         let Some(parent_node_id) = parent_node_id else {
             return Ok(());
         };
-        conn.execute(
-            "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
-            params![node_id],
-        )
-        .map_err(sqlite_error)?;
+        conn.execute(session_sql().graph_sqlite.retire.sql(), params![node_id])
+            .map_err(sqlite_error)?;
         let Some(parent_node_id) = parent_node_id else {
             return Ok(());
         };
@@ -304,8 +281,7 @@ pub(crate) fn nearest_frame_node_id_conn(
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
     conn.query_row(
-        "SELECT frame_node_id FROM graph_nodes
-         WHERE node_id = ?1 AND tombstoned = 0",
+        session_sql().graph_sqlite.select_frame_node_id.sql(),
         params![leaf_node_id],
         |row| row.get(0),
     )

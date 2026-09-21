@@ -1,5 +1,6 @@
 //! Terminal-session receipt sweep and dependent-root reconciliation (FIG-2502),
 //! and the durable owner of deferred effect-scope retirement (ADR 0067).
+use crate::session_sql::session_sql;
 use crate::*;
 
 /// The sweep's outcome, boxed on the failure side: `MaintenanceFailure`
@@ -34,11 +35,10 @@ pub(crate) async fn reclaim(
                 .map_err(store_sqlx_error)?;
         // deleted_sessions permanently protects identity reuse (FIG-754 / FIG-748).
         let removed_receipt_count = sqlx::query(
-            "DELETE FROM lash_runtime_turn_commits AS receipt
-             WHERE receipt.committed_at_ms < $1
-               AND NOT (receipt.turn_id = ANY($2))
-               AND EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
-                           WHERE deleted.session_id = receipt.session_id)",
+            session_sql()
+                .turn_commits_postgres
+                .delete_retained_except_live
+                .sql(),
         )
         .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
         .bind(&live_scope_receipt_keys)
@@ -48,18 +48,11 @@ pub(crate) async fn reclaim(
         .rows_affected() as usize;
         // Only terminal usage becomes eligible; live ledgers reconstruct
         // resumed accounting. Anti-join after the receipt-root sweep.
-        let removed_usage_delta_count = sqlx::query(
-            "DELETE FROM lash_usage_deltas AS usage
-             WHERE EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
-                           WHERE deleted.session_id = usage.session_id)
-               AND NOT EXISTS (SELECT 1 FROM lash_runtime_turn_commits AS receipt
-                               WHERE receipt.session_id = usage.session_id
-                                 AND receipt.turn_id = usage.operation_storage_key)",
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected() as usize;
+        let removed_usage_delta_count = sqlx::query(session_sql().usage.delete_reclaimable.sql())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
         // Terminal markers replace the positive receipt oracle for deleted
         // owners; graph retention independently protects committed attachments.
         let removed_attachment_root_count = sqlx::query(
@@ -142,12 +135,11 @@ async fn retire_quiescent_operation_scopes(
             reason = "`ExecutionScope` is a derived-`Serialize` enum of strings, so encoding it cannot fail"
         )]
         let scope_json = serde_json::to_string(&scope).expect("execution scopes serialize");
-        let receipt_recorded: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM lash_runtime_turn_commits WHERE turn_id = $1)",
-        )
-        .bind(&receipt_key)
-        .fetch_one(&mut **tx)
-        .await?;
+        let receipt_recorded: bool =
+            sqlx::query_scalar(session_sql().turn_commits.exists_for_operation.sql())
+                .bind(&receipt_key)
+                .fetch_one(&mut **tx)
+                .await?;
         if !receipt_recorded {
             continue;
         }

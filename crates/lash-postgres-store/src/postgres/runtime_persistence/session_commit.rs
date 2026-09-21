@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
@@ -8,17 +9,12 @@ impl SessionCommitStore for PostgresSessionStore {
             turn_id,
         )?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(
-                 SELECT 1 FROM lash_runtime_turn_commits
-                 WHERE session_id = $1 AND turn_id = $2
-             )",
-        )
-        .bind(self.session_id.as_str())
-        .bind(&key)
-        .fetch_one(connection.as_mut())
-        .await
-        .map_err(store_sqlx_error)?;
+        let exists: bool = sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
+            .bind(self.session_id.as_str())
+            .bind(&key)
+            .fetch_one(connection.as_mut())
+            .await
+            .map_err(store_sqlx_error)?;
         Ok(exists)
     }
 
@@ -76,11 +72,12 @@ impl SessionCommitStore for PostgresSessionStore {
         let token_ledger = lash_core::store::merge_token_ledger_entries_checked(
             load_usage_deltas_tx(&mut tx, session_id).await?,
         )?;
-        let turn_failure_rows = sqlx::query(LOAD_TURN_FAILURE_SETTLEMENTS_SQL)
-            .bind(session_id.as_str())
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        let turn_failure_rows =
+            sqlx::query(session_sql().turn_commits.select_failure_settlements.sql())
+                .bind(session_id.as_str())
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
         let mut turn_failure_settlements = Vec::new();
         for row in turn_failure_rows {
             let turn_id = row.get::<String, _>("turn_id");
@@ -138,26 +135,12 @@ impl SessionCommitStore for PostgresSessionStore {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        let row = sqlx::query(
-            "SELECT node.node_id, node.parent_node_id, node.node_json,
-                    node.session_id, node.generation
-             FROM lash_graph_nodes AS node
-             WHERE node.node_id = $1 AND node.tombstoned = FALSE
-               AND (
-                   node.session_id = $2
-                   OR EXISTS (
-                       SELECT 1 FROM lash_fork_lineage AS lineage
-                       WHERE lineage.session_id = $2
-                         AND lineage.ancestor_session_id = node.session_id
-                         AND node.generation <= lineage.fork_generation
-                   )
-               )",
-        )
-        .bind(node_id)
-        .bind(session_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let row = sqlx::query(session_sql().graph_postgres.select_lookup.sql())
+            .bind(node_id)
+            .bind(session_id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let Some(row) = row else {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
@@ -168,35 +151,12 @@ impl SessionCommitStore for PostgresSessionStore {
         let owner: String = row.get(3);
         let candidate_generation: i64 = row.get(4);
         if owner != *session_id {
-            let rows = sqlx::query(
-                "WITH readable_sessions(session_id, generation_ceiling) AS (
-                     SELECT $1::TEXT, NULL::BIGINT
-                     UNION ALL
-                     SELECT lineage.ancestor_session_id, lineage.fork_generation
-                     FROM lash_fork_lineage AS lineage
-                     WHERE lineage.session_id = $1
-                 )
-                 SELECT session.leaf_node_id, head.generation, head.tombstoned,
-                        node.node_id, node.parent_node_id,
-                        node.generation, node.tombstoned
-                 FROM lash_sessions AS session
-                 LEFT JOIN lash_graph_nodes AS head
-                   ON head.node_id = session.leaf_node_id
-                 LEFT JOIN readable_sessions AS readable ON TRUE
-                 LEFT JOIN lash_graph_nodes AS node
-                   ON node.session_id = readable.session_id
-                  AND node.generation BETWEEN $2 AND head.generation
-                  AND (
-                      readable.generation_ceiling IS NULL
-                      OR node.generation <= readable.generation_ceiling
-                  )
-                 WHERE session.session_id = $1",
-            )
-            .bind(session_id.as_str())
-            .bind(candidate_generation)
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+            let rows = sqlx::query(session_sql().head.select_readable_range.sql())
+                .bind(session_id.as_str())
+                .bind(candidate_generation)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
             let Some(first) = rows.first() else {
                 tx.commit().await.map_err(store_sqlx_error)?;
                 return Ok(None);
@@ -319,18 +279,12 @@ impl SessionCommitStore for PostgresSessionStore {
         };
         planner.validate_node_derivation()?;
         {
-            let prior = sqlx::query(
-                "SELECT turn_commit_hash, result_json,
-                        request_identity_hash, identity_encoding_version,
-                        requested_node_count
-                 FROM lash_runtime_turn_commits
-                 WHERE session_id = $1 AND turn_id = $2",
-            )
-            .bind(commit.session_id.as_str())
-            .bind(planner.operation_key())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+            let prior = sqlx::query(session_sql().turn_commits.select_receipt.sql())
+                .bind(commit.session_id.as_str())
+                .bind(planner.operation_key())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);
@@ -443,10 +397,13 @@ impl SessionCommitStore for PostgresSessionStore {
             let final_key =
                 lash_core::OperationId::turn(closure.session_id(), closure.turn_id(), "final")
                     .storage_key()?;
-            let committed: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM lash_runtime_turn_commits WHERE session_id = $1 AND turn_id = $2)",
-            ).bind(closure.session_id().as_str()).bind(final_key)
-                .fetch_one(&mut *tx).await.map_err(store_sqlx_error)?;
+            let committed: bool =
+                sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
+                    .bind(closure.session_id().as_str())
+                    .bind(final_key)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
             if committed {
                 return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                     session_id: closure.session_id().clone(),
@@ -509,40 +466,32 @@ impl SessionCommitStore for PostgresSessionStore {
                 None,
                 None,
             )?;
-            sqlx::query(
-                "INSERT INTO lash_sessions
-                 (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
-                 VALUES ($1, 0, $2, NULL, NULL)
-                 ON CONFLICT (session_id) DO NOTHING",
-            )
-            .bind(commit.session_id.as_str())
-            .bind(encode_json(&placeholder.payload())?)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+            sqlx::query(session_sql().head.insert_placeholder.sql())
+                .bind(commit.session_id.as_str())
+                .bind(encode_json(&placeholder.payload())?)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
         }
-        let locked_revision = sqlx::query_scalar::<_, i64>(
-            "SELECT head_revision
-             FROM lash_sessions
-             WHERE session_id = $1
-             FOR UPDATE",
-        )
-        .bind(commit.session_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
-        .transpose()?
-        .ok_or_else(|| StoreError::StoredDataCorrupt {
-            record_kind: "SessionHeadMeta",
-            message: "head row disappeared while commit authority was held".to_string(),
-        })?;
+        let locked_revision =
+            sqlx::query_scalar::<_, i64>(session_sql().head.select_revision_for_update.sql())
+                .bind(commit.session_id.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+                .transpose()?
+                .ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionHeadMeta",
+                    message: "head row disappeared while commit authority was held".to_string(),
+                })?;
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
         let parent_node_facts = match old_leaf_node_id.as_deref() {
             Some(leaf_node_id) => sqlx::query_as::<_, (i64, String)>(
-                "SELECT generation, frame_node_id FROM lash_graph_nodes
-                 WHERE node_id = $1 AND tombstoned = FALSE
-                 FOR UPDATE",
+                session_sql()
+                    .graph_postgres
+                    .select_parent_facts_for_update
+                    .sql(),
             )
             .bind(leaf_node_id)
             .fetch_optional(&mut *tx)
@@ -565,21 +514,7 @@ impl SessionCommitStore for PostgresSessionStore {
             (None, _) => true,
             (Some(_), None) => false,
             (Some(required), Some(parent)) => sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(
-                     SELECT 1 FROM lash_graph_nodes AS node
-                     WHERE node.node_id = $1
-                       AND node.tombstoned = FALSE
-                       AND node.generation <= $3
-                       AND (
-                           node.session_id = $2
-                           OR EXISTS (
-                               SELECT 1 FROM lash_fork_lineage AS lineage
-                               WHERE lineage.session_id = $2
-                                 AND lineage.ancestor_session_id = node.session_id
-                                 AND node.generation <= lineage.fork_generation
-                           )
-                       )
-                 )",
+                session_sql().graph_postgres.exists_readable_ancestor.sql(),
             )
             .bind(required)
             .bind(commit.session_id.as_str())
@@ -620,18 +555,15 @@ impl SessionCommitStore for PostgresSessionStore {
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>();
-        let occupied_node_ids = sqlx::query_scalar::<_, String>(
-            "SELECT node_id
-             FROM lash_graph_nodes
-             WHERE node_id = ANY($1)",
-        )
-        .bind(&node_ids)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .into_iter()
-        .map(lash_core::NodeId::from)
-        .collect::<std::collections::HashSet<_>>();
+        let occupied_node_ids =
+            sqlx::query_scalar::<_, String>(session_sql().graph_postgres.select_occupied.sql())
+                .bind(&node_ids)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .into_iter()
+                .map(lash_core::NodeId::from)
+                .collect::<std::collections::HashSet<_>>();
         let published_leaf = match old_leaf_node_id {
             None => lash_core::store::PublishedLeafFacts::Absent,
             Some(node_id) => match parent_node_facts {
@@ -662,56 +594,56 @@ impl SessionCommitStore for PostgresSessionStore {
                     "usage delta ordinal does not fit PostgreSQL BIGINT".to_string(),
                 )
             })?;
-            sqlx::query(
-                "INSERT INTO lash_usage_deltas (
-                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                 ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
-                 DO NOTHING",
-            )
-            .bind(commit.session_id.as_str())
-            .bind(&entry.identity.operation_storage_key)
-            .bind(entry_ordinal)
-            .bind(i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
-                StoreError::Backend(
-                    "usage payload encoding version does not fit PostgreSQL INTEGER".to_string(),
+            sqlx::query(session_sql().usage_postgres.insert.sql())
+                .bind(commit.session_id.as_str())
+                .bind(&entry.identity.operation_storage_key)
+                .bind(entry_ordinal)
+                .bind(
+                    i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
+                        StoreError::Backend(
+                            "usage payload encoding version does not fit PostgreSQL INTEGER"
+                                .to_string(),
+                        )
+                    })?,
                 )
-            })?)
-            .bind(&entry.identity.payload_hash)
-            .bind(&entry.entry.source)
-            .bind(&entry.entry.model)
-            .bind(entry.entry.usage.input_tokens)
-            .bind(entry.entry.usage.output_tokens)
-            .bind(entry.entry.usage.cache_read_input_tokens)
-            .bind(entry.entry.usage.cache_write_input_tokens)
-            .bind(entry.entry.usage.reasoning_output_tokens)
-            .bind(encode_usage_disposition(&entry.entry.usage_disposition)?)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+                .bind(&entry.identity.payload_hash)
+                .bind(&entry.entry.source)
+                .bind(&entry.entry.model)
+                .bind(entry.entry.usage.input_tokens)
+                .bind(entry.entry.usage.output_tokens)
+                .bind(entry.entry.usage.cache_read_input_tokens)
+                .bind(entry.entry.usage.cache_write_input_tokens)
+                .bind(entry.entry.usage.reasoning_output_tokens)
+                .bind(encode_usage_disposition(&entry.entry.usage_disposition)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
         }
         for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
             let node_json = node.encode_storage_body().map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))
             })?;
-            sqlx::query(
-                "INSERT INTO lash_graph_nodes
-                     (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-                     VALUES ($1, $2, $3, $4, $5, $6)",
-            )
-            .bind(commit.session_id.as_str())
-            .bind(&*node.node_id)
-            .bind(node.parent_node_id.as_deref())
-            .bind(i64::try_from(facts.generation).map_err(|_| {
-                StoreError::Backend("node generation does not fit PostgreSQL BIGINT".to_string())
-            })?)
-            .bind(&*facts.frame_node_id)
-            .bind(node_json)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                graph_node_insert_error(error, &commit.session_id, facts.generation, &node.node_id)
-            })?;
+            sqlx::query(session_sql().graph.insert.sql())
+                .bind(commit.session_id.as_str())
+                .bind(&*node.node_id)
+                .bind(node.parent_node_id.as_deref())
+                .bind(i64::try_from(facts.generation).map_err(|_| {
+                    StoreError::Backend(
+                        "node generation does not fit PostgreSQL BIGINT".to_string(),
+                    )
+                })?)
+                .bind(&*facts.frame_node_id)
+                .bind(node_json)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| {
+                    graph_node_insert_error(
+                        error,
+                        &commit.session_id,
+                        facts.generation,
+                        &node.node_id,
+                    )
+                })?;
         }
         let meta = plan.head_meta(checkpoint_ref.clone());
         // The revision predicate stays on the upsert as the backstop, and it
@@ -720,25 +652,15 @@ impl SessionCommitStore for PostgresSessionStore {
         // Existing sessions already hold the row lock and the session-keyed
         // advisory lock, so for them it can no longer disagree with the
         // verdict.
-        let head_write = sqlx::query(
-            "INSERT INTO lash_sessions
-             (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (session_id) DO UPDATE SET
-                head_revision = EXCLUDED.head_revision,
-                head_json = EXCLUDED.head_json,
-                checkpoint_ref = EXCLUDED.checkpoint_ref,
-                leaf_node_id = EXCLUDED.leaf_node_id
-             WHERE lash_sessions.head_revision = $6",
-        )
-        .bind(commit.session_id.as_str())
-        .bind(sql_head_revision)
-        .bind(encode_json(&meta.payload())?)
-        .bind(checkpoint_ref.as_str())
-        .bind(meta.leaf_node_id.as_deref())
-        .bind(plan.actual_head_revision() as i64)
-        .execute(&mut *tx)
-        .await;
+        let head_write = sqlx::query(session_sql().head.upsert_cas.sql())
+            .bind(commit.session_id.as_str())
+            .bind(sql_head_revision)
+            .bind(encode_json(&meta.payload())?)
+            .bind(checkpoint_ref.as_str())
+            .bind(meta.leaf_node_id.as_deref())
+            .bind(plan.actual_head_revision() as i64)
+            .execute(&mut *tx)
+            .await;
         let head_write = match head_write {
             Ok(result) => result,
             Err(err) if is_contention_error(&err) => {
@@ -763,22 +685,20 @@ impl SessionCommitStore for PostgresSessionStore {
             commit.session_id.as_str(),
             head_write.rows_affected(),
         ) {
-            let actual_now = sqlx::query_scalar::<_, i64>(
-                "SELECT head_revision FROM lash_sessions WHERE session_id = $1",
-            )
-            .bind(commit.session_id.as_str())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
-            .transpose()?
-            .unwrap_or(plan.actual_head_revision());
+            let actual_now = sqlx::query_scalar::<_, i64>(session_sql().head.select_revision.sql())
+                .bind(commit.session_id.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+                .transpose()?
+                .unwrap_or(plan.actual_head_revision());
             return Err(StoreError::HeadRevisionConflict {
                 expected: commit.expected_head_revision,
                 actual: actual_now,
             });
         }
-        sqlx::query("UPDATE lash_session_meta SET last_commit_at_ms = $2 WHERE session_id = $1")
+        sqlx::query(session_sql().meta.touch_last_commit.sql())
             .bind(commit.session_id.as_str())
             .bind(i64::try_from(now).unwrap_or(i64::MAX))
             .execute(&mut *tx)
@@ -926,24 +846,18 @@ impl SessionCommitStore for PostgresSessionStore {
             let receipt = plan.receipt_write(&result);
             let columns = append_identity_columns(receipt.append_request_identity)?;
             let result_json = encode_json(receipt.result)?;
-            sqlx::query(
-                "INSERT INTO lash_runtime_turn_commits (
-                    session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                    request_identity_hash, requested_node_count, identity_encoding_version
-                 )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            )
-            .bind(receipt.session_id.as_str())
-            .bind(receipt.operation_key)
-            .bind(receipt.turn_commit_hash)
-            .bind(&result_json)
-            .bind(now as i64)
-            .bind(columns.0)
-            .bind(columns.1)
-            .bind(columns.2)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+            sqlx::query(session_sql().turn_commits.insert.sql())
+                .bind(receipt.session_id.as_str())
+                .bind(receipt.operation_key)
+                .bind(receipt.turn_commit_hash)
+                .bind(&result_json)
+                .bind(now as i64)
+                .bind(columns.0)
+                .bind(columns.1)
+                .bind(columns.2)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
             if commit.turn_commit.operation.key == "session-command" {
                 for batch_id in commit
                     .completed_queue_claims
@@ -955,20 +869,15 @@ impl SessionCommitStore for PostgresSessionStore {
                             &commit.session_id,
                             batch_id,
                         )?;
-                    sqlx::query(
-                        "INSERT INTO lash_runtime_turn_commits (
-                            session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                            request_identity_hash, requested_node_count, identity_encoding_version
-                         ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULL)",
-                    )
-                    .bind(commit.session_id.as_str())
-                    .bind(marker)
-                    .bind(receipt.turn_commit_hash)
-                    .bind(&result_json)
-                    .bind(now as i64)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
+                    sqlx::query(session_sql().turn_commits.insert_marker.sql())
+                        .bind(commit.session_id.as_str())
+                        .bind(marker)
+                        .bind(receipt.turn_commit_hash)
+                        .bind(&result_json)
+                        .bind(now as i64)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(store_sqlx_error)?;
                 }
             }
         }

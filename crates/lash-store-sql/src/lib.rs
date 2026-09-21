@@ -89,7 +89,9 @@ pub mod artifact;
 pub mod attachment;
 pub mod effect;
 pub mod process;
+pub mod session;
 pub mod trigger;
+
 pub mod wait;
 
 pub use render::{
@@ -131,6 +133,19 @@ pub const TABLES: &[&str] = &[
     wait::waits::TABLE,
     wait::meta::TABLE,
     wait::revoked_sessions::TABLE,
+    session::checkpoint_blob_refs::TABLE,
+    session::deleted_sessions::TABLE,
+    session::fork_lineage::TABLE,
+    session::graph_nodes::TABLE,
+    session::head::TABLE,
+    session::meta::TABLE,
+    session::meta_fork_inheritance_processes::TABLE,
+    session::meta_pending_observer_intents::TABLE,
+    session::node_anchors::TABLE,
+    session::release_stamp::TABLE,
+    session::sessions::TABLE,
+    session::turn_commits::TABLE,
+    session::usage_deltas::TABLE,
     // Tables a converted family's statements reach but no converted family
     // owns yet. The renderer has to know a name to address it, and a
     // cross-family statement is a statement like any other — it cannot wait
@@ -138,24 +153,11 @@ pub const TABLES: &[&str] = &[
     // path precisely because no module owns it: when its family converts, its
     // lane replaces the string with that module's `TABLE` and adds the
     // `[[cross_family]]` entry the gate then starts demanding.
-    //
-    // `session_head` and `sessions` are one logical table spelled differently
-    // by the two backends (ADR 0098 freezes both names), so both appear; each
-    // is named only by the backend that has it.
-    "checkpoint_blob_refs",
-    "deleted_sessions",
-    "fork_lineage",
-    "graph_nodes",
     "lashlang_artifacts",
-    "node_anchors",
     "pending_turn_inputs",
     "queued_work_batches",
     "queued_work_items",
-    "runtime_turn_commits",
     "session_execution_leases",
-    "session_head",
-    "session_meta",
-    "sessions",
     "turn_cancel_closure_authorizations",
     "turn_cancel_requests",
     "turn_cancellation_bindings",
@@ -192,6 +194,18 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(process::processes::ProcessStatements::NEUTRAL);
     statements.extend_from_slice(process::segment_handovers::SegmentHandoverStatements::NEUTRAL);
     statements.extend_from_slice(process::tombstones::TombstoneStatements::NEUTRAL);
+    statements.extend_from_slice(session::fork_lineage::ForkLineageStatements::NEUTRAL);
+    statements.extend_from_slice(session::graph_nodes::GraphNodeStatements::NEUTRAL);
+    statements.extend_from_slice(session::meta::SessionMetaStatements::NEUTRAL);
+    statements.extend_from_slice(
+        session::meta_fork_inheritance_processes::ForkInheritanceStatements::NEUTRAL,
+    );
+    statements.extend_from_slice(
+        session::meta_pending_observer_intents::ObserverIntentStatements::NEUTRAL,
+    );
+    statements.extend_from_slice(session::node_anchors::NodeAnchorStatements::NEUTRAL);
+    statements.extend_from_slice(session::turn_commits::TurnCommitStatements::NEUTRAL);
+    statements.extend_from_slice(session::usage_deltas::UsageDeltaStatements::NEUTRAL);
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
     statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
     statements

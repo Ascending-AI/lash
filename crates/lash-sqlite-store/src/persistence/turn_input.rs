@@ -295,7 +295,10 @@ impl TurnInputStore for Store {
         self.conn
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)",
+                    crate::session_sql::session_sql()
+                        .turn_commits
+                        .exists_for_turn
+                        .sql(),
                     params![session_id.as_str(), operation_key],
                     |row| row.get::<_, bool>(0),
                 )
@@ -322,7 +325,10 @@ impl TurnInputStore for Store {
                     .storage_key()?;
                     let committed = tx
                         .query_row(
-                            "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)",
+                            crate::session_sql::session_sql()
+                        .turn_commits
+                        .exists_for_turn
+                        .sql(),
                             params![session_id.as_str(), operation_key],
                             |row| row.get::<_, bool>(0),
                         )
@@ -613,9 +619,10 @@ impl TurnInputStore for Store {
                 let outcome = (|| {
                     let mut stmt = conn
                         .prepare(
-                            "SELECT turn_id, result_json
-                             FROM runtime_turn_commits
-                             WHERE session_id = ?1",
+                            crate::session_sql::session_sql()
+                                .turn_commits
+                                .select_all_for_session
+                                .sql(),
                         )
                         .map_err(sqlite_error)?;
                     let rows = stmt

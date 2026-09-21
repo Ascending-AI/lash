@@ -13,6 +13,7 @@
 
 use super::artifact_store::artifact_namespace_kind;
 use super::*;
+use crate::session_sql::session_sql;
 use lash_sansio::SessionId;
 
 /// One GC root class. The variant *is* the label choice: a pointer-table row
@@ -75,7 +76,7 @@ impl Store {
             Some(leaf_node_id) => {
                 let row = conn
                     .query_row(
-                        "SELECT generation, tombstoned FROM graph_nodes WHERE node_id = ?1",
+                        session_sql().graph_sqlite.select_leaf_state.sql(),
                         params![leaf_node_id],
                         |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
                     )
@@ -91,27 +92,30 @@ impl Store {
             }
             None => None,
         };
-        let mut stmt = conn
-            .prepare(
-                "SELECT g.node_id, g.parent_node_id, g.node_json,
-                        g.generation, g.frame_node_id
-                 FROM graph_nodes AS g
-                 WHERE g.tombstoned = 0
-                   AND (?2 IS NULL OR g.generation <= ?2)
-                   AND (
-                       g.session_id = ?1
-                       OR EXISTS (
-                           SELECT 1 FROM fork_lineage AS lineage
-                           WHERE lineage.session_id = ?1
-                             AND lineage.ancestor_session_id = g.session_id
-                             AND g.generation <= lineage.fork_generation
-                       )
-                   )
-                 ORDER BY g.generation ASC",
-            )
-            .map_err(sqlite_error)?;
+        // One statement per filter shape, chosen exhaustively: a single
+        // statement carrying `?2 IS NULL OR generation <= ?2` cannot use an
+        // index for either shape, and this read is the whole session graph.
+        let (statement, bound): (_, Vec<rusqlite::types::Value>) = match leaf_generation {
+            None => (
+                session_sql().graph_sqlite.select_readable.sql(),
+                vec![rusqlite::types::Value::Text(
+                    session_id.as_str().to_string(),
+                )],
+            ),
+            Some(generation) => (
+                session_sql()
+                    .graph_sqlite
+                    .select_readable_to_generation
+                    .sql(),
+                vec![
+                    rusqlite::types::Value::Text(session_id.as_str().to_string()),
+                    rusqlite::types::Value::Integer(generation),
+                ],
+            ),
+        };
+        let mut stmt = conn.prepare(statement).map_err(sqlite_error)?;
         let rows = stmt
-            .query_map(params![session_id.as_str(), leaf_generation], |row| {
+            .query_map(rusqlite::params_from_iter(bound), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -178,7 +182,7 @@ impl Store {
             .call(move |conn| {
                 let leaf_node_id = conn
                     .query_row(
-                        "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
+                        session_sql().head.select_leaf_node_id.sql(),
                         params![session_id.as_str()],
                         |row| row.get::<_, Option<String>>(0),
                     )
@@ -220,11 +224,7 @@ impl Store {
     fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<GcRoot>, StoreError> {
         let mut roots = Vec::new();
         let mut stmt = conn
-            .prepare(
-                "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
-                 UNION
-                 SELECT checkpoint_ref FROM node_anchors",
-            )
+            .prepare(session_sql().head.select_checkpoint_roots.sql())
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -319,19 +319,8 @@ impl Store {
         // Match PostgreSQL's strict ordering even though SQLite's component
         // side is not FK-enforced: every dead root loses its complete outgoing
         // edge set before any hash-ordered blob delete can reach a component.
-        tx.execute(
-            "DELETE FROM checkpoint_blob_refs AS edge
-             WHERE NOT EXISTS (
-                       SELECT 1 FROM session_head AS head
-                       WHERE head.checkpoint_ref = edge.checkpoint_ref
-                   )
-               AND NOT EXISTS (
-                       SELECT 1 FROM node_anchors AS anchor
-                       WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-                   )",
-            [],
-        )
-        .map_err(sqlite_error)?;
+        tx.execute(session_sql().checkpoint_edges.delete_unrooted.sql(), [])
+            .map_err(sqlite_error)?;
         let all_hashes = {
             let mut stmt = tx
                 .prepare(

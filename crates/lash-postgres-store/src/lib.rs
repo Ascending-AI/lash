@@ -1132,6 +1132,8 @@ mod session_catalog;
 mod session_factory;
 #[path = "postgres/session_meta.rs"]
 mod session_meta;
+#[path = "postgres/session_sql.rs"]
+mod session_sql;
 #[path = "postgres/support.rs"]
 mod support;
 #[cfg(any(test, feature = "testing"))]

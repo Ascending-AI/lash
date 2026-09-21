@@ -17,7 +17,10 @@ impl StoreTestSupport for PostgresSessionStore {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let head_json: String = sqlx::query_scalar(
-            "SELECT head_json FROM lash_sessions WHERE session_id = $1 FOR UPDATE",
+            crate::session_sql::session_sql()
+                .head
+                .select_head_json_for_update
+                .sql(),
         )
         .bind(self.session_id.as_str())
         .fetch_one(&mut *tx)
@@ -44,7 +47,7 @@ impl StoreTestSupport for PostgresSessionStore {
         let head_json = serde_json::to_string(&head).map_err(|error| {
             StoreError::Backend(format!("failed to encode test session head: {error}"))
         })?;
-        sqlx::query("UPDATE lash_sessions SET head_json = $2 WHERE session_id = $1")
+        sqlx::query(crate::session_sql::session_sql().head.set_head_json.sql())
             .bind(self.session_id.as_str())
             .bind(head_json)
             .execute(&mut *tx)
@@ -60,7 +63,10 @@ impl StoreTestSupport for PostgresSessionStore {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         sqlx::query(
-            "UPDATE lash_session_meta SET session_state_version = $2 WHERE session_id = $1",
+            crate::session_sql::session_sql()
+                .meta
+                .set_state_version
+                .sql(),
         )
         .bind(self.session_id.as_str())
         .bind(
@@ -73,7 +79,10 @@ impl StoreTestSupport for PostgresSessionStore {
         .await
         .map_err(store_sqlx_error)?;
         sqlx::query(
-            "UPDATE lash_sessions SET head_json = '{not-current-json' WHERE session_id = $1",
+            crate::session_sql::session_sql()
+                .head
+                .corrupt_head_json
+                .sql(),
         )
         .bind(self.session_id.as_str())
         .execute(&mut *tx)

@@ -1,13 +1,8 @@
+use crate::session_sql::session_sql;
 use crate::*;
 use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-
-pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
-     FROM lash_runtime_turn_commits
-     WHERE session_id = $1
-       AND result_json LIKE '%\"failure_evidence\"%'
-     ORDER BY committed_at_ms, turn_id";
 
 pub(crate) async fn lock_session_history_mutation_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -53,15 +48,11 @@ pub(crate) async fn ensure_session_not_deleted_tx(
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     lock_session_history_mutation_tx(tx, session_id).await?;
-    let deleted = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(
-            SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-         )",
-    )
-    .bind(session_id.as_str())
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let deleted = sqlx::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
+        .bind(session_id.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     if deleted {
         Err(StoreError::SessionDeleted {
             session_id: SessionId::from(session_id.to_string()),
@@ -200,9 +191,7 @@ pub(crate) async fn retire_unreachable_ancestry_tx(
     let mut node_id = first_node_id.to_string();
     loop {
         let parent_node_id = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT parent_node_id FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE
-             FOR UPDATE",
+            session_sql().graph_postgres.select_parent_for_update.sql(),
         )
         .bind(&node_id)
         .fetch_optional(&mut **tx)
@@ -211,27 +200,16 @@ pub(crate) async fn retire_unreachable_ancestry_tx(
         let Some(parent_node_id) = parent_node_id else {
             return Ok(());
         };
-        let reachable = sqlx::query_scalar::<_, bool>(
-            "SELECT
-                EXISTS(
-                    SELECT 1 FROM lash_graph_nodes
-                    WHERE parent_node_id = $1 AND tombstoned = FALSE
-                )
-                OR EXISTS(
-                    SELECT 1 FROM lash_sessions WHERE leaf_node_id = $1
-                )
-                OR EXISTS(
-                    SELECT 1 FROM lash_node_anchors WHERE node_id = $1
-                )",
-        )
-        .bind(&node_id)
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let reachable =
+            sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.exists_reachable.sql())
+                .bind(&node_id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
         if reachable {
             return Ok(());
         }
-        sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
+        sqlx::query(session_sql().graph_postgres.retire.sql())
             .bind(&node_id)
             .execute(&mut **tx)
             .await
@@ -247,14 +225,11 @@ pub(crate) async fn nearest_frame_node_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
-    sqlx::query_scalar(
-        "SELECT frame_node_id FROM lash_graph_nodes
-         WHERE node_id = $1 AND tombstoned = FALSE",
-    )
-    .bind(leaf_node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)
+    sqlx::query_scalar(session_sql().graph_postgres.select_frame_node_id.sql())
+        .bind(leaf_node_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)
 }
 
 async fn enqueue_queued_work_tx(
@@ -432,14 +407,21 @@ async fn read_session_state_version_tx(
     session_id: &SessionId,
     lock: bool,
 ) -> Result<u32, StoreError> {
-    let suffix = if lock { " FOR UPDATE" } else { "" };
-    let marker: Option<Option<i32>> = sqlx::query_scalar(&format!(
-        "SELECT session_state_version FROM lash_session_meta WHERE session_id = $1{suffix}"
-    ))
-    .bind(session_id.as_str())
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    // One statement per filter shape, not a suffix appended per call: the
+    // locked read is a different statement from the unlocked one.
+    let statement = if lock {
+        session_sql()
+            .meta_postgres
+            .select_state_version_for_update
+            .sql()
+    } else {
+        session_sql().meta.select_state_version.sql()
+    };
+    let marker: Option<Option<i32>> = sqlx::query_scalar(statement)
+        .bind(session_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     let Some(marker) = marker else {
         return Ok(lash_core::store::CURRENT_SESSION_STATE_VERSION);
     };
