@@ -129,6 +129,42 @@ pub(crate) enum RuntimePerfScenario {
     HighTrafficKneePostgres,
 }
 
+// The harness wiring facts the builders read once per scenario: which
+// benchmark plugins, tools, stores, and trigger surfaces to install. Declared
+// on the metadata table so the builders hold no per-scenario predicates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScenarioWiring {
+    pub(crate) compat_stream_server: bool,
+    pub(crate) turn_start_gate: bool,
+    pub(crate) tool_catalog_observer: bool,
+    pub(crate) llm_query_plugin: bool,
+    pub(crate) subagents_plugin: bool,
+    pub(crate) oblique_tools_plugin: bool,
+    pub(crate) large_tool_catalog_plugin: bool,
+    pub(crate) workbench_trigger_plugin: bool,
+    pub(crate) process_registry: bool,
+    pub(crate) queued_work: bool,
+    pub(crate) measure_commit_bytes: bool,
+    pub(crate) session_store_handle: bool,
+}
+
+impl ScenarioWiring {
+    pub(crate) const DEFAULT: Self = Self {
+        compat_stream_server: false,
+        turn_start_gate: false,
+        tool_catalog_observer: false,
+        llm_query_plugin: false,
+        subagents_plugin: false,
+        oblique_tools_plugin: false,
+        large_tool_catalog_plugin: false,
+        workbench_trigger_plugin: false,
+        process_registry: true,
+        queued_work: true,
+        measure_commit_bytes: true,
+        session_store_handle: false,
+    };
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimePerfScenarioMetadata {
     pub(crate) scenario: RuntimePerfScenario,
@@ -139,10 +175,82 @@ pub(crate) struct RuntimePerfScenarioMetadata {
     pub(crate) scenario_harness: ScenarioHarnessKind,
     pub(crate) harness_rationale: &'static str,
     pub(crate) correctness_coverage_ids: &'static [&'static str],
+    pub(crate) wiring: ScenarioWiring,
     pub(crate) default: bool,
 }
 
 macro_rules! runtime_perf_metadata {
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, wiring { $($wiring_field:ident = $wiring_value:expr),* $(,)? } $(, $default:literal)?) => {
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            Ephemeral,
+            StableDurableTurn,
+            [],
+            wiring { $($wiring_field = $wiring_value),* }
+            $(, $default)?
+        )
+    };
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, [$($coverage_id:literal),* $(,)?], wiring { $($wiring_field:ident = $wiring_value:expr),* $(,)? } $(, $default:literal)?) => {
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            Ephemeral,
+            StableDurableTurn,
+            [$($coverage_id),*],
+            wiring { $($wiring_field = $wiring_value),* }
+            $(, $default)?
+        )
+    };
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, wiring { $($wiring_field:ident = $wiring_value:expr),* $(,)? } $(, $default:literal)?) => {
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            $durability,
+            StableDurableTurn,
+            [],
+            wiring { $($wiring_field = $wiring_value),* }
+            $(, $default)?
+        )
+    };
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident, wiring { $($wiring_field:ident = $wiring_value:expr),* $(,)? } $(, $default:literal)?) => {
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            $durability,
+            $phase_contract,
+            [],
+            wiring { $($wiring_field = $wiring_value),* }
+            $(, $default)?
+        )
+    };
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident, [$($coverage_id:literal),* $(,)?], wiring { $($wiring_field:ident = $wiring_value:expr),* $(,)? } $(, $default:literal)?) => {
+        runtime_perf_metadata!(
+            @entry
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            $durability,
+            $phase_contract,
+            [$($coverage_id),*],
+            wiring { $($wiring_field = $wiring_value),* }
+            $(, $default)?
+        )
+    };
     ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal $(, $default:literal)?) => {
         runtime_perf_metadata!(
             $scenario,
@@ -196,6 +304,21 @@ macro_rules! runtime_perf_metadata {
         )
     };
     ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident, [$($coverage_id:literal),* $(,)?] $(, $default:literal)?) => {
+        runtime_perf_metadata!(
+            @entry
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            $durability,
+            $phase_contract,
+            [$($coverage_id),*],
+            wiring {}
+            $(, $default)?
+        )
+    };
+    (@entry $scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident, [$($coverage_id:literal),* $(,)?], wiring { $($wiring_field:ident = $wiring_value:expr),* $(,)? } $(, $default:literal)?) => {
         RuntimePerfScenarioMetadata {
             scenario: RuntimePerfScenario::$scenario,
             name: $name,
@@ -205,6 +328,10 @@ macro_rules! runtime_perf_metadata {
             scenario_harness: ScenarioHarnessKind::$harness,
             harness_rationale: $rationale,
             correctness_coverage_ids: &[$($coverage_id),*],
+            wiring: ScenarioWiring {
+                $($wiring_field: $wiring_value,)*
+                ..ScenarioWiring::DEFAULT
+            },
             default: runtime_perf_metadata!(@default_flag $($default)?),
         }
     };
@@ -297,7 +424,8 @@ impl RuntimePerfScenario {
             "rlm_trigger_mail_pipeline",
             Rlm,
             AgentScenario,
-            "Measures facade/plugin process pipeline behavior initiated through an RLM agent turn."
+            "Measures facade/plugin process pipeline behavior initiated through an RLM agent turn.",
+            wiring { workbench_trigger_plugin = true }
         ),
         runtime_perf_metadata!(
             RlmProcessAsyncToolCompletion,
@@ -313,21 +441,24 @@ impl RuntimePerfScenario {
             Rlm,
             AgentScenario,
             "Measures subagent facade composition and child-session behavior.",
-            ["agent_scenario_started_process_labeled_subagent_spawn"]
+            ["agent_scenario_started_process_labeled_subagent_spawn"],
+            wiring { subagents_plugin = true }
         ),
         runtime_perf_metadata!(
             RlmLlmQuery,
             "rlm_llm_query",
             Rlm,
             AgentScenario,
-            "Measures facade-level LLM query tool behavior from an RLM agent flow."
+            "Measures facade-level LLM query tool behavior from an RLM agent flow.",
+            wiring { llm_query_plugin = true }
         ),
         runtime_perf_metadata!(
             RlmGlobals,
             "rlm_globals",
             Rlm,
             RlmProtocolScenario,
-            "Measures RLM protocol prompt/context handling for fixed session-scoped projected bindings."
+            "Measures RLM protocol prompt/context handling for fixed session-scoped projected bindings.",
+            wiring { process_registry = false, queued_work = false }
         ),
         runtime_perf_metadata!(
             RlmLargePrint,
@@ -348,7 +479,8 @@ impl RuntimePerfScenario {
             "rlm_large_tool_catalog",
             Rlm,
             RlmProtocolScenario,
-            "Measures RLM protocol prompt pressure from a large tool catalog."
+            "Measures RLM protocol prompt pressure from a large tool catalog.",
+            wiring { large_tool_catalog_plugin = true }
         ),
         runtime_perf_metadata!(
             RlmToolCatalogCold,
@@ -356,6 +488,7 @@ impl RuntimePerfScenario {
             Rlm,
             RlmProtocolScenario,
             "Measures cold tool-catalog reconstruction inside the measured RLM turn.",
+            wiring { large_tool_catalog_plugin = true, tool_catalog_observer = true },
             false
         ),
         runtime_perf_metadata!(
@@ -364,6 +497,7 @@ impl RuntimePerfScenario {
             Rlm,
             RlmProtocolScenario,
             "Measures the warm RLM turn after the tool catalog has been reconstructed.",
+            wiring { large_tool_catalog_plugin = true, tool_catalog_observer = true },
             false
         ),
         runtime_perf_metadata!(
@@ -371,14 +505,16 @@ impl RuntimePerfScenario {
             "rlm_oblique_stack_mix",
             Rlm,
             RlmProtocolScenario,
-            "Measures mixed RLM protocol/Lashlang execution pressure without facade subagent ownership."
+            "Measures mixed RLM protocol/Lashlang execution pressure without facade subagent ownership.",
+            wiring { subagents_plugin = true, oblique_tools_plugin = true }
         ),
         runtime_perf_metadata!(
             OpenAiCompatStream,
             "openai_compat_stream",
             Standard,
             StandardProtocolScenario,
-            "Measures Standard protocol streaming provider compatibility as model-response projection."
+            "Measures Standard protocol streaming provider compatibility as model-response projection.",
+            wiring { compat_stream_server = true }
         ),
         runtime_perf_metadata!(
             StandardShellOutput,
@@ -392,7 +528,8 @@ impl RuntimePerfScenario {
             "tool_discovery_search",
             Standard,
             StandardProtocolScenario,
-            "Measures Standard protocol pressure from tool discovery and request projection."
+            "Measures Standard protocol pressure from tool discovery and request projection.",
+            wiring { large_tool_catalog_plugin = true }
         ),
         runtime_perf_metadata!(
             OpenAiResponsesSseParse,
@@ -448,7 +585,8 @@ impl RuntimePerfScenario {
             "sqlite_store_reopen",
             Standard,
             RuntimeScenario,
-            "Measures SQLite runtime persistence reopen behavior below protocol and facade ownership."
+            "Measures SQLite runtime persistence reopen behavior below protocol and facade ownership.",
+            wiring { measure_commit_bytes = false }
         ),
         runtime_perf_metadata!(
             TurnCheckpoint,
@@ -508,14 +646,16 @@ impl RuntimePerfScenario {
             Rlm,
             AgentScenario,
             "Measures the composed parent/child turn future with active ingress, tool and process loops, cancellation observation, and timer/await-event durable waits.",
-            ["agent_scenario_nested_process_start_await"]
+            ["agent_scenario_nested_process_start_await"],
+            wiring { subagents_plugin = true, workbench_trigger_plugin = true }
         ),
         runtime_perf_metadata!(
             TurnStartGate,
             "turn_start_gate",
             Standard,
             RuntimeScenario,
-            "Measures the native turn-cancel gate peek through the bounded retry wrapper below protocol and facade ownership."
+            "Measures the native turn-cancel gate peek through the bounded retry wrapper below protocol and facade ownership.",
+            wiring { turn_start_gate = true }
         ),
         runtime_perf_metadata!(
             TurnCancelRoundTrip,
@@ -582,6 +722,7 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures a complete parent and child agent turn through the runtime against the decorated SQLite persistence boundary.",
             Durable,
+            wiring { subagents_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -591,6 +732,7 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures a complete parent and child agent turn through the runtime against the decorated PostgreSQL persistence boundary.",
             Durable,
+            wiring { subagents_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -621,6 +763,7 @@ impl RuntimePerfScenario {
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
             Durable,
             QueuedWorkContention,
+            wiring { queued_work = false, session_store_handle = true },
             false
         ),
         runtime_perf_metadata!(
@@ -631,6 +774,7 @@ impl RuntimePerfScenario {
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared PostgreSQL backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
             Durable,
             QueuedWorkContention,
+            wiring { queued_work = false, session_store_handle = true },
             false
         ),
         runtime_perf_metadata!(
@@ -655,6 +799,7 @@ impl RuntimePerfScenario {
             Rlm,
             AgentScenario,
             "Measures two gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return.",
+            wiring { workbench_trigger_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -663,6 +808,7 @@ impl RuntimePerfScenario {
             Rlm,
             AgentScenario,
             "Measures eight gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return.",
+            wiring { workbench_trigger_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -673,6 +819,7 @@ impl RuntimePerfScenario {
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence.",
             Durable,
             HighTraffic,
+            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
             false
         ),
         runtime_perf_metadata!(
@@ -683,6 +830,7 @@ impl RuntimePerfScenario {
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared PostgreSQL persistence.",
             Durable,
             HighTraffic,
+            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
             false
         ),
         runtime_perf_metadata!(
@@ -693,6 +841,7 @@ impl RuntimePerfScenario {
             "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
             HighTraffic,
+            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
             false
         ),
         runtime_perf_metadata!(
@@ -703,6 +852,7 @@ impl RuntimePerfScenario {
             "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
             HighTraffic,
+            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
             false
         ),
     ];
@@ -777,6 +927,7 @@ impl RuntimePerfScenario {
         )
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn is_queued_work_contention(self) -> bool {
         matches!(
             self,
@@ -840,6 +991,10 @@ impl RuntimePerfScenario {
             .iter()
             .find(|metadata| metadata.scenario == self)
             .expect("runtime perf scenario metadata missing")
+    }
+
+    pub(crate) fn wiring(self) -> ScenarioWiring {
+        self.metadata().wiring
     }
 
     pub(crate) fn uses_rolling_history(self) -> bool {

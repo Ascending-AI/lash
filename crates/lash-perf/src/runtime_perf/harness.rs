@@ -745,50 +745,127 @@ fn preview(value: &str, max_chars: usize) -> String {
     preview.replace('\n', "\\n")
 }
 
+fn benchmark_rlm_protocol_factory(
+    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+) -> lash_protocol_rlm::RlmProtocolPluginFactory {
+    lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        artifact_store,
+    )
+}
+
+fn benchmark_standard_builder(provider: ProviderHandle) -> lash::LashCoreBuilder {
+    lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
+        .provider(provider)
+        .model(benchmark_model_spec())
+}
+
+fn benchmark_rlm_builder(
+    provider: ProviderHandle,
+    factory: lash_protocol_rlm::RlmProtocolPluginFactory,
+) -> lash::LashCoreBuilder {
+    lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
+        .provider(provider)
+        .model(benchmark_model_spec())
+        .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
+}
+
+// The benchmark plugin list, in push order. Every conditional reads the
+// scenario's `ScenarioWiring` column; the builders only append the result.
+fn benchmark_plugin_factories(
+    scenario: RuntimePerfScenario,
+    effect_host: &Arc<dyn lash_core::EffectHost>,
+    settlement_control: Option<&Arc<BenchmarkSettlementControl>>,
+    tool_catalog_observer: Option<&Arc<BenchmarkToolCatalogObserver>>,
+) -> Vec<Arc<dyn PluginFactory>> {
+    let wiring = scenario.wiring();
+    let benchmark_tool = settlement_control.map_or_else(
+        || BenchmarkEchoTool::new(Arc::clone(effect_host)),
+        |control| {
+            BenchmarkEchoTool::with_settlement_control(Arc::clone(effect_host), Arc::clone(control))
+        },
+    );
+    let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
+        "runtime_perf_tools",
+        PluginSpec::new().with_tool_provider(Arc::new(benchmark_tool)),
+    ))];
+    if wiring.llm_query_plugin {
+        factories.push(Arc::new(LlmToolsPluginFactory::default()));
+    }
+    if wiring.subagents_plugin {
+        factories.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
+            Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                lash_subagents::StaticCapability::new(
+                    "default",
+                    lash_core::facade_support::SessionSpec::inherit(),
+                ),
+            ))),
+        )));
+    }
+    if wiring.oblique_tools_plugin {
+        factories.push(Arc::new(StaticPluginFactory::new(
+            "runtime_perf_oblique_tools",
+            PluginSpec::new().with_tool_provider(Arc::new(BenchmarkObliqueTools)),
+        )));
+    }
+    if wiring.large_tool_catalog_plugin {
+        factories.push(Arc::new(StaticPluginFactory::new(
+            "runtime_perf_large_tool_catalog",
+            PluginSpec::new().with_tool_provider(Arc::new(BenchmarkLargeToolCatalog::default())),
+        )));
+    }
+    if let Some(observer) = tool_catalog_observer {
+        let composition_observer = Arc::clone(observer);
+        factories.push(Arc::new(StaticPluginFactory::new(
+            "runtime_perf_tool_catalog_observer",
+            PluginSpec::new().with_tool_catalog_contributor(Arc::new(move |context| {
+                composition_observer.observe_session_catalog_composition(&context.session_id)?;
+                Ok(Default::default())
+            })),
+        )));
+    }
+    if wiring.workbench_trigger_plugin {
+        factories.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
+    }
+    factories
+}
+
 pub(crate) fn build_embed_core(
     scenario: RuntimePerfScenario,
     store: Arc<RuntimePerfStore>,
 ) -> anyhow::Result<BenchmarkCore> {
-    let effect_host = Arc::new(
+    let effect_host: Arc<dyn lash_core::EffectHost> = Arc::new(
         lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
     );
-    match scenario {
-        RuntimePerfScenario::EmbedStandard => {
-            lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-                .with_native_queued_work()
-                .with_explicit_ephemeral_facets()
-                .effect_host(effect_host.clone())
-                .provider(benchmark_provider(scenario).into_handle())
-                .model(benchmark_model_spec())
-                .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
-                .build(runtime_perf_owner())
-                .map(BenchmarkCore::Standard)
-                .map_err(anyhow::Error::from)
-        }
-        RuntimePerfScenario::EmbedRlm => {
-            let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash_protocol_rlm::RlmChannel::Cell)
-                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
-            );
-            lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-                .with_native_queued_work()
-                .with_explicit_ephemeral_facets()
-                .effect_host(effect_host.clone())
-                .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
-                .provider(benchmark_provider(scenario).into_handle())
-                .model(benchmark_model_spec())
-                .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
-                .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
-                .build(runtime_perf_owner())
-                .map(BenchmarkCore::Rlm)
-                .map_err(anyhow::Error::from)
-        }
-        _ => anyhow::bail!("{} is not an embed scenario", scenario.name()),
+    let provider = benchmark_provider(scenario).into_handle();
+    match scenario.execution_mode() {
+        ExecutionMode::Standard => benchmark_standard_builder(provider)
+            .with_explicit_ephemeral_facets()
+            .effect_host(effect_host)
+            .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
+            .build(runtime_perf_owner())
+            .map(BenchmarkCore::Standard)
+            .map_err(anyhow::Error::from),
+        ExecutionMode::Rlm => benchmark_rlm_builder(
+            provider,
+            benchmark_rlm_protocol_factory(Arc::new(
+                lash::persistence::InMemoryLashlangArtifactStore::new(),
+            )),
+        )
+        .with_explicit_ephemeral_facets()
+        .effect_host(Arc::clone(&effect_host))
+        .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
+        .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
+        .build(runtime_perf_owner())
+        .map(BenchmarkCore::Rlm)
+        .map_err(anyhow::Error::from),
     }
 }
 
@@ -797,8 +874,9 @@ pub(crate) async fn build_runtime_with_store(
     store: Option<Arc<RuntimePerfStore>>,
     trace_config: Option<RuntimePerfTraceConfig>,
 ) -> anyhow::Result<BenchmarkRuntime> {
+    let wiring = scenario.wiring();
     let execution_mode = scenario.execution_mode();
-    let openai_compat_server = if matches!(scenario, RuntimePerfScenario::OpenAiCompatStream) {
+    let openai_compat_server = if wiring.compat_stream_server {
         Some(OpenAiCompatBenchServer::start(benchmark_stream_profile(scenario)).await?)
     } else {
         None
@@ -808,8 +886,8 @@ pub(crate) async fn build_runtime_with_store(
         .map(|server| server.base_url.clone())
         .unwrap_or_else(|| "https://example.invalid/v1".to_string());
     let (provider, provider_control): (ProviderHandle, Option<Arc<BenchmarkProviderControl>>) =
-        match scenario {
-            RuntimePerfScenario::OpenAiCompatStream => (
+        if wiring.compat_stream_server {
+            (
                 ProviderHandle::new(
                     OpenAiCompatibleProvider::new("test-key", base_url.clone())
                         .with_options(ProviderOptions {
@@ -819,115 +897,48 @@ pub(crate) async fn build_runtime_with_store(
                         .into_components(),
                 ),
                 None,
-            ),
-            _ => {
-                let (provider, control) = benchmark_provider_with_control(scenario);
-                (provider.into_handle(), control)
-            }
-        };
-    let effect_host: Arc<dyn lash_core::EffectHost> =
-        if matches!(scenario, RuntimePerfScenario::TurnStartGate) {
-            Arc::new(
-                lash_core::facade_support::NativeEffectHost::new(Arc::new(
-                    RetryingStartGateController::default(),
-                ))
-                .allow_process_lifetime_completion_keys(),
             )
         } else {
-            Arc::new(
-                lash_core::facade_support::NativeEffectHost::default()
-                    .allow_process_lifetime_completion_keys(),
-            )
+            let (provider, control) = benchmark_provider_with_control(scenario);
+            (provider.into_handle(), control)
         };
+    let effect_host: Arc<dyn lash_core::EffectHost> = if wiring.turn_start_gate {
+        Arc::new(
+            lash_core::facade_support::NativeEffectHost::new(Arc::new(
+                RetryingStartGateController::default(),
+            ))
+            .allow_process_lifetime_completion_keys(),
+        )
+    } else {
+        Arc::new(
+            lash_core::facade_support::NativeEffectHost::default()
+                .allow_process_lifetime_completion_keys(),
+        )
+    };
     let store = store.unwrap_or_else(|| Arc::new(RuntimePerfStore::default()));
     let settlement_control = scenario
         .settlement_children()
         .map(|_| Arc::new(BenchmarkSettlementControl::new()));
-    let tool_catalog_observer = matches!(
-        scenario,
-        RuntimePerfScenario::RlmToolCatalogCold | RuntimePerfScenario::RlmToolCatalogWarm
-    )
-    .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
+    let tool_catalog_observer = wiring
+        .tool_catalog_observer
+        .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
     let mut plugin_stack = runtime_perf_plugin_stack(
         scenario.uses_rolling_history(),
         execution_mode.is_standard(),
     );
-    let benchmark_tool = settlement_control.as_ref().map_or_else(
-        || BenchmarkEchoTool::new(Arc::clone(&effect_host)),
-        |control| {
-            BenchmarkEchoTool::with_settlement_control(
-                Arc::clone(&effect_host),
-                Arc::clone(control),
-            )
-        },
-    );
-    plugin_stack.push(Arc::new(StaticPluginFactory::new(
-        "runtime_perf_tools",
-        PluginSpec::new().with_tool_provider(Arc::new(benchmark_tool)),
-    )));
-    if matches!(scenario, RuntimePerfScenario::RlmLlmQuery) {
-        plugin_stack.push(Arc::new(LlmToolsPluginFactory::default()));
-    }
-    if matches!(
+    for factory in benchmark_plugin_factories(
         scenario,
-        RuntimePerfScenario::RlmSubagentSpawn
-            | RuntimePerfScenario::RlmObliqueStackMix
-            | RuntimePerfScenario::DeepTurnComposition
+        &effect_host,
+        settlement_control.as_ref(),
+        tool_catalog_observer.as_ref(),
     ) {
-        plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
-            Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
-                lash_subagents::StaticCapability::new(
-                    "default",
-                    lash_core::facade_support::SessionSpec::inherit(),
-                ),
-            ))),
-        )));
-    }
-    if matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix) {
-        plugin_stack.push(Arc::new(StaticPluginFactory::new(
-            "runtime_perf_oblique_tools",
-            PluginSpec::new().with_tool_provider(Arc::new(BenchmarkObliqueTools)),
-        )));
-    }
-    if matches!(
-        scenario,
-        RuntimePerfScenario::RlmLargeToolCatalog
-            | RuntimePerfScenario::RlmToolCatalogCold
-            | RuntimePerfScenario::RlmToolCatalogWarm
-            | RuntimePerfScenario::ToolDiscoverySearch
-    ) {
-        plugin_stack.push(Arc::new(StaticPluginFactory::new(
-            "runtime_perf_large_tool_catalog",
-            PluginSpec::new().with_tool_provider(Arc::new(BenchmarkLargeToolCatalog::default())),
-        )));
-    }
-    if let Some(observer) = tool_catalog_observer.as_ref() {
-        let composition_observer = Arc::clone(observer);
-        plugin_stack.push(Arc::new(StaticPluginFactory::new(
-            "runtime_perf_tool_catalog_observer",
-            PluginSpec::new().with_tool_catalog_contributor(Arc::new(move |context| {
-                composition_observer.observe_session_catalog_composition(&context.session_id)?;
-                Ok(Default::default())
-            })),
-        )));
-    }
-    if matches!(
-        scenario,
-        RuntimePerfScenario::RlmTriggerMailPipeline
-            | RuntimePerfScenario::DeepTurnComposition
-            | RuntimePerfScenario::AsyncProcessSettlement2Children
-            | RuntimePerfScenario::AsyncProcessSettlement8Children
-    ) {
-        plugin_stack.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
+        plugin_stack.push(factory);
     }
     let core = match execution_mode {
         ExecutionMode::Standard => {
-            let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-                .with_native_queued_work()
+            let mut builder = benchmark_standard_builder(provider)
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
-                .provider(provider)
-                .model(benchmark_model_spec())
                 .plugins(plugin_stack);
             if let Some(config) = trace_config {
                 if let Some(path) = config.trace_jsonl_path {
@@ -935,58 +946,48 @@ pub(crate) async fn build_runtime_with_store(
                 }
                 builder = builder.trace_level(config.trace_level);
             }
-            if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
+            if wiring.process_registry {
                 builder = builder
                     .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default()));
             }
             builder =
                 builder.store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
-            if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-                // This benchmark has no queued-work lane, but its facade
-                // session still uses the retained in-memory store above.
+            if !wiring.queued_work {
+                // Scenarios without a queued-work lane still use the retained
+                // in-memory store installed above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
-            let mut factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash_protocol_rlm::RlmChannel::Cell)
-                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
-            );
+            let mut factory = benchmark_rlm_protocol_factory(Arc::new(
+                lash::persistence::InMemoryLashlangArtifactStore::new(),
+            ));
             if let Some(path) = trace_config
                 .as_ref()
                 .and_then(|config| config.lashlang_execution_jsonl_path.clone())
             {
                 factory = factory.with_lashlang_execution_jsonl_path(path);
             }
-            let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-                .with_native_queued_work()
+            let mut builder = benchmark_rlm_builder(provider, factory)
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
-                .provider(provider)
-                .model(benchmark_model_spec())
-                .plugins(plugin_stack)
-                .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS));
+                .plugins(plugin_stack);
             if let Some(config) = trace_config {
                 if let Some(path) = config.trace_jsonl_path {
                     builder = builder.trace_jsonl_path(path);
                 }
                 builder = builder.trace_level(config.trace_level);
             }
-            if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
+            if wiring.process_registry {
                 builder = builder
                     .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default()));
             }
             builder =
                 builder.store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
-            if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-                // This benchmark has no queued-work lane, but its facade
-                // session still uses the retained in-memory store above.
+            if !wiring.queued_work {
+                // Scenarios without a queued-work lane still use the retained
+                // in-memory store installed above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
@@ -1219,20 +1220,6 @@ fn benchmark_field(name: &str, ty: lash::rlm::TypeExpr) -> lash::rlm::TypeField 
     }
 }
 
-trait RuntimePerfCoreBuilderExt {
-    fn with_manual_queue_drain(self, scenario: RuntimePerfScenario) -> Self;
-}
-
-impl RuntimePerfCoreBuilderExt for lash::LashCoreBuilder {
-    fn with_manual_queue_drain(self, scenario: RuntimePerfScenario) -> Self {
-        if scenario.is_high_traffic() || scenario.is_queued_work_contention() {
-            self.without_queued_work()
-        } else {
-            self
-        }
-    }
-}
-
 pub(crate) fn durable_sqlite_session_store_factory(
     sessions_root: PathBuf,
     process_registry_path: &std::path::Path,
@@ -1324,6 +1311,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     scenario: RuntimePerfScenario,
     root: PathBuf,
 ) -> anyhow::Result<BenchmarkRuntime> {
+    let wiring = scenario.wiring();
     let mode_id = scenario.execution_mode();
     let provider = benchmark_provider(scenario).into_handle();
     let mut plugin_stack =
@@ -1335,29 +1323,13 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let process_env_db = root.join("process-env.db");
     let process_db = root.join("processes.db");
     let triggers_db = root.join("triggers.db");
-    let effect_host = Arc::new(
+    let effect_host: Arc<dyn lash_core::EffectHost> = Arc::new(
         lash_sqlite_store::SqliteEffectHost::open(&effects_db)
             .await
             .map_err(|err| anyhow::anyhow!(err.to_string()))?,
     );
-    plugin_stack.push(Arc::new(StaticPluginFactory::new(
-        "runtime_perf_tools",
-        PluginSpec::new().with_tool_provider(Arc::new(BenchmarkEchoTool::new(effect_host.clone()))),
-    )));
-    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnSqlite)
-        || scenario.is_high_traffic()
-    {
-        plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
-            Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
-                lash_subagents::StaticCapability::new(
-                    "default",
-                    lash_core::facade_support::SessionSpec::inherit(),
-                ),
-            ))),
-        )));
-    }
-    if scenario.is_high_traffic() {
-        plugin_stack.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
+    for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
+        plugin_stack.push(factory);
     }
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         attachments_root,
@@ -1383,9 +1355,9 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let (store_factory, store_metrics): (
         Arc<dyn lash_core::SessionStoreFactory>,
         Arc<RuntimePerfStoreMetrics>,
-    ) = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen) {
-        // Keep this DEFAULT scenario on its pre-PR construction path: it is a
-        // store-reopen measurement, not a decorated durable commit measurement.
+    ) = if !wiring.measure_commit_bytes {
+        // Store-reopen scenarios stay on their pre-decoration construction
+        // path: they measure reopen, not decorated durable commits.
         (
             Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
                 sessions_root,
@@ -1397,11 +1369,8 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     };
     let commit_budget = lash::CommitBudget::bounded(1024 * 1024, 512);
     let core = match mode_id {
-        ExecutionMode::Standard => BenchmarkCore::Standard(
-            lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-                .with_native_queued_work()
-                .provider(provider)
-                .model(benchmark_model_spec())
+        ExecutionMode::Standard => {
+            let mut builder = benchmark_standard_builder(provider)
                 .effect_host(effect_host.clone())
                 .attachment_store(attachment_store.clone())
                 .commit_budget(commit_budget)
@@ -1410,30 +1379,20 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 .process_registry(process_registry.clone())
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
-                .plugins(plugin_stack)
-                .with_manual_queue_drain(scenario)
-                .build(runtime_perf_owner())?,
-        ),
+                .plugins(plugin_stack);
+            if !wiring.queued_work {
+                builder = builder.without_queued_work();
+            }
+            BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
+        }
         ExecutionMode::Rlm => {
             let artifact_store = Arc::new(
                 lash_sqlite_store::Store::open(&artifacts_db)
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?,
             );
-            let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash_protocol_rlm::RlmChannel::Cell)
-                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                artifact_store,
-            );
-            BenchmarkCore::Rlm(
-                lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-                    .with_native_queued_work()
-                    .provider(provider)
-                    .model(benchmark_model_spec())
+            let mut builder =
+                benchmark_rlm_builder(provider, benchmark_rlm_protocol_factory(artifact_store))
                     .effect_host(effect_host.clone())
                     .attachment_store(attachment_store.clone())
                     .commit_budget(commit_budget)
@@ -1442,16 +1401,16 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .process_registry(process_registry.clone())
                     .trigger_store(trigger_store.clone())
                     .store_factory(store_factory.clone())
-                    .plugins(plugin_stack)
-                    .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
-                    .with_manual_queue_drain(scenario)
-                    .build(runtime_perf_owner())?,
-            )
+                    .plugins(plugin_stack);
+            if !wiring.queued_work {
+                builder = builder.without_queued_work();
+            }
+            BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
     };
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core.open_session(session_id.clone()).await?;
-    let persistence = if scenario.is_queued_work_contention() {
+    let persistence = if wiring.session_store_handle {
         Some(
             store_factory
                 .open_existing_store_by_id(&session_id)
@@ -1481,12 +1440,13 @@ pub(crate) async fn build_runtime_with_postgres_store(
     scenario: RuntimePerfScenario,
     database_url: &str,
 ) -> anyhow::Result<BenchmarkRuntime> {
+    let wiring = scenario.wiring();
     let mode_id = scenario.execution_mode();
     let provider = benchmark_provider(scenario).into_handle();
     let postgres = lash_postgres_store::PostgresStorage::connect(database_url)
         .await
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    let effect_host = Arc::new(postgres.effect_host());
+    let effect_host: Arc<dyn lash_core::EffectHost> = Arc::new(postgres.effect_host());
     let process_env_store = Arc::new(postgres.process_env_store());
     let process_registry = Arc::new(postgres.process_registry());
     let trigger_store = Arc::new(postgres.trigger_store());
@@ -1495,32 +1455,13 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let commit_budget = lash::CommitBudget::bounded(1024 * 1024, 512);
     let mut plugin_stack =
         runtime_perf_plugin_stack(scenario.uses_rolling_history(), mode_id.is_standard());
-    plugin_stack.push(Arc::new(StaticPluginFactory::new(
-        "runtime_perf_tools",
-        PluginSpec::new().with_tool_provider(Arc::new(BenchmarkEchoTool::new(effect_host.clone()))),
-    )));
-    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnPostgres)
-        || scenario.is_high_traffic()
-    {
-        plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
-            Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
-                lash_subagents::StaticCapability::new(
-                    "default",
-                    lash_core::facade_support::SessionSpec::inherit(),
-                ),
-            ))),
-        )));
-    }
-    if scenario.is_high_traffic() {
-        plugin_stack.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
+    for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
+        plugin_stack.push(factory);
     }
 
     let core = match mode_id {
-        ExecutionMode::Standard => BenchmarkCore::Standard(
-            lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-                .with_native_queued_work()
-                .provider(provider)
-                .model(benchmark_model_spec())
+        ExecutionMode::Standard => {
+            let mut builder = benchmark_standard_builder(provider)
                 .effect_host(effect_host.clone())
                 .attachment_store(attachment_store.clone())
                 .commit_budget(commit_budget)
@@ -1529,38 +1470,30 @@ pub(crate) async fn build_runtime_with_postgres_store(
                 .process_registry(process_registry.clone())
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
-                .plugins(plugin_stack)
-                .with_manual_queue_drain(scenario)
-                .build(runtime_perf_owner())?,
-        ),
+                .plugins(plugin_stack);
+            if !wiring.queued_work {
+                builder = builder.without_queued_work();
+            }
+            BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
+        }
         ExecutionMode::Rlm => {
-            let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash_protocol_rlm::RlmChannel::Cell)
-                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                Arc::new(postgres.lashlang_artifact_store()),
-            );
-            BenchmarkCore::Rlm(
-                lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-                    .with_native_queued_work()
-                    .provider(provider)
-                    .model(benchmark_model_spec())
-                    .effect_host(effect_host.clone())
-                    .attachment_store(attachment_store.clone())
-                    .commit_budget(commit_budget)
-                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-                    .process_env_store(process_env_store.clone())
-                    .process_registry(process_registry.clone())
-                    .trigger_store(trigger_store.clone())
-                    .store_factory(store_factory.clone())
-                    .plugins(plugin_stack)
-                    .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
-                    .with_manual_queue_drain(scenario)
-                    .build(runtime_perf_owner())?,
+            let mut builder = benchmark_rlm_builder(
+                provider,
+                benchmark_rlm_protocol_factory(Arc::new(postgres.lashlang_artifact_store())),
             )
+            .effect_host(effect_host.clone())
+            .attachment_store(attachment_store.clone())
+            .commit_budget(commit_budget)
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .process_env_store(process_env_store.clone())
+            .process_registry(process_registry.clone())
+            .trigger_store(trigger_store.clone())
+            .store_factory(store_factory.clone())
+            .plugins(plugin_stack);
+            if !wiring.queued_work {
+                builder = builder.without_queued_work();
+            }
+            BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
     };
     let session_id = SessionId::from(format!(
@@ -1569,7 +1502,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
         uuid::Uuid::new_v4()
     ));
     let session = core.open_session(session_id.clone()).await?;
-    let persistence = if scenario.is_queued_work_contention() {
+    let persistence = if wiring.session_store_handle {
         Some(
             store_factory
                 .open_existing_store_by_id(&session_id)
