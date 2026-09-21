@@ -126,6 +126,97 @@ pub async fn a_reopen_dispatches_the_retained_membership<F: Fn() -> Host>(make: 
         .expect("the group closes");
 }
 
+/// W2 — a reopen reissues each child's **original identity**, never a fresh
+/// unrelated call (ADR 0099 §3, crash window W2).
+///
+/// The window is "after dispatch, before the child's invocation id was
+/// published". Identity here is the child's replay key and its canonical
+/// envelope hash: a dispatch under a different key claims a different journal
+/// row, so the effect runs a second time. The law reads that directly — a
+/// reopen whose caller offers differently-keyed children must still settle at
+/// the *recorded* ranks, with the outcomes the first dispatch recorded, and
+/// must not run any effect again.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_reopen_reissues_each_childs_original_identity<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let opener = make();
+    let scoped = opener
+        .scoped(scope(prefix, "w2-identity"))
+        .expect("a scope binds");
+    let key = group_key(prefix, "w2-identity");
+
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counted = |runs: &Arc<AtomicUsize>, position: usize| {
+        let runs = Arc::clone(runs);
+        RuntimeEffectLocalExecutor::testing(move |_| {
+            let runs = Arc::clone(&runs);
+            async move {
+                runs.fetch_add(1, Ordering::SeqCst);
+                Ok(outcome_of(position))
+            }
+        })
+    };
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(staged(
+            group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![counted(&runs, 0), counted(&runs, 1)],
+        ))
+        .await
+        .expect("the group opens");
+    let first = next(&scoped, &mut handle).await.expect("rank 1 is served");
+    let second = next(&scoped, &mut handle).await.expect("rank 2 is served");
+    assert_eq!(runs.load(Ordering::SeqCst), 2, "each child ran once");
+    drop(handle);
+    drop(scoped);
+    drop(opener);
+
+    let successor = make();
+    let scoped = successor
+        .scoped(scope(prefix, "w2-identity"))
+        .expect("a scope binds");
+    let impostor = Arc::new(AtomicUsize::new(0));
+    let mut reopened = scoped
+        .controller()
+        .open_effect_group(partially_staged(
+            impostor_group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![
+                Some(counts_then_parks(&impostor)),
+                Some(counts_then_parks(&impostor)),
+            ],
+        ))
+        .await
+        .expect("a journaled group reopens");
+
+    // The recorded ranks, with the recorded outcomes. A fresh identity would
+    // have claimed an empty row and run the effect a second time.
+    let replayed_first = next(&scoped, &mut reopened).await.expect("rank 1 replays");
+    let replayed_second = next(&scoped, &mut reopened).await.expect("rank 2 replays");
+    assert_eq!(
+        (replayed_first.position, replayed_second.position),
+        (first.position, second.position),
+        "a reopen serves the settlements the first dispatch recorded"
+    );
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        2,
+        "recovery reissues the original identity, so no effect runs twice"
+    );
+    assert_eq!(
+        impostor.load(Ordering::SeqCst),
+        0,
+        "the caller's differently-keyed children are never dispatched"
+    );
+    close(&scoped, reopened, RUN)
+        .await
+        .expect("the group closes");
+}
+
 /// A group whose children carry replay keys no accepted child has.
 ///
 /// Same key, arity, wake rule and declared disposition, so the durable reopen

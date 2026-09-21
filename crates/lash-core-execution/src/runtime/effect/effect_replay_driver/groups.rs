@@ -352,7 +352,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         let offered = accepted_membership(&group, self.clock.timestamp_ms())?;
         let persisted = self.row_store.open_group(&record, &offered).await?;
         fence_reopen(&record, &persisted)?;
-        let Some((replay_keys, executors)) = prepared else {
+        let Some((offered_replay_keys, offered_executors)) = prepared else {
             // Already running here. The durable fence above has judged the
             // shape, so there is nothing left to check and nothing to dispatch.
             return Ok(handle);
@@ -377,6 +377,33 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             .read_group_membership(group.group_key())
             .await?;
         let group = reconstruct_group(&group, retained, self.vocabulary())?;
+        // Re-keyed onto the reconstructed group, not carried over positionally.
+        //
+        // The position map and the executor vector are both indexed by child,
+        // so taking them from a different vector than the one being dispatched
+        // pairs each accepted child with a stranger's runner and leaves
+        // `decode_settlement` unable to map a recorded replay key back to a
+        // position at all. Matching on the replay key instead is what makes the
+        // two vectors commensurable: it is the child's durable identity, so a
+        // caller that offered the accepted children keeps its runners, and a
+        // caller that offered different ones has simply staged nothing for the
+        // children that exist.
+        //
+        // Re-*resolving* is not the fix: the resolution above consumed this
+        // host's staged runners, and asking again would find none. It also
+        // cannot move below the write, because running before the group row
+        // exists is what lets a routing refusal journal nothing.
+        let replay_keys = replay_keys_of(&group)?;
+        let mut offered: HashMap<&str, RuntimeEffectLocalExecutor<'static>> = offered_replay_keys
+            .iter()
+            .map(String::as_str)
+            .zip(offered_executors)
+            .filter_map(|(key, executor)| executor.map(|executor| (key, executor)))
+            .collect();
+        let executors = replay_keys
+            .iter()
+            .map(|key| offered.remove(key.as_str()))
+            .collect::<Vec<_>>();
         let dispatched = executors
             .iter()
             .filter(|executor| executor.is_some())

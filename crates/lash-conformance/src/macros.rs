@@ -629,6 +629,7 @@ macro_rules! effect_group_host_tests {
             (a_reopen_is_fenced_on_shape_and_runs_no_child_twice, "group-reopen", wired),
             (a_second_host_instance_reads_the_ranks_the_first_recorded, "group-handoff", wired),
             (a_reopen_dispatches_the_retained_membership, "group-w1-membership", wired),
+            (a_reopen_reissues_each_childs_original_identity, "group-w2-identity", wired),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
