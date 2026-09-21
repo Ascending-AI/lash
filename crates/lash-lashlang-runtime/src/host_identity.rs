@@ -19,15 +19,42 @@ use lashlang::LashlangExecutionCallSite;
 ///
 /// ADR 0099 §1 knows three openers — a turn, a queued-work drain and a process
 /// incarnation — and `ExecutionScope` has two more kinds, `SessionDelete` and
-/// `RuntimeOperation`, which run no cells at all. This is a refusal rather
-/// than a fourth arm: widening the opener is a contract decision, and
-/// inventing an identity here would hide the site that needed it.
+/// `RuntimeOperation`, which run no cells at all. These are refusals rather
+/// than extra arms: widening the opener is a contract decision, and inventing
+/// an identity here would hide the site that needed it.
 #[derive(Debug, thiserror::Error)]
-#[error(
-    "lashlang execution has no logical opener: {scope_kind} scope names neither a turn nor a process incarnation"
-)]
-pub struct LashlangOpenerError {
-    scope_kind: &'static str,
+pub enum LashlangOpenerError {
+    /// A scope kind that is not an opener at all.
+    #[error(
+        "lashlang execution has no logical opener: {scope_kind} scope names neither a turn, a queued-work drain nor a process incarnation"
+    )]
+    NotAnOpener {
+        /// The scope kind, for the diagnostic.
+        scope_kind: &'static str,
+    },
+    /// A process scope whose run bound no incarnation.
+    ///
+    /// `ExecutionScope::Process` carries the reusable process *name*, so the
+    /// name alone cannot be the opener: it would alias every earlier
+    /// incarnation's groups, closes and cancellation fences (ADR 0099 §1).
+    /// The process runner binds the admitted incarnation onto the scoped
+    /// effect controller, so this refusal means the execution did not come
+    /// through a process runner at all.
+    #[error(
+        "lashlang execution under process `{process_id}` was not admitted with an incarnation, so it has no logical opener"
+    )]
+    ProcessWithoutIncarnation {
+        /// The reusable process name the scope carried.
+        process_id: String,
+    },
+    /// A process scope carrying an incarnation of some other process.
+    #[error("lashlang execution under process `{process_id}` was admitted as process `{admitted}`")]
+    ProcessMismatch {
+        /// The process the scope names.
+        process_id: String,
+        /// The process the admitted incarnation names.
+        admitted: String,
+    },
 }
 
 /// The opener a cell's scope names, or a refusal.
@@ -37,11 +64,20 @@ pub struct LashlangOpenerError {
 /// included — under `ExecutionScope::QueueDrain` (`crates/lash/src/turn.rs`,
 /// `execution_scope`), so a drain is an opener in its own right.
 ///
-/// A process scope cannot answer here: `ExecutionScope::Process` carries the
-/// reusable name and not the store-minted incarnation, so a process body builds
-/// its opener from the incarnation its run was admitted under instead
-/// ([`LashlangHostIdentities::process_body`]).
-pub fn cell_opener_for_scope(scope: &ExecutionScope) -> Result<EffectOpener, LashlangOpenerError> {
+/// So is a cell under a process scope. A `ProcessInput::SessionTurn` row — the
+/// shape every `agents.spawn` child takes — runs a whole child session turn
+/// under `ExecutionScope::Process`
+/// (`SessionTurnRequest::new_process_backed` requires exactly that scope), and
+/// that turn's cells are opened by the process, not by the child turn: a
+/// worker retry keeps the incarnation and reuses the journal, while a
+/// re-registration is a different opener. The scope alone cannot say which,
+/// which is why `admitted_process` is an argument here: it is the incarnation
+/// the process runner bound onto the scoped controller, and its absence is
+/// refused rather than filled in with the reusable name.
+pub fn cell_opener_for_scope(
+    scope: &ExecutionScope,
+    admitted_process: Option<&ProcessRef>,
+) -> Result<EffectOpener, LashlangOpenerError> {
     match scope {
         ExecutionScope::Turn {
             session_id,
@@ -54,13 +90,22 @@ pub fn cell_opener_for_scope(scope: &ExecutionScope) -> Result<EffectOpener, Las
             session_id.clone(),
             drain_id.clone(),
         )),
-        ExecutionScope::Process { .. } => Err(LashlangOpenerError {
-            scope_kind: "process",
-        }),
-        ExecutionScope::SessionDelete { .. } => Err(LashlangOpenerError {
+        ExecutionScope::Process { process_id } => match admitted_process {
+            Some(process_ref) if process_ref.process_id == *process_id => {
+                Ok(EffectOpener::process(process_ref.clone()))
+            }
+            Some(process_ref) => Err(LashlangOpenerError::ProcessMismatch {
+                process_id: process_id.to_string(),
+                admitted: process_ref.process_id.to_string(),
+            }),
+            None => Err(LashlangOpenerError::ProcessWithoutIncarnation {
+                process_id: process_id.to_string(),
+            }),
+        },
+        ExecutionScope::SessionDelete { .. } => Err(LashlangOpenerError::NotAnOpener {
             scope_kind: "session-delete",
         }),
-        ExecutionScope::RuntimeOperation { .. } => Err(LashlangOpenerError {
+        ExecutionScope::RuntimeOperation { .. } => Err(LashlangOpenerError::NotAnOpener {
             scope_kind: "runtime-operation",
         }),
     }
@@ -184,6 +229,107 @@ mod tests {
             name,
             ProcessIncarnation::from_registration_sequence(incarnation),
         ))
+    }
+
+    fn process_ref(name: &str, incarnation: u64) -> ProcessRef {
+        ProcessRef::new(
+            name,
+            ProcessIncarnation::from_registration_sequence(incarnation),
+        )
+    }
+
+    /// A cell of a process-backed session turn is opened by its process.
+    ///
+    /// This is the production shape every `agents.spawn` child takes: the
+    /// subagent row is a `ProcessInput::SessionTurn`, and
+    /// `SessionTurnRequest::new_process_backed` requires the child turn to run
+    /// under `ExecutionScope::Process`. Refusing that scope took every subagent
+    /// cell's first tool call out at the knees — `task.fail(...)` came back as
+    /// "has no logical opener", the child's driver re-asked the provider until
+    /// its cap, and the parent read `Stopped(MaxTurns)` instead of the child's
+    /// own reason.
+    #[test]
+    fn a_cell_under_a_process_scope_opens_on_the_admitted_incarnation() {
+        let scope = ExecutionScope::process("process:subagent:call-1");
+        let admitted = process_ref("process:subagent:call-1", 3);
+
+        let opener =
+            cell_opener_for_scope(&scope, Some(&admitted)).expect("a process is an opener");
+
+        assert_eq!(opener, EffectOpener::process(admitted));
+        assert_eq!(
+            opener.render(),
+            "process:process:subagent:call-1:incarnation:3"
+        );
+    }
+
+    /// The incarnation is what keeps a reused process name apart, so two
+    /// incarnations of one process-backed turn mint different identities while
+    /// a worker retry of the same incarnation mints the same ones.
+    #[test]
+    fn two_incarnations_of_one_process_backed_cell_mint_distinct_identities() {
+        let scope = ExecutionScope::process("process:subagent:call-1");
+        let site = call_site("resource_operation:aaaa", 1);
+        let identities = |incarnation| {
+            LashlangHostIdentities::cell(
+                cell_opener_for_scope(
+                    &scope,
+                    Some(&process_ref("process:subagent:call-1", incarnation)),
+                )
+                .expect("a process is an opener"),
+                "cell:1",
+            )
+        };
+
+        assert_ne!(
+            identities(1).leaf("tool:task.fail", &site),
+            identities(2).leaf("tool:task.fail", &site),
+            "a re-registered process is a different opener (ADR 0099 §1)"
+        );
+        assert_eq!(
+            identities(1).leaf("tool:task.fail", &site),
+            identities(1).leaf("tool:task.fail", &site),
+            "a worker retry keeps the incarnation, so it re-derives the same identity"
+        );
+    }
+
+    /// The name alone is never the opener.
+    ///
+    /// `ExecutionScope::Process` carries the reusable name, and a run that
+    /// reached here without a process runner binding its admitted incarnation
+    /// has no opener to mint under — refused, rather than silently aliasing
+    /// every earlier incarnation of that name.
+    #[test]
+    fn a_process_scope_without_an_admitted_incarnation_is_refused() {
+        let error = cell_opener_for_scope(&ExecutionScope::process("worker"), None)
+            .expect_err("the reusable name is not an opener");
+
+        assert!(
+            matches!(
+                &error,
+                LashlangOpenerError::ProcessWithoutIncarnation { process_id } if process_id == "worker"
+            ),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    /// An incarnation of another process cannot open this one's work.
+    #[test]
+    fn an_admitted_incarnation_of_another_process_is_refused() {
+        let error = cell_opener_for_scope(
+            &ExecutionScope::process("worker"),
+            Some(&process_ref("indexer", 1)),
+        )
+        .expect_err("the admitted process must be the scope's process");
+
+        assert!(
+            matches!(
+                &error,
+                LashlangOpenerError::ProcessMismatch { process_id, admitted }
+                    if process_id == "worker" && admitted == "indexer"
+            ),
+            "unexpected refusal: {error}"
+        );
     }
 
     /// ADR 0099 §1: a re-registered process name is a different opener.

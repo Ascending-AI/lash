@@ -24,6 +24,15 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
             registration,
             incarnation,
         } = admitted;
+        // Every arm below runs work this process opened, and `ExecutionScope`
+        // names only the reusable process name (ADR 0099 §1). Bind the admitted
+        // incarnation onto the controller once, here, rather than in each arm:
+        // a session-turn row's cells read it back through their
+        // `RuntimeExecutionContext`, an engine row reads it off its run context,
+        // and a tool-call row that ever grows a cell inherits it for free.
+        let scoped_effect_controller = scoped_effect_controller
+            .with_admitted_process(crate::ProcessRef::new(registration.id.clone(), incarnation))
+            .map_err(crate::ProcessInfraError::new)?;
         let input = Arc::clone(&registration.input);
         // Hybrid process model by design:
         // - ToolCall, SessionTurn, and External are kernel primitives because

@@ -65,10 +65,13 @@ pub(super) struct HostBridgeConfig<'run> {
 ///
 /// Both arms are unreachable from the production entry: the turn driver always
 /// installs the code-execution effect as the parent invocation
-/// (`crates/lash-core/src/runtime/turn_driver/effects.rs`), and a turn always
-/// runs under `ExecutionScope::Turn`. They are refusals rather than fallbacks
-/// because the fallback that used to stand here — the bare session id — minted
-/// one identity for the first unsited call of every cell in a session.
+/// (`crates/lash-core/src/runtime/turn_driver/effects.rs`), and every scope a
+/// managed turn may run under is an opener — `Turn`, `QueueDrain`, or the
+/// `Process` scope a `ProcessInput::SessionTurn` row runs its child turn
+/// under, whose admitted incarnation the process runner binds onto the scoped
+/// controller. They are refusals rather than fallbacks because the fallback
+/// that used to stand here — the bare session id — minted one identity for the
+/// first unsited call of every cell in a session.
 #[derive(Debug, thiserror::Error)]
 enum LashlangCellOpener {
     #[error("lashlang cell runs outside a code-execution effect, so it has no logical opener")]
@@ -86,20 +89,24 @@ impl<'run> HostBridge<'run> {
         // resolved once from the code-execution effect the turn driver
         // installed (`turn_driver/effects.rs` always sets the parent
         // invocation). The opener is the turn; the replay key is the cell.
+        let admitted_process = config.ctx.admitted_process();
         let identities = config
             .ctx
             .parent_invocation()
             .and_then(lash_core::RuntimeInvocation::effect_address)
             .ok_or(LashlangCellOpener::NoEffect)
             .and_then(|address| {
-                lash_lashlang_runtime::cell_opener_for_scope(&address.execution_scope)
-                    .map(|opener| {
-                        lash_lashlang_runtime::LashlangHostIdentities::cell(
-                            opener,
-                            address.replay_key.clone(),
-                        )
-                    })
-                    .map_err(LashlangCellOpener::Scope)
+                lash_lashlang_runtime::cell_opener_for_scope(
+                    &address.execution_scope,
+                    admitted_process.as_ref(),
+                )
+                .map(|opener| {
+                    lash_lashlang_runtime::LashlangHostIdentities::cell(
+                        opener,
+                        address.replay_key.clone(),
+                    )
+                })
+                .map_err(LashlangCellOpener::Scope)
             });
         Self {
             identities,
