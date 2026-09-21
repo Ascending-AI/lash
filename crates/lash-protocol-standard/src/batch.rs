@@ -79,6 +79,44 @@ mod tests {
     }
 
     #[test]
+    fn batch_result_row_keys_match_the_declared_output_schema() {
+        let item_schema = &batch_output_schema()["properties"]["results"]["items"];
+        let declared_keys: std::collections::BTreeSet<&str> = item_schema["properties"]
+            .as_object()
+            .expect("row properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let required_keys: std::collections::BTreeSet<&str> = item_schema["required"]
+            .as_array()
+            .expect("row required")
+            .iter()
+            .map(|key| key.as_str().expect("required key"))
+            .collect();
+
+        for row in [
+            BatchResultRow::success(0, "tool:alpha", 0, serde_json::json!("ok")),
+            BatchResultRow::failure(1, "tool:beta", 0, serde_json::json!("boom")),
+        ] {
+            let serialized = serde_json::to_value(&row).expect("row serializes");
+            let keys: std::collections::BTreeSet<&str> = serialized
+                .as_object()
+                .expect("row object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert!(
+                keys.is_subset(&declared_keys),
+                "row keys {keys:?} must be a subset of the declared properties {declared_keys:?}"
+            );
+            assert!(
+                required_keys.is_subset(&keys),
+                "row keys {keys:?} must cover the required keys {required_keys:?}"
+            );
+        }
+    }
+
+    #[test]
     fn batch_result_row_decode_names_missing_required_field() {
         let error = serde_json::from_value::<BatchResultRow>(serde_json::json!({
             "index": 0,
