@@ -714,9 +714,12 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         // contribute the same fixed 63-byte cost to both.
         // The pinned sizes gained two bytes with the single-language cutover:
         // the checkpoint carries the engine id, and `typescript` is two bytes
-        // longer than the retired `lashlang`.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_580);
-        assert_eq!(changed_budget.checkpoint_bytes, 14_098);
+        // longer than the retired `lashlang`. FIG-3394 added 278 bytes to both:
+        // the fixture now carries a production effect address, so the root
+        // persists the two deferred-resolution link identities it always
+        // persisted in production — once per checkpoint, not per component.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_858);
+        assert_eq!(changed_budget.checkpoint_bytes, 14_376);
     });
 }
 
