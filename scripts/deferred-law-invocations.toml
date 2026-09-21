@@ -1,0 +1,32 @@
+# Deferred conformance laws (FIG-3472). One [[deferred]] row per `#[ignore]`d
+# `*_tests!` invocation, naming the recipe that runs it, the CI job and matrix
+# entry that carry the recipe, and the artifact the lane's receipts land in.
+# The census fails both ways: an ignored invocation with no row is an
+# unchecked exemption, and a row naming no real ignored invocation is stale.
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
+suite = "effect_group_host_tests"
+recipe = "effect-group-conformance-e2e"
+ci_job = "functional-e2e"
+ci_matrix_name = "effect-group-conformance"
+receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law-receipts.txt"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
+suite = "effect_group_cancelled_child_terminal_tests"
+recipe = "effect-group-conformance-e2e"
+ci_job = "functional-e2e"
+ci_matrix_name = "effect-group-conformance"
+receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law-receipts.txt"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
+suite = "effect_host_await_event_witness_tests"
+recipe = "effect-group-conformance-e2e"
+ci_job = "functional-e2e"
+ci_matrix_name = "effect-group-conformance"
+receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law-receipts.txt"

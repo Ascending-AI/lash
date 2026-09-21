@@ -58,5 +58,6 @@ tracing-subscriber = { workspace = true, optional = true }
 [dev-dependencies]
 insta = "1"
 proptest = "1"
+syn = { version = "2", features = ["full"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

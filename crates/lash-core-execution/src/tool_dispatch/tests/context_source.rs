@@ -2,31 +2,33 @@
 //! rebind checklist is proven against the declaration rather than a second
 //! hand-maintained list.
 
-/// The `pub <name>:` fields of `pub struct ToolDispatchContext`, in order.
+/// Every named field of `pub struct ToolDispatchContext`, in order — parsed
+/// structurally, so visibility, attributes, and multiline declarations are
+/// all collected. A private field escapes the checklist exactly as well as a
+/// public one, which is why this exists.
 pub(super) fn dispatch_context_fields() -> Vec<String> {
     const SOURCE: &str = include_str!("../context.rs");
-    let start = SOURCE
-        .find("pub struct ToolDispatchContext")
-        .expect("ToolDispatchContext is declared in context.rs");
-    let body_start = SOURCE[start..]
-        .find('{')
-        .map(|offset| start + offset)
-        .expect("the struct has a body");
-    // The struct body ends at the first `}` that begins a line.
-    let tail = &SOURCE[body_start..];
-    let end = tail
-        .find("\n}")
-        .map(|offset| body_start + offset)
-        .expect("the struct body is closed");
-    tail[..end - body_start]
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            line.strip_prefix("pub ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(str::to_string)
+    let file = syn::parse_file(SOURCE).expect("context.rs parses");
+    let item = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Struct(item) if item.ident == "ToolDispatchContext" => Some(item),
+            _ => None,
         })
-        .collect()
+        .expect("ToolDispatchContext is declared in context.rs");
+    match &item.fields {
+        syn::Fields::Named(fields) => fields
+            .named
+            .iter()
+            .map(|field| {
+                field
+                    .ident
+                    .as_ref()
+                    .expect("a named field has an ident")
+                    .to_string()
+            })
+            .collect(),
+        _ => panic!("ToolDispatchContext must keep named fields"),
+    }
 }

@@ -11,26 +11,48 @@ service (the FIG-3414 Postgres shape, where ``let Some(..) = .. else { return
 job simply never runs the binary.
 
 The receipts are the durable half of the fix: each generated test appends
-``law<TAB>label`` to ``$LASH_LAW_RECEIPTS`` (Cargo/nextest legs) or to
-``$TEST_UNDECLARED_OUTPUTS_DIR/law-receipts.txt`` (Bazel legs, collected into
-``bazel-testlogs/<pkg>/<target>/test.outputs/``).  This census is the other
-half: for each claimed unit it recomputes the registered law set from
-``macros.rs`` and the crate's own ``*_tests!`` invocations, and fails on any
-law that produced no receipt.  A receipt naming no registered law is also a
-failure -- a stale or fabricated record is not evidence either.
+``claimant<TAB>law<TAB>label`` to ``$LASH_LAW_RECEIPTS`` (Cargo/nextest legs)
+or to ``$TEST_UNDECLARED_OUTPUTS_DIR/law-receipts.txt`` (Bazel legs, collected
+into ``bazel-testlogs/<pkg>/<target>/test.outputs/``).  The claimant is the
+module path at the invocation site (``module_path!()``), whose first segment
+is the test binary's crate name -- so ``mod native`` and ``mod sqlite``
+invocations of one suite in one binary are separate obligations, and a receipt
+from one can never satisfy the other (FIG-3472).
+
+This census is the other half: it walks each claimed crate's module tree,
+records every ``*_tests!(`` invocation with the claimant it will expand under,
+and compares the multiset of registered laws per claimant against the
+receipts, exactly:
+
+* a registered law with fewer receipts than invocations is missing;
+* a receipt naming a (law, label) the claimant does not owe is a bug in the
+  receipt -- stale, fabricated, or emitted under the wrong claimant;
+* more receipts than invocations is a duplicate;
+* a claimant with receipts but no expectation fails too.
+
+``#[ignore]``d invocations are deferred laws, not exemptions: every ignored
+invocation must be named by ``scripts/deferred-law-invocations.toml`` with the
+recipe, CI job, and receipt artifact that owns its execution, and every
+manifest entry must name a real ignored invocation (a stale entry fails the
+same way a missing one does).  ``--deferred <recipe>`` censuses a deferred
+lane's receipts against the manifest's entries for that recipe.
 
 Claims are passed explicitly so each CI job asserts exactly the coverage it
 executes:
 
 * ``--crate <dir>``: every ``*_tests!`` invocation anywhere under the crate.
   The ``cargo test -p`` legs run every target in the package, so the claim is
-  the whole crate.
+  the whole crate.  Claims never union: expectations stay per claimant, and a
+  repeated ``--crate`` does not double-count an invocation site.
 * ``--test-file <file>``: invocations in one test-root file plus its
   ``#[path]``/``mod`` includes -- the per-binary claim.
 * ``--labels <file> --crate-root <dir>``: a Bazel label file such as
   ``tools/bazel/postgres_test_labels.txt``, resolved to test-root files the
   same way the generator names them.
-* ``--suite <name>``: one ``*_tests!`` macro's full catalogue.
+* ``--suite <name>``: every live invocation of that ``*_tests!`` macro across
+  all crates under ``crates/``, ``examples/``, and ``runbooks/``, per
+  claimant.
+* ``--deferred <recipe>``: the deferred manifest's entries for one recipe.
 * ``--bazel-testlogs <dir>``: self-describing per-target mode for Bazel legs.
   Every test target that ran is discovered under
   ``<dir>/crates/<pkg>/<target>/``; each law-bearing target must have left a
@@ -43,26 +65,40 @@ from __future__ import annotations
 
 import argparse
 import ast
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import sys
+import tomllib
 import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = ROOT / "crates/lash-conformance/src/macros.rs"
 WORKSPACE_TARGETS = ROOT / "tools/bazel/workspace_targets.bzl"
+DEFERRED_MANIFEST = ROOT / "scripts/deferred-law-invocations.toml"
 RECEIPT_NAME = "law-receipts.txt"
 
 CATALOGUE_ROW = re.compile(r"\(\s*([a-z_][a-z0-9_]*)\s*,\s*\"([^\"]*)\"")
 SUITE_CALL = re.compile(r"\b([a-z_][a-z0-9_]*_tests)\s*!")
 SUITE_DEFINE = re.compile(r"macro_rules!\s+([a-z_][a-z0-9_]*_tests)\b")
 DELEGATE_CALL = re.compile(r"\b([a-z_][a-z0-9_]*_tests)\s*!\s*\(\s*@([a-z_]+)")
-PATH_INCLUDE = re.compile(r"#\[\s*path\s*=\s*\"([^\"]+)\"\s*\]\s*(?:\n\s*)*mod\b")
-MOD_INCLUDE = re.compile(r"^\s*(?:pub\s+)?mod\s+([a-z_][a-z0-9_]*)\s*;", re.MULTILINE)
 LINE_COMMENT = re.compile(r"//[^\n]*")
+BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 TEST_TARGET = re.compile(r'name\s*=\s*"([^"]+)"')
+
+IGNORE_HEAD = re.compile(r"\s*\(\s*#\s*\[\s*ignore\b")
+
+# One module-tree token: a `#[path = "..."]` attribute (remembered for the
+# next `mod` declaration), a `mod x;` / `mod x {` declaration, an
+# `include!("...")` textual include, or a `*_tests!(` invocation.
+MODULE_TOKEN = re.compile(
+    r"#\[\s*path\s*=\s*\"(?P<path>[^\"]+)\"\s*\]"
+    r"|(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?P<mod>[a-zA-Z_][a-zA-Z0-9_]*)\s*(?P<term>[;{])"
+    r"|include!\s*\(\s*\"(?P<include>[^\"]+)\"\s*\)"
+    r"|(?P<suite>\b[a-z_][a-z0-9_]*_tests\s*!)"
+)
 
 
 @dataclass
@@ -70,6 +106,17 @@ class Macro:
     name: str
     # (arm pattern head, arm body text) -- a list, since two arms may share a head
     arms: list[tuple[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Invocation:
+    """One ``*_tests!(`` call site, under the claimant it expands for."""
+
+    claimant: str
+    suite: str
+    ignored: bool
+    file: Path
+    line: int
 
 
 def split_top_level(text: str) -> list[str]:
@@ -190,73 +237,211 @@ def suite_expected(macros: dict[str, Macro], name: str) -> set[tuple[str, str]]:
 
 
 def strip_comments(text: str) -> str:
-    """Remove ``//`` line comments so `// No foo_tests!:` notes don't claim."""
-    return LINE_COMMENT.sub("", text)
+    """Remove ``//`` and ``/* */`` comments so negations and docs don't claim."""
+    return LINE_COMMENT.sub("", BLOCK_COMMENT.sub("", text))
 
 
-def source_files(root_file: Path) -> list[Path]:
-    """A test-root file plus its ``#[path]`` and ``mod`` includes, recursively."""
-    seen: list[Path] = []
-    stack = [root_file]
-    visited: set[Path] = set()
-    while stack:
-        path = stack.pop()
-        path = path.resolve()
-        if path in visited or not path.is_file():
-            continue
-        visited.add(path)
-        seen.append(path)
-        text = strip_comments(path.read_text(encoding="utf-8"))
-        for inc in PATH_INCLUDE.findall(text):
-            stack.append(path.parent / inc)
-        for mod in MOD_INCLUDE.findall(text):
-            stack.append(path.parent / f"{mod}.rs")
-            stack.append(path.parent / mod / "mod.rs")
-    return seen
+def brace_match(text: str, open_index: int) -> int:
+    """The index of the ``}`` closing the ``{`` at ``open_index``."""
+    depth = 0
+    for i in range(open_index, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(text)
 
 
-def invoked_suites(text: str) -> set[str]:
-    return set(SUITE_CALL.findall(strip_comments(text))) - set(
-        SUITE_DEFINE.findall(text)
-    )
+def resolve_mod_file(declaring: Path, name: str, path_attr: str | None) -> Path | None:
+    """The file a ``mod name;`` in ``declaring`` refers to, or None.
 
-
-IGNORE_HEAD = re.compile(r"\s*\(\s*#\s*\[\s*ignore\b")
-
-
-def live_invoked_suites(text: str) -> set[str]:
-    """Invoked suites minus those whose every invocation is ``#[ignore]``d.
-
-    An ``#[ignore]`` attribute passed at the call site lands on every test the
-    suite generates: the laws stay registered but are deferred to the lane the
-    ignore reason names, so this file's target owes no receipt for them. A
-    suite invoked once ignored and once live still owes its receipts.
+    From ``lib.rs``/``main.rs``/``mod.rs`` the module lives at
+    ``<dir>/<name>.rs`` or ``<dir>/<name>/mod.rs``; from any other file it
+    lives under ``<dir>/<stem>/`` instead.  ``#[path = "..."]`` overrides the
+    file name under the same base directory.
     """
-    stripped = strip_comments(text)
-    defined = set(SUITE_DEFINE.findall(stripped))
-    live: dict[str, bool] = {}
-    for m in SUITE_CALL.finditer(stripped):
-        name = m.group(1)
-        if name in defined:
+    if path_attr is not None:
+        # `#[path]` is relative to the declaring file's own directory even
+        # when that file is not lib.rs/main.rs/mod.rs (unlike plain `mod`).
+        candidate = declaring.parent / path_attr
+        return candidate if candidate.is_file() else None
+    if declaring.name in ("lib.rs", "main.rs", "mod.rs"):
+        base = declaring.parent
+    else:
+        base = declaring.parent / declaring.stem
+    for candidate in (base / f"{name}.rs", base / name / "mod.rs"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _scan_module_text(
+    text: str,
+    prefix: list[str],
+    file: Path,
+    out: list[Invocation],
+    stack: list[tuple[Path, list[str]]],
+    line_offset: int = 0,
+) -> None:
+    """One file (or inline-module body) of the module walk.
+
+    ``prefix`` is the module path the text expands under -- its first segment
+    is the crate name, which is what ``module_path!()`` (and therefore the
+    receipt's claimant column) reports.  ``mod x;`` declarations push their
+    resolved file onto ``stack``; inline ``mod x { ... }`` bodies are scanned
+    recursively with the path extended.
+    """
+    defined = set(SUITE_DEFINE.findall(text))
+    pending_path: str | None = None
+    pos = 0
+    while True:
+        m = MODULE_TOKEN.search(text, pos)
+        if m is None:
+            return
+        if m.group("path") is not None:
+            pending_path = m.group("path")
+            pos = m.end()
             continue
-        ignored = bool(IGNORE_HEAD.match(stripped, m.end()))
-        live[name] = live.get(name, False) or not ignored
-    return {name for name, is_live in live.items() if is_live}
+        if m.group("include") is not None:
+            # Textual include: the file's items land in *this* module, so its
+            # invocations carry this prefix, not a child path.
+            stack.append((file.parent / m.group("include"), prefix))
+            pos = m.end()
+            continue
+        if m.group("mod") is not None:
+            name = m.group("mod")
+            if m.group("term") == ";":
+                target = resolve_mod_file(file, name, pending_path)
+                if target is not None:
+                    stack.append((target, prefix + [name]))
+                pos = m.end()
+            else:
+                open_index = m.end() - 1
+                close = brace_match(text, open_index)
+                _scan_module_text(
+                    text[open_index + 1 : close],
+                    prefix + [name],
+                    file,
+                    out,
+                    stack,
+                    line_offset + text.count("\n", 0, open_index + 1),
+                )
+                pos = close + 1
+            pending_path = None
+            continue
+        suite = m.group("suite")
+        suite_name = suite[: suite.index("!")].strip()
+        if suite_name not in defined:
+            out.append(
+                Invocation(
+                    claimant="::".join(prefix),
+                    suite=suite_name,
+                    ignored=bool(IGNORE_HEAD.match(text, m.end())),
+                    file=file,
+                    line=line_offset + text.count("\n", 0, m.start()) + 1,
+                )
+            )
+        pos = m.end()
 
 
-def expected_for_files(files: list[Path], macros: dict[str, Macro]) -> set[tuple[str, str]]:
-    expected: set[tuple[str, str]] = set()
-    for path in files:
-        for suite in live_invoked_suites(path.read_text(encoding="utf-8")):
-            expected |= suite_expected(macros, suite)
-    return expected
+def invocations_in_root(root_file: Path, prefix: str) -> list[Invocation]:
+    """Every ``*_tests!`` invocation a crate root's module tree reaches."""
+    out: list[Invocation] = []
+    stack: list[tuple[Path, list[str]]] = [(root_file, [prefix])]
+    visited: set[tuple[Path, tuple[str, ...]]] = set()
+    while stack:
+        path, prefix_parts = stack.pop()
+        resolved = path.resolve()
+        key = (resolved, tuple(prefix_parts))
+        if key in visited or not resolved.is_file():
+            continue
+        visited.add(key)
+        _scan_module_text(
+            strip_comments(resolved.read_text(encoding="utf-8")),
+            prefix_parts,
+            resolved,
+            out,
+            stack,
+        )
+    return out
 
 
-def expected_for_crate(crate: Path, macros: dict[str, Macro]) -> set[tuple[str, str]]:
-    expected: set[tuple[str, str]] = set()
-    for path in sorted(crate.rglob("*.rs")):
-        expected |= expected_for_files([path], macros)
-    return expected
+def crate_manifest(crate: Path) -> dict:
+    manifest_path = crate / "Cargo.toml"
+    if not manifest_path.is_file():
+        return {}
+    return tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def crate_roots(crate: Path) -> list[tuple[str, Path]]:
+    """(claimant prefix, root file) for every compilation root of a package.
+
+    The first segment of ``module_path!()`` is the crate name: the ``[lib]``
+    name (or the package name with ``-`` -> ``_``) for ``src/lib.rs``, the bin
+    name for ``src/main.rs``/``[[bin]]``, the file stem for ``tests/*.rs``,
+    and the declared ``name`` for ``[[test]]``.
+    """
+    manifest = crate_manifest(crate)
+    package = manifest.get("package", {}).get("name", crate.name)
+    roots: list[tuple[str, Path]] = []
+
+    lib = manifest.get("lib", {})
+    lib_path = crate / lib.get("path", "src/lib.rs")
+    if lib_path.is_file():
+        roots.append((lib.get("name", package.replace("-", "_")), lib_path))
+
+    bin_paths: set[Path] = set()
+    for section in manifest.get("bin", []):
+        name = section.get("name")
+        path = crate / section.get("path", f"src/bin/{name}.rs")
+        if name and path.is_file():
+            roots.append((name, path))
+            bin_paths.add(path.resolve())
+    main = crate / "src/main.rs"
+    if main.is_file() and main.resolve() not in bin_paths:
+        roots.append((package.replace("-", "_"), main))
+
+    test_paths: set[Path] = set()
+    for section in manifest.get("test", []):
+        name = section.get("name")
+        path = crate / section.get("path", f"tests/{name}.rs")
+        if name and path.is_file():
+            roots.append((name, path))
+            test_paths.add(path.resolve())
+    tests_dir = crate / "tests"
+    if tests_dir.is_dir():
+        for path in sorted(tests_dir.glob("*.rs")):
+            if path.resolve() not in test_paths:
+                roots.append((path.stem, path))
+    return roots
+
+
+def invocations_in_crate(crate: Path) -> list[Invocation]:
+    out: list[Invocation] = []
+    for prefix, root in crate_roots(crate):
+        out.extend(invocations_in_root(root, prefix))
+    return out
+
+
+def root_prefix(crate: Path, root_file: Path) -> str:
+    """The claimant prefix a claim file expands under inside ``crate``."""
+    manifest = crate_manifest(crate)
+    package = manifest.get("package", {}).get("name", crate.name)
+    resolved = root_file.resolve()
+    lib = manifest.get("lib", {})
+    if resolved == (crate / lib.get("path", "src/lib.rs")).resolve():
+        return lib.get("name", package.replace("-", "_"))
+    for section in manifest.get("bin", []):
+        if resolved == (crate / section.get("path", f"src/bin/{section.get('name')}.rs")).resolve():
+            return section.get("name", root_file.stem)
+    if resolved == (crate / "src/main.rs").resolve():
+        return package.replace("-", "_")
+    for section in manifest.get("test", []):
+        if resolved == (crate / section.get("path", f"tests/{section.get('name')}.rs")).resolve():
+            return section.get("name", root_file.stem)
+    return root_file.stem
 
 
 def cargo_test_paths(crate_root: Path) -> dict[str, Path]:
@@ -264,28 +449,30 @@ def cargo_test_paths(crate_root: Path) -> dict[str, Path]:
     mapping: dict[str, Path] = {}
     cargo_toml = crate_root / "Cargo.toml"
     if cargo_toml.is_file():
-        text = cargo_toml.read_text(encoding="utf-8")
-        for section in re.findall(r"\[\[test\]\](.*?)(?=\n\[|\Z)", text, re.DOTALL):
-            name = TEST_TARGET.search(section)
-            path = re.search(r'path\s*=\s*"([^"]+)"', section)
+        manifest = crate_manifest(crate_root)
+        for section in manifest.get("test", []):
+            name = section.get("name")
+            path = section.get("path")
             if name and path:
-                mapping[name.group(1)] = crate_root / path.group(1)
-    for path in sorted((crate_root / "tests").glob("*.rs")) if (crate_root / "tests").is_dir() else []:
-        mapping.setdefault(path.stem, path)
+                mapping[name] = crate_root / path
+    tests_dir = crate_root / "tests"
+    if tests_dir.is_dir():
+        for path in sorted(tests_dir.glob("*.rs")):
+            mapping.setdefault(path.stem, path)
     return mapping
 
 
-def resolve_bazel_label(crate_root: Path, target: str) -> list[Path]:
-    """A ``<name>__test`` or ``<pkg>__unit_test`` label to its source files."""
+def resolve_bazel_label(crate_root: Path, target: str) -> list[tuple[str, Path]]:
+    """A ``<name>__test`` or ``<pkg>__unit_test`` label to (claimant, root)s."""
     if target.endswith("__unit_test"):
-        src = crate_root / "src"
-        files = [src / "lib.rs", src / "main.rs"]
-        return [f for f in files if f.is_file()] + [
-            p for p in sorted(src.rglob("*.rs")) if p.name not in ("lib.rs", "main.rs")
+        return [
+            (prefix, root)
+            for prefix, root in crate_roots(crate_root)
+            if root.name in ("lib.rs", "main.rs") or "/src/bin/" in str(root)
         ]
     name = target[: -len("__test")] if target.endswith("__test") else target
     root = cargo_test_paths(crate_root).get(name)
-    return [root] if root else []
+    return [(name, root)] if root else []
 
 
 def workspace_test_batches() -> dict[str, list[str]]:
@@ -307,8 +494,8 @@ def workspace_test_batches() -> dict[str, list[str]]:
     return ast.literal_eval(match.group(1))
 
 
-def resolve_label(label: str) -> list[Path]:
-    """A ``//package:target`` label to its test-root source files.
+def resolve_label(label: str) -> list[tuple[str, Path]]:
+    """A ``//package:target`` label to its (claimant prefix, test root)s.
 
     Batch members are not confined to ``crates/`` -- the generated mapping
     carries ``runbooks/`` and ``examples/`` packages too -- so resolution is
@@ -320,92 +507,167 @@ def resolve_label(label: str) -> list[Path]:
     return resolve_bazel_label(ROOT / package.removeprefix("//"), target)
 
 
-def census_testlogs(
-    testlogs_dir: Path,
-    batches: dict[str, list[str]],
-    macros: dict[str, Macro],
-    registered: dict[tuple[str, str], set[str]],
-) -> list[str]:
-    """The per-target census over one Bazel testlogs tree.
+def deferred_manifest() -> list[dict[str, str]]:
+    """The checked deferred-law manifest: one ``[[deferred]]`` row per
+    ``#[ignore]``d invocation, naming the recipe and CI lane that owns it."""
+    if not DEFERRED_MANIFEST.is_file():
+        return []
+    data = tomllib.loads(DEFERRED_MANIFEST.read_text(encoding="utf-8"))
+    return list(data.get("deferred", []))
 
-    A ran target is any directory carrying ``test.log`` or ``test.outputs``;
-    its path relative to the root is its label's package and name, so
-    discovery reaches nested packages (``runbooks/…``, ``examples/…``) the
-    same way it reaches ``crates/…``. A target the generated
-    ``WORKSPACE_TEST_BATCHES`` names as a batch is censused over the union of
-    its members' sources: every member label must resolve to a test root,
-    and a ran target that left receipts it cannot account for is a failure,
-    never a skip.
+
+def manifest_check(errors: list[str]) -> dict[tuple[str, str, str], Invocation]:
+    """Both directions of the deferred-law contract, always on.
+
+    Returns ``(file, claimant, suite)`` -> the real ignored invocation each
+    manifest entry names, for callers to match ignored invocations against
+    and for ``--deferred`` to census the invocation at its true file and
+    line.  Every entry must name a real ignored invocation: the entry's
+    crate is walked and an ignored ``*_tests!(`` with the entry's claimant
+    and suite must exist at the named file.
     """
-    errors: list[str] = []
-    target_dirs = {
-        marker.parent
-        for marker in testlogs_dir.rglob("*")
-        if marker.name in ("test.log", "test.outputs") and marker.parent.is_dir()
-    }
-    for target_dir in sorted(target_dirs):
-        rel = target_dir.relative_to(testlogs_dir)
-        if len(rel.parts) < 2:
-            continue
-        target_label = f"//{'/'.join(rel.parts[:-1])}:{rel.parts[-1]}"
-        members = batches.get(target_label, [target_label])
-        files: list[Path] = []
-        unresolved: list[str] = []
-        for member in members:
-            member_files = resolve_label(member)
-            if member_files:
-                files.extend(member_files)
-            else:
-                unresolved.append(member)
-        t_observed = bazel_receipts(target_dir)
-        if unresolved and t_observed:
+    entries = deferred_manifest()
+    matched: dict[tuple[str, str, str], Invocation] = {}
+    crate_invocations: dict[Path, list[Invocation]] = {}
+    for entry in entries:
+        key = (entry.get("file", ""), entry.get("claimant", ""), entry.get("suite", ""))
+        rel = Path(entry.get("file", ""))
+        file = ROOT / rel
+        if not file.is_file():
             errors.append(
-                f"bazel target {target_label} ran and left "
-                f"{len(t_observed)} receipts, but "
-                + (
-                    "no batch member"
-                    if len(unresolved) == len(members)
-                    else f"member(s) {', '.join(sorted(unresolved))}"
-                )
-                + " could be resolved to a test root -- the census cannot "
-                "name the laws those receipts owe"
+                f"deferred-law manifest entry {key} names a file that does "
+                "not exist -- stale entry"
             )
-        if not files:
             continue
-        t_expected = expected_for_files(
-            [f for root_f in files for f in source_files(root_f)], macros
+        crate = file.resolve().parent
+        while crate != ROOT and not (crate / "Cargo.toml").is_file():
+            crate = crate.parent
+        if crate not in crate_invocations:
+            crate_invocations[crate] = invocations_in_crate(crate)
+        match = next(
+            (
+                inv
+                for inv in crate_invocations[crate]
+                if inv.ignored
+                and inv.claimant == entry.get("claimant")
+                and inv.suite == entry.get("suite")
+                and inv.file == file.resolve()
+            ),
+            None,
         )
-        if not t_expected:
+        if match is None:
+            errors.append(
+                f"deferred-law manifest entry {key} names no real "
+                "#[ignore]d invocation -- stale entry"
+            )
+        else:
+            matched[key] = match
+    return matched
+
+
+def check_ignored(
+    invocations: list[Invocation],
+    manifest_set: dict[tuple[str, str, str], Invocation],
+    errors: list[str],
+) -> None:
+    """Every ignored invocation in claimed sources must be manifest-named."""
+    for inv in invocations:
+        if not inv.ignored:
             continue
-        t_missing = sorted(t_expected - t_observed)
-        for law, label in t_missing:
+        rel = inv.file.relative_to(ROOT).as_posix()
+        if (rel, inv.claimant, inv.suite) not in manifest_set:
             errors.append(
-                f"bazel target {target_label} ran but registered law "
-                f"`{law}` (label `{label}`) left no execution receipt"
+                f"#[ignore]d invocation {inv.suite} at {rel}:{inv.line} "
+                f"(claimant `{inv.claimant}`) is not in "
+                "scripts/deferred-law-invocations.toml -- a deferred law "
+                "needs a manifest entry naming the recipe that runs it"
             )
-        t_unknown = sorted(p for p in t_observed if p not in registered)
-        for law, label in t_unknown:
-            errors.append(
-                f"bazel target {target_label} receipt for `{law}` (label "
-                f"`{label}`) names no registered law"
-            )
-    return errors
 
 
-def read_receipts(paths: list[Path]) -> set[tuple[str, str]]:
-    observed: set[tuple[str, str]] = set()
+def deferred_invocations(
+    recipe: str,
+    manifest_index: dict[tuple[str, str, str], Invocation],
+) -> tuple[list[Invocation], str | None]:
+    """The live expectation a ``--deferred <recipe>`` claim asserts.
+
+    Each manifest entry resolves to the real ignored invocation
+    ``manifest_check`` already matched -- its true file and line, not a
+    synthetic ``line=0``, so two entries sharing a file and claimant stay
+    two distinct obligations instead of deduping to the first.
+    """
+    entries = [e for e in deferred_manifest() if e.get("recipe") == recipe]
+    if not entries:
+        return [], f"deferred recipe `{recipe}` has no manifest entries"
+    invocations: list[Invocation] = []
+    for entry in entries:
+        key = (
+            entry.get("file", ""),
+            entry.get("claimant", ""),
+            entry.get("suite", ""),
+        )
+        inv = manifest_index.get(key)
+        if inv is None:
+            # manifest_check already reported the stale entry.
+            continue
+        invocations.append(
+            Invocation(
+                claimant=inv.claimant,
+                suite=inv.suite,
+                ignored=False,
+                file=inv.file,
+                line=inv.line,
+            )
+        )
+    return invocations, None
+
+
+def expected_from_invocations(
+    invocations: list[Invocation],
+    macros: dict[str, Macro],
+) -> dict[str, Counter]:
+    """claimant -> Counter[(law, label)] from the live invocations."""
+    expected: dict[str, Counter] = {}
+    seen: set[tuple[str, Path, int]] = set()
+    for inv in invocations:
+        if inv.ignored:
+            continue
+        key = (inv.claimant, inv.file, inv.line)
+        if key in seen:
+            continue
+        seen.add(key)
+        expected.setdefault(inv.claimant, Counter()).update(
+            suite_expected(macros, inv.suite)
+        )
+    return expected
+
+
+def read_receipts(paths: list[Path]) -> tuple[dict[str, Counter], list[str]]:
+    """claimant -> Counter[(law, label)] from 3-column receipt lines."""
+    observed: dict[str, Counter] = {}
+    errors: list[str] = []
     for path in paths:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
             if not line.strip():
                 continue
             parts = line.split("\t")
-            if len(parts) != 2:
+            if len(parts) == 2:
+                errors.append(
+                    f"{path}:{lineno}: pre-FIG-3472 receipt format "
+                    f"`{line}` -- receipts are now claimant<TAB>law<TAB>label; "
+                    "re-run the tests with a current build"
+                )
                 continue
-            observed.add((parts[0], parts[1]))
-    return observed
+            if len(parts) != 3:
+                errors.append(f"{path}:{lineno}: malformed receipt line `{line}`")
+                continue
+            claimant, law, label = parts
+            observed.setdefault(claimant, Counter())[(law, label)] += 1
+    return observed, errors
 
 
-def bazel_receipts(target_dir: Path) -> set[tuple[str, str]]:
+def bazel_receipts(target_dir: Path) -> tuple[dict[str, Counter], list[str]]:
     """Receipts a single Bazel test target left in its undeclared outputs."""
     outputs_dir = target_dir / "test.outputs"
     found: list[Path] = []
@@ -425,6 +687,116 @@ def bazel_receipts(target_dir: Path) -> set[tuple[str, str]]:
     return read_receipts(found)
 
 
+def census_compare(
+    expected: dict[str, Counter],
+    observed: dict[str, Counter],
+    where: str,
+) -> list[str]:
+    """The exact per-claimant multiset comparison."""
+    errors: list[str] = []
+    for claimant in sorted(expected):
+        exp = expected[claimant]
+        obs = observed.get(claimant, Counter())
+        for (law, label), missing in sorted((exp - obs).items()):
+            errors.append(
+                f"{where}claimant `{claimant}`: registered law `{law}` "
+                f"(label `{label}`) produced {exp[(law, label)] - missing} of "
+                f"{exp[(law, label)]} execution receipts"
+            )
+        for (law, label), count in sorted(obs.items()):
+            if (law, label) not in exp:
+                errors.append(
+                    f"{where}claimant `{claimant}`: receipt for `{law}` "
+                    f"(label `{label}`) names a law this claimant does not "
+                    "owe -- stale, fabricated, or misclaimed record"
+                )
+            elif count > exp[(law, label)]:
+                errors.append(
+                    f"{where}claimant `{claimant}`: receipt for `{law}` "
+                    f"(label `{label}`) appeared {count} times but the law "
+                    f"is owed {exp[(law, label)]} times -- duplicate record"
+                )
+    for claimant in sorted(set(observed) - set(expected)):
+        errors.append(
+            f"{where}receipts name claimant `{claimant}`, which no claim "
+            "covers -- stale, fabricated, or misclaimed record"
+        )
+    return errors
+
+
+def census_testlogs(
+    testlogs_dir: Path,
+    batches: dict[str, list[str]],
+    macros: dict[str, Macro],
+    manifest_set: dict[tuple[str, str, str], Invocation],
+) -> tuple[list[str], int]:
+    """The per-target census over one Bazel testlogs tree.
+
+    A ran target is any directory carrying ``test.log`` or ``test.outputs``;
+    its path relative to the root is its label's package and name, so
+    discovery reaches nested packages (``runbooks/…``, ``examples/…``) the
+    same way it reaches ``crates/…``. A target the generated
+    ``WORKSPACE_TEST_BATCHES`` names as a batch is censused over the union of
+    its members' roots -- the claimants stay per member binary. Every member
+    label must resolve to a test root, and a ran target that left receipts it
+    cannot account for is a failure, never a skip.
+    """
+    errors: list[str] = []
+    verified = 0
+    target_dirs = {
+        marker.parent
+        for marker in testlogs_dir.rglob("*")
+        if marker.name in ("test.log", "test.outputs") and marker.parent.is_dir()
+    }
+    for target_dir in sorted(target_dirs):
+        rel = target_dir.relative_to(testlogs_dir)
+        if len(rel.parts) < 2:
+            continue
+        target_label = f"//{'/'.join(rel.parts[:-1])}:{rel.parts[-1]}"
+        members = batches.get(target_label, [target_label])
+        invocations: list[Invocation] = []
+        unresolved: list[str] = []
+        for member in members:
+            roots = resolve_label(member)
+            if roots:
+                for prefix, root_file in roots:
+                    invocations.extend(invocations_in_root(root_file, prefix))
+            else:
+                unresolved.append(member)
+        t_observed, receipt_errors = bazel_receipts(target_dir)
+        errors.extend(receipt_errors)
+        check_ignored(invocations, manifest_set, errors)
+        if unresolved and t_observed:
+            errors.append(
+                f"bazel target {target_label} ran and left receipts, but "
+                + (
+                    "no batch member"
+                    if len(unresolved) == len(members)
+                    else f"member(s) {', '.join(sorted(unresolved))}"
+                )
+                + " could be resolved to a test root -- the census cannot "
+                "name the laws those receipts owe"
+            )
+        t_expected = expected_from_invocations(invocations, macros)
+        verified += sum(sum(c.values()) for c in t_expected.values())
+        errors.extend(
+            census_compare(t_expected, t_observed, f"bazel target {target_label} ran but ")
+        )
+    return errors, verified
+
+
+def workspace_package_dirs() -> list[Path]:
+    """Every package directory under the claimable roots."""
+    dirs: list[Path] = []
+    for base_name in ("crates", "examples", "runbooks"):
+        base = ROOT / base_name
+        if not base.is_dir():
+            continue
+        for manifest in sorted(base.rglob("Cargo.toml")):
+            dirs.append(manifest.parent)
+    return dirs
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receipts", action="append", default=[], metavar="FILE")
@@ -434,13 +806,14 @@ def main() -> int:
     parser.add_argument("--suite", action="append", default=[], metavar="NAME")
     parser.add_argument("--labels", action="append", default=[], metavar="FILE")
     parser.add_argument("--crate-root", metavar="DIR")
+    parser.add_argument("--deferred", action="append", default=[], metavar="RECIPE")
     parser.add_argument("--bazel-testlogs", action="append", default=[], metavar="DIR")
     args = parser.parse_args()
 
     macros = macro_blocks(MACROS.read_text(encoding="utf-8"))
-    registered = registered_pairs(macros)
 
     errors: list[str] = []
+    manifest_set = manifest_check(errors)
 
     receipts_paths: list[Path] = [Path(p) for p in args.receipts]
     for root in args.receipts_root:
@@ -455,27 +828,33 @@ def main() -> int:
                 "(empty observation)",
                 file=sys.stderr,
             )
-    observed = read_receipts([p for p in receipts_paths if p.is_file()])
+    observed, receipt_errors = read_receipts(
+        [p for p in receipts_paths if p.is_file()]
+    )
+    errors.extend(receipt_errors)
 
-    expected: dict[tuple[str, str], str] = {}
-
-    def claim(pairs: set[tuple[str, str]], source: str) -> None:
-        for pair in pairs:
-            expected.setdefault(pair, source)
-
+    invocations: list[Invocation] = []
     for crate in args.crates:
-        claim(expected_for_crate(ROOT / crate, macros), f"crate {crate}")
+        invocations.extend(invocations_in_crate(ROOT / crate))
     for test_file in args.test_file:
-        claim(
-            expected_for_files(source_files(ROOT / test_file), macros),
-            f"test file {test_file}",
+        root_file = ROOT / test_file
+        crate = root_file.resolve().parent
+        while crate != ROOT and not (crate / "Cargo.toml").is_file():
+            crate = crate.parent
+        invocations.extend(
+            invocations_in_root(root_file, root_prefix(crate, root_file))
         )
     for suite in args.suite:
         name = suite if suite.endswith("_tests") else f"{suite}_tests"
-        pairs = suite_expected(macros, name)
-        if not pairs:
-            errors.append(f"suite {name} registers no laws in macros.rs")
-        claim(pairs, f"suite {name}")
+        found = False
+        for crate_dir in workspace_package_dirs():
+            crate_invs = invocations_in_crate(crate_dir)
+            suite_invs = [inv for inv in crate_invs if inv.suite == name]
+            if suite_invs:
+                found = True
+                invocations.extend(suite_invs)
+        if not found:
+            errors.append(f"suite {name} has no invocation under crates/, examples/, runbooks/")
     if args.labels:
         crate_root = Path(args.crate_root or ".")
         for labels_file in args.labels:
@@ -484,41 +863,39 @@ def main() -> int:
                 if not line or ":" not in line:
                     continue
                 target = line.rsplit(":", 1)[1]
-                files = resolve_bazel_label(crate_root, target)
-                for f in files:
-                    claim(
-                        expected_for_files(source_files(f), macros),
-                        f"label {line}",
-                    )
+                for prefix, root_file in resolve_bazel_label(crate_root, target):
+                    invocations.extend(invocations_in_root(root_file, prefix))
+    for recipe in args.deferred:
+        deferred, deferred_error = deferred_invocations(recipe, manifest_set)
+        if deferred_error is not None:
+            errors.append(deferred_error)
+        invocations.extend(deferred)
 
-    missing = sorted(set(expected) - observed)
-    for law, label in missing:
-        errors.append(
-            f"registered law `{law}` (label `{label}`, claimed by "
-            f"{expected[(law, label)]}) produced no execution receipt"
-        )
-    unknown = sorted(p for p in observed if p not in registered)
-    for law, label in unknown:
-        errors.append(
-            f"receipt for `{law}` (label `{label}`) names no registered law in "
-            "macros.rs -- stale or fabricated record"
-        )
+    check_ignored(invocations, manifest_set, errors)
+    expected = expected_from_invocations(invocations, macros)
+    errors.extend(census_compare(expected, observed, ""))
 
     batches = workspace_test_batches() if args.bazel_testlogs else {}
+    bazel_verified = 0
     for testlogs in args.bazel_testlogs:
         testlogs_dir = Path(testlogs)
         if not testlogs_dir.is_dir():
             errors.append(f"{testlogs} is not a testlogs directory")
             continue
-        errors.extend(census_testlogs(testlogs_dir, batches, macros, registered))
+        target_errors, verified = census_testlogs(
+            testlogs_dir, batches, macros, manifest_set
+        )
+        errors.extend(target_errors)
+        bazel_verified += verified
 
     if errors:
         for error in errors:
             print(f"law execution census: {error}", file=sys.stderr)
         return 1
+    total = sum(sum(c.values()) for c in expected.values()) + bazel_verified
     print(
-        f"law execution census: {len(observed)} receipts cover "
-        f"{len(expected)} claimed laws"
+        f"law execution census: receipts cover {total} claimed laws across "
+        f"{len(expected)} claimants"
     )
     return 0
 
