@@ -2074,6 +2074,10 @@ macro_rules! tool_child_invocation_tests {
                 a_crashed_child_replays_its_committed_attempts_facts,
                 "tool-child-attempt-capture"
             ),
+            (
+                every_billed_provider_attempt_is_conserved_once_on_its_opener,
+                "tool-child-usage-conservation"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
