@@ -208,6 +208,7 @@ mod rlm_inventory {
 mod testing_inventory {
     use lash::testing::TestLocalProcessRegistry as _;
     use lash::testing::TestProvider as _;
+    use lash::testing::code_execution_context as _;
     use lash::testing::mock_tool_context_with_execution_binding as _;
     // The durable-backend certification laws ride the facade: a host certifies
     // its store through `lash::testing::conformance` alone.
