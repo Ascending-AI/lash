@@ -226,6 +226,38 @@ pub enum ToolChildCompletionRouting {
     ProcessLifetime,
 }
 
+/// Where a tool child runs and whose work it is.
+///
+/// Four facts that always travel together and are never independently
+/// meaningful: a child admitted under one opener, one claim scope, one session
+/// and one frame. Grouping them keeps the request's constructor honest about
+/// what a caller must supply, and makes "the child's binding" a thing a reader
+/// can name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolChildScope {
+    /// The exact logical opener the group binds (ADR 0099 §1).
+    ///
+    /// Recorded as an [`ExecutionScope`] deliberately. §1 requires a process
+    /// opener to carry its incarnation, and `ExecutionScope::Process` does not
+    /// carry one yet; binding the incarnation into that scope is FIG-3394's, and
+    /// when it lands this field carries it with no change to this shape. A
+    /// parallel opener type minted here would have been a second spelling of the
+    /// same fact, and the two would disagree the first time only one was updated.
+    pub opener: ExecutionScope,
+    /// The scope this child is admitted and claimed under, which a process
+    /// opener's child need not share with its opener.
+    pub admitted_scope: ExecutionScope,
+    /// The session the child's work is attributed to.
+    pub session_id: SessionId,
+    /// The agent frame the child's work belongs to.
+    ///
+    /// Not reconstructible from [`session_id`](Self::session_id): one session
+    /// holds many frames (ADR 0092), so a recovered child that re-derived a
+    /// frame from its session would attribute its work to the wrong one.
+    pub agent_frame_id: FrameNodeId,
+}
+
 /// Everything needed to run one tool child of a durable effect group, with no
 /// caller in scope (ADR 0099 §3).
 ///
@@ -243,10 +275,7 @@ pub enum ToolChildCompletionRouting {
 /// | [`call`](Self::call) | group formation (FIG-3397), from the prepared batch call | the handler-level driver (FIG-2266), as the call to execute |
 /// | [`admission`](Self::admission) | group formation, from the grant or the admitted catalog manifest | the driver, for authority, retry policy and argument projection, without the live catalog |
 /// | [`attempt_identity`](Self::attempt_identity) | group formation, as the identity the leaf's attempts derive from | the driver, to derive each attempt's replay key and causal parent |
-/// | [`opener`](Self::opener) | group formation, as the logical opener of ADR 0099 §1 | recovery (FIG-3396 §1), to validate the opener still exists and matches |
-/// | [`admitted_scope`](Self::admitted_scope) | group formation, as the scope the child's claim is fenced on | the driver, to reconstruct the admitted controller |
-/// | [`session_id`](Self::session_id) | group formation | the driver, for session-scoped services |
-/// | [`agent_frame_id`](Self::agent_frame_id) | group formation | the driver, for the frame the child's work belongs to |
+/// | [`scope`](Self::scope) | group formation, as the opener, claim scope, session and frame | recovery (FIG-3396 §1) validates the opener; the driver reconstructs the admitted controller and its session-scoped services |
 /// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process | the driver, to set the call's enclosing process |
 /// | [`cancellation_authority`](Self::cancellation_authority) | group formation, from the opener's turn-control binding | the cooperative cancel path (FIG-2266) and the cancel disposition (FIG-3409) |
 /// | [`execution_env`](Self::execution_env) | group formation, from `captured_process_execution_env_ref` | the driver, to resolve the captured environment; retained under `ArtifactOwner::Execution` until the last dependency |
@@ -279,26 +308,8 @@ pub struct ToolChildRequest {
     /// parent from. Carries the parent invocation, so it is also the request's
     /// lineage.
     pub attempt_identity: ToolAttemptEffectIdentity,
-    /// The exact logical opener the group binds (ADR 0099 §1).
-    ///
-    /// Recorded as an [`ExecutionScope`] deliberately. §1 requires a process
-    /// opener to carry its incarnation, and `ExecutionScope::Process` does not
-    /// carry one yet; binding the incarnation into that scope is FIG-3394's, and
-    /// when it lands this field carries it with no change to this shape. A
-    /// parallel opener type minted here would have been a second spelling of the
-    /// same fact, and the two would disagree the first time only one was updated.
-    pub opener: ExecutionScope,
-    /// The scope this child is admitted and claimed under, which a process
-    /// opener's child need not share with its opener.
-    pub admitted_scope: ExecutionScope,
-    /// The session the child's work is attributed to.
-    pub session_id: SessionId,
-    /// The agent frame the child's work belongs to.
-    ///
-    /// Not reconstructible from [`session_id`](Self::session_id): one session
-    /// holds many frames (ADR 0092), so a recovered child that re-derived a
-    /// frame from its session would attribute its work to the wrong one.
-    pub agent_frame_id: FrameNodeId,
+    /// Where this child runs and whose work it is.
+    pub scope: ToolChildScope,
     /// The process this call executes inside, when the opener is a process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enclosing_process: Option<ProcessId>,
@@ -326,10 +337,7 @@ impl ToolChildRequest {
         call: PreparedToolCall,
         admission: ToolChildAdmission,
         attempt_identity: ToolAttemptEffectIdentity,
-        opener: ExecutionScope,
-        admitted_scope: ExecutionScope,
-        session_id: SessionId,
-        agent_frame_id: FrameNodeId,
+        scope: ToolChildScope,
         completion_routing: ToolChildCompletionRouting,
     ) -> Self {
         Self {
@@ -337,10 +345,7 @@ impl ToolChildRequest {
             call,
             admission,
             attempt_identity,
-            opener,
-            admitted_scope,
-            session_id,
-            agent_frame_id,
+            scope,
             enclosing_process: None,
             cancellation_authority: None,
             execution_env: None,
@@ -447,6 +452,15 @@ mod tests {
         )
     }
 
+    fn scope() -> ToolChildScope {
+        ToolChildScope {
+            opener: ExecutionScope::turn("session", "turn"),
+            admitted_scope: ExecutionScope::turn("session", "turn"),
+            session_id: SessionId::from("session"),
+            agent_frame_id: frame(),
+        }
+    }
+
     fn request() -> ToolChildRequest {
         let tool = manifest("search");
         ToolChildRequest::new(
@@ -455,10 +469,7 @@ mod tests {
                 manifest: Box::new(tool),
             },
             ToolAttemptEffectIdentity::Scalar { parent: None },
-            ExecutionScope::turn("session", "turn"),
-            ExecutionScope::turn("session", "turn"),
-            SessionId::from("session"),
-            frame(),
+            scope(),
             ToolChildCompletionRouting::Durable,
         )
     }
@@ -485,7 +496,7 @@ mod tests {
             Some("env-ref")
         );
         assert_eq!(decoded.enclosing_process.as_deref(), Some("process-9"));
-        assert_eq!(decoded.agent_frame_id.as_str(), "frame-1");
+        assert_eq!(decoded.scope.agent_frame_id.as_str(), "frame-1");
     }
 
     /// A field this build does not know is refused, not dropped. A retired field
@@ -563,10 +574,7 @@ mod tests {
                 manifest: Box::new(tool),
             },
             ToolAttemptEffectIdentity::Scalar { parent: None },
-            ExecutionScope::turn("session", "turn"),
-            ExecutionScope::turn("session", "turn"),
-            SessionId::from("session"),
-            frame(),
+            scope(),
             ToolChildCompletionRouting::Inline,
         );
         let decoded: ToolChildRequest =
@@ -600,14 +608,14 @@ mod tests {
     #[test]
     fn the_opener_and_the_admitted_scope_are_retained_separately() {
         let mut request = request();
-        request.opener = ExecutionScope::process("process-1");
-        request.admitted_scope = ExecutionScope::runtime_operation("op-1");
+        request.scope.opener = ExecutionScope::process("process-1");
+        request.scope.admitted_scope = ExecutionScope::runtime_operation("op-1");
         let decoded: ToolChildRequest =
             serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
                 .expect("decodes");
-        assert_eq!(decoded.opener, ExecutionScope::process("process-1"));
+        assert_eq!(decoded.scope.opener, ExecutionScope::process("process-1"));
         assert_eq!(
-            decoded.admitted_scope,
+            decoded.scope.admitted_scope,
             ExecutionScope::runtime_operation("op-1")
         );
     }

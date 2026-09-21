@@ -16,6 +16,7 @@ pub use store_turn_control::bind_store_turn_control_authority;
 mod tool_child;
 pub use tool_child::{
     TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
+    ToolChildScope,
 };
 mod outcome;
 pub use lash_core_effect::promise_semantics;

@@ -70,7 +70,7 @@ REGISTRATION_BASELINES = {
     # invocation-level tool command together, as one new durable format. The
     # constant has no merge-base value because the surface is new, not renamed.
     "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
-        "sha256:fd8364c42e0e7777bd01b83b15a1d060121cddf52aca80018f5cb961401854a8"
+        "sha256:89819bf609b96d27a4c5f33907f91aec4fa13859c8ae73279f99142716b5f4ac"
     ),
     # FIG-1128: the v2 Restate durable-wait request enrolls an explicit
     # absolute-deadline wire after retiring the unversioned relative timeout.

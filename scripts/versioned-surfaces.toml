@@ -426,6 +426,7 @@ paths = [
 ]
 symbols = [
   "ToolChildRequest",
+  "ToolChildScope",
   "ToolChildAdmission",
   "ToolChildCompletionRouting",
   "ToolAttemptEffectIdentity",
