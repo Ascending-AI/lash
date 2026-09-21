@@ -60,13 +60,7 @@ pub(crate) async fn list_sessions(
             parent_session_id,
             deleted,
         };
-        if !filter
-            .relation
-            .is_none_or(|relation| relation == summary.relation)
-            || !filter
-                .deleted
-                .is_none_or(|deleted| deleted == summary.deleted)
-        {
+        if !filter.matches(&summary) {
             continue;
         }
         summaries.push(summary);

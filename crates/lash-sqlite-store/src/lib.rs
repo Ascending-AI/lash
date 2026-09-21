@@ -1274,13 +1274,7 @@ fn list_session_summaries(
     let mut summaries = Vec::new();
     for row in rows {
         let summary = row?;
-        if filter
-            .relation
-            .is_none_or(|relation| relation == summary.relation)
-            && filter
-                .deleted
-                .is_none_or(|deleted| deleted == summary.deleted)
-        {
+        if filter.matches(&summary) {
             summaries.push(summary);
         }
     }

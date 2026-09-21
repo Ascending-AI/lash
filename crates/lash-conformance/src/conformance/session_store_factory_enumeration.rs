@@ -77,6 +77,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         .list_sessions(&crate::SessionListFilter {
             relation: Some(crate::SessionRelationKind::Child),
             deleted: Some(false),
+            caused_by: None,
         })
         .await
         .expect("filter live child sessions");
@@ -86,6 +87,41 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
             .map(|summary| summary.session_id.as_str())
             .collect::<Vec<_>>(),
         vec![child_request.session_id.as_str()]
+    );
+
+    // Hosts list the sessions a process or turn caused through `caused_by`
+    // (FIG-3377): the filter selects exactly the child carrying that causal
+    // reference and nothing else.
+    let crate::SessionRelation::Child { caused_by, .. } = &child_request.relation else {
+        unreachable!("child request is a child relation")
+    };
+    let caused = factory
+        .list_sessions(&crate::SessionListFilter {
+            caused_by: caused_by.clone(),
+            ..crate::SessionListFilter::default()
+        })
+        .await
+        .expect("filter sessions by caused_by");
+    assert_eq!(
+        caused
+            .iter()
+            .map(|summary| summary.session_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![child_request.session_id.as_str()],
+        "caused_by selects exactly the session that records it"
+    );
+    let uncaused = factory
+        .list_sessions(&crate::SessionListFilter {
+            caused_by: Some(crate::CausalRef::Process {
+                process_id: crate::ProcessId::from("enumeration-absent-process"),
+            }),
+            ..crate::SessionListFilter::default()
+        })
+        .await
+        .expect("filter sessions by an absent caused_by");
+    assert!(
+        uncaused.is_empty(),
+        "an unmatched caused_by selects nothing"
     );
 
     let mut state = crate::RuntimeSessionState {
@@ -145,6 +181,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         .list_sessions(&crate::SessionListFilter {
             relation: None,
             deleted: Some(true),
+            caused_by: None,
         })
         .await
         .expect("enumerate deletion tombstones");
@@ -161,6 +198,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
             .list_sessions(&crate::SessionListFilter {
                 relation: None,
                 deleted: Some(true),
+                caused_by: None,
             })
             .await
             .expect("enumerate tombstones after vacuum")

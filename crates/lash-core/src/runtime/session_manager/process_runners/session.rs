@@ -1,6 +1,15 @@
 use super::*;
 
 impl RuntimeSessionServices {
+    /// Run a `ProcessInput::SessionTurn`: initialize the recorded child
+    /// session and drive its first turn through the shared managed-turn path.
+    ///
+    /// Cancellation never tears the session down. The process token is the
+    /// turn's own cancellation token inside the port, so a cancelled process
+    /// leaves an ordinary cancelled turn inside a retained, reusable child
+    /// session — and no pending or held turn input. Only the caller records
+    /// the process terminal; the committed child turn is not itself a
+    /// recorded process result.
     pub(in crate::runtime::session_manager::process_runners) async fn run_process_session_turn(
         &self,
         registration: crate::ProcessRegistration,
@@ -12,262 +21,78 @@ impl RuntimeSessionServices {
         create_request = create_request.with_caused_by(crate::CausalRef::Process {
             process_id: registration.id.clone(),
         });
-        let requested_child_session_id = create_request.session_id.clone();
-        if cancellation.is_cancelled() {
-            if let Some(child_session_id) = create_request.session_id.as_deref() {
-                self.reclaim_prestart_cancelled_child_session(
-                    &registration.id,
-                    &SessionId::from(child_session_id),
-                )
-                .await?;
-            }
-            return Ok(cancelled_session_turn_output());
-        }
         // `ProcessInput::SessionTurn` is durable input. Its `create_request`
         // carries only persisted policy, so fill an omitted provider_id from
         // the parent runtime policy before the child session is built.
         self.inherit_session_turn_provider_id(&mut create_request);
-        let child = match Box::pin(self.managed.create_session(&self.current, create_request)).await
-        {
-            Ok(child) => child,
-            Err(err) => {
-                if cancellation.is_cancelled() {
-                    if let Some(child_session_id) = requested_child_session_id.as_ref() {
-                        self.reclaim_prestart_cancelled_child_session(
-                            &registration.id,
-                            child_session_id,
-                        )
-                        .await?;
-                    }
-                    return Ok(cancelled_session_turn_output());
-                }
-                return Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-                        crate::ToolFailureClass::Execution,
-                        "process_session_create_failed",
-                        err.to_string(),
-                    )),
-                ));
-            }
-        };
-        let child_session_id = child.session_id.clone();
         // The child session's first turn is deliberately scoped by the
         // process identity that started it, so the crossing is spelled out.
-        let child_turn_id = crate::TurnId::from(registration.id.as_str());
         // The process worker admitted this controller under `registration.id`.
         // Keep that execution authority through the child turn; session and
         // turn ids remain the turn's foreground routing and attribution.
-        let request = match crate::SessionTurnRequest::new_process_backed(
-            &child_session_id,
-            &child_turn_id,
-            turn_input,
+        let child_turn_id = crate::TurnId::from(registration.id.as_str());
+        match Box::pin(self.managed.initialize_session_and_run_turn(
+            &self.current,
+            &self.usage,
+            create_request,
             &registration.id,
+            child_turn_id,
+            turn_input,
             scoped_effect_controller,
-        ) {
-            Ok(request) => request,
-            Err(err) => {
-                if self
-                    .close_or_reclaim_cancelled_session_turn(
-                        &registration.id,
-                        &child_session_id,
-                        &cancellation,
-                    )
-                    .await?
-                {
-                    return Ok(cancelled_session_turn_output());
-                }
-                return Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-                        crate::ToolFailureClass::Execution,
-                        "process_session_turn_scope_failed",
-                        err.to_string(),
-                    )),
-                ));
-            }
-        };
-        let mut turn = Box::pin(self.managed.start_turn(&self.current, &self.usage, request));
-        let outcome = tokio::select! {
-            biased;
-            _ = cancellation.cancelled() => None,
-            outcome = turn.as_mut() => Some(outcome),
-        };
-        let Some(outcome) = outcome else {
-            // Dropping the managed-turn future aborts its inherited task-local
-            // execution before this outer process reacquires the shared slot.
-            drop(turn);
-            crate::runtime::process_permit::ensure_process_execution_permit().await;
-            self.reclaim_cancelled_child_session(&registration.id, &child_session_id)
-                .await?;
-            return Ok(cancelled_session_turn_output());
-        };
-        if cancellation.is_cancelled() {
-            self.reclaim_cancelled_child_session(&registration.id, &child_session_id)
-                .await?;
-            return Ok(cancelled_session_turn_output());
-        }
-        Ok(match outcome {
-            Ok(turn) => {
-                let state = process_terminal_state_for_turn(&turn);
-                if matches!(state, crate::ProcessStatus::Cancelled) {
-                    self.reclaim_cancelled_child_session(&registration.id, &child_session_id)
-                        .await?;
-                } else if self
-                    .close_or_reclaim_cancelled_session_turn(
-                        &registration.id,
-                        &child_session_id,
-                        &cancellation,
-                    )
-                    .await?
-                {
-                    return Ok(cancelled_session_turn_output());
-                }
-                crate::ProcessAwaitOutput::from_tool_output(output_from_process_turn(
-                    &registration,
-                    &child_session_id,
-                    turn,
-                    state,
-                ))
-            }
-            Err(err) => {
-                if self
-                    .close_or_reclaim_cancelled_session_turn(
-                        &registration.id,
-                        &child_session_id,
-                        &cancellation,
-                    )
-                    .await?
-                {
-                    return Ok(cancelled_session_turn_output());
-                }
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-                    crate::ToolFailure::tool(
-                        crate::ToolFailureClass::Execution,
-                        "process_session_turn_failed",
-                        err.to_string(),
-                    ),
-                ))
-            }
-        })
-    }
-
-    async fn reclaim_cancelled_child_session(
-        &self,
-        process_id: &ProcessId,
-        child_session_id: &SessionId,
-    ) -> Result<(), crate::ProcessInfraError> {
-        if let Some(factory) = self.current.host.session_store_factory.as_ref()
-            && let Some(store) = factory
-                .open_existing_store_by_id(child_session_id)
-                .await
-                .map_err(|error| {
-                    crate::ProcessInfraError::new(crate::PluginError::Session(format!(
-                        "failed to inspect cancelled child session `{child_session_id}`: {error}"
-                    )))
-                })?
+            cancellation,
+        ))
+        .await
         {
-            self.require_process_owned_child_session(process_id, child_session_id, store.as_ref())
-                .await?;
+            Ok(run) => {
+                let child_session_id = run.session.session_id.clone();
+                let state = process_terminal_state_for_turn(&run.turn);
+                Ok(crate::ProcessAwaitOutput::from_tool_output(
+                    output_from_process_turn(&registration, &child_session_id, run.turn, state),
+                ))
+            }
+            Err(err) => {
+                if let Some(session_id) = err.retained_session_id() {
+                    tracing::debug!(
+                        process_id = %registration.id,
+                        session_id = %session_id,
+                        "process session turn left a retained child session"
+                    );
+                }
+                Ok(match err {
+                    turns::SessionTurnInitError::CancelledBeforeCreate
+                    | turns::SessionTurnInitError::CancelledAfterCreate { .. } => {
+                        cancelled_session_turn_output()
+                    }
+                    turns::SessionTurnInitError::Create { source } => {
+                        crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+                            crate::ToolFailure::tool(
+                                crate::ToolFailureClass::Execution,
+                                "process_session_create_failed",
+                                source.to_string(),
+                            ),
+                        ))
+                    }
+                    turns::SessionTurnInitError::Request { source, .. } => {
+                        crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+                            crate::ToolFailure::tool(
+                                crate::ToolFailureClass::Execution,
+                                "process_session_turn_scope_failed",
+                                source.to_string(),
+                            ),
+                        ))
+                    }
+                    turns::SessionTurnInitError::Turn { source, .. } => {
+                        crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+                            crate::ToolFailure::tool(
+                                crate::ToolFailureClass::Execution,
+                                "process_session_turn_failed",
+                                source.to_string(),
+                            ),
+                        ))
+                    }
+                })
+            }
         }
-        self.managed
-            .close_session(&self.current, child_session_id)
-            .await
-            .map_err(crate::ProcessInfraError::new)?;
-        let Some(factory) = self.current.host.session_store_factory.as_ref() else {
-            return Ok(());
-        };
-        factory.delete_session(child_session_id).await.map_err(|failure| {
-            crate::ProcessInfraError::new(crate::PluginError::Session(format!(
-                "failed to reclaim cancelled child session `{child_session_id}`: {}; partial report: {:?}",
-                failure.stop, failure.partial
-            )))
-        })?;
-        Ok(())
-    }
-
-    async fn reclaim_prestart_cancelled_child_session(
-        &self,
-        process_id: &ProcessId,
-        child_session_id: &SessionId,
-    ) -> Result<(), crate::ProcessInfraError> {
-        let Some(factory) = self.current.host.session_store_factory.as_ref() else {
-            return Ok(());
-        };
-        let Some(store) = factory
-            .open_existing_store_by_id(child_session_id)
-            .await
-            .map_err(|error| {
-                crate::ProcessInfraError::new(crate::PluginError::Session(format!(
-                    "failed to inspect prestart cancelled child session `{child_session_id}`: {error}"
-                )))
-            })?
-        else {
-            return Ok(());
-        };
-        self.require_process_owned_child_session(process_id, child_session_id, store.as_ref())
-            .await?;
-        self.reclaim_cancelled_child_session(process_id, child_session_id)
-            .await
-    }
-
-    async fn require_process_owned_child_session(
-        &self,
-        process_id: &ProcessId,
-        child_session_id: &SessionId,
-        store: &dyn crate::store::RuntimePersistence,
-    ) -> Result<(), crate::ProcessInfraError> {
-        let meta = store
-            .load_session_meta()
-            .await
-            .map_err(|error| {
-                crate::ProcessInfraError::new(crate::PluginError::Session(format!(
-                    "failed to inspect prestart cancelled child session `{child_session_id}` metadata: {error}"
-                )))
-            })?
-            .ok_or_else(|| {
-                crate::ProcessInfraError::new(crate::PluginError::Session(format!(
-                    "refusing to reclaim prestart cancelled child session `{child_session_id}` without durable ownership metadata"
-                )))
-            })?;
-        let owned_by_process = matches!(
-            &meta.relation,
-            crate::SessionRelation::Child {
-                caused_by: Some(crate::CausalRef::Process {
-                    process_id: owner_process_id,
-                }),
-                ..
-            } if owner_process_id == process_id
-        );
-        if !owned_by_process {
-            return Err(crate::ProcessInfraError::new(crate::PluginError::Session(
-                format!(
-                    "refusing to reclaim prestart cancelled child session `{child_session_id}` not owned by process `{process_id}`"
-                ),
-            )));
-        }
-        Ok(())
-    }
-
-    async fn close_or_reclaim_cancelled_session_turn(
-        &self,
-        process_id: &ProcessId,
-        child_session_id: &SessionId,
-        cancellation: &tokio_util::sync::CancellationToken,
-    ) -> Result<bool, crate::ProcessInfraError> {
-        if cancellation.is_cancelled() {
-            self.reclaim_cancelled_child_session(process_id, child_session_id)
-                .await?;
-            return Ok(true);
-        }
-        let _ = self
-            .managed
-            .close_session(&self.current, child_session_id)
-            .await;
-        if cancellation.is_cancelled() {
-            self.reclaim_cancelled_child_session(process_id, child_session_id)
-                .await?;
-            return Ok(true);
-        }
-        Ok(false)
     }
 
     fn inherit_session_turn_provider_id(&self, create_request: &mut crate::SessionCreateRequest) {
@@ -698,7 +523,7 @@ mod tests {
         )
     }
 
-    async fn cancelled_mid_turn_subagent_reclaims_durable_child_rows(case: &str) {
+    async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
         let child_session_id = SessionId::from(format!("cancelled-{case}-subagent-child"));
         let process_id = ProcessId::from(format!("process:subagent:cancelled-{case}"));
         let factory = crate::InMemorySessionStoreFactory::new();
@@ -708,15 +533,29 @@ mod tests {
         ))
         .with_session_store_factory(Arc::new(factory.clone()));
         let (started_tx, mut started_rx) = tokio::sync::mpsc::channel(1);
-        let transport = mock_provider(vec![MockCall {
-            stream_events: vec![LlmStreamEvent::Part(crate::LlmOutputPart::ToolCall {
-                call_id: format!("park-{case}"),
-                tool_name: "park_forever".to_string(),
-                input_json: "{}".to_string(),
-                replay: None,
-            })],
-            response: Ok(crate::LlmResponse::default()),
-        }]);
+        let transport = mock_provider(vec![
+            MockCall {
+                stream_events: vec![LlmStreamEvent::Part(crate::LlmOutputPart::ToolCall {
+                    call_id: format!("park-{case}"),
+                    tool_name: "park_forever".to_string(),
+                    input_json: "{}".to_string(),
+                    replay: None,
+                })],
+                response: Ok(crate::LlmResponse::default()),
+            },
+            // The retained child session runs an ordinary follow-up turn after
+            // the cancelled first turn.
+            MockCall {
+                stream_events: Vec::new(),
+                response: Ok(crate::LlmResponse {
+                    parts: vec![crate::LlmOutputPart::Text {
+                        text: "follow-up answered".to_string(),
+                        response_meta: None,
+                    }],
+                    ..Default::default()
+                }),
+            },
+        ]);
         let runtime = runtime_with_plugins_and_tools_and_host(
             Vec::new(),
             Arc::new(ParkForever {
@@ -771,25 +610,29 @@ mod tests {
         );
         let foreign_cancellation = tokio_util::sync::CancellationToken::new();
         foreign_cancellation.cancel();
+        let foreign_output = services
+            .run_process_session_turn(
+                foreign_registration,
+                foreign_create_request,
+                crate::TurnInput::text("must not run"),
+                native_scope(crate::ExecutionScope::process(&foreign_process_id)),
+                foreign_cancellation,
+            )
+            .await
+            .expect("a pre-cancelled process settles cancelled, not an error");
         assert!(
-            services
-                .run_process_session_turn(
-                    foreign_registration,
-                    foreign_create_request,
-                    crate::TurnInput::text("must not run"),
-                    native_scope(crate::ExecutionScope::process(&foreign_process_id)),
-                    foreign_cancellation,
-                )
-                .await
-                .is_err(),
-            "a pre-cancelled process must refuse to reclaim an unrelated session id"
+            matches!(
+                foreign_output.into_tool_output().outcome,
+                crate::ToolCallOutcome::Cancelled(_)
+            ),
+            "a pre-cancelled process returns a cancelled output without touching the named session"
         );
         assert!(
             factory
                 .raw_store_for_testing(&foreign_session_id)
                 .and_then(|store| store.raw_session_meta_for_testing())
                 .is_some(),
-            "ownership refusal must leave the unrelated parent session durable and reopenable"
+            "a cancelled process must leave the unrelated session durable and reopenable"
         );
         let plugin_init = runtime
             .session_state_service()
@@ -855,33 +698,65 @@ mod tests {
             .expect("cancelled child process settles");
         assert!(matches!(
             output
-                .expect("cancelled child cleanup succeeds")
+                .expect("cancelled child turn settles")
                 .into_tool_output()
                 .outcome,
             crate::ToolCallOutcome::Cancelled(_)
         ));
 
-        let after = [
-            usize::from(child_store.raw_session_meta_for_testing().is_some()),
-            usize::from(child_store.raw_head_revision_for_testing().is_some()),
-            child_store.raw_graph_nodes_for_testing().len(),
-            child_store.raw_pending_turn_inputs_for_testing().len(),
-            child_store.raw_queued_work_for_testing().len(),
-        ];
-        assert_eq!(
-            after,
-            [0, 0, 0, 0, 0],
-            "cancelled {case} subagent child retained [session_meta, session_head, active_graph_nodes, pending_turn_inputs, queued_work_batches]; before={before:?}"
+        // The child session is retained — lash never deletes a session because
+        // a process was cancelled — and the cancelled turn's commit settles
+        // its accepted input: the row remains only as a terminal receipt.
+        assert!(
+            child_store.raw_session_meta_for_testing().is_some(),
+            "cancelled {case} subagent child keeps its durable session row"
         );
         assert!(
-            factory
-                .open_existing_store_by_id(&child_session_id)
-                .await
-                .expect("inspect reclaimed child")
-                .is_none(),
-            "cancelled {case} child store must no longer be openable"
+            child_store
+                .raw_pending_turn_inputs_for_testing()
+                .iter()
+                .all(|row| row.2.kind().is_terminal() && row.3.is_none()),
+            "cancelled {case} child leaves only settled turn-input receipts; before={before:?}"
+        );
+        let child_store = factory
+            .open_existing_store_by_id(&child_session_id)
+            .await
+            .expect("inspect retained child")
+            .expect("cancelled {case} child store stays openable");
+        assert!(
+            crate::store::TurnInputStore::list_pending_turn_inputs(
+                child_store.as_ref(),
+                &child_session_id,
+            )
+            .await
+            .expect("list retained child inputs")
+            .is_empty(),
+            "a reopened read of the retained child finds no claimable input"
         );
 
+        // The retained session is reusable: an ordinary follow-up turn runs.
+        let lifecycle = runtime
+            .session_lifecycle_service()
+            .expect("session lifecycle");
+        let follow_up_turn_id = format!("{case}-follow-up-turn");
+        lifecycle
+            .start_turn(
+                crate::SessionTurnRequest::new(
+                    &child_session_id,
+                    &follow_up_turn_id,
+                    crate::TurnInput::text("follow up after cancellation"),
+                    native_scope(crate::ExecutionScope::turn(
+                        &child_session_id,
+                        &follow_up_turn_id,
+                    )),
+                )
+                .expect("follow-up turn request"),
+            )
+            .await
+            .expect("the retained child session runs an ordinary follow-up turn");
+
+        // A replayed attempt against the still-cancelled token creates nothing
+        // new and leaves the retained child alone.
         let replay = services
             .run_process_session_turn(
                 replay_registration,
@@ -891,7 +766,7 @@ mod tests {
                 cancellation,
             )
             .await
-            .expect("cancelled child replay cleanup is idempotent");
+            .expect("cancelled child replay settles idempotently");
         assert!(matches!(
             replay.into_tool_output().outcome,
             crate::ToolCallOutcome::Cancelled(_)
@@ -900,15 +775,15 @@ mod tests {
             factory
                 .open_existing_store_by_id(&child_session_id)
                 .await
-                .expect("inspect replayed reclaimed child")
-                .is_none(),
-            "cancelled {case} replay must not recreate the child store"
+                .expect("inspect replayed child")
+                .is_some(),
+            "cancelled {case} replay leaves the retained child openable"
         );
     }
 
     #[tokio::test]
-    async fn cancelled_mid_turn_subagent_reclaims_durable_rows() {
-        Box::pin(cancelled_mid_turn_subagent_reclaims_durable_child_rows(
+    async fn cancelled_mid_turn_subagent_retains_durable_rows() {
+        Box::pin(cancelled_mid_turn_subagent_retains_durable_child_session(
             "mid-turn",
         ))
         .await;

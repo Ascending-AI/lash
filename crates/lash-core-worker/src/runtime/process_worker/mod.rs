@@ -1295,14 +1295,26 @@ impl DurableProcessWorker {
                 }
                 outcome = &mut pending => {
                     cancel_watcher.abort();
-                    if requires_cancelled_session_turn
+                    // A committed cancellation outranks a runner success: if
+                    // the runner settled before observing the cancel signal,
+                    // the recorded terminal is still `Cancelled`. The child
+                    // session and its committed turn stay retained either way.
+                    let outcome = if requires_cancelled_session_turn
                         && self.cancellation_was_already_requested(&process_id).await?
                         && runner_outcome_requires_cancel_fence(&outcome)
                     {
-                        return Err(RecoverFailure::Run(PluginError::Session(format!(
-                            "process `{process_id}` cancellation committed before terminalization; deferring terminal write for cancelled replay"
-                        ))));
-                    }
+                        Ok(crate::ProcessRunOutcome::Terminal {
+                            output: Box::new(crate::ProcessAwaitOutput::from_tool_output(
+                                crate::ToolCallOutput::cancelled(
+                                    crate::ToolCancellation::runtime(format!(
+                                        "process `{process_id}` was cancelled"
+                                    )),
+                                ),
+                            )),
+                        })
+                    } else {
+                        outcome
+                    };
                     return outcome.map_err(RecoverFailure::Run);
                 }
                 _ = self.config.runtime_host.clock.sleep(self.lease_timings().renew_interval()) => {

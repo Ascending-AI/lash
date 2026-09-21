@@ -292,20 +292,7 @@ where
                 signal?;
                 cancellation.cancel();
                 self.confirm_process_cancel_requested(&process_id).await?;
-                if requires_cancelled_session_turn {
-                    let settled = runner.await.map_err(handler_error_from_plugin)?;
-                    if settled
-                        .terminal_output()
-                        .and_then(ProcessAwaitOutput::terminal_status)
-                        != Some(lash_core::ProcessStatus::Cancelled)
-                    {
-                        return Err(handler_error_from_plugin(PluginError::Session(format!(
-                            "process `{process_id}` cancellation reached a non-cancelled runner outcome; retrying cleanup"
-                        ))));
-                    }
-                } else {
-                    let _ = runner.await;
-                }
+                let _ = runner.await;
                 Ok(lash_core::ProcessRunOutcome::Terminal {
                     output: Box::new(ProcessAwaitOutput::from_tool_output(
                         lash_core::ToolCallOutput::cancelled(
@@ -326,17 +313,28 @@ where
                     .and_then(ProcessAwaitOutput::terminal_status)
                     == Some(lash_core::ProcessStatus::Cancelled)
         );
-        if requires_cancelled_session_turn
+        // A committed cancellation outranks a runner success (PR #897): if the
+        // runner settled before observing the cancel signal, the recorded
+        // terminal is still `Cancelled`. The child session and its committed
+        // turn stay retained either way — lash never deletes a session because
+        // a process was cancelled.
+        let outcome = if requires_cancelled_session_turn
             && !runner_settled_cancelled
             && self
                 .process_cancel_requested(&process_id)
                 .await
                 .map_err(handler_error_from_plugin)?
         {
-            return Err(handler_error_from_plugin(PluginError::Session(format!(
-                "process `{process_id}` cancellation committed before terminalization; retrying cleanup"
-            ))));
-        }
+            Ok(lash_core::ProcessRunOutcome::Terminal {
+                output: Box::new(ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+                        format!("process `{process_id}` was cancelled"),
+                    )),
+                )),
+            })
+        } else {
+            outcome
+        };
         match outcome {
             Ok(lash_core::ProcessRunOutcome::Terminal { output }) => {
                 // The terminal append writes the ended parent scope's ledger

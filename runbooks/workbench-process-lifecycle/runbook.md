@@ -186,12 +186,17 @@ Expect:
 - the second subagent reaches a non-terminal card and then a terminal state, proving the
   parent's managed-turn registry admitted new child work after the cancellation;
 - **durable-catalog gate (objective):** `03b-sessions-before.json` proves the query saw
-  the recorded child session, and `03b-sessions-after.json` has zero rows for that id in
-  all five listed tables. Reclamation uses the canonical session-delete transaction, so
-  the runtime-internal child id also joins `deleted_sessions` and cannot be recreated on
-  replay. The tombstone is identity evidence, not leaked live catalog state. Quote the
-  child id and the before/after counts when scoring — an unquoted "looked clean" does not
-  pass;
+  the recorded child session. FIG-3377 changed the aftermath: lash never deletes a
+  session because a process was cancelled, so `03b-sessions-after.json` must still show
+  the child's `session_meta`/`session_head` rows for that id and must **not** show a
+  `deleted_sessions` tombstone for it. What cancellation settles is the turn, not the
+  session: the child's `pending_turn_inputs` row is left in a terminal state
+  (`completed`/`cancelled`), never open — no claimable input remains for a later turn to
+  pick up. The retained child is host-visible: it enumerates under the session catalog's
+  `caused_by = process(<process_id>)` filter and may be retired by an explicit host
+  session delete, which is the only path that tombstones it. Quote the child id, the
+  retained row counts, and the open-input count when scoring — an unquoted "looked
+  clean" does not pass;
 - capture the workbench logs with debug-level records enabled: `managed_turn.admission`
   and `managed_turn.release` are emitted by `tracing::debug!`, so an info-only log does
   not prove their absence. The records are log evidence, not a guaranteed event in the
@@ -202,11 +207,12 @@ Expect:
   cancelled one. A `managed_turn.admission` with `outcome=denied` and reason
   "already has a running turn" after the cancellation is the exact FIG-884 regression.
 
-Known residual (FIG-872, out of scope here): the cancelled subagent's **own child
-session** cannot run further turns — the dropped turn future also loses that child
-runtime's session loan. The gate above therefore uses a *new* subagent, not a second turn
-on the cancelled child. Screenshot the follow-up answer and the second subagent's terminal
-card as `03b-session-still-usable.png`.
+The cancelled subagent's child session is retained durable and reusable: a host can open
+it (for example via the `caused_by` catalog listing) and run an ordinary follow-up turn
+on it. The gate above still uses a *new* subagent for the parent-session check, since the
+parent's wedge was the managed-turn registration, not the child's durability. Screenshot
+the follow-up answer and the second subagent's terminal card as
+`03b-session-still-usable.png`.
 
 ## Phase 4 — Let the survivor complete
 
@@ -232,7 +238,7 @@ container are gone.
 | Runtime independence | both original ids remain live in rail and `/api/work` after delete | | `02-owner-gone-processes-live.png`, API/trace report |
 | Global cancel | exact id accepted; `cancel_requested` then cancelled | | `03-orphan-cancelled.png`, `03-cancel-receipt.json`, store events |
 | Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent runs; `managed_turn.release` released, no `already has a running turn` denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
-| Cancelled child session left no durable-catalog rows (FIG-884) | `03b-sessions-before.json` has a non-zero baseline for the recorded child id; `03b-sessions-after.json` has zero rows for that id in all five cleanup tables | | `03b-subagent-running.json` (child session id), `03b-sessions-before.json`, `03b-sessions-after.json`, `03b-sessions-delta.txt` |
+| Cancelled child session retained, not reclaimed (FIG-3377) | `03b-sessions-before.json` has a non-zero baseline for the recorded child id; `03b-sessions-after.json` keeps its `session_meta`/`session_head` rows, has no `deleted_sessions` tombstone, and has no open `pending_turn_inputs` for that id | | `03b-subagent-running.json` (child session id), `03b-sessions-before.json`, `03b-sessions-after.json`, `03b-sessions-delta.txt` |
 | Survivor completion | completed terminal and terminal marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 

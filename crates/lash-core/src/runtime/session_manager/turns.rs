@@ -18,12 +18,132 @@ impl ManagedSessionCapability {
             },
             scoped_effect_controller,
         ) = request.into_parts();
+        self.run_admitted_turn(
+            current,
+            usage,
+            session_id,
+            turn_id,
+            input,
+            scoped_effect_controller,
+            CancellationToken::new(),
+        )
+        .await
+    }
+
+    /// Initialize a brand-new session and run its first turn as one operation.
+    ///
+    /// This is the process-origin initialization port (FIG-3377): the only
+    /// caller is `run_process_session_turn`, which hands over the durable
+    /// `SessionCreateRequest` recorded on the process row, the process's own
+    /// execution authority, and its cancellation token. No facade or worker
+    /// type reaches this layer.
+    ///
+    /// Ordering contract (the crash/replay boundary on both substrates):
+    ///
+    /// 1. The child session's create commit lands durably in the child store.
+    /// 2. The first turn is accepted and committed inside the child session
+    ///    under the ordinary session execution lease — never the process
+    ///    registry.
+    /// 3. Only the runner's caller records the process terminal. A committed
+    ///    child turn is not itself a recorded process result.
+    ///
+    /// Cancellation is the standard turn cancellation, not a teardown path:
+    ///
+    /// * Observed before the create commit, nothing is created.
+    /// * Observed after the create commit but before turn admission, the
+    ///   session is retained idle — an empty durable row that is never
+    ///   reclaimed by lash.
+    /// * Observed while the turn runs, the supplied token is the turn's own
+    ///   cancellation token, so the turn settles `Cancelled` through the same
+    ///   path as every other cancelled turn: the cancelled turn commits, the
+    ///   accepted turn-input row is settled, and nothing remains claimable.
+    ///   The child session stays durable and reusable; lash never deletes a
+    ///   session because a process was cancelled.
+    ///
+    /// Admission is the shared managed-turn registry: the process's first
+    /// turn claims a `ManagedTurnLease` under `turn_concurrency_limit`, so a
+    /// subagent spawning another subagent receives a fresh Tokio task stack
+    /// and counts against the same bound as every other managed turn.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the port takes the create request, the process authority, and the turn parameters as distinct inputs; folding them would invent a wrapper type for one caller"
+    )]
+    pub(in crate::runtime::session_manager) async fn initialize_session_and_run_turn(
+        &self,
+        current: &CurrentSessionCapability,
+        usage: &UsageCapability,
+        create_request: crate::SessionCreateRequest,
+        process_id: &crate::ProcessId,
+        turn_id: TurnId,
+        turn_input: crate::TurnInput,
+        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        cancellation: CancellationToken,
+    ) -> Result<InitializedSessionTurn, SessionTurnInitError> {
+        if cancellation.is_cancelled() {
+            return Err(SessionTurnInitError::CancelledBeforeCreate);
+        }
+        let session = self
+            .create_session(current, create_request)
+            .await
+            .map_err(|source| SessionTurnInitError::Create {
+                source: Box::new(source),
+            })?;
+        let session_id = session.session_id.clone();
+        if cancellation.is_cancelled() {
+            return Err(SessionTurnInitError::CancelledAfterCreate { session_id });
+        }
+        let request = crate::SessionTurnRequest::new_process_backed(
+            &session_id,
+            turn_id.clone(),
+            turn_input,
+            process_id,
+            scoped_effect_controller,
+        )
+        .map_err(|source| SessionTurnInitError::Request {
+            session_id: session_id.clone(),
+            source: Box::new(source),
+        })?;
+        let turn = self
+            .run_admitted_turn(
+                current,
+                usage,
+                session_id.clone(),
+                turn_id,
+                request.input().clone(),
+                request.into_parts().1,
+                cancellation,
+            )
+            .await
+            .map_err(|source| SessionTurnInitError::Turn {
+                session_id: session_id.clone(),
+                source: Box::new(source),
+            })?;
+        Ok(InitializedSessionTurn { session, turn })
+    }
+
+    /// The shared managed-turn drive: registry admission, event drain, task
+    /// stack, and post-turn usage persistence. `cancel` is the turn's own
+    /// cancellation token — a fresh one for `start_turn`, the process's token
+    /// for `initialize_session_and_run_turn`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the shared body takes the capabilities, the turn identity, and the caller's authority as distinct inputs; folding them would invent a wrapper type shared by only two callers"
+    )]
+    async fn run_admitted_turn(
+        &self,
+        current: &CurrentSessionCapability,
+        usage: &UsageCapability,
+        session_id: SessionId,
+        turn_id: TurnId,
+        input: crate::TurnInput,
+        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        cancel: CancellationToken,
+    ) -> Result<AssembledTurn, crate::PluginError> {
         let runtime = {
             let registry = self.registry.lock().await;
             registry.get(&session_id).cloned()
         }
         .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        let cancel = CancellationToken::new();
         // Registration is owned by this lease for the rest of the turn. Every
         // exit — return, error, panic, or a dropped future when the owning
         // process is cancelled — releases it, because release happens in `Drop`
@@ -95,6 +215,50 @@ impl ManagedSessionCapability {
         lease.complete();
         Box::pin(usage.persist_current_usage_ledger(current, &turn_id)).await?;
         turn
+    }
+}
+
+/// The initialized child session and its committed first turn returned by
+/// [`ManagedSessionCapability::initialize_session_and_run_turn`].
+pub(in crate::runtime::session_manager) struct InitializedSessionTurn {
+    pub session: SessionHandle,
+    pub turn: AssembledTurn,
+}
+
+/// Where [`ManagedSessionCapability::initialize_session_and_run_turn`] stopped.
+///
+/// The variants partition the operation so the process runner can report the
+/// stage faithfully without inspecting error strings.
+pub(in crate::runtime::session_manager) enum SessionTurnInitError {
+    /// Cancellation was observed before the create commit; nothing exists.
+    CancelledBeforeCreate,
+    /// Cancellation was observed in the window between the create commit and
+    /// turn admission. The session is committed, retained, and idle.
+    CancelledAfterCreate { session_id: SessionId },
+    /// Session initialization failed; no retained session was produced.
+    Create { source: Box<crate::PluginError> },
+    /// The process's execution authority did not validate for the child turn.
+    Request {
+        session_id: SessionId,
+        source: Box<crate::PluginError>,
+    },
+    /// The first turn itself failed to run to a committed outcome.
+    Turn {
+        session_id: SessionId,
+        source: Box<crate::PluginError>,
+    },
+}
+
+impl SessionTurnInitError {
+    /// The retained child session id, when cancellation landed after the
+    /// create commit. `None` means the operation created nothing.
+    pub(in crate::runtime::session_manager) fn retained_session_id(&self) -> Option<&SessionId> {
+        match self {
+            Self::CancelledAfterCreate { session_id }
+            | Self::Request { session_id, .. }
+            | Self::Turn { session_id, .. } => Some(session_id),
+            Self::CancelledBeforeCreate | Self::Create { .. } => None,
+        }
     }
 }
 
