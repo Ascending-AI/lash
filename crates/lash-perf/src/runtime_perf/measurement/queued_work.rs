@@ -16,40 +16,37 @@ pub(super) async fn run_once_queued_work_claim_stress(
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-queued-work-other";
     let owner = lash_core::LeaseOwnerIdentity::opaque("runtime-perf", "queued-work-stress");
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let store = Arc::new(RuntimePerfStore::default());
-    let _runtime = build_runtime_with_store(scenario, Some(Arc::clone(&store)), None).await?;
-    let mut commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
+    let (store, _runtime, mut commit_state) = run
+        .build(async {
+            let store = Arc::new(RuntimePerfStore::default());
+            let runtime =
+                build_runtime_with_store(scenario, Some(Arc::clone(&store)), None).await?;
+            let commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
+            Ok((store, runtime, commit_state))
+        })
+        .await?;
 
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    for index in 0..QUEUED_WORK_SEED_OTHER_SESSION_BATCHES {
-        store
-            .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    other_session_id,
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    SessionCommand::RefreshToolCatalog {
-                        reason: format!("other queued work {index}"),
-                    },
+    run.seed(async {
+        for index in 0..QUEUED_WORK_SEED_OTHER_SESSION_BATCHES {
+            store
+                .enqueue_queued_work(
+                    QueuedWorkBatchDraft::new(
+                        other_session_id,
+                        DeliveryPolicy::EarliestSafeBoundary,
+                        SessionCommand::RefreshToolCatalog {
+                            reason: format!("other queued work {index}"),
+                        },
+                    )
+                    .with_source_key(format!("other:{index}")),
                 )
-                .with_source_key(format!("other:{index}")),
-            )
-            .await?;
-    }
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
+                .await?;
+        }
+        Ok(())
+    })
+    .await?;
 
-    let mut turns = Vec::with_capacity(chat_turns);
     let mut enqueued_batches = QUEUED_WORK_SEED_OTHER_SESSION_BATCHES;
     let mut command_claims = 0usize;
     let mut join_claims = 0usize;
@@ -58,304 +55,263 @@ pub(super) async fn run_once_queued_work_claim_stress(
     let mut completed_batches = 0usize;
 
     for turn_index in 0..chat_turns {
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let mut phase_profile = BTreeMap::new();
-
-        let (lease, phase) =
-            measure_runtime_perf_async_phase("queued_work.claim_session_lease", async {
-                store
-                    .try_claim_session_execution_lease(
-                        &session_id,
-                        &owner,
-                        "run-once-queued-work-claim-stress-executor",
-                        QUEUED_WORK_CLAIM_TTL_MS,
-                    )
-                    .await?
-                    .acquired()
-                    .ok_or_else(|| anyhow::anyhow!("queued-work stress lease was busy"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-
-        let (_, phase) =
-            measure_runtime_perf_async_phase("queued_work.enqueue_mixed_batch", async {
-                enqueue_queued_work_stress_turn(store.as_ref(), &session_id, turn_index).await
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        enqueued_batches += QUEUED_WORK_JOIN_BATCHES_PER_TURN + 2;
-
-        let (command_claim, phase) =
-            measure_runtime_perf_async_phase("queued_work.claim_session_command", async {
-                store
-                    .claim_leading_ready_session_command(&session_id, &lease.fence(), &owner)
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("queued-work stress expected command claim"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        command_claims += 1;
-        if command_claim.batches.len() != 1 || command_claim.exclusive_session_command().is_none() {
-            anyhow::bail!("queued-work stress command claim did not contain one session command");
-        }
-
-        let (_, phase) =
-            measure_runtime_perf_async_phase("queued_work.complete_session_command", async {
-                let result = store
-                    .commit_runtime_state(queued_work_stress_commit(
-                        &commit_state,
-                        vec![command_claim.completion()],
-                    ))
-                    .await?;
-                commit_state.apply_persisted_commit_result(result);
-                Ok::<(), anyhow::Error>(())
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        completed_batches += 1;
-
-        let (join_claim, phase) =
-            measure_runtime_perf_async_phase("queued_work.claim_join_turn_work", async {
-                store
-                    .claim_ready_queued_work(
-                        &session_id,
-                        &lease.fence(),
-                        &owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        lash_core::testing::queued_work_claim_policy(
-                            QUEUED_WORK_JOIN_BATCHES_PER_TURN,
-                        ),
-                    )
-                    .await?
-                    .claim()
-                    .ok_or_else(|| anyhow::anyhow!("queued-work stress expected join claim"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        if join_claim.batches.len() != QUEUED_WORK_JOIN_BATCHES_PER_TURN {
-            anyhow::bail!(
-                "queued-work stress expected {} joined batches, got {}",
-                QUEUED_WORK_JOIN_BATCHES_PER_TURN,
-                join_claim.batches.len()
-            );
-        }
-        join_claims += 1;
-        join_batches_claimed += join_claim.batches.len();
-        let join_batch_ids = join_claim
-            .batches
-            .iter()
-            .map(|batch| batch.batch_id.clone())
-            .collect::<Vec<_>>();
-
-        let (_, phase) =
-            measure_runtime_perf_async_phase("queued_work.abandon_join_claim", async {
-                store
-                    .abandon_queued_work_claim(&join_claim)
-                    .await
-                    .map_err(anyhow::Error::from)
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-
-        let (join_claim, phase) =
-            measure_runtime_perf_async_phase("queued_work.reclaim_by_batch_ids", async {
-                store
-                    .claim_ready_queued_work_by_batch_ids(
-                        &session_id,
-                        &lease.fence(),
-                        &owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        &join_batch_ids,
-                        lash_core::testing::queued_work_claim_policy(64),
-                    )
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("queued-work stress expected exact reclaim"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        if join_claim
-            .batches
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .ne(join_batch_ids.iter().map(lash_core::BatchId::as_str))
-        {
-            anyhow::bail!("queued-work stress exact reclaim returned different batches");
-        }
-
-        let (_, phase) =
-            measure_runtime_perf_async_phase("queued_work.complete_join_turn_work", async {
-                let result = store
-                    .commit_runtime_state(queued_work_stress_commit(
-                        &commit_state,
-                        vec![join_claim.completion()],
-                    ))
-                    .await?;
-                commit_state.apply_persisted_commit_result(result);
-                Ok::<(), anyhow::Error>(())
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        completed_batches += join_claim.batches.len();
-
-        let (exclusive_claim, phase) =
-            measure_runtime_perf_async_phase("queued_work.claim_exclusive_turn_work", async {
-                store
-                    .claim_ready_queued_work(
-                        &session_id,
-                        &lease.fence(),
-                        &owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        lash_core::testing::queued_work_claim_policy(
-                            QUEUED_WORK_JOIN_BATCHES_PER_TURN,
-                        ),
-                    )
-                    .await?
-                    .claim()
-                    .ok_or_else(|| anyhow::anyhow!("queued-work stress expected exclusive claim"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        if exclusive_claim.batches.len() != 1 {
-            anyhow::bail!(
-                "queued-work stress expected one exclusive batch, got {}",
-                exclusive_claim.batches.len()
-            );
-        }
-        exclusive_claims += 1;
-
-        let (_, phase) =
-            measure_runtime_perf_async_phase("queued_work.complete_exclusive_turn_work", async {
-                let result = store
-                    .commit_runtime_state(queued_work_stress_commit(
-                        &commit_state,
-                        vec![exclusive_claim.completion()],
-                    ))
-                    .await?;
-                commit_state.apply_persisted_commit_result(result);
-                Ok::<(), anyhow::Error>(())
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        completed_batches += 1;
-
-        let (pending, phase) =
-            measure_runtime_perf_async_phase("queued_work.list_pending", async {
-                store
-                    .list_pending_queued_work(&session_id)
-                    .await
-                    .map_err(anyhow::Error::from)
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        if !pending.is_empty() {
-            anyhow::bail!(
-                "queued-work stress left {} pending batches for measured session",
-                pending.len()
-            );
-        }
-
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        tokio::task::yield_now().await;
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        turns.push(RuntimePerfTurnResult {
+        run.turn(
             turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: memory_span(turn_before_memory, after_await_memory),
-            phase_profile,
-            turn_usage: TokenUsage::default(),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
-        });
+            async {
+                let mut phase_profile = BTreeMap::new();
+
+                let (lease, phase) =
+                    measure_runtime_perf_async_phase("queued_work.claim_session_lease", async {
+                        store
+                            .try_claim_session_execution_lease(
+                                &session_id,
+                                &owner,
+                                "run-once-queued-work-claim-stress-executor",
+                                QUEUED_WORK_CLAIM_TTL_MS,
+                            )
+                            .await?
+                            .acquired()
+                            .ok_or_else(|| anyhow::anyhow!("queued-work stress lease was busy"))
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+
+                let (_, phase) =
+                    measure_runtime_perf_async_phase("queued_work.enqueue_mixed_batch", async {
+                        enqueue_queued_work_stress_turn(store.as_ref(), &session_id, turn_index)
+                            .await
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+                enqueued_batches += QUEUED_WORK_JOIN_BATCHES_PER_TURN + 2;
+
+                let (command_claim, phase) =
+                    measure_runtime_perf_async_phase("queued_work.claim_session_command", async {
+                        store
+                            .claim_leading_ready_session_command(
+                                &session_id,
+                                &lease.fence(),
+                                &owner,
+                            )
+                            .await?
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("queued-work stress expected command claim")
+                            })
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+                command_claims += 1;
+                if command_claim.batches.len() != 1
+                    || command_claim.exclusive_session_command().is_none()
+                {
+                    anyhow::bail!(
+                        "queued-work stress command claim did not contain one session command"
+                    );
+                }
+
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "queued_work.complete_session_command",
+                    async {
+                        let result = store
+                            .commit_runtime_state(queued_work_stress_commit(
+                                &commit_state,
+                                vec![command_claim.completion()],
+                            ))
+                            .await?;
+                        commit_state.apply_persisted_commit_result(result);
+                        Ok::<(), anyhow::Error>(())
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                completed_batches += 1;
+
+                let (join_claim, phase) =
+                    measure_runtime_perf_async_phase("queued_work.claim_join_turn_work", async {
+                        store
+                            .claim_ready_queued_work(
+                                &session_id,
+                                &lease.fence(),
+                                &owner,
+                                QueuedWorkClaimBoundary::Idle,
+                                lash_core::testing::queued_work_claim_policy(
+                                    QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                                ),
+                            )
+                            .await?
+                            .claim()
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("queued-work stress expected join claim")
+                            })
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+                if join_claim.batches.len() != QUEUED_WORK_JOIN_BATCHES_PER_TURN {
+                    anyhow::bail!(
+                        "queued-work stress expected {} joined batches, got {}",
+                        QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                        join_claim.batches.len()
+                    );
+                }
+                join_claims += 1;
+                join_batches_claimed += join_claim.batches.len();
+                let join_batch_ids = join_claim
+                    .batches
+                    .iter()
+                    .map(|batch| batch.batch_id.clone())
+                    .collect::<Vec<_>>();
+
+                let (_, phase) =
+                    measure_runtime_perf_async_phase("queued_work.abandon_join_claim", async {
+                        store
+                            .abandon_queued_work_claim(&join_claim)
+                            .await
+                            .map_err(anyhow::Error::from)
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+
+                let (join_claim, phase) =
+                    measure_runtime_perf_async_phase("queued_work.reclaim_by_batch_ids", async {
+                        store
+                            .claim_ready_queued_work_by_batch_ids(
+                                &session_id,
+                                &lease.fence(),
+                                &owner,
+                                QueuedWorkClaimBoundary::Idle,
+                                &join_batch_ids,
+                                lash_core::testing::queued_work_claim_policy(64),
+                            )
+                            .await?
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("queued-work stress expected exact reclaim")
+                            })
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+                if join_claim
+                    .batches
+                    .iter()
+                    .map(|batch| batch.batch_id.as_str())
+                    .ne(join_batch_ids.iter().map(lash_core::BatchId::as_str))
+                {
+                    anyhow::bail!("queued-work stress exact reclaim returned different batches");
+                }
+
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "queued_work.complete_join_turn_work",
+                    async {
+                        let result = store
+                            .commit_runtime_state(queued_work_stress_commit(
+                                &commit_state,
+                                vec![join_claim.completion()],
+                            ))
+                            .await?;
+                        commit_state.apply_persisted_commit_result(result);
+                        Ok::<(), anyhow::Error>(())
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                completed_batches += join_claim.batches.len();
+
+                let (exclusive_claim, phase) = measure_runtime_perf_async_phase(
+                    "queued_work.claim_exclusive_turn_work",
+                    async {
+                        store
+                            .claim_ready_queued_work(
+                                &session_id,
+                                &lease.fence(),
+                                &owner,
+                                QueuedWorkClaimBoundary::Idle,
+                                lash_core::testing::queued_work_claim_policy(
+                                    QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                                ),
+                            )
+                            .await?
+                            .claim()
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("queued-work stress expected exclusive claim")
+                            })
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                if exclusive_claim.batches.len() != 1 {
+                    anyhow::bail!(
+                        "queued-work stress expected one exclusive batch, got {}",
+                        exclusive_claim.batches.len()
+                    );
+                }
+                exclusive_claims += 1;
+
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "queued_work.complete_exclusive_turn_work",
+                    async {
+                        let result = store
+                            .commit_runtime_state(queued_work_stress_commit(
+                                &commit_state,
+                                vec![exclusive_claim.completion()],
+                            ))
+                            .await?;
+                        commit_state.apply_persisted_commit_result(result);
+                        Ok::<(), anyhow::Error>(())
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                completed_batches += 1;
+
+                let (pending, phase) =
+                    measure_runtime_perf_async_phase("queued_work.list_pending", async {
+                        store
+                            .list_pending_queued_work(&session_id)
+                            .await
+                            .map_err(anyhow::Error::from)
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+                if !pending.is_empty() {
+                    anyhow::bail!(
+                        "queued-work stress left {} pending batches for measured session",
+                        pending.len()
+                    );
+                }
+
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        phase_profile,
+                        ..TurnTail::default()
+                    },
+                })
+            },
+            async {
+                tokio::task::yield_now().await;
+                Ok(())
+            },
+        )
+        .await?;
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let remaining_measured = store.list_queued_work(&session_id).await?.len();
-    let remaining_other = store
-        .list_queued_work(&SessionId::from(other_session_id))
-        .await?
-        .len();
-    let _export_shape = serde_json::json!({
-        "enqueued_batches": enqueued_batches,
-        "completed_batches": completed_batches,
-        "remaining_measured_batches": remaining_measured,
-        "remaining_other_batches": remaining_other,
-    })
-    .to_string();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
+    let (remaining_measured, remaining_other) = run
+        .export(async {
+            let remaining_measured = store.list_queued_work(&session_id).await?.len();
+            let remaining_other = store
+                .list_queued_work(&SessionId::from(other_session_id))
+                .await?
+                .len();
+            let _export_shape = serde_json::json!({
+                "enqueued_batches": enqueued_batches,
+                "completed_batches": completed_batches,
+                "remaining_measured_batches": remaining_measured,
+                "remaining_other_batches": remaining_other,
+            })
+            .to_string();
+            Ok((remaining_measured, remaining_other))
+        })
+        .await?;
+    Ok(run.finish(RunTail {
         session_nodes: enqueued_batches,
         active_path_messages: completed_batches,
         extra_counters: BTreeMap::from([
@@ -377,13 +333,8 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 remaining_other as u64,
             ),
         ]),
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: memory_span(before_memory, after_export_memory),
-        phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turns,
-        cumulative_usage: SessionUsageReport::default(),
-    })
+        ..RunTail::default()
+    }))
 }
 
 async fn enqueue_queued_work_stress_turn(
@@ -468,37 +419,33 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-turn-input-other";
     let owner = lash_core::LeaseOwnerIdentity::opaque("runtime-perf", "turn-input-ingress");
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let store = Arc::new(RuntimePerfStore::default());
-    let mut commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
+    let (store, mut commit_state) = run
+        .build(async {
+            let store = Arc::new(RuntimePerfStore::default());
+            let commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
+            Ok((store, commit_state))
+        })
+        .await?;
 
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    for index in 0..QUEUED_WORK_SEED_OTHER_SESSION_BATCHES {
-        store
-            .enqueue_pending_turn_input(
-                lash_core::PendingTurnInputDraft::new(
-                    other_session_id,
-                    lash_core::TurnInputIngress::NextTurn,
-                    TurnInput::text(format!("other pending turn input {index}")),
+    run.seed(async {
+        for index in 0..QUEUED_WORK_SEED_OTHER_SESSION_BATCHES {
+            store
+                .enqueue_pending_turn_input(
+                    lash_core::PendingTurnInputDraft::new(
+                        other_session_id,
+                        lash_core::TurnInputIngress::NextTurn,
+                        TurnInput::text(format!("other pending turn input {index}")),
+                    )
+                    .with_source_key(format!("other:{index}")),
                 )
-                .with_source_key(format!("other:{index}")),
-            )
-            .await?;
-    }
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
+                .await?;
+        }
+        Ok(())
+    })
+    .await?;
 
-    let mut turns = Vec::with_capacity(chat_turns);
     let mut active_enqueued = 0usize;
     let mut next_enqueued = 0usize;
     let mut active_claims = 0usize;
@@ -508,162 +455,169 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let mut deferred_inputs = 0usize;
 
     for turn_index in 0..chat_turns {
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let mut phase_profile = BTreeMap::new();
-        let turn_id = lash_core::TurnId::from(format!("turn-input-ingress-{turn_index}"));
+        run.turn(
+            turn_index,
+            async {
+                let mut phase_profile = BTreeMap::new();
+                let turn_id = lash_core::TurnId::from(format!("turn-input-ingress-{turn_index}"));
 
-        let (lease, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.claim_session_lease", async {
-                store
-                    .try_claim_session_execution_lease(
-                        &session_id,
-                        &owner,
-                        "run-once-turn-input-ingress-interrupt-executor",
-                        QUEUED_WORK_CLAIM_TTL_MS,
-                    )
-                    .await?
-                    .acquired()
-                    .ok_or_else(|| anyhow::anyhow!("turn-input ingress lease was busy"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-
-        let (_, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.enqueue_active", async {
-                for input_index in 0..TURN_INPUT_INGRESS_ACTIVE_PER_TURN {
-                    let mut input = TurnInput::text(format!(
-                        "active steer turn {turn_index} input {input_index}"
-                    ));
-                    if input_index == 0 {
-                        input = input.with_attachment(lash_core::AttachmentSource::inline(
-                            lash_core::MediaType::parse("image/png").unwrap(),
-                            vec![1, 2, 3, turn_index as u8],
-                        ));
-                    }
-                    store
-                        .enqueue_pending_turn_input(
-                            lash_core::PendingTurnInputDraft::new(
+                let (lease, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.claim_session_lease",
+                    async {
+                        store
+                            .try_claim_session_execution_lease(
                                 &session_id,
-                                lash_core::TurnInputIngress::active_turn(
-                                    turn_id.clone(),
-                                    lash_core::TurnInputCheckpointBoundary::AfterWork,
-                                ),
-                                input,
+                                &owner,
+                                "run-once-turn-input-ingress-interrupt-executor",
+                                QUEUED_WORK_CLAIM_TTL_MS,
                             )
-                            .with_source_key(format!("active:{turn_index}:{input_index}")),
-                        )
-                        .await?;
-                }
-                Ok::<(), anyhow::Error>(())
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        active_enqueued += TURN_INPUT_INGRESS_ACTIVE_PER_TURN;
+                            .await?
+                            .acquired()
+                            .ok_or_else(|| anyhow::anyhow!("turn-input ingress lease was busy"))
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
 
-        let (_, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.enqueue_next", async {
-                for input_index in 0..TURN_INPUT_INGRESS_NEXT_PER_TURN {
-                    let mut input = TurnInput::text(format!(
-                        "queued next turn {turn_index} input {input_index}"
-                    ));
-                    if input_index == 0 {
-                        input = input.with_attachment(lash_core::AttachmentSource::inline(
-                            lash_core::MediaType::parse("image/png").unwrap(),
-                            vec![4, 5, 6, turn_index as u8],
-                        ));
-                    }
-                    store
-                        .enqueue_pending_turn_input(
-                            lash_core::PendingTurnInputDraft::new(
+                let (_, phase) =
+                    measure_runtime_perf_async_phase("turn_input_ingress.enqueue_active", async {
+                        for input_index in 0..TURN_INPUT_INGRESS_ACTIVE_PER_TURN {
+                            let mut input = TurnInput::text(format!(
+                                "active steer turn {turn_index} input {input_index}"
+                            ));
+                            if input_index == 0 {
+                                input = input.with_attachment(lash_core::AttachmentSource::inline(
+                                    lash_core::MediaType::parse("image/png").unwrap(),
+                                    vec![1, 2, 3, turn_index as u8],
+                                ));
+                            }
+                            store
+                                .enqueue_pending_turn_input(
+                                    lash_core::PendingTurnInputDraft::new(
+                                        &session_id,
+                                        lash_core::TurnInputIngress::active_turn(
+                                            turn_id.clone(),
+                                            lash_core::TurnInputCheckpointBoundary::AfterWork,
+                                        ),
+                                        input,
+                                    )
+                                    .with_source_key(format!("active:{turn_index}:{input_index}")),
+                                )
+                                .await?;
+                        }
+                        Ok::<(), anyhow::Error>(())
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+                active_enqueued += TURN_INPUT_INGRESS_ACTIVE_PER_TURN;
+
+                let (_, phase) =
+                    measure_runtime_perf_async_phase("turn_input_ingress.enqueue_next", async {
+                        for input_index in 0..TURN_INPUT_INGRESS_NEXT_PER_TURN {
+                            let mut input = TurnInput::text(format!(
+                                "queued next turn {turn_index} input {input_index}"
+                            ));
+                            if input_index == 0 {
+                                input = input.with_attachment(lash_core::AttachmentSource::inline(
+                                    lash_core::MediaType::parse("image/png").unwrap(),
+                                    vec![4, 5, 6, turn_index as u8],
+                                ));
+                            }
+                            store
+                                .enqueue_pending_turn_input(
+                                    lash_core::PendingTurnInputDraft::new(
+                                        &session_id,
+                                        lash_core::TurnInputIngress::NextTurn,
+                                        input,
+                                    )
+                                    .with_source_key(format!("next:{turn_index}:{input_index}")),
+                                )
+                                .await?;
+                        }
+                        Ok::<(), anyhow::Error>(())
+                    })
+                    .await?;
+                phase_profile.insert(phase.0, phase.1);
+                next_enqueued += TURN_INPUT_INGRESS_NEXT_PER_TURN;
+
+                let (initial_active_claim, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.claim_active_initial",
+                    async {
+                        store
+                            .claim_active_turn_inputs(
                                 &session_id,
-                                lash_core::TurnInputIngress::NextTurn,
-                                input,
+                                &lease.fence(),
+                                &owner,
+                                &turn_id,
+                                lash_core::CheckpointKind::AfterWork,
+                                1,
                             )
-                            .with_source_key(format!("next:{turn_index}:{input_index}")),
-                        )
-                        .await?;
-                }
-                Ok::<(), anyhow::Error>(())
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        next_enqueued += TURN_INPUT_INGRESS_NEXT_PER_TURN;
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("expected initial active input claim"))
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                active_claims += 1;
 
-        let (initial_active_claim, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.claim_active_initial", async {
-                store
-                    .claim_active_turn_inputs(
-                        &session_id,
-                        &lease.fence(),
-                        &owner,
-                        &turn_id,
-                        lash_core::CheckpointKind::AfterWork,
-                        1,
-                    )
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("expected initial active input claim"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        active_claims += 1;
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.abandon_active_claim",
+                    async {
+                        store
+                            .abandon_turn_input_claim(&initial_active_claim)
+                            .await
+                            .map_err(anyhow::Error::from)
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                abandoned_claims += 1;
 
-        let (_, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.abandon_active_claim", async {
-                store
-                    .abandon_turn_input_claim(&initial_active_claim)
-                    .await
-                    .map_err(anyhow::Error::from)
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        abandoned_claims += 1;
-
-        let (active_claim, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.reclaim_active_inputs", async {
-                store
-                    .claim_active_turn_inputs(
-                        &session_id,
-                        &lease.fence(),
-                        &owner,
-                        &turn_id,
-                        lash_core::CheckpointKind::AfterWork,
+                let (active_claim, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.reclaim_active_inputs",
+                    async {
+                        store
+                            .claim_active_turn_inputs(
+                                &session_id,
+                                &lease.fence(),
+                                &owner,
+                                &turn_id,
+                                lash_core::CheckpointKind::AfterWork,
+                                TURN_INPUT_INGRESS_ACCEPTED_PER_TURN,
+                            )
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("expected active input claim"))
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                active_claims += 1;
+                if active_claim.inputs.len() != TURN_INPUT_INGRESS_ACCEPTED_PER_TURN {
+                    anyhow::bail!(
+                        "turn-input ingress expected {} active inputs, got {}",
                         TURN_INPUT_INGRESS_ACCEPTED_PER_TURN,
+                        active_claim.inputs.len()
+                    );
+                }
+                let active_turn_input = active_claim.materialize_turn_input();
+                // Position-independent on purpose: a claim aggregates many inputs and
+                // only the first carries the attachment, so the attachment is not the
+                // last item. Assert survival, not placement.
+                if !active_turn_input.items.iter().any(|item| {
+                    matches!(
+                        item,
+                        lash_core::InputItem::Attachment {
+                            source: lash_core::AttachmentSource::Inline { bytes, .. }
+                        } if bytes == &vec![1, 2, 3, turn_index as u8]
                     )
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("expected active input claim"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        active_claims += 1;
-        if active_claim.inputs.len() != TURN_INPUT_INGRESS_ACCEPTED_PER_TURN {
-            anyhow::bail!(
-                "turn-input ingress expected {} active inputs, got {}",
-                TURN_INPUT_INGRESS_ACCEPTED_PER_TURN,
-                active_claim.inputs.len()
-            );
-        }
-        let active_turn_input = active_claim.materialize_turn_input();
-        // Position-independent on purpose: a claim aggregates many inputs and
-        // only the first carries the attachment, so the attachment is not the
-        // last item. Assert survival, not placement.
-        if !active_turn_input.items.iter().any(|item| {
-            matches!(
-                item,
-                lash_core::InputItem::Attachment {
-                    source: lash_core::AttachmentSource::Inline { bytes, .. }
-                } if bytes == &vec![1, 2, 3, turn_index as u8]
-            )
-        }) {
-            anyhow::bail!("turn-input ingress active claim lost attachment bytes");
-        }
+                }) {
+                    anyhow::bail!("turn-input ingress active claim lost attachment bytes");
+                }
 
-        let (_, phase) =
-            Box::pin(measure_runtime_perf_async_phase(
-                "turn_input_ingress.complete_active_and_defer",
-                async {
-                    let result = store
+                let (_, phase) = Box::pin(measure_runtime_perf_async_phase(
+                    "turn_input_ingress.complete_active_and_defer",
+                    async {
+                        let result = store
                     .commit_runtime_state(
                         lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                             store.as_ref(), &lease.fence(),
@@ -673,218 +627,160 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                         ).await?,
                     )
                     .await?;
-                    commit_state.apply_persisted_commit_result(result);
-                    Ok::<(), anyhow::Error>(())
-                },
-            ))
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        completed_inputs += TURN_INPUT_INGRESS_ACCEPTED_PER_TURN;
-        deferred_inputs +=
-            TURN_INPUT_INGRESS_ACTIVE_PER_TURN - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN;
+                        commit_state.apply_persisted_commit_result(result);
+                        Ok::<(), anyhow::Error>(())
+                    },
+                ))
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                completed_inputs += TURN_INPUT_INGRESS_ACCEPTED_PER_TURN;
+                deferred_inputs +=
+                    TURN_INPUT_INGRESS_ACTIVE_PER_TURN - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN;
 
-        let (next_claim, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.claim_next_turn_inputs", async {
-                store
-                    .claim_next_turn_inputs(
-                        &session_id,
-                        &lease.fence(),
-                        &owner,
-                        TURN_INPUT_INGRESS_ACTIVE_PER_TURN + TURN_INPUT_INGRESS_NEXT_PER_TURN,
+                let (next_claim, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.claim_next_turn_inputs",
+                    async {
+                        store
+                            .claim_next_turn_inputs(
+                                &session_id,
+                                &lease.fence(),
+                                &owner,
+                                TURN_INPUT_INGRESS_ACTIVE_PER_TURN
+                                    + TURN_INPUT_INGRESS_NEXT_PER_TURN,
+                            )
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("expected next-turn input claim"))
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                next_claims += 1;
+                let expected_next = TURN_INPUT_INGRESS_ACTIVE_PER_TURN
+                    - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN
+                    + TURN_INPUT_INGRESS_NEXT_PER_TURN;
+                if next_claim.inputs.len() != expected_next {
+                    anyhow::bail!(
+                        "turn-input ingress expected {expected_next} next-turn inputs, got {}",
+                        next_claim.inputs.len()
+                    );
+                }
+
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.abandon_next_claim",
+                    async {
+                        store
+                            .abandon_turn_input_claim(&next_claim)
+                            .await
+                            .map_err(anyhow::Error::from)
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                abandoned_claims += 1;
+
+                let (next_claim, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.reclaim_next_turn_inputs",
+                    async {
+                        store
+                            .claim_next_turn_inputs(
+                                &session_id,
+                                &lease.fence(),
+                                &owner,
+                                TURN_INPUT_INGRESS_ACTIVE_PER_TURN
+                                    + TURN_INPUT_INGRESS_NEXT_PER_TURN,
+                            )
+                            .await?
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("expected reclaimed next-turn input claim")
+                            })
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                next_claims += 1;
+                let next_turn_input = next_claim.materialize_turn_input();
+                // Position-independent: see the active-claim assertion above.
+                if !next_turn_input.items.iter().any(|item| {
+                    matches!(
+                        item,
+                        lash_core::InputItem::Attachment {
+                            source: lash_core::AttachmentSource::Inline { bytes, .. }
+                        } if bytes == &vec![4, 5, 6, turn_index as u8]
                     )
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("expected next-turn input claim"))
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        next_claims += 1;
-        let expected_next = TURN_INPUT_INGRESS_ACTIVE_PER_TURN
-            - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN
-            + TURN_INPUT_INGRESS_NEXT_PER_TURN;
-        if next_claim.inputs.len() != expected_next {
-            anyhow::bail!(
-                "turn-input ingress expected {expected_next} next-turn inputs, got {}",
-                next_claim.inputs.len()
-            );
-        }
+                }) {
+                    anyhow::bail!("turn-input ingress next claim lost attachment bytes");
+                }
 
-        let (_, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.abandon_next_claim", async {
-                store
-                    .abandon_turn_input_claim(&next_claim)
-                    .await
-                    .map_err(anyhow::Error::from)
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        abandoned_claims += 1;
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.complete_next_turn_inputs",
+                    async {
+                        let result = store
+                            .commit_runtime_state(
+                                RuntimeCommit::persisted_state_for_test(&commit_state, &[])
+                                    .completing_turn_input_claim(next_claim.completion()),
+                            )
+                            .await?;
+                        commit_state.apply_persisted_commit_result(result);
+                        Ok::<(), anyhow::Error>(())
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
+                completed_inputs += next_claim.inputs.len();
 
-        let (next_claim, phase) = measure_runtime_perf_async_phase(
-            "turn_input_ingress.reclaim_next_turn_inputs",
-            async {
-                store
-                    .claim_next_turn_inputs(
-                        &session_id,
-                        &lease.fence(),
-                        &owner,
-                        TURN_INPUT_INGRESS_ACTIVE_PER_TURN + TURN_INPUT_INGRESS_NEXT_PER_TURN,
-                    )
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("expected reclaimed next-turn input claim"))
-            },
-        )
-        .await?;
-        phase_profile.insert(phase.0, phase.1);
-        next_claims += 1;
-        let next_turn_input = next_claim.materialize_turn_input();
-        // Position-independent: see the active-claim assertion above.
-        if !next_turn_input.items.iter().any(|item| {
-            matches!(
-                item,
-                lash_core::InputItem::Attachment {
-                    source: lash_core::AttachmentSource::Inline { bytes, .. }
-                } if bytes == &vec![4, 5, 6, turn_index as u8]
-            )
-        }) {
-            anyhow::bail!("turn-input ingress next claim lost attachment bytes");
-        }
-
-        let (_, phase) = measure_runtime_perf_async_phase(
-            "turn_input_ingress.complete_next_turn_inputs",
-            async {
-                let result = store
-                    .commit_runtime_state(
-                        RuntimeCommit::persisted_state_for_test(&commit_state, &[])
-                            .completing_turn_input_claim(next_claim.completion()),
-                    )
+                let (pending, phase) =
+                    measure_runtime_perf_async_phase("turn_input_ingress.list_pending", async {
+                        store
+                            .list_pending_turn_inputs(&session_id)
+                            .await
+                            .map_err(anyhow::Error::from)
+                    })
                     .await?;
-                commit_state.apply_persisted_commit_result(result);
-                Ok::<(), anyhow::Error>(())
+                phase_profile.insert(phase.0, phase.1);
+                if !pending.is_empty() {
+                    anyhow::bail!(
+                        "turn-input ingress left {} pending inputs for measured session",
+                        pending.len()
+                    );
+                }
+
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        phase_profile,
+                        ..TurnTail::default()
+                    },
+                })
+            },
+            async {
+                tokio::task::yield_now().await;
+                Ok(())
             },
         )
         .await?;
-        phase_profile.insert(phase.0, phase.1);
-        completed_inputs += next_claim.inputs.len();
-
-        let (pending, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.list_pending", async {
-                store
-                    .list_pending_turn_inputs(&session_id)
-                    .await
-                    .map_err(anyhow::Error::from)
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-        if !pending.is_empty() {
-            anyhow::bail!(
-                "turn-input ingress left {} pending inputs for measured session",
-                pending.len()
-            );
-        }
-
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        tokio::task::yield_now().await;
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        turns.push(RuntimePerfTurnResult {
-            turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: memory_span(turn_before_memory, after_await_memory),
-            phase_profile,
-            turn_usage: TokenUsage::default(),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
-        });
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let remaining_measured = store.list_pending_turn_inputs(&session_id).await?.len();
-    let remaining_other = store
-        .list_pending_turn_inputs(&SessionId::from(other_session_id))
-        .await?
-        .len();
-    let _export_shape = serde_json::json!({
-        "active_enqueued": active_enqueued,
-        "next_enqueued": next_enqueued,
-        "completed_inputs": completed_inputs,
-        "deferred_inputs": deferred_inputs,
-        "remaining_measured_inputs": remaining_measured,
-        "remaining_other_inputs": remaining_other,
-    })
-    .to_string();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
+    let (remaining_measured, remaining_other) = run
+        .export(async {
+            let remaining_measured = store.list_pending_turn_inputs(&session_id).await?.len();
+            let remaining_other = store
+                .list_pending_turn_inputs(&SessionId::from(other_session_id))
+                .await?
+                .len();
+            let _export_shape = serde_json::json!({
+                "active_enqueued": active_enqueued,
+                "next_enqueued": next_enqueued,
+                "completed_inputs": completed_inputs,
+                "deferred_inputs": deferred_inputs,
+                "remaining_measured_inputs": remaining_measured,
+                "remaining_other_inputs": remaining_other,
+            })
+            .to_string();
+            Ok((remaining_measured, remaining_other))
+        })
+        .await?;
 
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
+    Ok(run.finish(RunTail {
         session_nodes: active_enqueued + next_enqueued,
         active_path_messages: completed_inputs,
         extra_counters: BTreeMap::from([
@@ -901,13 +797,8 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
             ),
             ("remaining_other_inputs".to_string(), remaining_other as u64),
         ]),
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: memory_span(before_memory, after_export_memory),
-        phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turns,
-        cumulative_usage: SessionUsageReport::default(),
-    })
+        ..RunTail::default()
+    }))
 }
 
 fn queued_work_stress_commit(

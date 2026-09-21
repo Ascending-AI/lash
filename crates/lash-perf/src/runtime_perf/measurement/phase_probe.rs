@@ -431,57 +431,52 @@ async fn run_once_inner(
         .then(lash_core::perf_witness::Collector::install)
         .transpose()?;
 
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let sqlite_root = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen)
-        || (scenario.is_durable() && !scenario.uses_postgres())
-    {
-        Some(make_temp_bench_dir(&format!(
-            "lash-runtime-perf-{}",
-            scenario.name()
-        ))?)
-    } else {
-        None
-    };
-    let lashlang_trace_root = if matches!(
-        scenario,
-        RuntimePerfScenario::RlmTriggerMailPipeline | RuntimePerfScenario::RlmObliqueStackMix
-    ) {
-        Some(make_temp_bench_dir(
-            format!("lash-runtime-perf-{}", scenario.name()).as_str(),
-        )?)
-    } else {
-        None
-    };
-    let trace_config = lashlang_trace_root
-        .as_ref()
-        .map(|root| RuntimePerfTraceConfig {
-            trace_jsonl_path: matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix)
-                .then(|| root.join("trace.jsonl")),
-            lashlang_execution_jsonl_path: Some(root.join("lashlang-execution.jsonl")),
-            trace_level: lash::tracing::TraceLevel::Extended,
-        });
-    let mut runtime = if let Some(database_url) = postgres_database_url {
-        build_runtime_with_postgres_store(scenario, database_url).await?
-    } else if let Some(root) = sqlite_root.as_ref() {
-        build_runtime_with_sqlite_store(scenario, root.clone()).await?
-    } else {
-        build_runtime_with_store(scenario, None, trace_config).await?
-    };
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
+    let (sqlite_root, mut runtime) = run
+        .build(async {
+            let sqlite_root = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen)
+                || (scenario.is_durable() && !scenario.uses_postgres())
+            {
+                Some(make_temp_bench_dir(&format!(
+                    "lash-runtime-perf-{}",
+                    scenario.name()
+                ))?)
+            } else {
+                None
+            };
+            let lashlang_trace_root = if matches!(
+                scenario,
+                RuntimePerfScenario::RlmTriggerMailPipeline
+                    | RuntimePerfScenario::RlmObliqueStackMix
+            ) {
+                Some(make_temp_bench_dir(
+                    format!("lash-runtime-perf-{}", scenario.name()).as_str(),
+                )?)
+            } else {
+                None
+            };
+            let trace_config = lashlang_trace_root
+                .as_ref()
+                .map(|root| RuntimePerfTraceConfig {
+                    trace_jsonl_path: matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix)
+                        .then(|| root.join("trace.jsonl")),
+                    lashlang_execution_jsonl_path: Some(root.join("lashlang-execution.jsonl")),
+                    trace_level: lash::tracing::TraceLevel::Extended,
+                });
+            let runtime = if let Some(database_url) = postgres_database_url {
+                build_runtime_with_postgres_store(scenario, database_url).await?
+            } else if let Some(root) = sqlite_root.as_ref() {
+                build_runtime_with_sqlite_store(scenario, root.clone()).await?
+            } else {
+                build_runtime_with_store(scenario, None, trace_config).await?
+            };
+            Ok((sqlite_root, runtime))
+        })
+        .await?;
 
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    seed_runtime_state(&mut runtime, scenario).await?;
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
+    run.seed(async { seed_runtime_state(&mut runtime, scenario).await })
+        .await?;
 
     if matches!(scenario, RuntimePerfScenario::RlmToolCatalogWarm) {
         runtime
@@ -490,8 +485,9 @@ async fn run_once_inner(
         runtime.await_background_work().await?;
     }
 
-    let mut turns = Vec::with_capacity(chat_turns);
-    let mut extra_counters = BTreeMap::new();
+    // Both the run and the await closures insert counters while their span
+    // is open, so the map is shared through a Mutex rather than borrowed.
+    let extra_counters = std::sync::Mutex::new(BTreeMap::new());
     for turn_index in 0..chat_turns {
         let mut extra_phase_profile = BTreeMap::new();
         if matches!(scenario, RuntimePerfScenario::StoreReopen) && turn_index > 0 {
@@ -610,11 +606,11 @@ async fn run_once_inner(
         let before_turn_usage = runtime.usage_report();
         if let Some(variant) = catalog_variant {
             let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics()?;
-            extra_counters.insert(
+            extra_counters.lock_recover().insert(
                 format!("tool_catalog.{variant}.registry_manifest_count"),
                 manifest_count as u64,
             );
-            extra_counters.insert(
+            extra_counters.lock_recover().insert(
                 format!("tool_catalog.{variant}.registry_rendered_bytes"),
                 rendered_bytes as u64,
             );
@@ -625,241 +621,237 @@ async fn run_once_inner(
                 Arc::new(move || composition_probe.catalog_observation_stage(warm)),
             );
         }
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let cancel = CancellationToken::new();
-        let mut trigger_delivery_observation = None;
-        let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
-            let effect_controller = ScopedPerfEffectController;
-            let turn_id = TurnId::from(format!("runtime-perf-scoped-{}", turn_index + 1));
-            let scoped_effect_controller = lash::runtime::ScopedEffectController::borrowed(
-                &effect_controller,
-                runtime.turn_scope(&turn_id),
-            )
-            .map_err(anyhow::Error::from)?;
-            runtime_perf_timed(
-                scenario,
-                turn_index,
-                "run_turn",
-                Some(cancel.clone()),
-                runtime.run_turn_with_execution_scope(turn_input, cancel, scoped_effect_controller),
-            )
-            .await
-        } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-            let turn_id = TurnId::from(format!(
-                "runtime-perf-cancel-round-trip-{}",
-                lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-            ));
-            let (turn, duration) = runtime_perf_timed(
-                scenario,
-                turn_index,
-                "run_turn",
-                Some(cancel.clone()),
-                runtime.run_cancel_round_trip(
-                    turn_input,
-                    &turn_id,
-                    cancel,
-                    &format!("runtime-perf-cancel-request-{}", turn_index + 1),
-                ),
-            )
-            .await?;
-            extra_phase_profile.insert(
-                "turn_cancel.request_to_token_to_seal".to_string(),
-                RuntimePerfPhaseRunResult {
-                    samples: 1,
-                    duration_ms: round3(duration.as_secs_f64() * 1000.0),
-                    allocations: zero_allocation_delta(),
-                    rss_growth_kb: None,
-                },
-            );
-            Ok(turn)
-        } else if matches!(scenario, RuntimePerfScenario::IngressClaimProjection) {
-            let turn_id = TurnId::from(format!(
-                "runtime-perf-ingress-projection-{}",
-                lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-            ));
-            let (turn, duration) = runtime_perf_timed(
-                scenario,
-                turn_index,
-                "run_turn",
-                Some(cancel.clone()),
-                runtime.run_ingress_claim_projection(
-                    turn_input,
-                    &turn_id,
-                    cancel,
-                    &format!("runtime-perf-ingress-projection-{}", turn_index + 1),
-                ),
-            )
-            .await?;
-            extra_phase_profile.insert(
-                "turn_input_ingress.enqueue_to_claim_to_projection".to_string(),
-                RuntimePerfPhaseRunResult {
-                    samples: 1,
-                    duration_ms: round3(duration.as_secs_f64() * 1000.0),
-                    allocations: zero_allocation_delta(),
-                    rss_growth_kb: None,
-                },
-            );
-            Ok(turn)
-        } else if let Some(turn_id) = deep_turn_id.as_deref() {
-            runtime_perf_timed(
-                scenario,
-                turn_index,
-                "run_turn",
-                Some(cancel.clone()),
-                runtime.run_turn_with_id(turn_input, &TurnId::from(turn_id), cancel),
-            )
-            .await
-        } else if trigger_end_to_end {
-            let (turn, observation) = tokio::join!(
+
+        // The run closure moves the turn input in, so pre-bind shared
+        // references for everything else it touches; the delivery
+        // observation crosses into the await span through the Mutex.
+        let trigger_delivery_observation = std::sync::Mutex::new(None);
+        let runtime_ref = &runtime;
+        let counters_ref = &extra_counters;
+        let observation_ref = &trigger_delivery_observation;
+        let probe_ref = &phase_probe;
+        run.turn_then(
+            turn_index,
+            async move {
+                let runtime = runtime_ref;
+                let extra_counters = counters_ref;
+                let trigger_delivery_observation = observation_ref;
+                let phase_probe = probe_ref;
+                let cancel = CancellationToken::new();
+                let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
+                    let effect_controller = ScopedPerfEffectController;
+                    let turn_id = TurnId::from(format!("runtime-perf-scoped-{}", turn_index + 1));
+                    let scoped_effect_controller = lash::runtime::ScopedEffectController::borrowed(
+                        &effect_controller,
+                        runtime.turn_scope(&turn_id),
+                    )
+                    .map_err(anyhow::Error::from)?;
+                    runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "run_turn",
+                        Some(cancel.clone()),
+                        runtime.run_turn_with_execution_scope(
+                            turn_input,
+                            cancel,
+                            scoped_effect_controller,
+                        ),
+                    )
+                    .await
+                } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
+                    let turn_id = TurnId::from(format!(
+                        "runtime-perf-cancel-round-trip-{}",
+                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
+                    ));
+                    let (turn, duration) = runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "run_turn",
+                        Some(cancel.clone()),
+                        runtime.run_cancel_round_trip(
+                            turn_input,
+                            &turn_id,
+                            cancel,
+                            &format!("runtime-perf-cancel-request-{}", turn_index + 1),
+                        ),
+                    )
+                    .await?;
+                    extra_phase_profile.insert(
+                        "turn_cancel.request_to_token_to_seal".to_string(),
+                        RuntimePerfPhaseRunResult {
+                            samples: 1,
+                            duration_ms: round3(duration.as_secs_f64() * 1000.0),
+                            allocations: zero_allocation_delta(),
+                            rss_growth_kb: None,
+                        },
+                    );
+                    Ok(turn)
+                } else if matches!(scenario, RuntimePerfScenario::IngressClaimProjection) {
+                    let turn_id = TurnId::from(format!(
+                        "runtime-perf-ingress-projection-{}",
+                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
+                    ));
+                    let (turn, duration) = runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "run_turn",
+                        Some(cancel.clone()),
+                        runtime.run_ingress_claim_projection(
+                            turn_input,
+                            &turn_id,
+                            cancel,
+                            &format!("runtime-perf-ingress-projection-{}", turn_index + 1),
+                        ),
+                    )
+                    .await?;
+                    extra_phase_profile.insert(
+                        "turn_input_ingress.enqueue_to_claim_to_projection".to_string(),
+                        RuntimePerfPhaseRunResult {
+                            samples: 1,
+                            duration_ms: round3(duration.as_secs_f64() * 1000.0),
+                            allocations: zero_allocation_delta(),
+                            rss_growth_kb: None,
+                        },
+                    );
+                    Ok(turn)
+                } else if let Some(turn_id) = deep_turn_id.as_deref() {
+                    runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "run_turn",
+                        Some(cancel.clone()),
+                        runtime.run_turn_with_id(turn_input, &TurnId::from(turn_id), cancel),
+                    )
+                    .await
+                } else if trigger_end_to_end {
+                    let (turn, observation) = tokio::join!(
+                        runtime_perf_timed(
+                            scenario,
+                            turn_index,
+                            "run_turn",
+                            Some(cancel.clone()),
+                            runtime.run_turn(turn_input, cancel),
+                        ),
+                        runtime.observe_trigger_delivery_terminals(),
+                    );
+                    phase_probe.close_deferred_named("trigger.occurrence_to_delivery");
+                    *trigger_delivery_observation.lock_recover() = Some(observation?);
+                    turn
+                } else {
+                    runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "run_turn",
+                        Some(cancel.clone()),
+                        runtime.run_turn(turn_input, cancel),
+                    )
+                    .await
+                }
+                .with_context(|| {
+                    format!(
+                        "run runtime perf scenario {} turn {}",
+                        scenario.name(),
+                        turn_index + 1
+                    )
+                })?;
+                if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
+                    if !matches!(
+                        turn.outcome,
+                        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
+                    ) {
+                        anyhow::bail!(
+                            "cancel round-trip turn did not finish cancelled: {:?}",
+                            turn.outcome
+                        );
+                    }
+                } else {
+                    validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                }
+                if let Some(variant) = catalog_variant {
+                    let observation = runtime.finish_tool_catalog_observation();
+                    extra_counters.lock_recover().insert(
+                        format!("tool_catalog.{variant}.cache_state"),
+                        observation.cache_state,
+                    );
+                    extra_counters.lock_recover().insert(
+                        format!("tool_catalog.{variant}.setup_recomposition_count"),
+                        observation.setup_recomposition_count,
+                    );
+                    extra_counters.lock_recover().insert(
+                        format!("tool_catalog.{variant}.recomposition_count"),
+                        observation.recomposition_count,
+                    );
+                }
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        phase_profile: std::mem::take(&mut extra_phase_profile),
+                        turn_usage: turn.usage,
+                        ..TurnTail::default()
+                    },
+                })
+            },
+            async {
                 runtime_perf_timed(
                     scenario,
                     turn_index,
-                    "run_turn",
-                    Some(cancel.clone()),
-                    runtime.run_turn(turn_input, cancel),
-                ),
-                runtime.observe_trigger_delivery_terminals(),
-            );
-            phase_probe.close_deferred_named("trigger.occurrence_to_delivery");
-            trigger_delivery_observation = Some(observation?);
-            turn
-        } else {
-            runtime_perf_timed(
-                scenario,
-                turn_index,
-                "run_turn",
-                Some(cancel.clone()),
-                runtime.run_turn(turn_input, cancel),
-            )
-            .await
-        }
-        .with_context(|| {
-            format!(
-                "run runtime perf scenario {} turn {}",
-                scenario.name(),
-                turn_index + 1
-            )
-        })?;
-        if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-            if !matches!(
-                turn.outcome,
-                TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-            ) {
-                anyhow::bail!(
-                    "cancel round-trip turn did not finish cancelled: {:?}",
-                    turn.outcome
-                );
-            }
-        } else {
-            validate_runtime_perf_turn(scenario, turn_index, &turn)?;
-        }
-        if let Some(variant) = catalog_variant {
-            let observation = runtime.finish_tool_catalog_observation();
-            extra_counters.insert(
-                format!("tool_catalog.{variant}.cache_state"),
-                observation.cache_state,
-            );
-            extra_counters.insert(
-                format!("tool_catalog.{variant}.setup_recomposition_count"),
-                observation.setup_recomposition_count,
-            );
-            extra_counters.insert(
-                format!("tool_catalog.{variant}.recomposition_count"),
-                observation.recomposition_count,
-            );
-        }
-        let measurement_start = PhaseStart {
-            started_at: turn_started,
-            alloc_before: turn_before_alloc,
-            memory_before: turn_before_memory,
-        };
-        let run_turn_ms = elapsed_ms(measurement_start.started_at);
-        let run_turn_alloc = alloc_delta(measurement_start.alloc_before, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        runtime_perf_timed(
-            scenario,
-            turn_index,
-            "await_background_work",
-            None,
-            runtime.await_background_work(),
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "await background work for {} turn {}",
-                scenario.name(),
-                turn_index + 1
-            )
-        })?;
-        if trigger_end_to_end {
-            let observation = trigger_delivery_observation
-                .take()
-                .context("trigger delivery observation was not collected")?;
-            extra_counters.insert(
-                "trigger.delivery_process_count".to_string(),
-                observation.process_count,
-            );
-            extra_counters.insert(
-                "trigger.delivery_durable_claim_count".to_string(),
-                observation.durable_claim_count,
-            );
-            extra_counters.insert(
-                "trigger.delivery_terminal_count".to_string(),
-                observation.terminal_count,
-            );
-        }
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        let cumulative_usage = runtime.usage_report();
-        let usage_delta_entries =
-            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
+                    "await_background_work",
+                    None,
+                    runtime.await_background_work(),
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "await background work for {} turn {}",
+                        scenario.name(),
+                        turn_index + 1
+                    )
+                })?;
+                if trigger_end_to_end {
+                    let observation = trigger_delivery_observation
+                        .lock_recover()
+                        .take()
+                        .context("trigger delivery observation was not collected")?;
+                    extra_counters.lock_recover().insert(
+                        "trigger.delivery_process_count".to_string(),
+                        observation.process_count,
+                    );
+                    extra_counters.lock_recover().insert(
+                        "trigger.delivery_durable_claim_count".to_string(),
+                        observation.durable_claim_count,
+                    );
+                    extra_counters.lock_recover().insert(
+                        "trigger.delivery_terminal_count".to_string(),
+                        observation.terminal_count,
+                    );
+                }
+                Ok(())
+            },
+            |_, _, tail| {
+                let cumulative_usage = runtime.usage_report();
+                let usage_delta_entries = lash_core::facade_support::diff_usage_reports(
+                    &before_turn_usage,
+                    &cumulative_usage,
+                )
                 .map_err(anyhow::Error::msg)?;
-        let mut phase_profile = phase_probe.take_completed();
-        phase_profile.extend(extra_phase_profile);
-        turns.push(RuntimePerfTurnResult {
-            turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: memory_span(turn_before_memory, after_await_memory),
-            phase_profile,
-            turn_usage: turn.usage,
-            usage_delta: SessionUsageReport::from_entries(&usage_delta_entries),
-            cumulative_usage,
-        });
+                let mut phase_profile = phase_probe.take_completed();
+                phase_profile.extend(std::mem::take(&mut tail.phase_profile));
+                tail.phase_profile = phase_profile;
+                tail.usage_delta = SessionUsageReport::from_entries(&usage_delta_entries);
+                tail.cumulative_usage = cumulative_usage;
+                Ok(())
+            },
+        )
+        .await?;
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let state = runtime.export_state().await;
-    let cumulative_usage = runtime.usage_report();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
+    let (state, cumulative_usage) = run
+        .export(async {
+            let state = runtime.export_state().await;
+            let cumulative_usage = runtime.usage_report();
+            Ok((state, cumulative_usage))
+        })
+        .await?;
     let store_metrics = runtime.store_metrics();
     if let Some(collector) = work_collector {
         let work = collector.snapshot();
@@ -871,21 +863,27 @@ async fn run_once_inner(
             ("runtime_work.body_copy_passes", work.body_copy_passes),
             ("runtime_work.copied_bytes", work.copied_bytes),
         ] {
-            extra_counters.insert(name.to_string(), value);
+            extra_counters
+                .lock_recover()
+                .insert(name.to_string(), value);
         }
         // Only SQLite carries the statement witness today; emitting a zero for
         // PostgreSQL would read as "no statements" rather than "not observed".
         if !scenario.uses_postgres() {
-            extra_counters.insert(
+            extra_counters.lock_recover().insert(
                 "runtime_work.sql_statements".to_string(),
                 work.sql_statements,
             );
             for (verb, count) in work.sql_statements_by_verb {
-                extra_counters.insert(format!("runtime_work.sql_statements.{verb}"), count);
+                extra_counters
+                    .lock_recover()
+                    .insert(format!("runtime_work.sql_statements.{verb}"), count);
             }
         }
     }
-    extra_counters.extend(store_metrics.call_counters());
+    extra_counters
+        .lock_recover()
+        .extend(store_metrics.call_counters());
     let metric_samples = store_metrics.observed_latency_samples();
     let mut metric_samples_ms = BTreeMap::new();
     let pool_checkout_wait_ms = store_metrics.pool_checkout_wait_samples_ms();
@@ -896,17 +894,21 @@ async fn run_once_inner(
         );
     }
     if let Some(commit) = store_metrics.commit_measurements().last() {
-        extra_counters.insert(
+        extra_counters.lock_recover().insert(
             "durable_commit.logical_bytes".to_string(),
             commit.total_bytes,
         );
-        extra_counters.insert(
+        extra_counters.lock_recover().insert(
             "durable_commit.checkpoint_bytes".to_string(),
             commit.checkpoint_bytes,
         );
-        extra_counters.insert("durable_commit.logical_rows".to_string(), commit.total_rows);
-        extra_counters.insert("durable_commit.graph_rows".to_string(), commit.graph_rows);
-        extra_counters.insert(
+        extra_counters
+            .lock_recover()
+            .insert("durable_commit.logical_rows".to_string(), commit.total_rows);
+        extra_counters
+            .lock_recover()
+            .insert("durable_commit.graph_rows".to_string(), commit.graph_rows);
+        extra_counters.lock_recover().insert(
             "durable_commit.checkpoint_components".to_string(),
             commit.checkpoint_components,
         );
@@ -916,62 +918,19 @@ async fn run_once_inner(
         let _ = std::fs::remove_dir_all(root);
     }
 
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
+    Ok(run.finish(RunTail {
         session_nodes: state.session_graph.nodes.len(),
         active_path_messages: state
             .read_view()
             .expect("runtime frame scope resolves")
             .messages()
             .len(),
-        extra_counters,
+        extra_counters: std::mem::take(&mut extra_counters.lock_recover()),
         metric_samples,
         metric_samples_ms,
-        memory: memory_span(before_memory, after_export_memory),
-        phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turns,
         cumulative_usage,
-    })
+        ..RunTail::default()
+    }))
 }
 
 pub(super) fn configured_postgres_database_url() -> Option<String> {

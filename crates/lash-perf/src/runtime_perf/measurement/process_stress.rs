@@ -7,395 +7,328 @@ pub(super) async fn run_once_process_list_stress(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::ProcessListStress;
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
+    let (registry, session_scope) = run
+        .build(async {
+            let registry: Arc<dyn lash_core::ProcessRegistry> =
+                Arc::new(lash_core::TestLocalProcessRegistry::default());
+            let session_scope = lash_core::SessionScope::new("runtime-perf-process-list");
+            Ok((registry, session_scope))
+        })
+        .await?;
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let session_scope = lash_core::SessionScope::new("runtime-perf-process-list");
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
-
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    let process_count = chat_turns.max(1) * PROCESS_LIST_STRESS_BATCH;
-    for index in 0..process_count {
-        let process_id = ProcessId::from(format!("process-list-stress-{index:05}"));
-        registry
-            .register_process(process_list_stress_registration(
-                process_id.clone(),
-                session_scope.clone(),
-                index,
-            ))
-            .await?;
-        registry
-            .add_observer(
-                &session_scope.session_id,
-                &process_id,
-                lash_core::ProcessObserverBy::host(format!("process-list-stress-{index:05}")),
-            )
-            .await?;
-        if index % 2 == 1 {
+    let (process_count, signal_event_type, signal_process_id) = run
+        .seed(async {
+            let process_count = chat_turns.max(1) * PROCESS_LIST_STRESS_BATCH;
+            for index in 0..process_count {
+                let process_id = ProcessId::from(format!("process-list-stress-{index:05}"));
+                registry
+                    .register_process(process_list_stress_registration(
+                        process_id.clone(),
+                        session_scope.clone(),
+                        index,
+                    ))
+                    .await?;
+                registry
+                    .add_observer(
+                        &session_scope.session_id,
+                        &process_id,
+                        lash_core::ProcessObserverBy::host(format!(
+                            "process-list-stress-{index:05}"
+                        )),
+                    )
+                    .await?;
+                if index % 2 == 1 {
+                    registry
+                        .complete_process(
+                            &process_id,
+                            lash_core::ProcessAwaitOutput::from_tool_output(
+                                lash_core::ToolCallOutput::success(
+                                    serde_json::json!({ "index": index }),
+                                ),
+                            ),
+                            lash_core::ProcessCompletionAuthority::external_owner(),
+                        )
+                        .await?;
+                }
+            }
+            // Dedicated long-lived process for the signal/wait phases: its event log
+            // grows across turns, so the phases also expose append-cost growth with
+            // log length (the durable-suspension hot path).
+            let signal_process_id = "process-signal-stress";
+            let signal_event_type = lash_core::facade_support::process_signal_event_type("stress")?;
             registry
-                .complete_process(
-                    &process_id,
-                    lash_core::ProcessAwaitOutput::from_tool_output(
-                        lash_core::ToolCallOutput::success(serde_json::json!({ "index": index })),
-                    ),
-                    lash_core::ProcessCompletionAuthority::external_owner(),
+                .register_process(
+                    lash_core::ProcessRegistration::new(
+                        signal_process_id,
+                        lash_core::ProcessInput::External {
+                            metadata: serde_json::json!({ "label": "signal stress" }),
+                        },
+                        lash_core::RecoveryContract::ExternallyOwned,
+                        lash_core::ProcessProvenance::host(),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
+                    )
+                    .with_event_types(vec![lash_core::ProcessEventType {
+                        name: signal_event_type.clone(),
+                        payload_schema: lash_core::LashSchema::any(),
+                        semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                    }]),
                 )
                 .await?;
-        }
-    }
-    // Dedicated long-lived process for the signal/wait phases: its event log
-    // grows across turns, so the phases also expose append-cost growth with
-    // log length (the durable-suspension hot path).
-    let signal_process_id = "process-signal-stress";
-    let signal_event_type = lash_core::facade_support::process_signal_event_type("stress")?;
-    registry
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                signal_process_id,
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::json!({ "label": "signal stress" }),
-                },
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            )
-            .with_event_types(vec![lash_core::ProcessEventType {
-                name: signal_event_type.clone(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
-            }]),
-        )
+            Ok((process_count, signal_event_type, signal_process_id))
+        })
         .await?;
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
 
-    let mut turns = Vec::with_capacity(chat_turns);
     let mut rendered_payload_bytes = 0usize;
     for turn_index in 0..chat_turns {
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let mut phase_profile = BTreeMap::new();
-
-        let phase_started = Instant::now();
-        let phase_before_alloc = allocator_stats();
-        let phase_before_memory = process_memory_sample();
-        let live_entries = registry
-            .list_live_observed_by(&session_scope.session_id)
-            .await?;
-        phase_profile.insert(
-            "process_list_stress.list_live".to_string(),
-            RuntimePerfPhaseRunResult {
-                samples: 1,
-                duration_ms: elapsed_ms(phase_started),
-                allocations: alloc_delta(phase_before_alloc, allocator_stats()),
-                rss_growth_kb: diff_opt_i64(
-                    phase_before_memory.rss_kb,
-                    process_memory_sample().rss_kb,
-                ),
-            },
-        );
-        if live_entries
-            .iter()
-            .any(lash_core::ProcessRecord::is_terminal)
-        {
-            anyhow::bail!("process_list_stress live listing included a terminal process");
-        }
-
-        let phase_started = Instant::now();
-        let phase_before_alloc = allocator_stats();
-        let phase_before_memory = process_memory_sample();
-        let all_entries = registry
-            .list_observed_by(
-                &session_scope.session_id,
-                &lash_core::ProcessListFilter {
-                    status: lash_core::ProcessStatusFilter::Any,
-                    ..Default::default()
-                },
-            )
-            .await?;
-        phase_profile.insert(
-            "process_list_stress.list_all".to_string(),
-            RuntimePerfPhaseRunResult {
-                samples: 1,
-                duration_ms: elapsed_ms(phase_started),
-                allocations: alloc_delta(phase_before_alloc, allocator_stats()),
-                rss_growth_kb: diff_opt_i64(
-                    phase_before_memory.rss_kb,
-                    process_memory_sample().rss_kb,
-                ),
-            },
-        );
-        if all_entries.len() != process_count {
-            anyhow::bail!(
-                "process_list_stress all listing expected {process_count} entries, got {}",
-                all_entries.len()
-            );
-        }
-
-        let phase_started = Instant::now();
-        let phase_before_alloc = allocator_stats();
-        let phase_before_memory = process_memory_sample();
-        let global_records = registry
-            .list_processes(&lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
-            })
-            .await?;
-        phase_profile.insert(
-            "process_list_stress.list_global".to_string(),
-            RuntimePerfPhaseRunResult {
-                samples: 1,
-                duration_ms: elapsed_ms(phase_started),
-                allocations: alloc_delta(phase_before_alloc, allocator_stats()),
-                rss_growth_kb: diff_opt_i64(
-                    phase_before_memory.rss_kb,
-                    process_memory_sample().rss_kb,
-                ),
-            },
-        );
-        if global_records.len() != process_count + 1 {
-            anyhow::bail!(
-                "process_list_stress global listing expected {} records, got {}",
-                process_count + 1,
-                global_records.len()
-            );
-        }
-
-        const SIGNALS_PER_TURN: usize = 32;
-        let phase_started = Instant::now();
-        let phase_before_alloc = allocator_stats();
-        let phase_before_memory = process_memory_sample();
-        for signal_index in 0..SIGNALS_PER_TURN {
-            registry
-                .append_event(
-                    &ProcessId::from(signal_process_id),
-                    lash_core::ProcessEventAppendRequest::new(
-                        signal_event_type.clone(),
-                        serde_json::json!({ "turn": turn_index, "n": signal_index }),
-                    )
-                    .with_replay_key(
-                        lash_core::facade_support::process_signal_wait_key(
-                            &ProcessId::from(signal_process_id),
-                            "stress",
-                            format_args!("{turn_index}:{signal_index}"),
-                        ),
-                    ),
-                )
-                .await?;
-        }
-        phase_profile.insert(
-            "process_list_stress.signal_append".to_string(),
-            RuntimePerfPhaseRunResult {
-                samples: 1,
-                duration_ms: elapsed_ms(phase_started),
-                allocations: alloc_delta(phase_before_alloc, allocator_stats()),
-                rss_growth_kb: diff_opt_i64(
-                    phase_before_memory.rss_kb,
-                    process_memory_sample().rss_kb,
-                ),
-            },
-        );
-
-        let phase_started = Instant::now();
-        let phase_before_alloc = allocator_stats();
-        let phase_before_memory = process_memory_sample();
-        let waiting = registry
-            .set_process_wait(
-                &ProcessId::from(signal_process_id),
-                lash_core::WaitState {
-                    since_ms: turn_index as u64 + 1,
-                    kind: lash_core::WaitKind::Signal {
-                        name: "stress".to_string(),
-                        event_type: signal_event_type.clone(),
-                        key: lash_core::facade_support::process_signal_wait_key(
-                            &ProcessId::from(signal_process_id),
-                            "stress",
-                            turn_index + 1,
-                        ),
-                        ordinal: turn_index as u64 + 1,
-                    },
-                },
-            )
-            .await?;
-        if waiting.wait.is_none() {
-            anyhow::bail!("process_list_stress wait facet did not round-trip");
-        }
-        registry
-            .clear_process_wait(&ProcessId::from(signal_process_id))
-            .await?;
-        phase_profile.insert(
-            "process_list_stress.wait_roundtrip".to_string(),
-            RuntimePerfPhaseRunResult {
-                samples: 1,
-                duration_ms: elapsed_ms(phase_started),
-                allocations: alloc_delta(phase_before_alloc, allocator_stats()),
-                rss_growth_kb: diff_opt_i64(
-                    phase_before_memory.rss_kb,
-                    process_memory_sample().rss_kb,
-                ),
-            },
-        );
-
-        // Env-spec hashing is the new per-start cost (content-addressed
-        // capture); measure it standalone so regressions in stable_hash or
-        // spec encoding surface here rather than inside start latency.
-        const ENV_HASHES_PER_TURN: usize = 64;
-        let phase_started = Instant::now();
-        let phase_before_alloc = allocator_stats();
-        let phase_before_memory = process_memory_sample();
-        for hash_index in 0..ENV_HASHES_PER_TURN {
-            let mut options = lash_core::PluginOptions::default();
-            options.plugins.insert(
-                "stress".to_string(),
-                serde_json::json!({ "turn": turn_index, "n": hash_index }),
-            );
-            let spec = lash_core::ProcessExecutionEnvSpec::new(
-                options,
-                lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-            );
-            let env_ref = spec
-                .stable_ref()
-                .map_err(|err| anyhow::anyhow!("env spec hashing failed: {err}"))?;
-            if env_ref.as_str().is_empty() {
-                anyhow::bail!("process_list_stress env hash produced an empty ref");
-            }
-        }
-        phase_profile.insert(
-            "process_list_stress.env_spec_hash".to_string(),
-            RuntimePerfPhaseRunResult {
-                samples: 1,
-                duration_ms: elapsed_ms(phase_started),
-                allocations: alloc_delta(phase_before_alloc, allocator_stats()),
-                rss_growth_kb: diff_opt_i64(
-                    phase_before_memory.rss_kb,
-                    process_memory_sample().rss_kb,
-                ),
-            },
-        );
-
-        let (live_payload_len, live_render_phase) =
-            measure_runtime_perf_phase("process_list_stress.render_live_json", || {
-                serde_json::to_string(&process_list_tool_payload(&live_entries))
-                    .map(|payload| payload.len())
-                    .map_err(anyhow::Error::from)
-            })?;
-        phase_profile.insert(live_render_phase.0, live_render_phase.1);
-        let (all_payload_len, all_render_phase) =
-            measure_runtime_perf_phase("process_list_stress.render_all_json", || {
-                serde_json::to_string(&process_list_tool_payload(&all_entries))
-                    .map(|payload| payload.len())
-                    .map_err(anyhow::Error::from)
-            })?;
-        phase_profile.insert(all_render_phase.0, all_render_phase.1);
-        rendered_payload_bytes += live_payload_len + all_payload_len;
-
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        tokio::task::yield_now().await;
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        turns.push(RuntimePerfTurnResult {
+        run.turn(
             turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: memory_span(turn_before_memory, after_await_memory),
-            phase_profile,
-            turn_usage: TokenUsage::default(),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
-        });
+            async {
+                let mut phase_profile = BTreeMap::new();
+
+                let phase_started = Instant::now();
+                let phase_before_alloc = allocator_stats();
+                let phase_before_memory = process_memory_sample();
+                let live_entries = registry
+                    .list_live_observed_by(&session_scope.session_id)
+                    .await?;
+                phase_profile.insert(
+                    "process_list_stress.list_live".to_string(),
+                    RuntimePerfPhaseRunResult {
+                        samples: 1,
+                        duration_ms: elapsed_ms(phase_started),
+                        allocations: alloc_delta(phase_before_alloc, allocator_stats()),
+                        rss_growth_kb: diff_opt_i64(
+                            phase_before_memory.rss_kb,
+                            process_memory_sample().rss_kb,
+                        ),
+                    },
+                );
+                if live_entries
+                    .iter()
+                    .any(lash_core::ProcessRecord::is_terminal)
+                {
+                    anyhow::bail!("process_list_stress live listing included a terminal process");
+                }
+
+                let phase_started = Instant::now();
+                let phase_before_alloc = allocator_stats();
+                let phase_before_memory = process_memory_sample();
+                let all_entries = registry
+                    .list_observed_by(
+                        &session_scope.session_id,
+                        &lash_core::ProcessListFilter {
+                            status: lash_core::ProcessStatusFilter::Any,
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                phase_profile.insert(
+                    "process_list_stress.list_all".to_string(),
+                    RuntimePerfPhaseRunResult {
+                        samples: 1,
+                        duration_ms: elapsed_ms(phase_started),
+                        allocations: alloc_delta(phase_before_alloc, allocator_stats()),
+                        rss_growth_kb: diff_opt_i64(
+                            phase_before_memory.rss_kb,
+                            process_memory_sample().rss_kb,
+                        ),
+                    },
+                );
+                if all_entries.len() != process_count {
+                    anyhow::bail!(
+                        "process_list_stress all listing expected {process_count} entries, got {}",
+                        all_entries.len()
+                    );
+                }
+
+                let phase_started = Instant::now();
+                let phase_before_alloc = allocator_stats();
+                let phase_before_memory = process_memory_sample();
+                let global_records = registry
+                    .list_processes(&lash_core::ProcessListFilter {
+                        status: lash_core::ProcessStatusFilter::Any,
+                        ..lash_core::ProcessListFilter::default()
+                    })
+                    .await?;
+                phase_profile.insert(
+                    "process_list_stress.list_global".to_string(),
+                    RuntimePerfPhaseRunResult {
+                        samples: 1,
+                        duration_ms: elapsed_ms(phase_started),
+                        allocations: alloc_delta(phase_before_alloc, allocator_stats()),
+                        rss_growth_kb: diff_opt_i64(
+                            phase_before_memory.rss_kb,
+                            process_memory_sample().rss_kb,
+                        ),
+                    },
+                );
+                if global_records.len() != process_count + 1 {
+                    anyhow::bail!(
+                        "process_list_stress global listing expected {} records, got {}",
+                        process_count + 1,
+                        global_records.len()
+                    );
+                }
+
+                const SIGNALS_PER_TURN: usize = 32;
+                let phase_started = Instant::now();
+                let phase_before_alloc = allocator_stats();
+                let phase_before_memory = process_memory_sample();
+                for signal_index in 0..SIGNALS_PER_TURN {
+                    registry
+                        .append_event(
+                            &ProcessId::from(signal_process_id),
+                            lash_core::ProcessEventAppendRequest::new(
+                                signal_event_type.clone(),
+                                serde_json::json!({ "turn": turn_index, "n": signal_index }),
+                            )
+                            .with_replay_key(
+                                lash_core::facade_support::process_signal_wait_key(
+                                    &ProcessId::from(signal_process_id),
+                                    "stress",
+                                    format!("{turn_index}:{signal_index}"),
+                                ),
+                            ),
+                        )
+                        .await?;
+                }
+                phase_profile.insert(
+                    "process_list_stress.signal_append".to_string(),
+                    RuntimePerfPhaseRunResult {
+                        samples: 1,
+                        duration_ms: elapsed_ms(phase_started),
+                        allocations: alloc_delta(phase_before_alloc, allocator_stats()),
+                        rss_growth_kb: diff_opt_i64(
+                            phase_before_memory.rss_kb,
+                            process_memory_sample().rss_kb,
+                        ),
+                    },
+                );
+
+                let phase_started = Instant::now();
+                let phase_before_alloc = allocator_stats();
+                let phase_before_memory = process_memory_sample();
+                let waiting = registry
+                    .set_process_wait(
+                        &ProcessId::from(signal_process_id),
+                        lash_core::WaitState {
+                            since_ms: turn_index as u64 + 1,
+                            kind: lash_core::WaitKind::Signal {
+                                name: "stress".to_string(),
+                                event_type: signal_event_type.clone(),
+                                key: lash_core::facade_support::process_signal_wait_key(
+                                    &ProcessId::from(signal_process_id),
+                                    "stress",
+                                    turn_index + 1,
+                                ),
+                                ordinal: turn_index as u64 + 1,
+                            },
+                        },
+                    )
+                    .await?;
+                if waiting.wait.is_none() {
+                    anyhow::bail!("process_list_stress wait facet did not round-trip");
+                }
+                registry
+                    .clear_process_wait(&ProcessId::from(signal_process_id))
+                    .await?;
+                phase_profile.insert(
+                    "process_list_stress.wait_roundtrip".to_string(),
+                    RuntimePerfPhaseRunResult {
+                        samples: 1,
+                        duration_ms: elapsed_ms(phase_started),
+                        allocations: alloc_delta(phase_before_alloc, allocator_stats()),
+                        rss_growth_kb: diff_opt_i64(
+                            phase_before_memory.rss_kb,
+                            process_memory_sample().rss_kb,
+                        ),
+                    },
+                );
+
+                // Env-spec hashing is the new per-start cost (content-addressed
+                // capture); measure it standalone so regressions in stable_hash or
+                // spec encoding surface here rather than inside start latency.
+                const ENV_HASHES_PER_TURN: usize = 64;
+                let phase_started = Instant::now();
+                let phase_before_alloc = allocator_stats();
+                let phase_before_memory = process_memory_sample();
+                for hash_index in 0..ENV_HASHES_PER_TURN {
+                    let mut options = lash_core::PluginOptions::default();
+                    options.plugins.insert(
+                        "stress".to_string(),
+                        serde_json::json!({ "turn": turn_index, "n": hash_index }),
+                    );
+                    let spec = lash_core::ProcessExecutionEnvSpec::new(
+                        options,
+                        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                    );
+                    let env_ref = spec
+                        .stable_ref()
+                        .map_err(|err| anyhow::anyhow!("env spec hashing failed: {err}"))?;
+                    if env_ref.as_str().is_empty() {
+                        anyhow::bail!("process_list_stress env hash produced an empty ref");
+                    }
+                }
+                phase_profile.insert(
+                    "process_list_stress.env_spec_hash".to_string(),
+                    RuntimePerfPhaseRunResult {
+                        samples: 1,
+                        duration_ms: elapsed_ms(phase_started),
+                        allocations: alloc_delta(phase_before_alloc, allocator_stats()),
+                        rss_growth_kb: diff_opt_i64(
+                            phase_before_memory.rss_kb,
+                            process_memory_sample().rss_kb,
+                        ),
+                    },
+                );
+
+                let (live_payload_len, live_render_phase) =
+                    measure_runtime_perf_phase("process_list_stress.render_live_json", || {
+                        serde_json::to_string(&process_list_tool_payload(&live_entries))
+                            .map(|payload| payload.len())
+                            .map_err(anyhow::Error::from)
+                    })?;
+                phase_profile.insert(live_render_phase.0, live_render_phase.1);
+                let (all_payload_len, all_render_phase) =
+                    measure_runtime_perf_phase("process_list_stress.render_all_json", || {
+                        serde_json::to_string(&process_list_tool_payload(&all_entries))
+                            .map(|payload| payload.len())
+                            .map_err(anyhow::Error::from)
+                    })?;
+                phase_profile.insert(all_render_phase.0, all_render_phase.1);
+                rendered_payload_bytes += live_payload_len + all_payload_len;
+
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        phase_profile,
+                        ..TurnTail::default()
+                    },
+                })
+            },
+            async {
+                tokio::task::yield_now().await;
+                Ok(())
+            },
+        )
+        .await?;
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let _export_shape = serde_json::json!({
-        "process_count": process_count,
-        "rendered_payload_bytes": rendered_payload_bytes,
+    run.export(async {
+        let _export_shape = serde_json::json!({
+            "process_count": process_count,
+            "rendered_payload_bytes": rendered_payload_bytes,
+        })
+        .to_string();
+        Ok(())
     })
-    .to_string();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
+    .await?;
 
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
+    Ok(run.finish(RunTail {
         session_nodes: process_count,
         active_path_messages: process_count / 2,
         extra_counters: BTreeMap::from([
@@ -405,13 +338,8 @@ pub(super) async fn run_once_process_list_stress(
                 rendered_payload_bytes as u64,
             ),
         ]),
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: memory_span(before_memory, after_export_memory),
-        phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turns,
-        cumulative_usage: SessionUsageReport::default(),
-    })
+        ..RunTail::default()
+    }))
 }
 
 fn process_list_stress_registration(

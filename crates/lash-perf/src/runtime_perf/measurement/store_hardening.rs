@@ -56,263 +56,221 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
     let run_id = uuid::Uuid::new_v4().simple().to_string();
     let postgres_database =
         lash_postgres_store::testing::IsolatedDatabase::create(postgres_url).await;
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let memory_factory = lash::persistence::InMemorySessionStoreFactory::new();
-    let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
-    let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root);
-    let postgres = lash_postgres_store::PostgresStorage::connect_with(
-        postgres_database.url(),
-        lash_postgres_store::PostgresStoreConfig {
-            min_connections: 1,
-            max_connections: 4,
-            ..lash_postgres_store::PostgresStoreConfig::default()
-        },
-    )
-    .await?;
-    let postgres_factory = postgres.session_store_factory_with_shared_process_registry();
+    let (
+        _sqlite_root,
+        postgres,
+        memory_store,
+        sqlite_store,
+        postgres_store,
+        memory_registry,
+        sqlite_registry,
+        postgres_registry,
+        memory_session_id,
+        sqlite_session_id,
+        postgres_session_id,
+    ) = run
+        .build(async {
+            let memory_factory = lash::persistence::InMemorySessionStoreFactory::new();
+            let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
+            let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root);
+            let postgres = lash_postgres_store::PostgresStorage::connect_with(
+                postgres_database.url(),
+                lash_postgres_store::PostgresStoreConfig {
+                    min_connections: 1,
+                    max_connections: 4,
+                    ..lash_postgres_store::PostgresStoreConfig::default()
+                },
+            )
+            .await?;
+            let postgres_factory = postgres.session_store_factory_with_shared_process_registry();
 
-    let memory_session_id = SessionId::from(format!("perf-hardening-memory-{run_id}"));
-    let sqlite_session_id = SessionId::from(format!("perf-hardening-sqlite-{run_id}"));
-    let postgres_session_id = SessionId::from(format!("perf-hardening-postgres-{run_id}"));
-    let memory_store = memory_factory
-        .create_store(&runtime_perf_session_create_request(&memory_session_id))
-        .await?;
-    let sqlite_store = sqlite_factory
-        .create_store(&runtime_perf_session_create_request(&sqlite_session_id))
-        .await?;
-    let postgres_store = postgres_factory
-        .create_store(&runtime_perf_session_create_request(&postgres_session_id))
+            let memory_session_id = SessionId::from(format!("perf-hardening-memory-{run_id}"));
+            let sqlite_session_id = SessionId::from(format!("perf-hardening-sqlite-{run_id}"));
+            let postgres_session_id = SessionId::from(format!("perf-hardening-postgres-{run_id}"));
+            let memory_store = memory_factory
+                .create_store(&runtime_perf_session_create_request(&memory_session_id))
+                .await?;
+            let sqlite_store = sqlite_factory
+                .create_store(&runtime_perf_session_create_request(&sqlite_session_id))
+                .await?;
+            let postgres_store = postgres_factory
+                .create_store(&runtime_perf_session_create_request(&postgres_session_id))
+                .await?;
+
+            let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
+                Arc::new(lash_core::TestLocalProcessRegistry::default());
+            let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
+                lash_sqlite_store::SqliteProcessRegistry::open(
+                    &sqlite_root.join("process-registry.sqlite"),
+                    sqlite_root.join("process-sessions"),
+                )
+                .await?,
+            );
+            let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
+                Arc::new(postgres.process_registry());
+            Ok((
+                sqlite_root,
+                postgres,
+                memory_store,
+                sqlite_store,
+                postgres_store,
+                memory_registry,
+                sqlite_registry,
+                postgres_registry,
+                memory_session_id,
+                sqlite_session_id,
+                postgres_session_id,
+            ))
+        })
         .await?;
 
-    let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &sqlite_root.join("process-registry.sqlite"),
-            sqlite_root.join("process-sessions"),
+    run.seed(async {
+        // Warm the existing pool once. Timed open arms below share this pool so
+        // their difference isolates structural verification rather than TCP/TLS.
+        let preverified = lash_postgres_store::PostgresStorage::from_preverified_pool_for_testing(
+            postgres.pool().clone(),
         )
-        .await?,
-    );
-    let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(postgres.process_registry());
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
-
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    // Warm the existing pool once. Timed open arms below share this pool so
-    // their difference isolates structural verification rather than TCP/TLS.
-    let preverified = lash_postgres_store::PostgresStorage::from_preverified_pool_for_testing(
-        postgres.pool().clone(),
-    )
+        .await?;
+        drop(preverified);
+        Ok(())
+    })
     .await?;
-    drop(preverified);
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
 
     let owner = lash_core::LeaseOwnerIdentity::opaque("lash-perf", &run_id);
-    let mut turns = Vec::with_capacity(chat_turns);
     for turn_index in 0..chat_turns {
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let mut phase_profile = BTreeMap::new();
+        run.turn(
+            turn_index,
+            async {
+                let mut phase_profile = BTreeMap::new();
 
-        measure_hardening_identity_phases(turn_index, &mut phase_profile)?;
+                measure_hardening_identity_phases(turn_index, &mut phase_profile)?;
 
-        let (_, phase) =
-            measure_runtime_perf_async_phase("store_hardening.postgres.open_preverified", async {
-                lash_postgres_store::PostgresStorage::from_preverified_pool_for_testing(
-                    postgres.pool().clone(),
-                )
-                .await
-                .map(drop)
-                .map_err(anyhow::Error::from)
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
-
-        let (_, phase) =
-            measure_runtime_perf_async_phase("store_hardening.postgres.open_enforce", async {
-                // Deliberately HostProvisioned: this arm measures the structural
-                // verification gate without LashManaged's version preflight and
-                // idempotent DDL. The report calls out that narrower open mode.
-                lash_postgres_store::PostgresStorage::from_pool_with(
-                    postgres.pool().clone(),
-                    lash_postgres_store::PostgresStoreConfig {
-                        schema_provisioning:
-                            lash_postgres_store::SchemaProvisioning::HostProvisioned,
-                        schema_check: lash_postgres_store::SchemaCheck::Enforce,
-                        ..lash_postgres_store::PostgresStoreConfig::default()
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "store_hardening.postgres.open_preverified",
+                    async {
+                        lash_postgres_store::PostgresStorage::from_preverified_pool_for_testing(
+                            postgres.pool().clone(),
+                        )
+                        .await
+                        .map(drop)
+                        .map_err(anyhow::Error::from)
                     },
                 )
-                .await
-                .map(drop)
-                .map_err(anyhow::Error::from)
-            })
-            .await?;
-        phase_profile.insert(phase.0, phase.1);
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
 
-        phase_profile.extend(
-            measure_store_hardening_backend_turn(
-                &memory_store,
-                &memory_session_id,
-                &owner,
-                turn_index,
-                MEMORY_HARDENING_PHASES,
-            )
-            .await?,
-        );
-        phase_profile.extend(
-            measure_store_hardening_backend_turn(
-                &sqlite_store,
-                &sqlite_session_id,
-                &owner,
-                turn_index,
-                SQLITE_HARDENING_PHASES,
-            )
-            .await?,
-        );
-        phase_profile.extend(
-            measure_store_hardening_backend_turn(
-                &postgres_store,
-                &postgres_session_id,
-                &owner,
-                turn_index,
-                POSTGRES_HARDENING_PHASES,
-            )
-            .await?,
-        );
+                let (_, phase) = measure_runtime_perf_async_phase(
+                    "store_hardening.postgres.open_enforce",
+                    async {
+                        // Deliberately HostProvisioned: this arm measures the structural
+                        // verification gate without LashManaged's version preflight and
+                        // idempotent DDL. The report calls out that narrower open mode.
+                        lash_postgres_store::PostgresStorage::from_pool_with(
+                            postgres.pool().clone(),
+                            lash_postgres_store::PostgresStoreConfig {
+                                schema_provisioning:
+                                    lash_postgres_store::SchemaProvisioning::HostProvisioned,
+                                schema_check: lash_postgres_store::SchemaCheck::Enforce,
+                                ..lash_postgres_store::PostgresStoreConfig::default()
+                            },
+                        )
+                        .await
+                        .map(drop)
+                        .map_err(anyhow::Error::from)
+                    },
+                )
+                .await?;
+                phase_profile.insert(phase.0, phase.1);
 
-        measure_process_prune(
-            &memory_registry,
-            "store_hardening.memory.prune_terminal_processes",
-            "memory",
-            &run_id,
-            turn_index,
-            &mut phase_profile,
+                phase_profile.extend(
+                    measure_store_hardening_backend_turn(
+                        &memory_store,
+                        &memory_session_id,
+                        &owner,
+                        turn_index,
+                        MEMORY_HARDENING_PHASES,
+                    )
+                    .await?,
+                );
+                phase_profile.extend(
+                    measure_store_hardening_backend_turn(
+                        &sqlite_store,
+                        &sqlite_session_id,
+                        &owner,
+                        turn_index,
+                        SQLITE_HARDENING_PHASES,
+                    )
+                    .await?,
+                );
+                phase_profile.extend(
+                    measure_store_hardening_backend_turn(
+                        &postgres_store,
+                        &postgres_session_id,
+                        &owner,
+                        turn_index,
+                        POSTGRES_HARDENING_PHASES,
+                    )
+                    .await?,
+                );
+
+                measure_process_prune(
+                    &memory_registry,
+                    "store_hardening.memory.prune_terminal_processes",
+                    "memory",
+                    &run_id,
+                    turn_index,
+                    &mut phase_profile,
+                )
+                .await?;
+                measure_process_prune(
+                    &sqlite_registry,
+                    "store_hardening.sqlite.prune_terminal_processes",
+                    "sqlite",
+                    &run_id,
+                    turn_index,
+                    &mut phase_profile,
+                )
+                .await?;
+                measure_process_prune(
+                    &postgres_registry,
+                    "store_hardening.postgres.prune_terminal_processes",
+                    "postgres",
+                    &run_id,
+                    turn_index,
+                    &mut phase_profile,
+                )
+                .await?;
+
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        phase_profile,
+                        ..TurnTail::default()
+                    },
+                })
+            },
+            async {
+                tokio::task::yield_now().await;
+                Ok(())
+            },
         )
         .await?;
-        measure_process_prune(
-            &sqlite_registry,
-            "store_hardening.sqlite.prune_terminal_processes",
-            "sqlite",
-            &run_id,
-            turn_index,
-            &mut phase_profile,
-        )
-        .await?;
-        measure_process_prune(
-            &postgres_registry,
-            "store_hardening.postgres.prune_terminal_processes",
-            "postgres",
-            &run_id,
-            turn_index,
-            &mut phase_profile,
-        )
-        .await?;
-
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        tokio::task::yield_now().await;
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let total_alloc = sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-        turns.push(RuntimePerfTurnResult {
-            turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: memory_span(turn_before_memory, after_await_memory),
-            phase_profile,
-            turn_usage: TokenUsage::default(),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
-        });
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let _export_shape = serde_json::json!({
-        "backends": 3,
-        "identity_iterations": HARDENING_IDENTITY_ITERATIONS,
-        "occurrence_iterations": HARDENING_OCCURRENCE_ITERATIONS,
-        "pruned_processes_per_backend_turn": HARDENING_PRUNE_BATCH,
+    run.export(async {
+        let _export_shape = serde_json::json!({
+            "backends": 3,
+            "identity_iterations": HARDENING_IDENTITY_ITERATIONS,
+            "occurrence_iterations": HARDENING_OCCURRENCE_ITERATIONS,
+            "pruned_processes_per_backend_turn": HARDENING_PRUNE_BATCH,
+        })
+        .to_string();
+        Ok(())
     })
-    .to_string();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
-        session_nodes: 0,
-        active_path_messages: 0,
+    .await?;
+    Ok(run.finish(RunTail {
         extra_counters: BTreeMap::from([
             ("backends".to_string(), 3),
             (
@@ -324,13 +282,8 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                 (chat_turns * HARDENING_OCCURRENCE_ITERATIONS) as u64,
             ),
         ]),
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: memory_span(before_memory, after_export_memory),
-        phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turns,
-        cumulative_usage: SessionUsageReport::default(),
-    })
+        ..RunTail::default()
+    }))
 }
 
 fn measure_hardening_identity_phases(
