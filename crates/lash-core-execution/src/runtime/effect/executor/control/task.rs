@@ -43,6 +43,24 @@ pub enum EffectControllerTaskRequest {
     TurnControlParticipation {
         response: oneshot::Sender<Result<TurnControlParticipation, RuntimeError>>,
     },
+    OpenEffectGroup {
+        scope: ExecutionScope,
+        group: Box<RuntimeEffectGroup>,
+        response: oneshot::Sender<Result<EffectGroupHandle, RuntimeEffectControllerError>>,
+    },
+    AwaitNextSettlement {
+        handle: EffectGroupHandle,
+        cancel: CancellationToken,
+        response: oneshot::Sender<(
+            EffectGroupHandle,
+            Result<GroupSettlement, RuntimeEffectControllerError>,
+        )>,
+    },
+    CloseEffectGroup {
+        handle: EffectGroupHandle,
+        disposition: LoserPolicy,
+        response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
+    },
 }
 
 impl EffectControllerTaskRequest {
@@ -108,6 +126,35 @@ impl EffectControllerTaskRequest {
             }),
             Self::TurnControlParticipation { response } => Box::pin(async move {
                 let _ = response.send(controller.turn_control_participation().await);
+            }),
+            Self::OpenEffectGroup {
+                scope,
+                group,
+                response,
+            } => Box::pin(async move {
+                let result = match group.validate_execution_scope(&scope) {
+                    Ok(()) => controller.open_effect_group(*group).await,
+                    Err(error) => Err(error),
+                };
+                let _ = response.send(result);
+            }),
+            Self::AwaitNextSettlement {
+                mut handle,
+                cancel,
+                response,
+            } => Box::pin(async move {
+                let result = controller.await_next_settlement(&mut handle, cancel).await;
+                // The cursor of record rides back with the outcome: whatever
+                // the controller advanced is exactly what the caller's handle
+                // becomes — nothing on a refusal or a cancellation.
+                let _ = response.send((handle, result));
+            }),
+            Self::CloseEffectGroup {
+                handle,
+                disposition,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.close_effect_group(handle, disposition).await);
             }),
         }
     }
@@ -391,32 +438,93 @@ impl RuntimeEffectController for EffectTaskController {
 
     async fn open_effect_group(
         &self,
-        _group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        // Not forwarded, on purpose. This proxy relays execute_effect and
-        // three other calls over an mpsc channel, so forwarding groups needs
-        // new request variants that round-trip `&mut EffectGroupHandle` and a
-        // long-lived cancellation token — a design change, not a delegation.
-        // Until FIG-3415 does that, a controller reached through this proxy
-        // has no groups, and now says so instead of inheriting a default that
-        // looked identical to a host which had simply never considered them.
-        Err(crate::effect_groups_unsupported("EffectTaskController"))
+        group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::OpenEffectGroup {
+                scope: self.scope.clone(),
+                group: Box::new(group),
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "group-open controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "group-open controller response was dropped",
+            )
+        })?
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("EffectTaskController"))
+        handle: &mut EffectGroupHandle,
+        cancel: CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        // A `&mut` cannot ride the channel, so the cursor travels as a copy:
+        // the task side advances its own handle and returns it with the
+        // outcome, and this handle — still the sole cursor of record — is
+        // written back to exactly what the controller delivered. A send or
+        // response failure therefore leaves this handle untouched, matching a
+        // cancelled await.
+        let cursor = EffectGroupHandle::restored(
+            handle.group_key().to_string(),
+            handle.children(),
+            handle.consumed(),
+        )?;
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::AwaitNextSettlement {
+                handle: cursor,
+                cancel,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "group-settlement controller task is no longer running",
+                )
+            })?;
+        let (returned, result) = response_rx.await.map_err(|_| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "group-settlement controller response was dropped",
+            )
+        })?;
+        *handle = returned;
+        result
     }
 
     async fn close_effect_group(
         &self,
-        _handle: crate::EffectGroupHandle,
-        _disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("EffectTaskController"))
+        handle: EffectGroupHandle,
+        disposition: LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::CloseEffectGroup {
+                handle,
+                disposition,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "group-close controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "group-close controller response was dropped",
+            )
+        })?
     }
 }
 

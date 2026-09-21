@@ -1074,6 +1074,93 @@ pub async fn a_wired_host_serves_all_three_group_methods<F: Fn() -> Host>(make: 
     close(&scoped, handle, RUN).await.expect("the group closes");
 }
 
+/// A controller reached through `EffectTaskController` must answer the whole
+/// group contract, not just the calls the proxy has always forwarded.
+///
+/// The proxy exists because process paths lend a `'static` controller to local
+/// execution: a scoped controller that cannot produce one — Restate's owned
+/// view, or any borrowed one — is wrapped in a task proxy that relays calls
+/// over a channel while a driver runs them on the real controller. A group
+/// opened through that proxy is a group opened on the same controller, so
+/// open, the settlement await — behind which the `&mut EffectGroupHandle`
+/// cursor must round-trip the channel and come back advanced — and close must
+/// all land (FIG-3415).
+///
+/// The driver's root effect stands in for the process-command envelope the
+/// proxy is built around in production: it stays in flight, gated on the
+/// law's release, while the group calls below arrive on the request channel —
+/// which is also what proves a proxied group call does not wait for the root
+/// to finish.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let admitted = admit(scope(prefix, "proxied"));
+    let scoped = host.scoped(admitted.clone()).expect("a scope binds");
+    let (proxied, requests) =
+        crate::runtime::effect::EffectTaskController::scoped(scoped.controller(), admitted)
+            .expect("the task proxy builds around the scoped controller");
+    let (release, released) = oneshot::channel::<()>();
+    let root_scope = scoped.execution_scope().clone();
+    let drive = crate::runtime::effect::drive_effect_controller_task(
+        scoped.controller(),
+        root_scope.clone(),
+        RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                EffectAddress::new(root_scope, "proxied:root").expect("valid proxied-root address"),
+                RuntimeAttribution::none(),
+                "proxied-root",
+            ),
+            RuntimeEffectCommand::LanguageRuntimeValue {
+                operation: "proxied-root".to_string(),
+            },
+        ),
+        RuntimeEffectLocalExecutor::testing(move |_| async move {
+            let _ = released.await;
+            Ok(outcome_of(0))
+        }),
+        requests,
+    );
+    let scenario = async {
+        let key = group_key(prefix, "proxied");
+        let mut handle = open(
+            &proxied,
+            &key,
+            2,
+            GroupWakePolicy::All,
+            RUN,
+            vec![settles(0), settles(1)],
+        )
+        .await;
+        let mut positions = Vec::new();
+        for rank in 1_u64..=2 {
+            let settlement = next(&proxied, &mut handle)
+                .await
+                .expect("the rank is served through the proxy");
+            assert_eq!(settlement.sequence, rank, "ranks arrive in order");
+            positions.push(settlement.position);
+        }
+        positions.sort_unstable();
+        assert_eq!(positions, vec![0, 1], "every child is delivered once");
+        assert_eq!(
+            handle.consumed(),
+            2,
+            "the cursor of record travelled the channel and came back advanced"
+        );
+        close(&proxied, handle, RUN)
+            .await
+            .expect("the proxied close lands");
+        let _ = release.send(());
+    };
+    let ((), outcome) = tokio::join!(scenario, drive);
+    outcome.expect("the driver completes its root effect");
+}
+
 /// Two children sharing a replay key never reach a host, and the refusal costs
 /// the group key nothing.
 ///
