@@ -304,6 +304,9 @@ fn validate_effect_command(
             ));
         }
     }
+    if let RuntimeEffectCommand::ToolInvocation { request } = command {
+        request.validate()?;
+    }
     if let RuntimeEffectCommand::ToolBatch { batch } = command {
         if batch.batch_id.trim().is_empty() {
             return Err(RuntimeEffectControllerError::new(
@@ -378,6 +381,22 @@ pub enum RuntimeEffectCommand {
     ToolBatch {
         batch: crate::PreparedToolBatch,
     },
+    /// One tool child of a durable effect group, at invocation level
+    /// (ADR 0099 §2, §3).
+    ///
+    /// Neither sibling tool command names this.
+    /// [`ToolAttempt`](Self::ToolAttempt) is the atomic body of a single
+    /// attempt — the thing that runs inside a recorded body — so it cannot
+    /// carry retry, which is a second attempt with a second envelope hash.
+    /// [`ToolBatch`](Self::ToolBatch) is the whole batch, the composition a
+    /// group replaces. The payload is the request that reconstructs the child
+    /// from the journal alone, which is what makes an accepted group's
+    /// membership recoverable (W1, W2).
+    ///
+    /// Boxed to keep the command inside its measured size budget below.
+    ToolInvocation {
+        request: Box<super::tool_child::ToolChildRequest>,
+    },
     Trigger {
         command: Box<crate::TriggerCommand>,
     },
@@ -440,6 +459,7 @@ impl RuntimeEffectCommand {
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
+            Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,

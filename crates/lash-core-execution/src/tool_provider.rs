@@ -1156,7 +1156,10 @@ impl<'run> ToolContext<'run> {
 /// The raw model/provider identity remains visible, but any argument rewrites
 /// and provider-owned context projections are frozen before the call crosses a
 /// runtime effect or process boundary.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+// `PartialEq` but not `Eq`: `args` and `prepared_payload` are `serde_json::Value`.
+// Comparison exists so a retained tool-child request can prove it round-tripped
+// its input unchanged (ADR 0099 §3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PreparedToolCall {
     pub call_id: String,
     pub tool_id: ToolId,
@@ -1268,7 +1271,11 @@ impl PreparedToolBatch {
 /// carries the manifest/contract to validate the call plus an opaque host
 /// execution binding that providers can inspect from the prepare and execute
 /// contexts.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+// `PartialEq` but not `Eq`: `execution_binding` is a `serde_json::Value`, whose
+// float arm has no total equality. Comparison exists so a retained tool-child
+// request can prove it round-tripped its admitted authority unchanged
+// (ADR 0099 §3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolExecutionGrant {
     /// Tool identity and model-facing metadata authorized by the grant.
     pub(crate) manifest: ToolManifest,

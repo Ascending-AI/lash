@@ -35,6 +35,11 @@ pub enum RuntimeEffectKind {
     Direct,
     ToolAttempt,
     ToolBatch,
+    /// One tool child of a durable effect group, driven at invocation level
+    /// (ADR 0099 §2). Distinct from [`ToolAttempt`](Self::ToolAttempt), which is
+    /// the atomic body of one attempt, and from [`ToolBatch`](Self::ToolBatch),
+    /// which is the whole batch a group replaces.
+    ToolInvocation,
     ToolParentEnd,
     Trigger,
     Process,
@@ -58,6 +63,7 @@ impl RuntimeEffectKind {
             Self::Direct => "direct",
             Self::ToolAttempt => "tool_attempt",
             Self::ToolBatch => "tool_batch",
+            Self::ToolInvocation => "tool_invocation",
             Self::ToolParentEnd => "tool_parent_end",
             Self::Trigger => "trigger",
             Self::Process => "process",

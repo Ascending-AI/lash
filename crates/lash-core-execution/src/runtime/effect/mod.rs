@@ -13,6 +13,10 @@ use lash_core_store::effect_identity as identity_types;
 mod native_host;
 mod store_turn_control;
 pub use store_turn_control::bind_store_turn_control_authority;
+mod tool_child;
+pub use tool_child::{
+    TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
+};
 mod outcome;
 pub use lash_core_effect::promise_semantics;
 mod validation;

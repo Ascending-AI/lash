@@ -12,9 +12,24 @@ use super::{
     ToolTriggerEffectOutcome, mark_retry_exhausted, retry_after_ms,
 };
 
-#[derive(Clone)]
+/// Which family of replay keys and causal parent a tool call's attempts derive
+/// from.
+///
+/// Serializable because a group child retains it: ADR 0099 §3 requires a tool
+/// child of an effect group to be reconstructible from the journal alone, and
+/// the attempt identity is how a recovered child re-derives the *same* replay
+/// key for the *same* attempt instead of issuing a fresh unrelated one (W2).
+/// It is carried whole rather than mirrored into a durable twin, because the
+/// twin and this type would be two spellings of one fact — see
+/// [`ToolChildRequest`](crate::runtime::effect::ToolChildRequest).
+///
+/// The parent invocation each arm carries is the dispatch context's
+/// `parent_invocation`, so this type is also a tool call's lineage.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolAttemptEffectIdentity {
     Scalar {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<RuntimeInvocation>,
     },
     Batch {
@@ -22,6 +37,7 @@ pub enum ToolAttemptEffectIdentity {
         replay_suffix: String,
     },
     Process {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<RuntimeInvocation>,
         process_id: ProcessId,
     },

@@ -83,9 +83,21 @@ pub struct EffectGroupMembership {
 /// seam (FIG-1416).
 ///
 /// The children are ordinary envelopes carrying ordinary
-/// [`RuntimeEffectCommand`](super::envelope::RuntimeEffectCommand)s — groups
-/// introduce no new command variant, because what is new is the *composition
-/// above* attempts, not the attempts.
+/// [`RuntimeEffectCommand`](super::envelope::RuntimeEffectCommand)s. For every
+/// child the journal could already name — a sleep, a process command, an await
+/// — that is the whole story, and ADR 0065 recorded the reason: what is new is
+/// the *composition above* attempts, not the attempts.
+///
+/// **A tool child is the exception, and it is a named one** (ADR 0099 §2, §3;
+/// FIG-3408). A tool group child is a replayable invocation driver, and neither
+/// existing tool command is that:
+/// [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) is the
+/// atomic body of one attempt, so it cannot carry retry, and
+/// [`ToolBatch`](super::envelope::RuntimeEffectCommand::ToolBatch) is the whole
+/// batch a group replaces. It is named by
+/// [`ToolInvocation`](super::envelope::RuntimeEffectCommand::ToolInvocation),
+/// whose payload is the retained request that reconstructs the child from the
+/// journal alone.
 ///
 /// Construct with [`try_new`](Self::try_new). The fields are readable but not
 /// publicly writable, because every durability claim in ADR 0065 reduces to the

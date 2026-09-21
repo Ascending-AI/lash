@@ -263,6 +263,9 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolBatchCallReplay,
     RuntimeEffectToolBatchEmpty,
     RuntimeEffectToolBatchId,
+    RuntimeEffectToolChildRequestAdmission,
+    RuntimeEffectToolChildRequestCallId,
+    RuntimeEffectToolChildRequestVersion,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
@@ -556,6 +559,15 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolBatchCallReplay => "runtime_effect_tool_batch_call_replay",
             Self::RuntimeEffectToolBatchEmpty => "runtime_effect_tool_batch_empty",
             Self::RuntimeEffectToolBatchId => "runtime_effect_tool_batch_id",
+            Self::RuntimeEffectToolChildRequestAdmission => {
+                "runtime_effect_tool_child_request_admission"
+            }
+            Self::RuntimeEffectToolChildRequestCallId => {
+                "runtime_effect_tool_child_request_call_id"
+            }
+            Self::RuntimeEffectToolChildRequestVersion => {
+                "runtime_effect_tool_child_request_version"
+            }
             Self::RuntimeEffectWrongOutcome => "runtime_effect_wrong_outcome",
             Self::RuntimeEffectControllerTaskClosed => "runtime_effect_controller_task_closed",
             Self::RuntimePerfStartGateRetry => "runtime_perf_start_gate_retry",
@@ -763,6 +775,9 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectToolBatchCallReplay
             | Self::RuntimeEffectToolBatchEmpty
             | Self::RuntimeEffectToolBatchId
+            | Self::RuntimeEffectToolChildRequestAdmission
+            | Self::RuntimeEffectToolChildRequestCallId
+            | Self::RuntimeEffectToolChildRequestVersion
             | Self::RuntimeEffectWrongOutcome
             | Self::RuntimeStoreCorrupt
             | Self::SessionCommandClaim
@@ -954,6 +969,9 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupChildCancelled,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
+        Self::RuntimeEffectToolChildRequestAdmission,
+        Self::RuntimeEffectToolChildRequestCallId,
+        Self::RuntimeEffectToolChildRequestVersion,
         Self::RuntimeEffectInvocationSubject,
         Self::RuntimeEffectScopeMismatch,
         Self::RuntimeEffectLocalExecutorMismatch,
@@ -1180,6 +1198,15 @@ impl RuntimeErrorCode {
             "runtime_effect_tool_batch_call_replay" => Self::RuntimeEffectToolBatchCallReplay,
             "runtime_effect_tool_batch_empty" => Self::RuntimeEffectToolBatchEmpty,
             "runtime_effect_tool_batch_id" => Self::RuntimeEffectToolBatchId,
+            "runtime_effect_tool_child_request_admission" => {
+                Self::RuntimeEffectToolChildRequestAdmission
+            }
+            "runtime_effect_tool_child_request_call_id" => {
+                Self::RuntimeEffectToolChildRequestCallId
+            }
+            "runtime_effect_tool_child_request_version" => {
+                Self::RuntimeEffectToolChildRequestVersion
+            }
             "runtime_effect_wrong_outcome" => Self::RuntimeEffectWrongOutcome,
             "runtime_effect_controller_task_closed" => Self::RuntimeEffectControllerTaskClosed,
             "runtime_perf_start_gate_retry" => Self::RuntimePerfStartGateRetry,
