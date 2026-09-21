@@ -307,6 +307,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
         };
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
+            probe_private_field: (),
             process_definitions: self.process_definitions,
             process_engines: self.process_engines,
             plugins,

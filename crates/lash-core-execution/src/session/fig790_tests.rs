@@ -469,6 +469,7 @@ fn fig790_process_await_context(
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
+        probe_private_field: (),
         plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,

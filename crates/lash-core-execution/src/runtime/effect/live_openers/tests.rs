@@ -27,6 +27,7 @@ fn live_context() -> LiveOpenerContext {
     // reports a closed channel for a reason unrelated to what is asserted.
     std::mem::forget(event_rx);
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
+        probe_private_field: (),
         plugins: crate::plugin::PluginHost::empty()
             .build_session("session")
             .expect("plugin session"),

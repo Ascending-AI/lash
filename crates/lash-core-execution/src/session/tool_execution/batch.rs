@@ -626,6 +626,7 @@ mod tests {
         let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
+            probe_private_field: (),
             plugins,
             tools: Arc::new(GrantedLeafTool),
             tool_registry: Some(Arc::new(registry)),
@@ -1074,6 +1075,7 @@ mod tests {
         let attachment_store: Arc<crate::SessionAttachmentStore> =
             Arc::new(crate::SessionAttachmentStore::in_memory());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
+            probe_private_field: (),
             plugins,
             tools,
             tool_registry: None,
