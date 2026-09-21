@@ -130,9 +130,9 @@ tables belong to the process family — a session's wake redelivery fences and
 the allocation floors targeting it — and seven to the turn-ingress family: its
 queue, its inputs, its lane lease and its cancellation facts. They all go with
 the session that owns them, so the session-core family owns the whole cascade
-and deletes from the other two families' tables inside it. SQLite's session delete is per session and
-issues the named per-table deletes in sequence under `BEGIN IMMEDIATE`, which
-is the same atomicity without the CTE.
+and deletes from the other two families' tables inside it. SQLite's session
+delete is per session and issues the named per-table deletes in sequence under
+`BEGIN IMMEDIATE`, which is the same atomicity without the CTE.
 """
 
 [[cross_family]]
