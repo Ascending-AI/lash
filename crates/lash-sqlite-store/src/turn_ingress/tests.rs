@@ -68,7 +68,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.family_sqlite
             .checkpoint_work_pending_before_completion
             .sql(),
-        sql.family_sqlite.record_wake_fence_from_claim.sql(),
         sql.pending_inputs.select_by_id.sql(),
         sql.pending_inputs.select_by_source_key.sql(),
         sql.pending_inputs.list_undelivered.sql(),
