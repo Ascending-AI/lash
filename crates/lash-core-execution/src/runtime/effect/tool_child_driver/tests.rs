@@ -398,12 +398,12 @@ fn the_resolver_answers_only_for_tool_children() {
     );
 }
 
-/// One function derives an opener from an admitted scope, exhaustively, so a
-/// scope arm added later is a compile error rather than a silently
-/// unregistered opener. The derivation is the bridge's
-/// (`cell_opener_for_scope`, FIG-3394): a turn and a queued drain name their
-/// opener from the scope alone; a process scope names it only through the
-/// pinned incarnation the runner bound, never from the reusable name.
+/// Live-opener registration derives through the one owner derivation
+/// (`EffectOpener::for_scope`, FIG-3417), exhaustively, so a scope arm added
+/// later is a compile error rather than a silently unregistered opener: a
+/// turn and a queued drain name their opener from the scope alone; a process
+/// scope names it only through the pinned incarnation the runner bound,
+/// never from the reusable name.
 #[test]
 fn opener_derivation_names_every_admitted_opener_scope() {
     let turn = ExecutionScope::turn("session", "turn");

@@ -118,8 +118,8 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             )
         })?;
         // Derive the opener before the controller moves into the handle. The
-        // derivation is the one the bridges use (`cell_opener_for_scope`,
-        // FIG-3394): the admitted scope plus its pinned incarnation, never a
+        // derivation is the one owner derivation (`EffectOpener::for_scope`,
+        // FIG-3417): the admitted scope plus its pinned incarnation, never a
         // registry lookup — a process scope without one names no opener and
         // registers nothing, leaving its children accepted rather than run
         // under a context that cannot claim them.
