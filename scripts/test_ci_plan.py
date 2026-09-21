@@ -334,7 +334,7 @@ class ConclusionTests(unittest.TestCase):
 
     def test_hygiene_jobs_are_required_for_every_event_and_docs_changes(self) -> None:
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
-        for job in ("diff-hygiene", "secret-scan"):
+        for job in ("hygiene",):
             self.assertIn(job, ci_plan.UNGATED_JOBS)
             self.assertIn(job, workflow["ci-conclusion"]["needs"])
             self.assertNotIn("if", workflow[job])
@@ -418,12 +418,12 @@ class ConclusionTests(unittest.TestCase):
 
     def test_skipped_ungated_job_fails(self) -> None:
         needs = successful_needs()
-        needs["facade-only-examples"]["result"] = "skipped"
+        needs["hygiene"]["result"] = "skipped"
         self.assertTrue(ci_plan.evaluate_conclusion(needs))
 
     def test_missing_needed_job_fails(self) -> None:
         needs = successful_needs()
-        del needs["facade-only-examples"]
+        del needs["hygiene"]
         self.assertTrue(ci_plan.evaluate_conclusion(needs))
 
 

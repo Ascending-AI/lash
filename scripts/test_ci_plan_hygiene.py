@@ -74,7 +74,7 @@ class HygieneTests(unittest.TestCase):
         self.git("merge", "--no-ff", "-qm", "Merge PR", "pr")
         merge_head = self.git("rev-parse", "HEAD").stdout.strip()
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-        for job in ("diff-hygiene", "secret-scan"):
+        for job in ("hygiene",):
             section = workflow.split(f"  {job}:\n", 1)[1]
             checkout = section.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
             checkout = "\n".join(line[10:] for line in checkout.splitlines())
@@ -214,7 +214,7 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn("Check C (added-file count) failed", result.stderr)
 
-    @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the secret-scan job")
+    @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the hygiene job")
     def test_added_secret_is_refused(self):
         # Construct a fake token at runtime so the regression fixture is not a leak.
         (self.repo / "config.txt").write_text('github_token = "' + "ghp_" + "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7C" + '"\n')
@@ -234,7 +234,7 @@ class HygieneTests(unittest.TestCase):
         script = "\n".join(line[10:] for line in script.splitlines())
         return script[script.index("git fetch"):]
 
-    @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the secret-scan job")
+    @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the hygiene job")
     def test_merges_of_main_do_not_leak_main_secrets(self):
         # A branch that merged main in earlier reaches main through a second
         # chain rooted far down it. `--deepen` extends every boundary, so that
@@ -302,7 +302,7 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual(1, leaked.returncode, leaked.stdout + leaked.stderr)
         self.assertIn("github-pat", leaked.stdout + leaked.stderr)
 
-        for job in ("diff-hygiene", "secret-scan"):
+        for job in ("hygiene",):
             with self.subTest(job=job):
                 clone, git = fresh(f"fixed-{job}")
                 result = subprocess.run(
