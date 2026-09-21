@@ -90,7 +90,7 @@ async fn postgres_direct_effect_retirement_serializes_with_bound_catalog() {
         eprintln!("skipping PostgreSQL closure-owner lifecycle test: database URL is not set");
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host());
     let effect_host: Arc<dyn EffectHost> = host.clone();
     let factory = storage.session_store_factory();
@@ -182,7 +182,7 @@ lash_conformance::effect_group_quiescent_retirement_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let database_url = database_url().expect("configured Postgres database URL");
     (
         database_lock,
@@ -254,7 +254,7 @@ async fn postgres_scope_retirement_waits_for_the_admission_lock() {
         eprintln!("skipping Postgres retirement lock test: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let scope =
         ExecutionScope::runtime_operation(format!("held-lock-{}", uuid::Uuid::new_v4().simple()));
     let key = scope

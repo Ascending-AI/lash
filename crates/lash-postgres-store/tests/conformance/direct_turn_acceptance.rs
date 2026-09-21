@@ -16,7 +16,7 @@ lash_conformance::direct_turn_acceptance_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     (
         database_lock,
         "postgres",

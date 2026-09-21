@@ -32,7 +32,7 @@ lash_conformance::wake_delivery_crash_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
     let factory = Arc::new(
         storage
@@ -72,7 +72,7 @@ lash_conformance::wake_delivery_ordering_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let registry = Arc::new(storage.process_registry());
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,

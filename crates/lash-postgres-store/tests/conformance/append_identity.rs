@@ -3,7 +3,7 @@ lash_conformance::append_receipt_identity_corruption_tests!({
         eprintln!("skipping Postgres corrupt receipt test: database is not configured");
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let pool = storage.pool().clone();
     (
         _database_lock,

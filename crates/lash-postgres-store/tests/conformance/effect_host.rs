@@ -7,7 +7,7 @@ lash_conformance::effect_host_cold_await_event_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
     (database_lock, move || {
@@ -28,7 +28,7 @@ lash_conformance::effect_host_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
     (database_lock, move || {
@@ -49,7 +49,7 @@ lash_conformance::tool_batch_parallelism_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
     let storage = Arc::new(storage);
     (
@@ -101,7 +101,7 @@ lash_conformance::turn_work_driver_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
     (
         database_lock,
@@ -117,7 +117,7 @@ lash_conformance::effect_host_await_event_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
     (database_lock, move || {
@@ -140,7 +140,7 @@ lash_conformance::effect_group_host_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
     (database_lock, move |executors| {
@@ -172,7 +172,7 @@ lash_conformance::effect_group_cancelled_child_terminal_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
     (database_lock, move |executors| {
@@ -201,7 +201,7 @@ lash_conformance::effect_group_runtime_retirement_tests!({
         );
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let database_url = database_url().expect("configured Postgres database URL");
     (
         database_lock,

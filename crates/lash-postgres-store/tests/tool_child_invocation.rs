@@ -20,7 +20,7 @@ use lash_conformance::{
 use lash_core::EffectHost;
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
-use crate::support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url, reset};
 
 /// A world over the configured database.
 ///
@@ -54,6 +54,16 @@ lash_conformance::tool_child_invocation_tests!({
         return;
     };
     let database_lock = SharedDatabaseLock::acquire(&url).await;
+    // The laws' scenario ids are deterministic and this database outlives the
+    // test process: without a reset a rerun replays the previous run's
+    // journaled rows and the bodies the laws watch for never re-execute.
+    reset(
+        PostgresStorage::connect(&url)
+            .await
+            .expect("PostgreSQL tool-child reset storage")
+            .pool(),
+    )
+    .await;
     let world_url = url.clone();
     let make_world: lash_conformance::ToolChildWorldFactory =
         Arc::new(move |spec: ToolChildWorldSpec| {

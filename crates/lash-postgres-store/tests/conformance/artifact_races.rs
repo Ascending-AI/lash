@@ -63,7 +63,7 @@ async fn postgres_artifact_release_observes_owner_that_commits_ahead_of_it() {
         eprintln!("skipping Postgres artifact race: database URL is not set");
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let store = storage.lashlang_artifact_store();
     let module = artifact("race");
     let owner_a = lash_core::ArtifactOwner::host("artifact-race-a");
@@ -122,7 +122,7 @@ async fn postgres_concurrent_final_artifact_releases_converge_to_absent_bytes() 
         eprintln!("skipping Postgres artifact race: database URL is not set");
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let store = storage.lashlang_artifact_store();
     let module = artifact("releases");
     let owner_a = lash_core::ArtifactOwner::host("final-release-a");
@@ -170,7 +170,7 @@ async fn postgres_artifact_retirement_fences_a_late_publisher() {
         eprintln!("skipping Postgres artifact race: database URL is not set");
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let store = storage.lashlang_artifact_store();
     let module = artifact("process late(root: str) -> str { finish root }");
     let owner = lash_core::ArtifactOwner::execution(lash_core::ExecutionScope::runtime_operation(

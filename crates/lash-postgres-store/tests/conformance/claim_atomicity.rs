@@ -10,7 +10,7 @@ async fn postgres_queued_work_partial_claim_rolls_back_through_all_entry_points(
         return;
     };
     for entry in law::ENTRIES {
-        super::reset(&storage).await;
+        super::reset(storage.pool()).await;
         let case = law::prepare(
             Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
             entry,
@@ -53,7 +53,7 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         eprintln!("skipping Postgres fence corruption test: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    super::reset(&storage).await;
+    super::reset(storage.pool()).await;
     let session_id = "postgres-fence-corrupt";
     let store = storage.session_store(session_id);
     let owner = lash_core::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
@@ -125,7 +125,7 @@ async fn postgres_queued_work_claimability_verdict_holds_over_a_displaced_genera
     let Some((_lock, storage)) = super::storage().await else {
         return;
     };
-    super::reset(&storage).await;
+    super::reset(storage.pool()).await;
     law::claimability_verdict_holds_over_a_displaced_generation(
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         "postgres",

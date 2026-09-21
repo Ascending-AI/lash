@@ -53,7 +53,7 @@ async fn punctuation_worklist_pagination_matches_all_three_backends() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let memory = TestLocalProcessRegistry::default();
     let sqlite = lash_sqlite_store::SqliteProcessRegistry::memory()
         .await

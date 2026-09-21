@@ -12,7 +12,7 @@ lash_conformance::abandoned_attachment_recovery_tests!({
             let storage = PostgresStorage::connect(&database_url)
                 .await
                 .expect("connect initial Postgres attachment recovery authority");
-            reset(&storage).await;
+            reset(storage.pool()).await;
             (
                 Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
                 move || async move {
@@ -35,7 +35,7 @@ lash_conformance::attachment_condemnation_recovery_tests!({
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect initial Postgres attachment condemnation authority");
-    reset(&storage).await;
+    reset(storage.pool()).await;
     let reopen_url = database_url.clone();
     (
         database_lock,
