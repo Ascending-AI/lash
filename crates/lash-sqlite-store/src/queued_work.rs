@@ -158,17 +158,6 @@ impl QueuedBatchRow {
             claim_session_lease_generation: self.claim_session_lease_generation,
         }
     }
-
-    /// The claim columns the shared settlement verdict consults.
-    pub(crate) fn settlement_facts(
-        &self,
-    ) -> lash_core::store_backend_support::QueuedWorkSettlementFacts<'_> {
-        lash_core::store_backend_support::QueuedWorkSettlementFacts {
-            claim_id: self.claim_id.as_deref(),
-            claim_token: self.claim_token.as_deref(),
-            claim_session_lease_generation: self.claim_session_lease_generation,
-        }
-    }
 }
 
 pub(crate) fn claim_candidate_from_row(

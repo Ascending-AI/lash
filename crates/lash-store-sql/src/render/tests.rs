@@ -388,7 +388,6 @@ fn malformed_neutral_text_is_refused_rather_than_rendered() {
 }
 
 
-
 #[test]
 fn a_name_the_statement_binds_for_itself_is_not_a_table() {
     let neutral = "WITH scope AS (

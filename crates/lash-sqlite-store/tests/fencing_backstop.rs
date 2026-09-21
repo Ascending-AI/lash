@@ -397,10 +397,7 @@ async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
     // Obligation one: the caller receives exactly what it always received —
     // a lost race, not an error.
     assert!(
-        matches!(
-            outcome,
-            lash_core::QueuedWorkClaimOutcome::Refused(_)
-        ),
+        matches!(outcome, lash_core::QueuedWorkClaimOutcome::Refused(_)),
         "a lost fenced claim must report no claim, got {outcome:?}"
     );
 
@@ -491,10 +488,7 @@ async fn a_queued_work_claim_the_verdict_refuses_never_reaches_the_write() {
         .expect("the second claim call itself succeeds");
 
     assert!(
-        matches!(
-            second,
-            lash_core::QueuedWorkClaimOutcome::Refused(_)
-        ),
+        matches!(second, lash_core::QueuedWorkClaimOutcome::Refused(_)),
         "a generation must not claim a row it already holds, got {second:?}"
     );
     assert!(

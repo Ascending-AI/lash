@@ -168,6 +168,18 @@ pub(super) fn sqlite_refusal_for_empty_scan(
     })
 }
 
+/// One claim-candidate scan: the rows as they were read, the batches they
+/// hydrate to, and the candidates the shared prefix rule decides over.
+///
+/// The rows are carried alongside the candidates because the claimability
+/// verdict is taken over the row's own claim columns, and `ClaimCandidate`
+/// deliberately does not carry the lease generation.
+pub(super) type QueuedWorkClaimScan = (
+    Vec<QueuedBatchRow>,
+    Vec<QueuedWorkBatch>,
+    Vec<ClaimCandidate>,
+);
+
 // Exact selection passes its full validation span: validate every fencing
 // token before writing, including candidates outside the selected prefix.
 #[allow(clippy::too_many_arguments)]
@@ -262,14 +274,7 @@ pub(super) fn scan_queued_work_candidates_sqlite(
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
     max_rows: usize,
-) -> Result<
-    (
-        Vec<QueuedBatchRow>,
-        Vec<QueuedWorkBatch>,
-        Vec<ClaimCandidate>,
-    ),
-    StoreError,
-> {
+) -> Result<QueuedWorkClaimScan, StoreError> {
     let candidate_rows = {
         let mut stmt = tx
             .prepare(sqlite_queued_work_claim_candidates_sql(boundary))

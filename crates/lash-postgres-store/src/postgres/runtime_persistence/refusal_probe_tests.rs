@@ -26,7 +26,7 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
     ensure_session_execution_lease_tx(&mut tx, &SessionId::from("refusal-probe"), &lease.fence())
         .await
         .unwrap();
-    let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(
+    let rows = sqlx::query(postgres_queued_work_claim_candidates_sql(
         QueuedWorkClaimBoundary::Idle,
     ))
     .bind("refusal-probe")
