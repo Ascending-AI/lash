@@ -620,6 +620,22 @@ impl Compiler {
         }
     }
 
+    fn emit_loop_execution_step(&mut self, path: &AstPath, label: &'static str) {
+        let instruction = self.code.len();
+        self.code.push(Instruction::ObserveStep);
+        let Some(tracking) = self.lashlang_execution.as_ref() else {
+            return;
+        };
+        let Some(path) = tracking.paths.get(path) else {
+            return;
+        };
+        let site = tracking
+            .context
+            .builder()
+            .node_site(path, LOOP_EXECUTION_SITE_KIND, label);
+        self.mark_lashlang_execution_site(instruction, site);
+    }
+
     fn compile_block_discarding_values(&mut self, block: &Expr, path: &AstPath) {
         match block {
             Expr::Block(expressions) => {
@@ -789,7 +805,7 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_for_loop_body(body, &path.child(1));
+            self.compile_for_loop_body(body, &path.child(1), path);
             self.push_null_if(leave_value);
             return;
         }
@@ -798,7 +814,7 @@ impl Compiler {
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_for_loop_body(body, &path.child(1));
+        self.compile_for_loop_body(body, &path.child(1), path);
         self.push_null_if(leave_value);
     }
 
@@ -806,12 +822,13 @@ impl Compiler {
         clippy::expect_used,
         reason = "the loop context pushed a few lines above is popped exactly once at the end of the body"
     )]
-    fn compile_for_loop_body(&mut self, body: &Expr, body_path: &AstPath) {
+    fn compile_for_loop_body(&mut self, body: &Expr, body_path: &AstPath, loop_path: &AstPath) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
+        self.emit_loop_execution_step(loop_path, "for");
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
@@ -984,6 +1001,7 @@ impl Compiler {
         self.clear_const_slots();
         let loop_start = self.code.len();
         let jump_to_end = self.compile_condition_jump_if_false(condition, &path.child(0));
+        self.emit_loop_execution_step(path, "while");
         self.clear_const_slots();
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,

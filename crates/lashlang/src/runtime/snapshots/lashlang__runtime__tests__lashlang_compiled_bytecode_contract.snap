@@ -31,16 +31,17 @@ code:
   0015: push_const c3 ","
   0016: intrinsic split argc=2
   0017: begin_iter 5:token
-  0018: iter_next 21
-  0019: add_assign_index_slot_number 4:counts 5:token 1
-  0020: jump 18
-  0021: end_iter
-  0022: push_const c4 {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
-  0023: store_name 6:Payload
-  0024: load_name 2:beta_index
-  0025: load_name 3:matches
-  0026: load_name 4:counts
-  0027: build_heap_record [beta_index, matches, counts]
-  0028: load_name 6:Payload
-  0029: intrinsic validate argc=2
-  0030: finish
+  0018: iter_next 22
+  0019: observe_step
+  0020: add_assign_index_slot_number 4:counts 5:token 1
+  0021: jump 18
+  0022: end_iter
+  0023: push_const c4 {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
+  0024: store_name 6:Payload
+  0025: load_name 2:beta_index
+  0026: load_name 3:matches
+  0027: load_name 4:counts
+  0028: build_heap_record [beta_index, matches, counts]
+  0029: load_name 6:Payload
+  0030: intrinsic validate argc=2
+  0031: finish

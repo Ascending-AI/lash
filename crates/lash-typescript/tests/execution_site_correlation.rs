@@ -19,9 +19,9 @@ use lashlang::testing::harness::{
     EchoHost, compile_labeled_program, compiled_execution_sites, link_labeled,
 };
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    LashlangExecutionObservation, Program, State, Value, WorkflowEffectKind, WorkflowNodeKind,
-    node_id_for_execution_site,
+    AbilityOp, AbilityResult, AstRoot, Declaration, ExecutionHost, ExecutionHostError,
+    ExecutionOutcome, LashlangExecutionObservation, Program, State, Value, WorkflowEffectKind,
+    WorkflowNodeKind, node_id_for_execution_site,
 };
 
 /// A `(kind, label, path)` triple for every execution site the compiler emitted,
@@ -131,6 +131,46 @@ finish(1);
             .any(|candidate| candidate.node_kind == "step"
                 && candidate.workflow_site.path == site.workflow_site.path),
         "a resource operation should not also emit a generic step site at its own path"
+    );
+}
+
+#[test]
+fn lifted_process_spans_move_to_the_declaration_root() {
+    let source = r#"const worker = async () => {
+  await tools.echo({ value: "inside" });
+  return "done";
+};
+finish(worker);
+"#;
+    let linked = link_labeled(parse_program(source));
+    let (index, process) = linked
+        .program()
+        .declarations
+        .iter()
+        .enumerate()
+        .find_map(|(index, declaration)| {
+            let Declaration::Process(process) = declaration else {
+                return None;
+            };
+            Some((index as u32, process))
+        })
+        .expect("the process literal lifts");
+    let process_spans = linked
+        .program()
+        .spans
+        .iter()
+        .filter(|(path, _)| path.root == AstRoot::Declaration(index))
+        .collect::<Vec<_>>();
+
+    assert!(
+        process_spans.len() > 1,
+        "the lifted declaration carries nested source provenance: {process_spans:?}"
+    );
+    assert!(
+        process_spans.iter().any(|(path, span)| {
+            path.steps.len() > 1 && source.get(span.start..span.end) == Some("return \"done\";")
+        }),
+        "the return statement keeps its exact source slice: {process_spans:?}; {process:?}"
     );
 }
 
@@ -357,6 +397,11 @@ if (true) {
 }
 const identity = (value) => value;
 const called = identity(1);
+for (const value of [1]) {
+  console.log(value);
+}
+while (false) {
+}
 finish(result);
 "#;
     let linked = link_labeled(parse_program(source));
@@ -379,6 +424,8 @@ finish(result);
     let mut expected = vec![
         ("branch".to_string(), "if".to_string()),
         ("call".to_string(), "function call".to_string()),
+        ("loop".to_string(), "for".to_string()),
+        ("loop".to_string(), "while".to_string()),
         // FIG-2999: starting, signalling and yielding are leaf tools now, so
         // they carry the one `resource_operation` descriptor kind instead of
         // the `child_process`, `signal` and `process_event` kinds the deleted
@@ -443,6 +490,36 @@ fn execution_site_wrapped_effect_uses_the_compiler_descriptor_for_its_graph_name
             .collect::<Vec<_>>(),
         [("sleep", "sleep for")]
     );
+}
+
+#[test]
+fn for_and_while_containers_have_matching_compiler_and_graph_sites() {
+    let source = r#"for (const value of [1, 2]) {
+  console.log(value);
+}
+while (false) {
+  console.log("never");
+}
+"#;
+    let linked = link_labeled(parse_program(source));
+    let compiled = compile_labeled_program(linked.program().clone());
+    let compiler = compiled_site_descriptors(&compiled)
+        .into_iter()
+        .filter(|(kind, _, _)| kind == "loop")
+        .collect::<Vec<_>>();
+    let graph = graph_site_descriptors(linked.program())
+        .into_iter()
+        .filter(|(kind, _, _)| kind == "loop")
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        compiler,
+        vec![
+            ("loop".to_string(), "for".to_string(), vec![0]),
+            ("loop".to_string(), "while".to_string(), vec![1]),
+        ]
+    );
+    assert_eq!(graph, compiler);
 }
 
 fn descriptor_pairs(compiled: &lashlang::CompiledProgram) -> Vec<(String, String)> {

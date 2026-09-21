@@ -36,6 +36,7 @@ pub(crate) struct Program {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Stmt {
+    Spanned(SourceSpan, Box<Stmt>),
     Empty,
     /// A statement carrying the label its leading `@label` doc comment named.
     ///
@@ -113,7 +114,7 @@ impl Stmt {
     /// pre-declaration, loop analysis — asks through here.
     pub(crate) fn unlabeled(&self) -> &Self {
         match self {
-            Self::Labeled { stmt, .. } => stmt.unlabeled(),
+            Self::Spanned(_, stmt) | Self::Labeled { stmt, .. } => stmt.unlabeled(),
             other => other,
         }
     }
@@ -617,13 +618,14 @@ impl Adapter {
     fn convert_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
         let label = self.statement_label(stmt.span().lo)?;
         let converted = self.convert_unlabeled_stmt(stmt)?;
-        Ok(match label {
+        let labeled = match label {
             Some(label) => Stmt::Labeled {
                 label,
                 stmt: Box::new(converted),
             },
             None => converted,
-        })
+        };
+        Ok(Stmt::Spanned(source_span(stmt.span()), Box::new(labeled)))
     }
 
     /// The label named by the statement's own leading doc comments.

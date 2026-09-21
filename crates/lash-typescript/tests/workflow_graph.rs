@@ -751,6 +751,73 @@ finish(1);
     );
 }
 
+fn source_slice<'a>(source: &'a str, node: &WorkflowNode) -> &'a str {
+    let span = node
+        .source_span
+        .expect("a projected node with canonical text carries a source span");
+    source
+        .get(span.start..span.end)
+        .expect("the source span addresses canonical UTF-8 boundaries")
+}
+
+#[test]
+fn canonical_source_spans_cover_bound_and_inline_process_bodies_without_shape_matching() {
+    let authored = r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});return "done";};
+await triggers.register({source:{expr:"0 8 * * *"},target:async(event)=>{await tools.echo({value:"inline"});return event;}});
+"#;
+    let canonical = canonical(authored);
+    let graph = workflow_graph_from_source(authored).expect("formatted source projects");
+    assert_eq!(
+        graph,
+        workflow_graph_from_source(&canonical).expect("canonical source projects"),
+        "formatting-only changes resolve to the same canonical spans"
+    );
+    let mut processes = graph.declarations.iter().filter_map(|declaration| {
+        let WorkflowDeclaration::Process(process) = declaration else {
+            return None;
+        };
+        Some(process)
+    });
+    let bound = processes.next().expect("the bound process projects");
+    let inline = processes.next().expect("the inline process projects");
+    assert!(processes.next().is_none(), "exactly two processes project");
+
+    let repeated = &bound.body.nodes[..2];
+    assert_eq!(
+        repeated
+            .iter()
+            .map(|node| source_slice(&canonical, node))
+            .collect::<Vec<_>>(),
+        [
+            "await (tools.echo({ value: \"same\" }))",
+            "await (tools.echo({ value: \"same\" }))",
+        ]
+    );
+    assert!(
+        repeated[0].source_span.expect("first span").start
+            < repeated[1].source_span.expect("second span").start,
+        "identical expressions retain their distinct canonical positions"
+    );
+    assert_eq!(
+        source_slice(
+            &canonical,
+            bound.body.nodes.last().expect("bound return node")
+        ),
+        "return \"done\";"
+    );
+    assert_eq!(
+        source_slice(&canonical, &inline.body.nodes[0]),
+        "await (tools.echo({ value: \"inline\" }))"
+    );
+    assert_eq!(
+        source_slice(
+            &canonical,
+            inline.body.nodes.last().expect("inline return node")
+        ),
+        "return event;"
+    );
+}
+
 fn facet_environment() -> LashlangHostEnvironment {
     let mut catalog = LashlangHostCatalog::new();
     catalog
@@ -922,9 +989,9 @@ fn while_collects_condition_sites_without_duplicating_body_sites() {
     assert_eq!(
         node.execution_sites
             .iter()
-            .map(|site| site.label.as_str())
+            .map(|site| (site.kind.as_str(), site.label.as_str()))
             .collect::<Vec<_>>(),
-        vec!["ready"]
+        vec![("loop", "while"), ("resource_operation", "ready")]
     );
     assert_eq!(body.nodes[0].execution_sites[0].label, "tick");
     assert_lens_laws(source);

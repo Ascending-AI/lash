@@ -159,7 +159,7 @@ impl Stmt {
         match self {
             // A label names the statement below it and holds no expression of
             // its own.
-            Stmt::Labeled { stmt, .. } => stmt.child_expressions(),
+            Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => stmt.child_expressions(),
             Stmt::Expr(expr) | Stmt::Throw(expr) => Box::new(std::iter::once(expr)),
             Stmt::Return(value) => Box::new(value.iter()),
             Stmt::Block(statements) => {
@@ -277,7 +277,7 @@ impl Stmt {
     pub(crate) fn descendants(&self) -> Box<dyn Iterator<Item = &Stmt> + '_> {
         let mut children = Vec::new();
         match self {
-            Stmt::Labeled { stmt, .. } => children.push(stmt.as_ref()),
+            Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => children.push(stmt.as_ref()),
             Stmt::Block(statements) => children.extend(statements),
             Stmt::If {
                 consequent,

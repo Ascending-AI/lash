@@ -139,10 +139,11 @@ fn lower_with_ambient_kind(
         .collect::<Vec<_>>();
     root_global_initializers.extend(expressions);
     let main = LashExpr::Block(root_global_initializers);
-    let spans = super::spans::source_spans(&main, &lowerer.span_notes);
-    Ok(LashProgram {
+    let mut program = LashProgram {
         declarations: lowerer.declarations,
         main,
-        spans,
-    })
+        spans: Default::default(),
+    };
+    lowerer.span_markers.resolve(&mut program);
+    Ok(program)
 }

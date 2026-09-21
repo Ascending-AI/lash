@@ -9,6 +9,10 @@
 //! comments and authored formatting are discarded. Hosts own graph mutation,
 //! drafts, layout, and versioning; this module owns projection, validation,
 //! deterministic identity, and canonical rendering.
+//!
+//! A node's `source_span` addresses this lens's canonical TypeScript output,
+//! which is the source text a host receives. It does not address the author's
+//! pre-canonical formatting.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -147,7 +151,7 @@ pub fn workflow_graph_to_source(graph: &WorkflowGraph) -> Result<String, GraphRe
 struct GraphProjector<'a> {
     program: &'a Program,
     source_hash: String,
-    spans: BTreeMap<Vec<u32>, Span>,
+    spans: BTreeMap<lashlang::AstPath, Span>,
     analysis: Option<&'a WorkflowLinkAnalysis>,
     allow_non_sourceable_expressions: bool,
 }
@@ -162,12 +166,7 @@ impl<'a> GraphProjector<'a> {
         Self {
             program,
             source_hash: hex_digest("lash-workflow-source/v3", canonical.as_bytes()),
-            spans: program
-                .spans
-                .iter()
-                .filter(|(path, _)| matches!(path.root, lashlang::AstRoot::Main))
-                .map(|(path, span)| (path.steps.clone(), *span))
-                .collect(),
+            spans: program.spans.clone(),
             analysis,
             allow_non_sourceable_expressions,
         }
@@ -358,6 +357,7 @@ impl<'a> GraphProjector<'a> {
                 path.push(step);
                 facts_path = facts_path.child(step);
             }
+            let source_path = facts_path.clone();
             // A statement the lowerer wrapped to give it a value is projected
             // as the statement itself, one AST step further down.
             let mut expression = expression;
@@ -371,7 +371,14 @@ impl<'a> GraphProjector<'a> {
                 facts_path = facts_path.child(0);
                 expression = statement;
             }
-            let node = self.project_node(expression, owner, &path, &facts_path, versions);
+            let node = self.project_node(
+                expression,
+                owner,
+                &path,
+                &facts_path,
+                &source_path,
+                versions,
+            );
             add_dependency_edges(&mut subgraph.edges, &node, expression, versions);
             if node_is_sequenced(&node) {
                 if let Some(previous) = &previous_effect {
@@ -397,6 +404,7 @@ impl<'a> GraphProjector<'a> {
         owner: &str,
         path: &[u32],
         facts_path: &lashlang::AstPath,
+        source_path: &lashlang::AstPath,
         versions: &mut VersionState,
     ) -> WorkflowNode {
         let (label, expression) = peel_label(expression);
@@ -405,11 +413,7 @@ impl<'a> GraphProjector<'a> {
         } else {
             facts_path.clone()
         };
-        let source_span = if owner == "main" {
-            self.spans.get(path).copied()
-        } else {
-            None
-        };
+        let source_span = self.spans.get(source_path).copied();
         let available_variables: Vec<String> = versions.known.iter().cloned().collect();
         let (kind, derived_name, outputs) =
             self.project_kind(expression, owner, path, &facts_path, versions);

@@ -841,9 +841,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 return Ok(Some(VmStep::Effect(VmEffect::Fail)));
             }
             Instruction::ObserveStep => {
-                if let Some(active) = self.begin_lashlang_execution(self.current_instruction_ip()) {
-                    self.complete_lashlang_execution(&active);
-                }
+                self.observe_lashlang_execution_step(self.current_instruction_ip());
             }
             Instruction::Pop => {
                 self.last_value = Some(self.pop_stack()?);

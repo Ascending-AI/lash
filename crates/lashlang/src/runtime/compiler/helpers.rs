@@ -3,6 +3,7 @@ use super::*;
 use std::borrow::Cow;
 
 pub(crate) const BRANCH_EXECUTION_SITE_KIND: &str = "branch";
+pub(crate) const LOOP_EXECUTION_SITE_KIND: &str = "loop";
 pub const RESOURCE_OPERATION_EXECUTION_SITE_KIND: &str = "resource_operation";
 pub(crate) const STEP_EXECUTION_SITE_KIND: &str = "step";
 
@@ -131,6 +132,8 @@ pub fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, s
         Expr::Fail(_) => ("terminal", Cow::Borrowed("failure")),
         Expr::Yield(_) => ("process_event", Cow::Borrowed("yield")),
         Expr::If { .. } => (BRANCH_EXECUTION_SITE_KIND, Cow::Borrowed("if")),
+        Expr::For { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("for")),
+        Expr::While { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("while")),
         Expr::Call { .. } => ("call", Cow::Borrowed("function call")),
         _ => return None,
     })
@@ -148,7 +151,9 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::Yield(_)
         | Expr::Finish(_)
         | Expr::Fail(_)
-        | Expr::If { .. } => true,
+        | Expr::If { .. }
+        | Expr::For { .. }
+        | Expr::While { .. } => true,
         // A literal lowers away before compilation, so it never carries a
         // label; the hoisted declaration it becomes does.
         Expr::ProcessLiteral(_) => false,
@@ -163,8 +168,6 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::List(_)
         | Expr::ListComprehension { .. }
         | Expr::Record(_)
-        | Expr::For { .. }
-        | Expr::While { .. }
         | Expr::Break
         | Expr::Continue
         | Expr::ProcessRef { .. }
