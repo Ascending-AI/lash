@@ -29,13 +29,17 @@ fn parked_cell_with_live_closure_survives_snapshot_restore() {
         before,
         "a closure created inside the parked cell must not become a session binding"
     );
+    // The root persists two deferred-resolution link identities whose msgpack
+    // field name `address` contains the bytes `add`; the law is unchanged, so
+    // the scan still covers every byte and skips only that field name.
+    let root = session.persisted_state().root;
+    let stray = (0..=root.len().saturating_sub(3))
+        .filter(|index| &root[*index..index + 3] == b"add")
+        .filter(|index| !root[*index..].starts_with(b"address"))
+        .collect::<Vec<_>>();
     assert!(
-        !session
-            .persisted_state()
-            .root
-            .windows(3)
-            .any(|window| window == b"add"),
-        "the completed cell must not persist its closure name"
+        stray.is_empty(),
+        "the completed cell must not persist its closure name: {stray:?}"
     );
     let outcome = session.run_ok("finish(base);");
     assert_eq!(outcome.finish, Some(serde_json::json!([1, 2])));
