@@ -7,6 +7,13 @@ invocation driver, FIG-3396 the accepted-work and protected-close recovery, and
 FIG-3397 the integration landing. FIG-3395 authors the aggregate oracle that
 freezes the pre-cutover baseline.
 
+FIG-3396 is delivered as four ordered parts: FIG-3408 (§3, the retained child
+request), FIG-3409 (§4/§5, the linearization point, commit order and
+discharge), FIG-3410 (§7, closing and deletion exclusion) and FIG-3411 (§6, §8,
+§12, §13, carriage and handover). §1's recovery-time incarnation validation
+waits on FIG-3394. **Landed so far: FIG-3408's durable shape** — minted and
+frozen, with no producer or consumer yet; see the §3 amendment.
+
 Amends [ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md),
 [ADR 0042](0042-tool-attempts-are-atomic.md),
 [ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md),
@@ -234,9 +241,72 @@ under a durable owner and then persists the reference … so a retirement must
 surface at publish time rather than hand back a reference to bytes the fence
 already reclaimed." A child request is on the durable side of that split.
 
+#### Amendment (FIG-3408): what a reconstructible request contains
+
+The clause above names the facts a child request carries. Building the shape
+forced four decisions that the clause did not settle, recorded here so a later
+reader does not re-derive them differently. **Status: the shape is minted and
+frozen; nothing produces or consumes it yet** — the handler-level driver is
+FIG-2266's and group formation is FIG-3397's.
+
+**A tool child needs a command of its own.** ADR 0065 recorded that "groups
+introduce no new command variant, because what is new is the *composition
+above* attempts". That holds for every child the journal could already name and
+fails for a tool child. `crates/lash-core-execution/src/runtime/effect/envelope.rs`
+carries `ToolAttempt { call, execution_grant, attempt, max_attempts }` — the
+atomic body of *one* attempt, so a driver expressed as one could not retry,
+because a second attempt is a second envelope with a second hash — and
+`ToolBatch { batch }`, the whole batch a group replaces. §2's invocation driver
+is neither. The retained request is therefore the payload of a new
+`ToolInvocation` command rather than a second record beside an existing one:
+one shape, so the recorded authority and the hashed envelope cannot disagree.
+
+**1. An ungranted call pins its admitted manifest.** A reopen may not consult
+the live Tool Catalog. A granted call already satisfies this, because
+`ToolExecutionGrant` exists to "validate granted call arguments without
+consulting the current Tool Catalog" and carries its own manifest and contract.
+An ungranted call is admitted by catalog membership, and the catalog is live
+state. The smallest fact that closes the gap is the admitted `ToolManifest`,
+because the manifest is what the catalog is consulted *for*:
+`resolve_callable_manifest_by_id` and its siblings in
+`tool_dispatch/preparation.rs` return a manifest and nothing else, and
+`ToolManifest` carries `retry_policy` and `argument_projection` inline. The two
+cases are one field with two arms, not two optional fields, because "neither"
+and "both" are not states a child can be in. No retry policy is stored beside
+the manifest, since the manifest already holds it.
+
+**2. Completion routing is recorded, not re-derived.** Completion-key
+preparation answers `Issued | NotNeeded | Unsupported` from two live inputs —
+whether the tool may defer, which consults the live registry or provider, and
+whether the host routes completions durably. Both are deployment facts at
+recovery time and admission facts at formation time. The request records which
+of `inline`, `durable` or `process-lifetime` the child was admitted under, so a
+recovered child never derives a key nothing will resolve; a process-lifetime
+child recovered in another process is a typed refusal, never a fresh key (§14).
+
+**3. `AttachmentSourcePolicy` is deployment wiring.** It is an
+`Arc<dyn AttachmentSourcePolicy>` on `ToolDispatchContext`, exactly as much
+host-installed wiring as the tool implementation behind it, and is not
+recorded. The same holds for the registries, the session services, the event
+sender and the clock.
+
+**4. Turn context is never recorded, and the fence already exists.**
+`TurnContext` holds a live `LiveTurnInputs` and an optional live
+`ProviderHandle` and has no `Serialize`. It is not carried. On the tiers where a
+group child is recovered this costs nothing, because live plugin inputs are
+already refused at turn admission: `ensure_durable_effect_input`
+(`crates/lash-core/src/runtime/turn_loop.rs`) rejects them with
+`DurableEffectLivePluginInput` on the durable admission paths
+(`runtime/session_api.rs`, `runtime/turn_loop/prepare.rs`), and process runners
+construct their tool dispatch with `TurnContext::default()`. The sole
+tool-facing reader is `ToolContext::plugin_input`. So the request records no
+turn-context payload and needs no new refusal: this is a restatement of an
+existing fence, not a behaviour change.
+
 *Status.* Capture, ownership and the separate grant **hold today**. Retained
 accepted membership, the reconstructible request and environment protection
-through the last dependency are **new** (FIG-3396).
+through the last dependency are **new** (FIG-3396). The request shape and the
+`ToolInvocation` command are **minted but unproduced** (FIG-3408).
 
 ---
 
