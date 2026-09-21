@@ -567,7 +567,7 @@ fn leaf_request(
     env_ref: &crate::ProcessExecutionEnvRef,
     parent: &crate::RuntimeInvocation,
 ) -> crate::runtime::effect::ToolChildRequest {
-    let crate::ExecutionScope::Turn { turn_id, .. } = scope else {
+    let crate::ExecutionScope::Turn { .. } = scope else {
         unreachable!("the law's children are admitted under a turn scope")
     };
     crate::runtime::effect::ToolChildRequest::new(
@@ -584,7 +584,8 @@ fn leaf_request(
             parent: Some(parent.clone()),
         },
         crate::runtime::effect::ToolChildScope {
-            opener: crate::EffectOpener::turn(session_id.clone(), turn_id.clone()),
+            opener: crate::EffectOpener::for_scope(scope, None)
+                .expect("a turn scope derives an opener"),
             admitted_scope: scope.clone(),
             session_id: session_id.clone(),
             agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
@@ -880,7 +881,8 @@ pub async fn tool_children_run_through_the_invocation_driver(
     let session_id = crate::SessionId::from(format!("{prefix}-lane"));
     let turn_id = crate::TurnId::from(format!("{prefix}-lane-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
-    let opener = crate::EffectOpener::turn(session_id.clone(), turn_id.clone());
+    let opener =
+        crate::EffectOpener::for_scope(&scope, None).expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-lane-group");
     let scenario = scenario(fixture, &session_id, serde_json::json!({"lane": "intents"})).await;
     let host = (fixture.make_world)(ToolChildWorldSpec {
@@ -1247,7 +1249,8 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     let session_id = crate::SessionId::from(format!("{prefix}-recovery"));
     let turn_id = crate::TurnId::from(format!("{prefix}-recovery-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
-    let opener = crate::EffectOpener::turn(session_id.clone(), turn_id.clone());
+    let opener =
+        crate::EffectOpener::for_scope(&scope, None).expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-recovery-group");
     let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
 
