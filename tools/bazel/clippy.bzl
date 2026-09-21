@@ -3,13 +3,14 @@
 `rules_rust` ships `rust_clippy` and `rust_clippy_aspect`, but its aspect binds
 one `clippy.toml` for the whole build. Clippy resolves its configuration by
 walking up from each crate's manifest directory and stopping at the first
-`clippy.toml` it finds, and this repository has three: the workspace file,
-`crates/lash-core/clippy.toml` and `crates/lash-core-store/clippy.toml`, which
-carry the `disallowed-methods` list the workspace lint table denies. A single
-global config would leave that list empty for the two core crates and silently
-pass `clippy::disallowed_methods` there, so the
-aspect below selects the nearest declared config per target exactly as Cargo
-does. Everything else is the upstream action.
+`clippy.toml` it finds. The repository has one per crate that differs from the
+workspace file: the `crates/lash-core*` files that additionally ban
+`tokio::spawn`, and the FIG-2971 host/tooling opt-outs (examples/, runbooks/,
+lash-sim, lash-perf, lash-conformance) that shadow the workspace ambient
+fs/env/process `disallowed-methods` ban. A single global config would both
+empty the spawn ban in the core crates and apply the ambient ban to hosts it
+exempts, so the aspect below selects the nearest declared config per target
+exactly as Cargo does. Everything else is the upstream action.
 
 The upstream aspect also drops its `-D warnings` default as soon as a target
 carries a `lint_config`, which every generated Lash target does. CI's Cargo
@@ -123,8 +124,22 @@ lash_clippy_aspect = aspect(
             allow_files = True,
             default = [
                 Label("//:clippy.toml"),
+                Label("//crates/lash-conformance:clippy.toml"),
                 Label("//crates/lash-core:clippy.toml"),
+                Label("//crates/lash-core-effect:clippy.toml"),
+                Label("//crates/lash-core-execution:clippy.toml"),
+                Label("//crates/lash-core-memory:clippy.toml"),
                 Label("//crates/lash-core-store:clippy.toml"),
+                Label("//crates/lash-core-worker:clippy.toml"),
+                Label("//crates/lash-perf:clippy.toml"),
+                Label("//crates/lash-sim:clippy.toml"),
+                Label("//examples/agent-service:clippy.toml"),
+                Label("//examples/agent-workbench:clippy.toml"),
+                Label("//examples/slack-clone:clippy.toml"),
+                Label("//examples/toolbench:clippy.toml"),
+                Label("//examples/workflow-graph-roundtrip:clippy.toml"),
+                Label("//runbooks/restate-postgres-workers:clippy.toml"),
+                Label("//runbooks/rlm-smoke:clippy.toml"),
             ],
         ),
         # The remaining attributes mirror `rust_clippy_aspect` so that
