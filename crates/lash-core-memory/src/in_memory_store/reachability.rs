@@ -149,7 +149,7 @@ impl InMemorySessionStore {
                 .filter(|node| !reclaimed.contains(&node.node_id))
                 .cloned()
                 .collect::<Vec<_>>();
-            graph = crate::SessionGraph::from_nodes(nodes, None)?;
+            graph = crate::SessionGraph::from_shared_nodes(nodes, None)?;
             owners.retain(|node_id, _| !reclaimed.contains(node_id));
             tombstoned.retain(|node_id| !reclaimed.contains(node_id));
         }

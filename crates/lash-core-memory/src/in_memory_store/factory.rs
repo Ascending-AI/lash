@@ -676,9 +676,11 @@ impl InMemorySessionStoreFactory {
             .ok_or_else(|| crate::StoreError::MissingFrameOpenAncestor {
                 leaf_node_id: request.node_id.clone(),
             })?;
-        let resident_path =
-            crate::SessionGraph::from_nodes(graph.nodes.clone(), Some(request.node_id.clone()))?
-                .trim_to_active_path();
+        let resident_path = crate::SessionGraph::from_shared_nodes(
+            graph.nodes.clone(),
+            Some(request.node_id.clone()),
+        )?
+        .trim_to_active_path();
         let owners = self.global_node_owners.lock_recover();
         let mut edge_path = Vec::with_capacity(resident_path.nodes.len());
         for (generation, node) in resident_path.nodes.iter().enumerate() {
@@ -709,11 +711,11 @@ impl InMemorySessionStoreFactory {
             })
             .collect();
         let resident_graph =
-            crate::SessionGraph::from_nodes(resident_nodes, Some(request.node_id.clone()))
+            crate::SessionGraph::from_shared_nodes(resident_nodes, Some(request.node_id.clone()))
                 .map_err(|error| crate::StoreError::StoredDataCorrupt {
-                    record_kind: "SessionGraph",
-                    message: error.to_string(),
-                })?;
+                record_kind: "SessionGraph",
+                message: error.to_string(),
+            })?;
         drop(owners);
         drop(tombstoned);
         drop(graph);

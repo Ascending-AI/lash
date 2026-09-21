@@ -45,13 +45,14 @@ impl InMemorySessionStore {
         let mut graph = self.global_session_graph.lock().expect("lock global graph");
         match target.corruption {
             GraphIntegrityCorruption::OrphanLeaf => {
-                graph
+                let node = graph
                     .data_mut()
                     .nodes
                     .iter_mut()
                     .find(|node| node.node_id == target.leaf_node_id)
-                    .expect("graph-integrity fixture leaf is durable")
-                    .parent_node_id = Some(target.missing_node_id.clone());
+                    .expect("graph-integrity fixture leaf is durable");
+                std::sync::Arc::make_mut(node).parent_node_id =
+                    Some(target.missing_node_id.clone());
             }
             GraphIntegrityCorruption::DuplicateNodeId => {
                 let duplicate = graph
@@ -65,19 +66,21 @@ impl InMemorySessionStore {
             GraphIntegrityCorruption::DanglingLeafId => unreachable!(),
             GraphIntegrityCorruption::ParentCycle => {
                 if target.read == GraphIntegrityRead::ActivePath {
-                    graph
+                    let node = graph
                         .data_mut()
                         .nodes
                         .iter_mut()
                         .find(|node| node.node_id == target.root_node_id)
-                        .expect("graph-integrity fixture root is durable")
-                        .parent_node_id = Some(target.leaf_node_id.clone());
+                        .expect("graph-integrity fixture root is durable");
+                    std::sync::Arc::make_mut(node).parent_node_id =
+                        Some(target.leaf_node_id.clone());
                 } else {
                     let template = graph
                         .nodes
                         .iter()
                         .find(|node| node.node_id == target.leaf_node_id)
                         .expect("graph-integrity fixture leaf is durable")
+                        .as_ref()
                         .clone();
                     let node_a_id = crate::NodeId::new(format!("{}-a", target.missing_node_id));
                     let node_b_id = crate::NodeId::new(format!("{}-b", target.missing_node_id));
@@ -87,7 +90,10 @@ impl InMemorySessionStore {
                     let mut node_b = template;
                     node_b.node_id = node_b_id;
                     node_b.parent_node_id = Some(node_a_id);
-                    graph.data_mut().nodes.extend([node_a, node_b]);
+                    graph
+                        .data_mut()
+                        .nodes
+                        .extend([node_a, node_b].map(std::sync::Arc::new));
                 }
             }
         }
@@ -101,7 +107,7 @@ impl InMemorySessionStore {
             .expect("lock session head")
             .as_ref()
             .and_then(|meta| meta.leaf_node_id.clone());
-        crate::SessionGraph::from_nodes(
+        crate::SessionGraph::from_shared_nodes(
             self.global_session_graph
                 .lock()
                 .expect("lock global graph")
@@ -126,7 +132,7 @@ impl InMemorySessionStore {
             .nodes
             .iter()
             .filter(|node| !tombstoned.contains(&node.node_id))
-            .cloned()
+            .map(|node| node.as_ref().clone())
             .collect()
     }
 

@@ -74,7 +74,7 @@ pub mod facade_ops {
             self.cache()
                 .active_path_indices
                 .iter()
-                .map(|idx| &self.nodes[*idx])
+                .map(|idx| self.nodes[*idx].as_ref())
                 .collect()
         }
 
@@ -127,8 +127,14 @@ pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNod
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SessionGraphData {
+    /// Resident node records, shared behind `Arc` so a graph-level COW after a
+    /// snapshot copies N pointers rather than N records. Records are immutable
+    /// once appended; the few writers (`remap_node_ids`,
+    /// `apply_realized_node_timestamps`, test fixtures) go through
+    /// `Arc::make_mut` so a held snapshot never observes an edit. `Arc<T>`
+    /// serializes as `T`, so the durable shape is unchanged.
     #[serde(default)]
-    pub nodes: Vec<SessionNodeRecord>,
+    pub nodes: Vec<Arc<SessionNodeRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leaf_node_id: Option<NodeId>,
 }
@@ -172,7 +178,7 @@ impl<'de> serde::Deserialize<'de> for SessionGraph {
         D: serde::Deserializer<'de>,
     {
         let inner = SessionGraphData::deserialize(deserializer)?;
-        Self::from_nodes(inner.nodes, inner.leaf_node_id).map_err(serde::de::Error::custom)
+        Self::from_shared_nodes(inner.nodes, inner.leaf_node_id).map_err(serde::de::Error::custom)
     }
 }
 
@@ -926,7 +932,18 @@ impl SessionGraph {
         nodes: Vec<SessionNodeRecord>,
         leaf_node_id: Option<NodeId>,
     ) -> Result<Self, crate::StoreError> {
-        let graph = Self::from_validated_nodes(nodes, leaf_node_id);
+        Self::from_shared_nodes(nodes.into_iter().map(Arc::new).collect(), leaf_node_id)
+    }
+
+    /// [`Self::from_nodes`] for callers that already hold shared records, so a
+    /// graph rebuilt from an existing resident graph (a store's whole-catalog
+    /// view, a filtered read projection) shares the same immutable records
+    /// instead of cloning them. Validation is identical.
+    pub fn from_shared_nodes(
+        nodes: Vec<Arc<SessionNodeRecord>>,
+        leaf_node_id: Option<NodeId>,
+    ) -> Result<Self, crate::StoreError> {
+        let graph = Self::from_shared_validated_nodes(nodes, leaf_node_id);
         graph.validate_structural_integrity()?;
         Ok(graph)
     }
@@ -938,6 +955,15 @@ impl SessionGraph {
     /// preserves identity, parent topology, and leaf membership.
     pub fn from_validated_nodes(
         nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: Option<NodeId>,
+    ) -> Self {
+        Self::from_shared_validated_nodes(nodes.into_iter().map(Arc::new).collect(), leaf_node_id)
+    }
+
+    /// [`Self::from_validated_nodes`] for callers that already hold shared
+    /// records — the same restricted-use contract applies.
+    pub(crate) fn from_shared_validated_nodes(
+        nodes: Vec<Arc<SessionNodeRecord>>,
         leaf_node_id: Option<NodeId>,
     ) -> Self {
         Self {
@@ -999,41 +1025,94 @@ impl SessionGraph {
         Arc::make_mut(&mut self.inner)
     }
 
+    /// Resident positions for `node_ids`, in input order.
+    ///
+    /// Resolution reads the initialized cache's `by_id` when it exists and
+    /// falls back to a one-off scan when it does not; it runs before
+    /// `data_mut` invalidates the cache, so mutation sites walk only the
+    /// resolved positions rather than the whole resident vector. Ids absent
+    /// from the graph resolve to `None`.
+    fn resident_node_indices<'a>(
+        &self,
+        node_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<Option<usize>> {
+        let node_ids = node_ids.into_iter().collect::<Vec<_>>();
+        if let Some(cache) = self.cache.get() {
+            return node_ids
+                .iter()
+                .map(|node_id| cache.by_id.get(*node_id).copied())
+                .collect();
+        }
+        let by_id = self
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.node_id.as_str(), index))
+            .collect::<HashMap<_, _>>();
+        node_ids
+            .iter()
+            .map(|node_id| by_id.get(node_id).copied())
+            .collect()
+    }
+
     pub fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
         if mapping.is_empty() {
             return;
         }
-        let mapping = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        // Only the mapped records are unshared and rewritten; the rest of the
+        // resident vector stays pointer-identical to every snapshot. Parents
+        // always precede their children in the resident vector (appends land
+        // at the tail), so a node whose parent is remapped sits at or after
+        // the first mapped position — scanning that tail range rewrites
+        // mapped parents, including on unmapped nodes, without touching the
+        // unmapped prefix.
+        let positions = self.resident_node_indices(mapping.iter().map(|(draft, _)| draft.as_str()));
+        let derived_by_id = mapping
+            .iter()
+            .map(|(draft, derived)| (draft, derived))
+            .collect::<HashMap<_, _>>();
         let data = self.data_mut();
-        for node in &mut data.nodes {
-            if let Some(derived) = mapping.get(&node.node_id) {
-                node.node_id = derived.clone();
-            }
-            if let Some(parent) = node.parent_node_id.as_mut()
-                && let Some(derived) = mapping.get(parent)
-            {
-                *parent = derived.clone();
-            }
+        let mut first_mapped = data.nodes.len();
+        for ((_, derived), position) in mapping.iter().zip(positions) {
+            let Some(index) = position else {
+                continue;
+            };
+            first_mapped = first_mapped.min(index);
+            Arc::make_mut(&mut data.nodes[index]).node_id = derived.clone();
+        }
+        for index in first_mapped..data.nodes.len() {
+            let Some(mapped_parent) = data.nodes[index]
+                .parent_node_id
+                .as_ref()
+                .and_then(|parent| derived_by_id.get(parent).map(|id| (*id).clone()))
+            else {
+                continue;
+            };
+            Arc::make_mut(&mut data.nodes[index]).parent_node_id = Some(mapped_parent);
         }
         if let Some(leaf) = data.leaf_node_id.as_mut()
-            && let Some(derived) = mapping.get(leaf)
+            && let Some(derived) = derived_by_id.get(leaf)
         {
-            *leaf = derived.clone();
+            *leaf = (*derived).clone();
         }
     }
 
-    pub(crate) fn apply_realized_node_timestamps(&mut self, realized: &[RealizedNodeTimestamp]) {
+    /// Applies store-realized timestamps to the nodes a commit receipt names.
+    ///
+    /// Only the realized records are unshared and rewritten; every other
+    /// resident record stays pointer-identical to every snapshot.
+    pub fn apply_realized_node_timestamps(&mut self, realized: &[RealizedNodeTimestamp]) {
         if realized.is_empty() {
             return;
         }
-        let timestamps = realized
-            .iter()
-            .map(|node| (node.node_id.as_str(), node.timestamp.as_str()))
-            .collect::<HashMap<_, _>>();
-        for node in &mut self.data_mut().nodes {
-            if let Some(timestamp) = timestamps.get(node.node_id.as_str()) {
-                node.timestamp = (*timestamp).to_string();
-            }
+        let positions =
+            self.resident_node_indices(realized.iter().map(|node| node.node_id.as_str()));
+        let data = self.data_mut();
+        for (realized, position) in realized.iter().zip(positions) {
+            let Some(index) = position else {
+                continue;
+            };
+            Arc::make_mut(&mut data.nodes[index]).timestamp = realized.timestamp.clone();
         }
     }
 
@@ -1122,10 +1201,13 @@ impl SessionGraph {
             for node in nodes {
                 let previous_leaf = data.leaf_node_id.clone();
                 let node_id = node.node_id.clone();
-                data.nodes.push(node);
+                data.nodes.push(Arc::new(node));
                 cache.append_node(
                     data.nodes.len() - 1,
-                    data.nodes.last().expect("just appended graph node"),
+                    data.nodes
+                        .last()
+                        .expect("just appended graph node")
+                        .as_ref(),
                     previous_leaf.as_deref(),
                 );
                 data.leaf_node_id = Some(node_id);
@@ -1136,7 +1218,7 @@ impl SessionGraph {
         let data = self.data_mut();
         for node in nodes {
             data.leaf_node_id = Some(node.node_id.clone());
-            data.nodes.push(node);
+            data.nodes.push(Arc::new(node));
         }
     }
 
@@ -1161,7 +1243,7 @@ impl SessionGraph {
             .try_cache()?
             .active_path_indices
             .iter()
-            .map(|idx| &self.nodes[*idx])
+            .map(|idx| self.nodes[*idx].as_ref())
             .collect())
     }
 
@@ -1320,7 +1402,7 @@ impl SessionGraph {
         &mut self,
         append: &crate::store::GraphAppend,
     ) -> Result<(), crate::StoreError> {
-        for node in self.nodes.iter().chain(append.nodes()) {
+        for node in self.nodes.iter().map(Arc::as_ref).chain(append.nodes()) {
             crate::session_graph_integrity::validate_node_id(&node.node_id)?;
         }
 
@@ -1362,7 +1444,8 @@ impl SessionGraph {
             self.append_prebuilt_nodes(append.nodes().to_vec());
         } else {
             let data = self.data_mut();
-            data.nodes.extend(append.nodes().iter().cloned());
+            data.nodes
+                .extend(append.nodes().iter().cloned().map(Arc::new));
             data.leaf_node_id = append.leaf_node_id().cloned();
         }
         Ok(())
@@ -1393,12 +1476,15 @@ impl SessionGraph {
     /// This is a memory-residency trim. It does not create a durable fork or
     /// move a persisted session head. The caller must have validated the source graph.
     pub fn trim_to_active_path(&self) -> SessionGraph {
-        let path = self.active_path_nodes();
+        let indices = &self.cache().active_path_indices;
         // Selecting the ancestry of a validated graph preserves unique ids, complete parents, and
         // the existing leaf, so repeating the full validation on this hot read projection is
-        // unnecessary.
-        SessionGraph::from_validated_nodes(
-            path.into_iter().cloned().collect(),
+        // unnecessary. The trimmed graph shares the source's immutable records.
+        SessionGraph::from_shared_validated_nodes(
+            indices
+                .iter()
+                .map(|index| Arc::clone(&self.nodes[*index]))
+                .collect(),
             self.leaf_node_id.clone(),
         )
     }
@@ -1407,9 +1493,9 @@ impl SessionGraph {
         let by_id = graph_node_indices(self)?;
         let mut path = ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
         path.reverse();
-        SessionGraph::from_nodes(
+        SessionGraph::from_shared_nodes(
             path.into_iter()
-                .map(|index| self.nodes[index].clone())
+                .map(|index| Arc::clone(&self.nodes[index]))
                 .collect(),
             self.leaf_node_id.clone(),
         )
@@ -1421,7 +1507,7 @@ impl SessionGraph {
         self.cache()
             .by_id
             .get(node_id)
-            .and_then(|idx| self.nodes.get(*idx))
+            .map(|idx| self.nodes[*idx].as_ref())
     }
 
     /// Rewrites the active readable tail and moves the resident leaf while retaining historical
@@ -1465,7 +1551,8 @@ impl SessionGraph {
         );
         let data = self.data_mut();
         data.leaf_node_id = replacement.leaf_node_id;
-        data.nodes.extend(replacement.new_tail_nodes);
+        data.nodes
+            .extend(replacement.new_tail_nodes.into_iter().map(Arc::new));
         Ok(())
     }
 
@@ -1543,7 +1630,7 @@ fn nearest_ancestor_index(
     let mut current = node_id.and_then(|node_id| by_id.get(node_id).copied());
     let mut remaining = graph.nodes.len();
     while let Some(idx) = current {
-        let node = &graph.nodes[idx];
+        let node = graph.nodes[idx].as_ref();
         if predicate(node) {
             return Ok(Some(idx));
         }

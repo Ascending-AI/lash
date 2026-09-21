@@ -121,7 +121,7 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
             .expect("non-empty frame material");
     let frame_node_id = lash_core::facade_support::frame_node_id(session_id, frame_key.as_str());
     let mut nodes = state.session_graph.nodes.clone();
-    nodes.push(lash_core::SessionNodeRecord {
+    nodes.push(std::sync::Arc::new(lash_core::SessionNodeRecord {
         node_id: frame_node_id.to_string().into(),
         parent_node_id: state.session_graph.leaf_node_id.clone(),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
@@ -131,9 +131,9 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
             assignment: lash_core::AgentFrameAssignment::from_policy(current_policy),
             protocol_turn_options: Default::default(),
         },
-    });
+    }));
     state.session_graph =
-        lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.to_string().into()))
+        lash_core::SessionGraph::from_shared_nodes(nodes, Some(frame_node_id.to_string().into()))
             .expect("session lifecycle fixture graph is valid");
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
@@ -426,7 +426,7 @@ async fn testing_set_persisted_replaces_resident_state_for_park_fixture() -> Res
     ))?;
     let session = core.session("testing-set-persisted-park").open().await?;
     let fixture = pending_park_state("testing-set-persisted-park", "park fixture via testing");
-    let node_ids = |nodes: &[lash_core::SessionNodeRecord]| {
+    let node_ids = |nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>]| {
         nodes.iter().map(|n| n.node_id.clone()).collect::<Vec<_>>()
     };
     let fixture_nodes = node_ids(&fixture.session_graph.nodes);
@@ -1690,11 +1690,13 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
         .iter_mut()
         .find(|node| Some(node.node_id.as_str()) == state.current_frame_node_id.as_deref())
         .expect("initial frame node");
-    let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut frame.payload else {
+    let lash_core::SessionNodePayload::FrameOpen { assignment, .. } =
+        &mut std::sync::Arc::make_mut(frame).payload
+    else {
         panic!("current frame must be a FrameOpen node");
     };
     assignment.policy.provider_id = "other-provider".to_string();
-    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+    state.session_graph = lash_core::SessionGraph::from_shared_nodes(nodes, leaf_node_id)
         .expect("session lifecycle fixture graph is valid");
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));

@@ -906,6 +906,98 @@
           }
         }
       },
+      "resident_graph_append_curve": {
+        "guarded_span": "whole_run",
+        "enforced_allocation": {
+          "alloc_bytes_max": 26000000.0,
+          "steady_state_turn_alloc_bytes_max": 1800000.0
+        },
+        "advisory_duration": {
+          "ms_max": 40.0,
+          "phases": {
+            "resident_graph_append.n0.append": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n0.construct": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n0.cow": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n0.remap": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n0.timestamps": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n128.append": {
+              "budget_ms": 2.0,
+              "required": true
+            },
+            "resident_graph_append.n128.construct": {
+              "budget_ms": 2.0,
+              "required": true
+            },
+            "resident_graph_append.n128.cow": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n128.remap": {
+              "budget_ms": 2.0,
+              "required": true
+            },
+            "resident_graph_append.n128.timestamps": {
+              "budget_ms": 2.0,
+              "required": true
+            },
+            "resident_graph_append.n32.append": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n32.construct": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n32.cow": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n32.remap": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n32.timestamps": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n512.append": {
+              "budget_ms": 4.0,
+              "required": true
+            },
+            "resident_graph_append.n512.construct": {
+              "budget_ms": 3.0,
+              "required": true
+            },
+            "resident_graph_append.n512.cow": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n512.remap": {
+              "budget_ms": 3.0,
+              "required": true
+            },
+            "resident_graph_append.n512.timestamps": {
+              "budget_ms": 3.0,
+              "required": true
+            }
+          }
+        }
+      },
       "rlm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {

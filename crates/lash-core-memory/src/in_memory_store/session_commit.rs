@@ -65,17 +65,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 record_kind: "SessionGraph",
                 message: error.to_string(),
             };
-        let mut graph =
-            crate::SessionGraph::from_nodes(global_graph.nodes.clone(), meta.leaf_node_id.clone())
-                .map_err(map_graph_corruption)?
-                .try_trim_to_active_path()
-                .map_err(map_graph_corruption)?;
+        let mut graph = crate::SessionGraph::from_shared_nodes(
+            global_graph.nodes.clone(),
+            meta.leaf_node_id.clone(),
+        )
+        .map_err(map_graph_corruption)?
+        .try_trim_to_active_path()
+        .map_err(map_graph_corruption)?;
         if !tombstoned.is_empty() {
             let leaf_node_id = graph
                 .leaf_node_id
                 .clone()
                 .filter(|leaf| !tombstoned.contains(leaf));
-            graph = crate::SessionGraph::from_nodes(
+            graph = crate::SessionGraph::from_shared_nodes(
                 graph
                     .nodes
                     .iter()

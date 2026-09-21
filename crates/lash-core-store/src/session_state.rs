@@ -899,7 +899,7 @@ impl RuntimeSessionState {
             .nodes
             .iter()
             .filter(|node| !self.persisted_node_ids.contains(&node.node_id))
-            .cloned()
+            .map(|node| node.as_ref().clone())
             .collect::<Vec<_>>();
         if nodes.is_empty() {
             crate::GraphAppend::PreserveHead

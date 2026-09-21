@@ -53,11 +53,12 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                 .cloned()
                 .collect::<Vec<_>>();
             let removed_node_count = before.saturating_sub(nodes.len());
-            let rebuilt_graph = crate::SessionGraph::from_nodes(nodes, None).map_err(|error| {
-                // Nothing was physically removed before this point: the node
-                // rebuild is the removal.
-                crate::store::MaintenanceFailure::failed_before_any_work(error)
-            })?;
+            let rebuilt_graph =
+                crate::SessionGraph::from_shared_nodes(nodes, None).map_err(|error| {
+                    // Nothing was physically removed before this point: the node
+                    // rebuild is the removal.
+                    crate::store::MaintenanceFailure::failed_before_any_work(error)
+                })?;
             let mut rebuilt_owners = self.global_node_owners.lock_recover().clone();
             rebuilt_owners.retain(|node_id, _| !session_tombstones.contains(node_id));
             (

@@ -350,6 +350,9 @@ async fn run_once_inner(
         RuntimePerfScenario::LiveReplayPressure => {
             return run_once_live_replay_pressure(chat_turns).await;
         }
+        RuntimePerfScenario::ResidentGraphAppendCurve => {
+            return run_once_resident_graph_append_curve(chat_turns).await;
+        }
         RuntimePerfScenario::TraceJsonlStandard | RuntimePerfScenario::TraceJsonlExtended => {
             return Box::pin(run_once_trace_jsonl(scenario, chat_turns)).await;
         }
