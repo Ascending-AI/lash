@@ -1275,7 +1275,7 @@ pub(crate) struct TurnStreamProseChunk {
 impl TurnStreamState {
     pub(crate) fn apply(&mut self, activity: &TurnActivity) {
         match &activity.event {
-            TurnEvent::AssistantProseDelta { text } => {
+            TurnEvent::AssistantProseDelta { text, .. } => {
                 self.assistant_prose.push(TurnStreamProseChunk {
                     correlation_id: activity.correlation_id.clone(),
                     text: text.to_string(),
@@ -1441,6 +1441,7 @@ mod turn_stream_state_tests {
             lash::TurnActivityId::new("prior"),
             TurnEvent::AssistantProseDelta {
                 text: "kept ".into(),
+                block: lash::direct::StreamBlockIdentity::new("text:0", 0),
             },
         ))
         .await;
@@ -1448,6 +1449,7 @@ mod turn_stream_state_tests {
             lash::TurnActivityId::new("failed"),
             TurnEvent::AssistantProseDelta {
                 text: "discarded ".into(),
+                block: lash::direct::StreamBlockIdentity::new("text:0", 0),
             },
         ))
         .await;
@@ -1460,6 +1462,7 @@ mod turn_stream_state_tests {
             lash::TurnActivityId::new("successful"),
             TurnEvent::AssistantProseDelta {
                 text: "answer".into(),
+                block: lash::direct::StreamBlockIdentity::new("text:0", 0),
             },
         ))
         .await;
@@ -1477,6 +1480,7 @@ mod turn_stream_state_tests {
             lash::TurnActivityId::new("cancelled-attempt"),
             TurnEvent::AssistantProseDelta {
                 text: "provisional text".into(),
+                block: lash::direct::StreamBlockIdentity::new("text:0", 0),
             },
         ))
         .await;
@@ -1494,6 +1498,7 @@ mod turn_stream_state_tests {
             lash::TurnActivityId::new("visible-before-boundaries"),
             TurnEvent::AssistantProseDelta {
                 text: "must remain visible".into(),
+                block: lash::direct::StreamBlockIdentity::new("text:0", 0),
             },
         )];
         activities.extend((0..11).map(|_| {

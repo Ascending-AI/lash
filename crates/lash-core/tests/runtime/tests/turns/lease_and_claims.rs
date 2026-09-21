@@ -15,52 +15,55 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
     let tool_executions = Arc::new(AtomicUsize::new(0));
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
-    let transport =
-        TestProvider::builder()
-            .kind("mock")
-            .requires_streaming(true)
-            .complete(move |request| {
-                let controller = Arc::clone(&controller_for_provider);
-                let observed_provider_calls = Arc::clone(&observed_provider_calls);
-                let provider_started_tx = Arc::clone(&provider_started_tx);
-                async move {
-                    let call = observed_provider_calls.fetch_add(1, Ordering::SeqCst);
-                    match call {
-                        0 => {
-                            request.stream_events.expect("stream events").send(
-                                LlmStreamEvent::Delta("drained before effect abort".to_string()),
-                            );
-                            if let Some(started) = provider_started_tx.lock_recover().take() {
-                                let _ = started.send(());
-                            }
-                            controller.wait_for_cancel_watch_exhaustion().await;
-                            for _ in 0..32 {
-                                tokio::task::yield_now().await;
-                            }
-                            Ok(LlmResponse {
-                                parts: vec![LlmOutputPart::ToolCall {
-                                    call_id: "post-exhaustion-tool".to_string(),
-                                    tool_name: "echo_tool".to_string(),
-                                    input_json: serde_json::json!({"value": "zombie"}).to_string(),
-                                    replay: None,
-                                }],
-                                response_metadata: Default::default(),
-                                ..LlmResponse::default()
-                            })
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let controller = Arc::clone(&controller_for_provider);
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            let provider_started_tx = Arc::clone(&provider_started_tx);
+            async move {
+                let call = observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                match call {
+                    0 => {
+                        request
+                            .stream_events
+                            .expect("stream events")
+                            .send(LlmStreamEvent::Delta {
+                                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                                text: "drained before effect abort".to_string(),
+                            });
+                        if let Some(started) = provider_started_tx.lock_recover().take() {
+                            let _ = started.send(());
                         }
-                        1 => Ok(LlmResponse {
-                            parts: vec![LlmOutputPart::Text {
-                                text: "zombie turn completed".to_string(),
-                                response_meta: None,
+                        controller.wait_for_cancel_watch_exhaustion().await;
+                        for _ in 0..32 {
+                            tokio::task::yield_now().await;
+                        }
+                        Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "post-exhaustion-tool".to_string(),
+                                tool_name: "echo_tool".to_string(),
+                                input_json: serde_json::json!({"value": "zombie"}).to_string(),
+                                replay: None,
                             }],
                             response_metadata: Default::default(),
                             ..LlmResponse::default()
-                        }),
-                        _ => panic!("unexpected provider call {call}"),
+                        })
                     }
+                    1 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text: "zombie turn completed".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    _ => panic!("unexpected provider call {call}"),
                 }
-            })
-            .build();
+            }
+        })
+        .build();
     let clock = Arc::new(CancelWatchTestClock(lash_core::testing::TestClock::new(0)));
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let config = super::effect::runtime_host_config_with_native_controller(controller.clone())
@@ -159,7 +162,7 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
     assert!(
         turn_events.snapshot().iter().any(|activity| matches!(
             &activity.event,
-            TurnEvent::AssistantProseDelta { text }
+            TurnEvent::AssistantProseDelta { text, .. }
                 if text.as_ref() == "drained before effect abort"
         )),
         "cooperative teardown must drain the buffered stream event; provider_calls={}, tool_executions={}",
@@ -198,7 +201,10 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
                     let stream = request
                         .stream_events
                         .expect("streaming runtime should request provider stream events");
-                    stream.send(LlmStreamEvent::Delta("partial provider text".to_string()));
+                    stream.send(LlmStreamEvent::Delta {
+                        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                        text: "partial provider text".to_string(),
+                    });
                     if let Some(tx) = delta_sent_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
@@ -258,7 +264,7 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
     assert!(
         turn_events.snapshot().iter().any(|activity| matches!(
             &activity.event,
-            TurnEvent::AssistantProseDelta { text } if text.as_ref() == "partial provider text"
+            TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "partial provider text"
         )),
         "partial provider text should remain observable only as live turn activity"
     );
@@ -328,7 +334,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
                             }));
                     }
 
-                    stream.send(LlmStreamEvent::Delta("success".to_string()));
+                    stream.send(LlmStreamEvent::Delta { block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: "success".to_string() });
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
@@ -410,7 +416,7 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
                     request
                         .stream_events
                         .expect("stream events")
-                        .send(LlmStreamEvent::Delta("success".to_string()));
+                        .send(LlmStreamEvent::Delta { block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: "success".to_string() });
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
@@ -505,7 +511,7 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
                     request
                         .stream_events
                         .expect("stream events")
-                        .send(LlmStreamEvent::Delta("success".to_string()));
+                        .send(LlmStreamEvent::Delta { block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: "success".to_string() });
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
@@ -585,7 +591,10 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
                 async move {
                     let stream = request.stream_events.expect("stream events");
                     if call == 0 {
-                        stream.send(LlmStreamEvent::Delta(lost_text.clone()));
+                        stream.send(LlmStreamEvent::Delta {
+                            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                            text: lost_text.clone(),
+                        });
                         let usage = LlmUsage {
                             input_tokens: 32,
                             output_tokens: 256,
@@ -615,7 +624,10 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
                         }));
                     }
 
-                    stream.send(LlmStreamEvent::Delta("replacement".to_string()));
+                    stream.send(LlmStreamEvent::Delta {
+                        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                        text: "replacement".to_string(),
+                    });
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "replacement".to_string(),
@@ -660,7 +672,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
     let activities = turn_events.snapshot();
     assert!(activities.iter().any(|activity| matches!(
         &activity.event,
-        TurnEvent::AssistantProseDelta { text } if text.as_ref() == lost_text
+        TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == lost_text
     )));
     assert!(
         activities

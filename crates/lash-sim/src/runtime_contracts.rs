@@ -863,6 +863,7 @@ mod tests {
             &[lash::TurnActivity::independent(
                 lash::TurnEvent::AssistantProseDelta {
                     text: "looks final".into(),
+                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
                 },
             )],
         );

@@ -1,5 +1,5 @@
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
-use lash_core::llm::types::{LlmOutputPart, LlmUsage};
+use lash_core::llm::types::{LlmOutputPart, LlmStreamEvent, LlmUsage};
 use serde_json::Value;
 
 use crate::responses_shared::ResponsesStreamState;
@@ -222,8 +222,13 @@ impl ResponsesStreamState {
                 .final_response
                 .as_ref()
                 .is_some_and(response_value_has_output_evidence)
-            || !self.pending_text_deltas.is_empty()
-            || !self.reasoning_deltas.is_empty()
+            || self.block_events.iter().any(|event| match event {
+                LlmStreamEvent::Delta { text, .. }
+                | LlmStreamEvent::ReasoningDelta { text, .. }
+                | LlmStreamEvent::TextBlockEnd { text, .. }
+                | LlmStreamEvent::ReasoningBlockEnd { text, .. } => !text.is_empty(),
+                _ => false,
+            })
             || self
                 .provider_usage
                 .as_ref()

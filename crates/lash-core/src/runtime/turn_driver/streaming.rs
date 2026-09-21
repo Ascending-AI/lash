@@ -17,6 +17,9 @@ use lash_trace::{
 use super::*;
 
 mod host_forwarder;
+mod support;
+
+use support::*;
 mod terminal;
 
 use host_forwarder::{ProviderDeltaClass, ProviderHostForwarder};
@@ -37,80 +40,6 @@ pub(super) struct StreamChunkOutcome {
     pub(super) chunk: String,
     pub(super) reasoning_deltas: Vec<String>,
     pub(super) abort_requested: bool,
-}
-
-async fn emit_plugin_runtime_events_runtime(
-    forwarder: &mut ProviderHostForwarder<'_>,
-    plugin_id: &str,
-    events: Vec<crate::PluginRuntimeEvent>,
-) {
-    for event in crate::plugin::plugin_runtime_session_events(plugin_id, events) {
-        forwarder.send_semantic_session_event(event).await;
-    }
-}
-
-/// Report the clamp on every disposition the call produced.
-///
-/// The adapter knows only that it put the cap it was handed on the wire, so it
-/// reports `Applied`; the runtime is the only layer that saw the larger number
-/// the caller asked for. This narrows that report on every carrier of it — the
-/// response, each attempt of the ledger, and the partial response an error
-/// carries when the adapter salvaged one — so no two accounts of the same
-/// request disagree. An adapter that reports nothing keeps reporting nothing:
-/// `None` means unreported, not "nothing happened".
-fn record_clamped_output_token_cap(
-    result: &mut Result<LlmResponse, LlmCallError>,
-    call_record: Option<&mut crate::LlmCallRecord>,
-) {
-    fn narrow(disposition: Option<&mut crate::GenerationReceipt>) {
-        if let Some(disposition) = disposition
-            && disposition.output_token_cap == crate::GenerationOptionOutcome::Applied
-        {
-            disposition.output_token_cap = crate::GenerationOptionOutcome::ClampedToCapacity;
-        }
-    }
-
-    match result {
-        Ok(response) => narrow(response.generation_disposition.as_mut()),
-        Err(error) => narrow(
-            error
-                .partial_response
-                .as_deref_mut()
-                .and_then(|partial| partial.generation_disposition.as_mut()),
-        ),
-    }
-    if let Some(call_record) = call_record {
-        for attempt in &mut call_record.attempts {
-            narrow(attempt.generation_disposition.as_mut());
-        }
-    }
-}
-
-/// Narrow the adapter's wire-level report when protocol projection suppressed
-/// caller-owned stop sequences before the request reached the adapter.
-fn record_protocol_owned_stop_suppression(
-    result: &mut Result<LlmResponse, LlmCallError>,
-    call_record: Option<&mut crate::LlmCallRecord>,
-) {
-    fn suppress(disposition: &mut Option<crate::GenerationReceipt>) {
-        if let Some(disposition) = disposition {
-            disposition.stop_sequences = crate::GenerationOptionOutcome::SuppressedProtocolOwned;
-        }
-    }
-
-    match result {
-        Ok(response) => suppress(&mut response.generation_disposition),
-        Err(error) => {
-            if let Some(partial) = error.partial_response.as_deref_mut() {
-                suppress(&mut partial.generation_disposition);
-            }
-        }
-    }
-    if let Some(call_record) = call_record {
-        for attempt in &mut call_record.attempts {
-            suppress(&mut attempt.generation_disposition);
-        }
-    }
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -355,10 +284,11 @@ impl RuntimeTurnDriver<'_> {
         let mut stream_accumulator = LlmStreamAccumulator::default();
         let mut stream_evidence = crate::LlmStreamEvidence::default();
         let mut abort_requested = false;
+        let mut block_raw_text = std::collections::HashMap::new();
         let attempt_started_at = self.host.core.clock.timestamp_ms();
         let attempt_started = self.host.core.clock.now();
-        let mut assistant_prose_correlation = None;
-        let mut reasoning_correlation = None;
+        let mut plugin_reasoning_blocks = 0u64;
+        let mut completed_part_index = 0usize;
         let mut reasoning_publication = ReasoningPublicationState::default();
         let mut assistant_prose_attempt_correlations = Vec::new();
         let mut reasoning_attempt_correlations = Vec::new();
@@ -369,12 +299,13 @@ impl RuntimeTurnDriver<'_> {
             stream_evidence: &mut stream_evidence,
             debug: &mut debug,
             protocol_iteration,
-            assistant_prose_correlation: &mut assistant_prose_correlation,
-            reasoning_correlation: &mut reasoning_correlation,
+            plugin_reasoning_blocks: &mut plugin_reasoning_blocks,
+            completed_part_index: &mut completed_part_index,
             reasoning_publication: &mut reasoning_publication,
             assistant_prose_attempt_correlations: &mut assistant_prose_attempt_correlations,
             reasoning_attempt_correlations: &mut reasoning_attempt_correlations,
             abort_requested: &mut abort_requested,
+            block_raw_text: &mut block_raw_text,
         };
         let mut host_forwarder = ProviderHostForwarder::new(event_tx);
         let mut call_record = None;
@@ -881,6 +812,7 @@ impl RuntimeTurnDriver<'_> {
             raw_text: log.text.raw.map(str::to_string),
             visible_text: log.text.visible.map(str::to_string),
             item_id: log.item_id.map(str::to_string),
+            block_id: log.block_id.map(str::to_string),
             output_index: None,
             call_id: None,
             tool_name: None,
@@ -989,17 +921,16 @@ impl RuntimeTurnDriver<'_> {
         ))
     }
 
-    /// Shared visible-assistant-text path for streamed text, used by both the
-    /// `Delta` (item-less) and `Part::Text` (item-scoped) provider events.
+    /// Shared visible-assistant-text path for streamed text.
     ///
     /// Sets the `text_streamed` flag, runs the chunk through plugin stream
     /// transforms (forwarding any reasoning deltas + abort request), logs the
-    /// event, and emits the visible prose deltas.
+    /// event, and emits the visible prose deltas inside `block`.
     async fn emit_visible_assistant_text(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
         text: String,
-        item_id: Option<&str>,
+        block: &StreamBlockIdentity,
         event_type: &'static str,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
@@ -1007,6 +938,11 @@ impl RuntimeTurnDriver<'_> {
             return Ok(());
         }
         *state.text_streamed = true;
+        state
+            .block_raw_text
+            .entry(block.id.clone())
+            .or_default()
+            .push_str(&text);
         let raw_text = self
             .host
             .core
@@ -1020,23 +956,8 @@ impl RuntimeTurnDriver<'_> {
         if outcome.abort_requested {
             *state.abort_requested = true;
         }
-        for reasoning_delta in outcome.reasoning_deltas {
-            if !reasoning_delta.is_empty() {
-                state.reasoning_publication.record_anonymous_part();
-            }
-            fold_llm_stream_event(
-                state.stream_accumulator,
-                state.streamed_usage,
-                &LlmStreamEvent::ReasoningDelta(reasoning_delta.clone()),
-            );
-            let correlation_id = stream_correlation_id(state.reasoning_correlation, None);
-            remember_attempt_correlation(state.reasoning_attempt_correlations, &correlation_id);
-            forwarder.forward_delta(
-                ProviderDeltaClass::Reasoning,
-                correlation_id,
-                reasoning_delta,
-            );
-        }
+        self.forward_plugin_reasoning(forwarder, outcome.reasoning_deltas, state)
+            .await;
         let text = outcome.chunk;
         self.log_llm_stream_event(
             state.debug,
@@ -1047,7 +968,8 @@ impl RuntimeTurnDriver<'_> {
                     raw: raw_text.as_deref(),
                     visible: Some(&text),
                 },
-                item_id,
+                item_id: block.item_id.as_deref(),
+                block_id: Some(block.id.as_str()),
                 usage: None,
                 tool_call: None,
             },
@@ -1056,16 +978,69 @@ impl RuntimeTurnDriver<'_> {
             fold_llm_stream_event(
                 state.stream_accumulator,
                 state.streamed_usage,
-                &LlmStreamEvent::Delta(text.clone()),
+                &LlmStreamEvent::Delta {
+                    block: block.clone(),
+                    text: text.clone(),
+                },
             );
-            let correlation_id = stream_correlation_id(state.assistant_prose_correlation, item_id);
             remember_attempt_correlation(
                 state.assistant_prose_attempt_correlations,
-                &correlation_id,
+                &TurnActivityId::new(block.id.clone()),
             );
-            forwarder.forward_delta(ProviderDeltaClass::AssistantProse, correlation_id, text);
+            forwarder.forward_delta(ProviderDeltaClass::AssistantProse, block.clone(), text);
         }
         Ok(())
+    }
+
+    /// Publishes plugin-emitted reasoning deltas as one runtime-minted block
+    /// per transformed chunk.
+    ///
+    /// These blocks have no provider identity — they are host observations
+    /// minted inside the runtime, so they get deterministic
+    /// `plugin-reasoning:{iteration}:{n}` ids and ordinals above every
+    /// provider mint's band rather than borrowing the provider's space.
+    async fn forward_plugin_reasoning(
+        &mut self,
+        forwarder: &mut ProviderHostForwarder<'_>,
+        reasoning_deltas: Vec<String>,
+        state: &mut LlmStreamState<'_>,
+    ) {
+        if !reasoning_deltas.iter().any(|delta| !delta.is_empty()) {
+            return;
+        }
+        let index = *state.plugin_reasoning_blocks;
+        *state.plugin_reasoning_blocks += 1;
+        let block = StreamBlockIdentity::new(
+            format!("plugin-reasoning:{}:{}", state.protocol_iteration, index),
+            PLUGIN_BLOCK_ORDINAL_BASE + index,
+        );
+        state.reasoning_publication.record_streamed_block(&block);
+        remember_attempt_correlation(
+            state.reasoning_attempt_correlations,
+            &TurnActivityId::new(block.id.clone()),
+        );
+        forwarder
+            .forward_block_start(ProviderDeltaClass::Reasoning, block.clone())
+            .await;
+        let mut block_text = String::new();
+        for delta in reasoning_deltas {
+            if delta.is_empty() {
+                continue;
+            }
+            block_text.push_str(&delta);
+            fold_llm_stream_event(
+                state.stream_accumulator,
+                state.streamed_usage,
+                &LlmStreamEvent::ReasoningDelta {
+                    block: block.clone(),
+                    text: delta.clone(),
+                },
+            );
+            forwarder.forward_delta(ProviderDeltaClass::Reasoning, block.clone(), delta);
+        }
+        forwarder
+            .forward_block_end(ProviderDeltaClass::Reasoning, block, block_text)
+            .await;
     }
 
     async fn forward_provider_stream_event(
@@ -1103,17 +1078,120 @@ impl RuntimeTurnDriver<'_> {
                 );
                 *state.stream_evidence = crate::LlmStreamEvidence::default();
                 *state.text_streamed = false;
-                *state.assistant_prose_correlation = None;
-                *state.reasoning_correlation = None;
                 *state.reasoning_publication = ReasoningPublicationState::default();
+                *state.plugin_reasoning_blocks = 0;
+                *state.completed_part_index = 0;
             }
-            LlmStreamEvent::Delta(delta) => {
-                self.emit_visible_assistant_text(forwarder, delta, None, "delta", state)
+            LlmStreamEvent::TextBlockStart { block } => {
+                *state.text_streamed = true;
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::TextBlockStart {
+                        block: block.clone(),
+                    },
+                );
+                remember_attempt_correlation(
+                    state.assistant_prose_attempt_correlations,
+                    &TurnActivityId::new(block.id.clone()),
+                );
+                forwarder
+                    .forward_block_start(ProviderDeltaClass::AssistantProse, block)
+                    .await;
+            }
+            LlmStreamEvent::Delta { block, text } => {
+                self.emit_visible_assistant_text(forwarder, text, &block, "delta", state)
                     .await?;
             }
-            LlmStreamEvent::ReasoningDelta(delta) => {
-                if !delta.is_empty() {
-                    state.reasoning_publication.record_delta();
+            LlmStreamEvent::TextBlockEnd { block, text } => {
+                // The end event's text is authoritative for the block. Only
+                // content beyond what streamed as deltas may go through the
+                // plugin stream transform — a stateful chunk hook must never
+                // see the same text twice.
+                let raw_text = self
+                    .host
+                    .core
+                    .tracing
+                    .trace_sink
+                    .as_ref()
+                    .map(|_| text.clone());
+                let raw_accumulated = state
+                    .block_raw_text
+                    .get(&block.id)
+                    .cloned()
+                    .unwrap_or_default();
+                let prefix_extension = text.starts_with(raw_accumulated.as_str());
+                if prefix_extension {
+                    // A completion that extends the streamed prefix forwards
+                    // only the unseen tail — covers zero-delta blocks and
+                    // non-streamed final-message reconciliation alike.
+                    let tail = text[raw_accumulated.len()..].to_string();
+                    self.emit_visible_assistant_text(forwarder, tail, &block, "delta", state)
+                        .await?;
+                }
+                // Prefix extensions seal with the post-transform total hosts
+                // accumulated from deltas; a non-prefix completion is a
+                // correction and seals with the provider's authoritative text.
+                let sealed = if prefix_extension {
+                    state
+                        .stream_accumulator
+                        .block_text(&block)
+                        .unwrap_or_else(|| text.clone())
+                } else {
+                    text.clone()
+                };
+                self.log_llm_stream_event(
+                    state.debug,
+                    LlmStreamEventLog {
+                        protocol_iteration: state.protocol_iteration,
+                        event_type: "text_block_end",
+                        text: LlmDebugText {
+                            raw: raw_text.as_deref(),
+                            visible: Some(&sealed),
+                        },
+                        item_id: block.item_id.as_deref(),
+                        block_id: Some(block.id.as_str()),
+                        usage: None,
+                        tool_call: None,
+                    },
+                );
+                *state.text_streamed = true;
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::TextBlockEnd {
+                        block: block.clone(),
+                        text,
+                    },
+                );
+                remember_attempt_correlation(
+                    state.assistant_prose_attempt_correlations,
+                    &TurnActivityId::new(block.id.clone()),
+                );
+                forwarder
+                    .forward_block_end(ProviderDeltaClass::AssistantProse, block, sealed)
+                    .await;
+            }
+            LlmStreamEvent::ReasoningBlockStart { block } => {
+                state.reasoning_publication.record_streamed_block(&block);
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::ReasoningBlockStart {
+                        block: block.clone(),
+                    },
+                );
+                remember_attempt_correlation(
+                    state.reasoning_attempt_correlations,
+                    &TurnActivityId::new(block.id.clone()),
+                );
+                forwarder
+                    .forward_block_start(ProviderDeltaClass::Reasoning, block)
+                    .await;
+            }
+            LlmStreamEvent::ReasoningDelta { block, text } => {
+                state.reasoning_publication.record_streamed_block(&block);
+                if !text.is_empty() {
                     self.log_llm_stream_event(
                         state.debug,
                         LlmStreamEventLog {
@@ -1121,28 +1199,61 @@ impl RuntimeTurnDriver<'_> {
                             event_type: "reasoning_delta",
                             text: LlmDebugText {
                                 raw: None,
-                                visible: Some(&delta),
+                                visible: Some(&text),
                             },
-                            item_id: None,
+                            item_id: block.item_id.as_deref(),
+                            block_id: Some(block.id.as_str()),
                             usage: None,
                             tool_call: None,
                         },
                     );
-                    // Delta-only streaming path (fix 1.3a display). No
-                    // encrypted content yet — that arrives with the full
-                    // item on `output_item.done` (fix 1.3b).
                     fold_llm_stream_event(
                         state.stream_accumulator,
                         state.streamed_usage,
-                        &LlmStreamEvent::ReasoningDelta(delta.clone()),
+                        &LlmStreamEvent::ReasoningDelta {
+                            block: block.clone(),
+                            text: text.clone(),
+                        },
                     );
-                    let correlation_id = stream_correlation_id(state.reasoning_correlation, None);
                     remember_attempt_correlation(
                         state.reasoning_attempt_correlations,
-                        &correlation_id,
+                        &TurnActivityId::new(block.id.clone()),
                     );
-                    forwarder.forward_delta(ProviderDeltaClass::Reasoning, correlation_id, delta);
+                    forwarder.forward_delta(ProviderDeltaClass::Reasoning, block, text);
                 }
+            }
+            LlmStreamEvent::ReasoningBlockEnd { block, text } => {
+                state.reasoning_publication.record_streamed_block(&block);
+                self.log_llm_stream_event(
+                    state.debug,
+                    LlmStreamEventLog {
+                        protocol_iteration: state.protocol_iteration,
+                        event_type: "reasoning_block_end",
+                        text: LlmDebugText {
+                            raw: None,
+                            visible: Some(&text),
+                        },
+                        item_id: block.item_id.as_deref(),
+                        block_id: Some(block.id.as_str()),
+                        usage: None,
+                        tool_call: None,
+                    },
+                );
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::ReasoningBlockEnd {
+                        block: block.clone(),
+                        text: text.clone(),
+                    },
+                );
+                remember_attempt_correlation(
+                    state.reasoning_attempt_correlations,
+                    &TurnActivityId::new(block.id.clone()),
+                );
+                forwarder
+                    .forward_block_end(ProviderDeltaClass::Reasoning, block, text)
+                    .await;
             }
             LlmStreamEvent::Part(LlmOutputPart::Text {
                 text,
@@ -1159,6 +1270,7 @@ impl RuntimeTurnDriver<'_> {
                             visible: None,
                         },
                         item_id: item_id.as_deref(),
+                        block_id: None,
                         usage: None,
                         tool_call: None,
                     },
@@ -1189,6 +1301,7 @@ impl RuntimeTurnDriver<'_> {
                             visible: None,
                         },
                         item_id,
+                        block_id: None,
                         usage: None,
                         tool_call: Some(LlmDebugToolCall {
                             call_id: &call_id,
@@ -1209,44 +1322,60 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
             LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }) => {
+                let part = LlmOutputPart::Reasoning {
+                    text: text.clone(),
+                    replay: replay.clone(),
+                };
                 let item_id = replay.as_ref().and_then(|meta| meta.item_id.as_deref());
-                let publish_completed_text = !state
-                    .reasoning_publication
-                    .reconcile_completed_part(item_id);
-                if !text.is_empty() {
-                    self.log_llm_stream_event(
-                        state.debug,
-                        LlmStreamEventLog {
-                            protocol_iteration: state.protocol_iteration,
-                            event_type: "reasoning_part",
-                            text: LlmDebugText {
-                                raw: Some(&text),
-                                visible: publish_completed_text.then_some(text.as_str()),
-                            },
-                            item_id,
-                            usage: None,
-                            tool_call: None,
+                self.log_llm_stream_event(
+                    state.debug,
+                    LlmStreamEventLog {
+                        protocol_iteration: state.protocol_iteration,
+                        event_type: "reasoning_part",
+                        text: LlmDebugText {
+                            raw: Some(&text),
+                            visible: None,
                         },
+                        item_id,
+                        block_id: None,
+                        usage: None,
+                        tool_call: None,
+                    },
+                );
+                // Item-level completion: replay material (encrypted content,
+                // signatures, summary) rides here, while any of the item's
+                // blocks that never streamed publish now as complete blocks —
+                // boundaries the live path already emitted are not repeated.
+                let part_index = *state.completed_part_index;
+                *state.completed_part_index += 1;
+                let mut next_ordinal = state.reasoning_publication.next_block_ordinal();
+                let unpublished = state.reasoning_publication.unpublished_blocks(
+                    part_index,
+                    &part,
+                    &mut next_ordinal,
+                );
+                for (block, block_text) in unpublished {
+                    state.reasoning_publication.record_streamed_block(&block);
+                    remember_attempt_correlation(
+                        state.reasoning_attempt_correlations,
+                        &TurnActivityId::new(block.id.clone()),
                     );
-                    if publish_completed_text {
-                        state.reasoning_publication.record_completed_part(item_id);
-                        let correlation_id =
-                            stream_correlation_id(state.reasoning_correlation, item_id);
-                        remember_attempt_correlation(
-                            state.reasoning_attempt_correlations,
-                            &correlation_id,
-                        );
-                        forwarder.forward_delta(
-                            ProviderDeltaClass::Reasoning,
-                            correlation_id,
-                            text.clone(),
-                        );
-                    }
+                    forwarder
+                        .forward_block_start(ProviderDeltaClass::Reasoning, block.clone())
+                        .await;
+                    forwarder.forward_delta(
+                        ProviderDeltaClass::Reasoning,
+                        block.clone(),
+                        block_text.clone(),
+                    );
+                    forwarder
+                        .forward_block_end(ProviderDeltaClass::Reasoning, block, block_text)
+                        .await;
                 }
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
-                    &LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }),
+                    &LlmStreamEvent::Part(part),
                 );
             }
             LlmStreamEvent::Usage(usage) => {
@@ -1260,6 +1389,7 @@ impl RuntimeTurnDriver<'_> {
                             visible: None,
                         },
                         item_id: None,
+                        block_id: None,
                         usage: Some(&usage),
                         tool_call: None,
                     },
@@ -1346,100 +1476,6 @@ impl RuntimeTurnDriver<'_> {
                 .await?;
         }
         Ok(())
-    }
-}
-
-fn assistant_stream_finish_reason(
-    result: &Result<LlmResponse, LlmCallError>,
-    abort_requested: bool,
-) -> crate::plugin::AssistantStreamFinishReason {
-    use crate::plugin::AssistantStreamFinishReason;
-
-    if abort_requested && result.is_ok() {
-        return AssistantStreamFinishReason::Aborted;
-    }
-    match result {
-        Ok(_) => AssistantStreamFinishReason::Complete,
-        Err(err) if err.terminal_reason == crate::LlmTerminalReason::Cancelled => {
-            AssistantStreamFinishReason::Cancelled
-        }
-        Err(_) => AssistantStreamFinishReason::ProviderError,
-    }
-}
-
-struct AbortOnDrop {
-    handle: tokio::task::AbortHandle,
-    armed: bool,
-}
-
-impl AbortOnDrop {
-    fn new(handle: tokio::task::AbortHandle) -> Self {
-        Self {
-            handle,
-            armed: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for AbortOnDrop {
-    fn drop(&mut self) {
-        if self.armed {
-            self.handle.abort();
-        }
-    }
-}
-
-fn response_usage_is_empty(usage: &LlmUsage) -> bool {
-    usage.input_tokens == 0
-        && usage.output_tokens == 0
-        && usage.cache_read_input_tokens == 0
-        && usage.cache_write_input_tokens == 0
-        && usage.reasoning_output_tokens == 0
-}
-
-fn provider_item_id(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("item_id")
-        .or_else(|| value.get("item").and_then(|item| item.get("id")))
-        .or_else(|| {
-            value
-                .get("response")
-                .and_then(|response| response.get("id"))
-        })
-        .or_else(|| value.get("id"))
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
-}
-
-fn provider_output_index(value: &serde_json::Value) -> Option<i64> {
-    value
-        .get("output_index")
-        .or_else(|| value.get("index"))
-        .and_then(|value| value.as_i64())
-}
-
-fn stream_correlation_id(
-    fallback_slot: &mut Option<TurnActivityId>,
-    provider_item_id: Option<&str>,
-) -> TurnActivityId {
-    if let Some(provider_item_id) = provider_item_id {
-        return TurnActivityId::new(provider_item_id.to_string());
-    }
-    fallback_slot
-        .get_or_insert_with(|| TurnActivityId::new(uuid::Uuid::new_v4().to_string()))
-        .clone()
-}
-
-fn remember_attempt_correlation(
-    correlations: &mut Vec<TurnActivityId>,
-    correlation_id: &TurnActivityId,
-) {
-    if !correlations.contains(correlation_id) {
-        correlations.push(correlation_id.clone());
     }
 }
 

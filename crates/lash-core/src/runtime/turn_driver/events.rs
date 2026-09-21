@@ -145,6 +145,12 @@ async fn send_independent_turn_event(
     .await;
 }
 
+/// Publishes completed response parts the provider never streamed as live
+/// blocks, each as a `StreamBlockStarted` + `StreamBlockCompleted` pair.
+///
+/// Identities minted here are deterministic — provider `item_id`s where they
+/// exist, `part:{index}` otherwise — because the completed response is itself
+/// deterministic: a replay of this path emits identical block identities.
 pub(in crate::runtime) async fn emit_semantic_response_parts(
     event_tx: &mpsc::Sender<RuntimeStreamEvent>,
     response: &LlmResponse,
@@ -152,65 +158,127 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
     reasoning_publication: &ReasoningPublicationState,
 ) {
     let visible_parts = crate::visible_response_parts(response.parts.clone());
-    let published_reasoning = reasoning_publication.published_response_part_indices(&visible_parts);
-    let has_text_correlation_ids = visible_parts.iter().any(|part| {
-        matches!(
-            part,
-            LlmOutputPart::Text {
-                response_meta: Some(meta),
-                ..
-            } if meta.id.is_some()
-        )
-    });
+    let mut next_ordinal = reasoning_publication.next_block_ordinal();
     let mut emitted_text = false;
     for (part_index, part) in visible_parts.iter().enumerate() {
         match part {
             LlmOutputPart::Text {
                 text,
                 response_meta,
-            } if has_text_correlation_ids && !text.is_empty() => {
+            } if !text.is_empty() => {
                 let text = project_assistant_prose(text, prose_projector);
                 if text.is_empty() {
                     continue;
                 }
                 emitted_text = true;
-                let correlation_id = response_meta
-                    .as_ref()
-                    .and_then(|meta| meta.id.clone())
-                    .map(TurnActivityId::new)
-                    .unwrap_or_else(|| TurnActivityId::new(uuid::Uuid::new_v4().to_string()));
+                let item_id = response_meta.as_ref().and_then(|meta| meta.id.clone());
+                let block = StreamBlockIdentity {
+                    id: item_id
+                        .clone()
+                        .unwrap_or_else(|| format!("part:{part_index}")),
+                    ordinal: next_ordinal,
+                    item_id,
+                };
+                next_ordinal += 1;
                 send_turn_activity(
                     event_tx,
-                    correlation_id,
-                    TurnEvent::AssistantProseDelta { text: text.into() },
-                )
-                .await;
-            }
-            LlmOutputPart::Reasoning { text, replay }
-                if !published_reasoning.contains(&part_index) && !text.is_empty() =>
-            {
-                let correlation_id = replay
-                    .as_ref()
-                    .and_then(|meta| meta.item_id.clone())
-                    .map(TurnActivityId::new)
-                    .unwrap_or_else(|| TurnActivityId::new(uuid::Uuid::new_v4().to_string()));
-                send_turn_activity(
-                    event_tx,
-                    correlation_id,
-                    TurnEvent::ReasoningDelta {
-                        text: text.clone().into(),
+                    TurnActivityId::new(block.id.clone()),
+                    TurnEvent::StreamBlockStarted {
+                        kind: StreamBlockKind::AssistantText,
+                        block: block.clone(),
                     },
                 )
                 .await;
+                send_turn_activity(
+                    event_tx,
+                    TurnActivityId::new(block.id.clone()),
+                    TurnEvent::AssistantProseDelta {
+                        text: text.clone().into(),
+                        block: block.clone(),
+                    },
+                )
+                .await;
+                send_turn_activity(
+                    event_tx,
+                    TurnActivityId::new(block.id.clone()),
+                    TurnEvent::StreamBlockCompleted {
+                        kind: StreamBlockKind::AssistantText,
+                        block,
+                        text: text.into(),
+                    },
+                )
+                .await;
+            }
+            LlmOutputPart::Reasoning { .. } => {
+                if response.expose_thinking == Some(false) {
+                    // Hidden thinking stays in `parts` for multi-turn replay
+                    // but never reaches the host — same gate the provider
+                    // applied to its live block events.
+                    continue;
+                }
+                for (block, text) in
+                    reasoning_publication.unpublished_blocks(part_index, part, &mut next_ordinal)
+                {
+                    send_turn_activity(
+                        event_tx,
+                        TurnActivityId::new(block.id.clone()),
+                        TurnEvent::StreamBlockStarted {
+                            kind: StreamBlockKind::Reasoning,
+                            block: block.clone(),
+                        },
+                    )
+                    .await;
+                    send_turn_activity(
+                        event_tx,
+                        TurnActivityId::new(block.id.clone()),
+                        TurnEvent::ReasoningDelta {
+                            text: text.clone().into(),
+                            block: block.clone(),
+                        },
+                    )
+                    .await;
+                    send_turn_activity(
+                        event_tx,
+                        TurnActivityId::new(block.id.clone()),
+                        TurnEvent::StreamBlockCompleted {
+                            kind: StreamBlockKind::Reasoning,
+                            block,
+                            text: text.into(),
+                        },
+                    )
+                    .await;
+                }
             }
             _ => {}
         }
     }
     let full_text = project_assistant_prose(&response.full_text(), prose_projector);
     if !emitted_text && !full_text.is_empty() {
-        send_independent_turn_event(
+        let block = StreamBlockIdentity::new("response:full-text", next_ordinal);
+        send_turn_activity(
             event_tx,
+            TurnActivityId::new(block.id.clone()),
+            TurnEvent::StreamBlockStarted {
+                kind: StreamBlockKind::AssistantText,
+                block: block.clone(),
+            },
+        )
+        .await;
+        send_turn_activity(
+            event_tx,
+            TurnActivityId::new(block.id.clone()),
             TurnEvent::AssistantProseDelta {
+                text: full_text.clone().into(),
+                block: block.clone(),
+            },
+        )
+        .await;
+        send_turn_activity(
+            event_tx,
+            TurnActivityId::new(block.id.clone()),
+            TurnEvent::StreamBlockCompleted {
+                kind: StreamBlockKind::AssistantText,
+                block,
                 text: full_text.into(),
             },
         )

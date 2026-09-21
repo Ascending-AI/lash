@@ -198,7 +198,10 @@ pub(crate) fn benchmark_provider_with_control(
                         }
                     } else {
                         for delta in &profile.deltas {
-                            tx.send(LlmStreamEvent::Delta(delta.clone()));
+                            tx.send(LlmStreamEvent::Delta {
+                                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                                text: delta.clone(),
+                            });
                         }
                     }
                     tx.send(LlmStreamEvent::Usage(usage.clone()));
@@ -222,6 +225,9 @@ pub(crate) fn benchmark_provider_with_control(
                     execution_evidence: None,
                     generation_disposition: None,
                     response_metadata: Default::default(),
+                    // The scripted profile emits every part, reasoning
+                    // included — the response carries that same policy.
+                    expose_thinking: Some(true),
                 })
             }
         })

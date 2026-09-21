@@ -8,6 +8,24 @@ use crate::llm::types::{
 };
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
+/// Every test double that completes with an empty `Stop` response shares
+/// this literal so provider-call plumbing, not response shape, stays in view.
+fn bare_ok_response() -> LlmResponse {
+    LlmResponse {
+        parts: Vec::new(),
+        usage: LlmUsage::default(),
+        terminal_reason: crate::LlmTerminalReason::Stop,
+        terminal_diagnostic: None,
+        provider_usage: None,
+        request_body: None,
+        http_summary: None,
+        execution_evidence: None,
+        generation_disposition: None,
+        response_metadata: Default::default(),
+        expose_thinking: Some(false),
+    }
+}
+
 fn code_of(error: &LlmTransportError) -> String {
     error.code.as_ref().expect("typed failure code").to_string()
 }
@@ -470,18 +488,7 @@ impl Provider for MutatingProvider {
 
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         self.options.max_output_tokens = Some(MUTATED_MAX_OUTPUT_TOKENS);
-        Ok(LlmResponse {
-            parts: Vec::new(),
-            usage: LlmUsage::default(),
-            terminal_reason: crate::LlmTerminalReason::Stop,
-            terminal_diagnostic: None,
-            provider_usage: None,
-            request_body: None,
-            http_summary: None,
-            execution_evidence: None,
-            generation_disposition: None,
-            response_metadata: Default::default(),
-        })
+        Ok(bare_ok_response())
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -528,18 +535,7 @@ impl Provider for FailingProvider {
                 .with_kind(kind)
                 .with_retry_verdict(retry_verdict));
         }
-        Ok(LlmResponse {
-            parts: Vec::new(),
-            usage: LlmUsage::default(),
-            terminal_reason: crate::LlmTerminalReason::Stop,
-            terminal_diagnostic: None,
-            provider_usage: None,
-            request_body: None,
-            http_summary: None,
-            execution_evidence: None,
-            generation_disposition: None,
-            response_metadata: Default::default(),
-        })
+        Ok(bare_ok_response())
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -614,18 +610,7 @@ impl Provider for StatusFailingProvider {
             }
             return Err(failure);
         }
-        Ok(LlmResponse {
-            parts: Vec::new(),
-            usage: LlmUsage::default(),
-            terminal_reason: crate::LlmTerminalReason::Stop,
-            terminal_diagnostic: None,
-            provider_usage: None,
-            request_body: None,
-            http_summary: None,
-            execution_evidence: None,
-            generation_disposition: None,
-            response_metadata: Default::default(),
-        })
+        Ok(bare_ok_response())
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {

@@ -688,7 +688,7 @@ fn terminal_provider_paths_emit_only_visible_prose() {
         let effects = drain_effects(&mut machine);
         assert!(effects.iter().any(|effect| matches!(
             effect,
-            Effect::Emit(SessionStreamEvent::TextDelta { content })
+            Effect::Emit(SessionStreamEvent::TextDelta { content, .. })
                 if content == "Visible plan."
         )));
         assert!(effects.iter().any(|effect| matches!(
@@ -698,7 +698,7 @@ fn terminal_provider_paths_emit_only_visible_prose() {
         )));
         assert!(!effects.iter().any(|effect| matches!(
             effect,
-            Effect::Emit(SessionStreamEvent::TextDelta { content })
+            Effect::Emit(SessionStreamEvent::TextDelta { content, .. })
                 | Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
                 if content.contains("<typescript>")
         )));

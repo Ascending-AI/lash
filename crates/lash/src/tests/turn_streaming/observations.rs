@@ -1,5 +1,9 @@
 use super::*;
 
+fn bid() -> lash_core::llm::types::StreamBlockIdentity {
+    lash_core::llm::types::StreamBlockIdentity::new("text:0", 0)
+}
+
 #[tokio::test]
 pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Result<()> {
     let core = standard_core();
@@ -53,15 +57,25 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
             let completed_only_reasoning = completed_only_reasoning.clone();
             async move {
                 let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::ReasoningDelta(
-                    "**Planning single ".to_string(),
-                ));
-                stream.send(LlmStreamEvent::ReasoningDelta(
-                    "shell command execution**".to_string(),
-                ));
+                let block = lash_core::llm::types::StreamBlockIdentity::new(
+                    "reasoning-streamed:summary:0",
+                    0,
+                )
+                .with_item_id(Some("reasoning-streamed".to_string()));
+                stream.send(LlmStreamEvent::ReasoningDelta {
+                    block: block.clone(),
+                    text: "**Planning single ".to_string(),
+                });
+                stream.send(LlmStreamEvent::ReasoningDelta {
+                    block,
+                    text: "shell command execution**".to_string(),
+                });
                 stream.send(LlmStreamEvent::Part(streamed_reasoning.clone()));
                 stream.send(LlmStreamEvent::Part(completed_only_reasoning.clone()));
-                stream.send(LlmStreamEvent::Delta("done".to_string()));
+                stream.send(LlmStreamEvent::Delta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                    text: "done".to_string(),
+                });
                 Ok(LlmResponse {
                     parts: vec![
                         streamed_reasoning,
@@ -93,7 +107,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -147,7 +161,7 @@ fn reasoning_activities(output: &crate::turn::TurnOutput) -> Vec<&str> {
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
             _ => None,
         })
         .collect()
@@ -174,7 +188,14 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
                                 input_json: "{}".to_string(),
                                 replay: None,
                             };
-                            stream.send(LlmStreamEvent::ReasoningDelta("inspect once".to_string()));
+                            stream.send(LlmStreamEvent::ReasoningDelta {
+                                block: lash_core::llm::types::StreamBlockIdentity::new(
+                                    "reasoning-tool:summary:0",
+                                    0,
+                                )
+                                .with_item_id(Some("reasoning-tool".to_string())),
+                                text: "inspect once".to_string(),
+                            });
                             stream.send(LlmStreamEvent::Part(reasoning.clone()));
                             stream.send(LlmStreamEvent::Part(tool.clone()));
                             Ok(LlmResponse {
@@ -184,7 +205,10 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
                             })
                         }
                         1 => {
-                            stream.send(LlmStreamEvent::Delta("done".to_string()));
+                            stream.send(LlmStreamEvent::Delta {
+                                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                                text: "done".to_string(),
+                            });
                             Ok(text_response("done"))
                         }
                         _ => panic!("unexpected provider call {call}"),
@@ -225,7 +249,14 @@ async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reason
             let completed = completed.clone();
             async move {
                 let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::ReasoningDelta("streamed A".to_string()));
+                stream.send(LlmStreamEvent::ReasoningDelta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new(
+                        "reasoning-a:summary:0",
+                        0,
+                    )
+                    .with_item_id(Some("reasoning-a".to_string())),
+                    text: "streamed A".to_string(),
+                });
                 stream.send(LlmStreamEvent::Part(streamed.clone()));
                 Ok(LlmResponse {
                     parts: vec![streamed, completed],
@@ -264,7 +295,14 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
             let reasoning = reasoning.clone();
             async move {
                 let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::ReasoningDelta("reasoning once".to_string()));
+                stream.send(LlmStreamEvent::ReasoningDelta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new(
+                        "reasoning-before-text:summary:0",
+                        0,
+                    )
+                    .with_item_id(Some("reasoning-before-text".to_string())),
+                    text: "reasoning once".to_string(),
+                });
                 stream.send(LlmStreamEvent::Part(reasoning.clone()));
                 Ok(LlmResponse {
                     parts: vec![
@@ -362,7 +400,7 @@ pub(super) async fn session_observation_replays_live_activity_and_commit() -> Re
             lash_core::SessionObservationEventPayload::TurnActivity(activity)
                 if matches!(
                     &activity.event,
-                    TurnEvent::AssistantProseDelta { text } if text.as_ref() == "echo: observe me"
+                    TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "echo: observe me"
                 )
         )
     }));
@@ -392,10 +430,20 @@ pub(super) fn retrying_visible_stream_provider() -> ProviderHandle {
             async move {
                 let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
                 let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::ReasoningDelta(format!(
-                    "reasoning-{attempt}"
-                )));
-                stream.send(LlmStreamEvent::Delta(format!("prose-{attempt}")));
+                stream.send(LlmStreamEvent::ReasoningDelta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new(
+                        format!("reasoning:{attempt}"),
+                        attempt as u64,
+                    ),
+                    text: format!("reasoning-{attempt}"),
+                });
+                stream.send(LlmStreamEvent::Delta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new(
+                        format!("text:{attempt}"),
+                        attempt as u64,
+                    ),
+                    text: format!("prose-{attempt}"),
+                });
                 if attempt < 3 {
                     return Err(LlmTransportError::new(format!("retry attempt {attempt}"))
                         .with_retry_verdict(
@@ -442,9 +490,10 @@ pub(super) fn output_then_failing_rlm_prose_provider(
                 let call = transport_calls.fetch_add(1, Ordering::SeqCst);
                 let stream = request.stream_events.expect("stream events");
                 if call == 0 {
-                    stream.send(LlmStreamEvent::Delta(
-                        "retry observer single-copy marker\n<typescript>\n".to_string(),
-                    ));
+                    stream.send(LlmStreamEvent::Delta {
+                        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                        text: "retry observer single-copy marker\n<typescript>\n".to_string(),
+                    });
                     return Err(
                         LlmTransportError::new("deterministic rate limit")
                             .with_http_status(429)
@@ -458,7 +507,7 @@ pub(super) fn output_then_failing_rlm_prose_provider(
                     2 => "<typescript>\nfinish(\"provider retry succeeded\");\n</typescript>",
                     _ => "<typescript>\nfinish(\"subsequent turn succeeded\");\n</typescript>",
                 };
-                stream.send(LlmStreamEvent::Delta(text.to_string()));
+                stream.send(LlmStreamEvent::Delta { block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: text.to_string() });
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
@@ -575,7 +624,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         assert!(first.result.assistant_output.raw_text.is_empty());
         assert!(first.activities.iter().any(|activity| matches!(
             &activity.event,
-            TurnEvent::AssistantProseDelta { text } if text.contains(MARKER)
+            TurnEvent::AssistantProseDelta { text, .. } if text.contains(MARKER)
         )));
         assert!(
             first
@@ -733,10 +782,10 @@ pub(super) fn render_observed_attempt_text(
             continue;
         };
         match &activity.event {
-            TurnEvent::AssistantProseDelta { text } => {
+            TurnEvent::AssistantProseDelta { text, .. } => {
                 prose.push((activity.correlation_id.clone(), text.clone()));
             }
-            TurnEvent::ReasoningDelta { text } => {
+            TurnEvent::ReasoningDelta { text, .. } => {
                 reasoning.push((activity.correlation_id.clone(), text.clone()));
             }
             TurnEvent::ModelAttemptReset {
@@ -1969,6 +2018,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         Some(&TurnId::from("before-restart-turn")),
         TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "before replay-store restart".into(),
+            block: bid(),
         }),
     );
     let mut first_stream = first_session
@@ -2018,6 +2068,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         Some(&TurnId::from("after-restart-turn")),
         TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "after replay-store restart".into(),
+            block: bid(),
         }),
     );
     let gap_continuation =
@@ -2154,7 +2205,10 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
     for text in ["lag one", "lag two", "lag three"] {
         session.observe().runtime.record_turn_activity(
             Some(&TurnId::from("lagged-turn")),
-            TurnActivity::independent(TurnEvent::AssistantProseDelta { text: text.into() }),
+            TurnActivity::independent(TurnEvent::AssistantProseDelta {
+                text: text.into(),
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+            }),
         );
     }
 
@@ -2177,6 +2231,7 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
         Some(&TurnId::from("after-lag-turn")),
         TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "after lag".into(),
+            block: bid(),
         }),
     );
     let continued = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
@@ -2253,7 +2308,7 @@ pub(super) fn observation_assistant_delta(
     match &event.payload {
         lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
             match &activity.event {
-                TurnEvent::AssistantProseDelta { text } => Some(text.to_string()),
+                TurnEvent::AssistantProseDelta { text, .. } => Some(text.to_string()),
                 _ => None,
             }
         }
@@ -2268,7 +2323,7 @@ pub(super) fn remote_observation_assistant_delta(
         crate::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
             activity,
         } => match &activity.event {
-            crate::remote::usage::RemoteTurnEvent::AssistantProseDelta { text } => {
+            crate::remote::usage::RemoteTurnEvent::AssistantProseDelta { text, .. } => {
                 Some(text.clone())
             }
             _ => None,

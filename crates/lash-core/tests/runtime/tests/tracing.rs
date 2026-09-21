@@ -857,8 +857,14 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
 async fn standard_runtime_trace_records_stream_event_entries() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("Hello ".to_string()),
-            LlmStreamEvent::Delta("world".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "Hello ".to_string(),
+            },
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "world".to_string(),
+            },
             LlmStreamEvent::Part(LlmOutputPart::Text {
                 text: "Hello world".to_string(),
                 response_meta: None,
@@ -1281,8 +1287,14 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
 async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("Hello ".to_string()),
-            LlmStreamEvent::Delta("world".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "Hello ".to_string(),
+            },
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "world".to_string(),
+            },
         ],
         response: Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {

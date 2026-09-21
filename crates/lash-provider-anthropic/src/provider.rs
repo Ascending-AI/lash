@@ -188,6 +188,7 @@ impl Provider for AnthropicProvider {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()
             }),
+            expose_thinking: self.options.expose_thinking,
             ..StreamState::default()
         };
         let expose_thinking = self.options.expose_thinking;
@@ -248,6 +249,7 @@ impl Provider for AnthropicProvider {
 
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
+        let expose_thinking = state.expose_thinking;
         let (parts, usage, terminal_reason) = Self::finalize(state, &req.model);
         let mut response = LlmResponse {
             parts,
@@ -260,6 +262,7 @@ impl Provider for AnthropicProvider {
             execution_evidence,
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
+            expose_thinking: Some(expose_thinking),
         };
         response
             .stamp_replay_origin(&minting_route)
@@ -323,6 +326,7 @@ impl AnthropicProvider {
     ) -> LlmResponse {
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
+        let expose_thinking = state.expose_thinking;
         let (parts, usage, _) = Self::finalize(state, origin_model);
         LlmResponse {
             parts,
@@ -335,6 +339,7 @@ impl AnthropicProvider {
             execution_evidence,
             generation_disposition,
             response_metadata: Default::default(),
+            expose_thinking: Some(expose_thinking),
         }
     }
 }

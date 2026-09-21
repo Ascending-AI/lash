@@ -437,17 +437,48 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             Option<lash_sansio::llm::types::ProviderReplayMeta>,
         )> = Vec::new();
         let mut actions = Vec::new();
+        let mut next_block_ordinal = 0u64;
 
-        for part in parts {
+        for (part_index, part) in parts.into_iter().enumerate() {
             match part {
-                LlmOutputPart::Text { text, .. } => {
+                LlmOutputPart::Text {
+                    text,
+                    response_meta,
+                } => {
                     if !text.is_empty() {
                         let previous_len = assistant_text.len();
                         crate::append_assistant_text_part(&mut assistant_text, &text);
+                        let text = assistant_text[previous_len..].to_string();
                         if !text_streamed {
+                            // Mirror StandardDriver: buffered completions emit
+                            // the same Started/Delta/Completed lifecycle the
+                            // streaming lane produces, keyed per text part.
+                            let item_id = response_meta.as_ref().and_then(|meta| meta.id.clone());
+                            let block = lash_sansio::llm::types::StreamBlockIdentity {
+                                id: item_id
+                                    .clone()
+                                    .unwrap_or_else(|| format!("part:{part_index}")),
+                                ordinal: next_block_ordinal,
+                                item_id,
+                            };
+                            next_block_ordinal += 1;
+                            actions.push(DriverAction::Emit(
+                                SessionStreamEvent::StreamBlockStarted {
+                                    kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
+                                    block: block.clone(),
+                                },
+                            ));
                             actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
-                                content: assistant_text[previous_len..].to_string(),
+                                content: text.clone(),
+                                block: block.clone(),
                             }));
+                            actions.push(DriverAction::Emit(
+                                SessionStreamEvent::StreamBlockCompleted {
+                                    kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
+                                    block,
+                                    content: text.clone(),
+                                },
+                            ));
                         }
                     }
                 }

@@ -172,7 +172,7 @@ fn turn_checkpoint_stamps_v4() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 4);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 5);
 }
 
 #[test]
@@ -1162,7 +1162,7 @@ fn output_limit_stops_as_incomplete_without_assistant_message() {
     );
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::TextDelta { content }) if content == "partial"
+        Effect::Emit(SessionStreamEvent::TextDelta { content, .. }) if content == "partial"
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,

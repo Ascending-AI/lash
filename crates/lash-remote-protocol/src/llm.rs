@@ -188,6 +188,13 @@ pub struct RemoteLlmResponse {
     /// from a report that nothing was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation_disposition: Option<RemoteGenerationReceipt>,
+    /// The adapter's thinking-visibility policy for this response. Reasoning
+    /// parts ride `output_parts` regardless so replay state survives; the
+    /// local runtime suppresses unstreamed reasoning only on `Some(false)` —
+    /// `None` (a worker that cannot report the policy) keeps the legacy
+    /// publish behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expose_thinking: Option<bool>,
 }
 
 /// Mirror of the core `GenerationReceipt`: the adapter-reported fate of a

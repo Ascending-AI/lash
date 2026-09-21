@@ -1235,8 +1235,14 @@ pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() 
 pub(super) async fn session_manager_can_run_child_session_turn() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("child ".to_string()),
-            LlmStreamEvent::Delta("session".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "child ".to_string(),
+            },
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "session".to_string(),
+            },
             LlmStreamEvent::Usage(LlmUsage {
                 input_tokens: 7,
                 output_tokens: 2,

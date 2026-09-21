@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 142,
+  "cargo_target_count": 143,
   "feature_lane_units": [
     {
       "features": [],
@@ -10314,6 +10314,15 @@
         "testing"
       ],
       "kind": "test",
+      "label": "//crates/lash-provider-google:block_identity__test__fv_12dddd17",
+      "package": "lash-internal-provider-google"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
       "label": "//crates/lash-provider-google:charge_safety__test__fv_12dddd17",
       "package": "lash-internal-provider-google"
     },
@@ -17359,7 +17368,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 196,
+  "generated_label_count": 197,
   "packages": [
     {
       "declared_features": [
@@ -18740,6 +18749,12 @@
           "tags": []
         },
         {
+          "cargo": "block_identity",
+          "kind": "test",
+          "label": "//crates/lash-provider-google:block_identity__test",
+          "tags": []
+        },
+        {
           "cargo": "charge_safety",
           "kind": "test",
           "label": "//crates/lash-provider-google:charge_safety__test",
@@ -18755,6 +18770,7 @@
       "test_batch": {
         "label": "//crates/lash-provider-google:test_batch",
         "members": [
+          "//crates/lash-provider-google:block_identity__test",
           "//crates/lash-provider-google:charge_safety__test",
           "//crates/lash-provider-google:lash-provider-google__unit_test",
           "//crates/lash-provider-google:property__test"

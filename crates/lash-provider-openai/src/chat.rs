@@ -815,9 +815,16 @@ fn reasoning_output_tokens(usage: &Value) -> Option<u64> {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ChatStreamState {
     pub(crate) full_text: String,
-    pub(crate) pending_text_deltas: Vec<String>,
     pub(crate) reasoning_text: String,
-    pub(crate) reasoning_deltas: Vec<String>,
+    /// Block-boundary stream events minted at the provider edge, drained by
+    /// the driver after each SSE event. Chat Completions has no native block
+    /// notion, so blocks get deterministic per-response ordinals.
+    pub(crate) block_events: Vec<LlmStreamEvent>,
+    next_block_ordinal: u64,
+    /// Open reasoning/text blocks and the text accumulated under each so the
+    /// block end can carry authoritative text.
+    reasoning_block: Option<(StreamBlockIdentity, String)>,
+    text_block: Option<StreamBlockIdentity>,
     pub(crate) usage: LlmUsage,
     pub(crate) provider_usage: Option<Value>,
     pub(crate) tool_calls: HashMap<usize, ChatStreamingToolCall>,
@@ -830,6 +837,10 @@ pub(crate) struct ChatStreamState {
     pub(crate) normal_stop_seen: bool,
     pub(crate) execution_evidence: Option<ExecutionEvidence>,
     pub(crate) tool_argument_decoder: shared::ToolArgumentDecoder,
+    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// so the assembled `LlmResponse` carries the visibility policy forward
+    /// for the runtime's reasoning republication gate.
+    pub(crate) expose_thinking: bool,
 }
 
 impl ChatStreamState {
@@ -890,20 +901,81 @@ impl ChatStreamState {
         )
         .map_err(|error| execution_evidence_error("Chat Completions response", error))
     }
+    fn mint_block(&mut self, prefix: &str) -> StreamBlockIdentity {
+        let ordinal = self.next_block_ordinal;
+        self.next_block_ordinal += 1;
+        StreamBlockIdentity::new(format!("{prefix}:{ordinal}"), ordinal)
+    }
+
+    /// Chat Completions has no explicit reasoning boundary; reasoning text
+    /// precedes assistant text on the wire, so the first prose delta seals
+    /// the open reasoning block with its accumulated text.
+    fn close_reasoning_block(&mut self) {
+        if let Some((block, text)) = self.reasoning_block.take() {
+            self.block_events
+                .push(LlmStreamEvent::ReasoningBlockEnd { block, text });
+        }
+    }
+
     pub(crate) fn push_text_delta(&mut self, piece: &str) {
         if piece.is_empty() {
             return;
         }
+        self.close_reasoning_block();
+        if self.text_block.is_none() {
+            let block = self.mint_block("text");
+            self.block_events.push(LlmStreamEvent::TextBlockStart {
+                block: block.clone(),
+            });
+            self.text_block = Some(block);
+        }
+        let Some(block) = self.text_block.clone() else {
+            return;
+        };
         self.full_text.push_str(piece);
-        self.pending_text_deltas.push(piece.to_string());
+        self.block_events.push(LlmStreamEvent::Delta {
+            block,
+            text: piece.to_string(),
+        });
     }
 
     pub(crate) fn push_reasoning_delta(&mut self, piece: &str) {
         if piece.is_empty() {
             return;
         }
+        if self.reasoning_block.is_none() {
+            let block = self.mint_block("reasoning");
+            self.block_events.push(LlmStreamEvent::ReasoningBlockStart {
+                block: block.clone(),
+            });
+            self.reasoning_block = Some((block, String::new()));
+        }
+        let Some((block, block_text)) = self.reasoning_block.as_mut() else {
+            return;
+        };
         self.reasoning_text.push_str(piece);
-        self.reasoning_deltas.push(piece.to_string());
+        block_text.push_str(piece);
+        self.block_events.push(LlmStreamEvent::ReasoningDelta {
+            block: block.clone(),
+            text: piece.to_string(),
+        });
+    }
+
+    /// Seals any blocks still open when the stream ends, carrying the
+    /// authoritative text accumulated under each.
+    pub(crate) fn finish_blocks(&mut self) -> Vec<LlmStreamEvent> {
+        self.close_reasoning_block();
+        if let Some(block) = self.text_block.take() {
+            self.block_events.push(LlmStreamEvent::TextBlockEnd {
+                block,
+                text: self.full_text.clone(),
+            });
+        }
+        self.take_block_events()
+    }
+
+    pub(crate) fn take_block_events(&mut self) -> Vec<LlmStreamEvent> {
+        std::mem::take(&mut self.block_events)
     }
 
     pub(crate) fn update_tool_call_delta(&mut self, value: &Value) {
@@ -949,14 +1021,6 @@ impl ChatStreamState {
                 }
             }
         }
-    }
-
-    pub(crate) fn take_reasoning_deltas(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.reasoning_deltas)
-    }
-
-    pub(crate) fn take_text_deltas(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending_text_deltas)
     }
 
     fn take_tool_call_parts(&mut self, require_complete_json: bool) -> Vec<LlmOutputPart> {

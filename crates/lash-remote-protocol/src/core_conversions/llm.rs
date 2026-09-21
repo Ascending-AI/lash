@@ -451,6 +451,7 @@ impl RemoteLlmResponse {
             execution_evidence,
             generation_disposition,
             response_metadata,
+            expose_thinking,
         } = value;
         let mut diagnostics = Vec::new();
         if let Some(message) = terminal_diagnostic {
@@ -476,6 +477,7 @@ impl RemoteLlmResponse {
             },
             execution_evidence: execution_evidence.map(Into::into),
             generation_disposition: generation_disposition.map(Into::into),
+            expose_thinking,
         }
     }
 }
@@ -492,6 +494,7 @@ impl From<RemoteLlmResponse> for core_llm::LlmResponse {
             provider_metadata,
             execution_evidence,
             generation_disposition,
+            expose_thinking,
         } = value;
         let RemoteProviderMetadata {
             usage: provider_usage,
@@ -510,6 +513,7 @@ impl From<RemoteLlmResponse> for core_llm::LlmResponse {
             execution_evidence: execution_evidence.map(Into::into),
             generation_disposition: generation_disposition.map(Into::into),
             response_metadata,
+            expose_thinking,
         }
     }
 }

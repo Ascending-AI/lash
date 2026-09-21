@@ -593,7 +593,7 @@ fn text_deltas(events: &Arc<Mutex<Vec<LlmStreamEvent>>>) -> Vec<String> {
         .lock_recover()
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::Delta(text) => Some(text.clone()),
+            LlmStreamEvent::Delta { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect()

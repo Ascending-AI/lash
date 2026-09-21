@@ -204,6 +204,8 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
         | lash_core::TurnEvent::QueuedWorkStarted { .. }
         | lash_core::TurnEvent::AssistantProseDelta { .. }
         | lash_core::TurnEvent::ReasoningDelta { .. }
+        | lash_core::TurnEvent::StreamBlockStarted { .. }
+        | lash_core::TurnEvent::StreamBlockCompleted { .. }
         | lash_core::TurnEvent::ModelCallRecorded { .. }
         | lash_core::TurnEvent::Usage { .. }
         | lash_core::TurnEvent::PluginRuntime { .. } => return None,

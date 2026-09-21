@@ -25,6 +25,10 @@ pub(super) fn synthesize_protocol_abort(
         execution_evidence: Some(execution_evidence.clone()),
         generation_disposition: stream_evidence.generation_disposition,
         response_metadata: stream_evidence.response_metadata.clone(),
+        // Runtime-synthesized abort: the provider policy is unknowable here,
+        // so leave the stamp unset — completed reasoning keeps the legacy
+        // publish behaviour while streamed blocks reconcile by identity.
+        expose_thinking: None,
     };
     stream_accumulator.apply_to_response(&mut response);
     // Usage observed before the abort is a fact; its absence is a typed hole

@@ -78,6 +78,7 @@ fn streamed_activity() -> RemoteTurnActivity {
         correlation_id: "correlation-stream".to_string(),
         event: RemoteTurnEvent::AssistantProseDelta {
             text: "hello".to_string(),
+            block: lash_sansio::llm::types::StreamBlockIdentity::new("text:0", 0),
         },
     }
 }

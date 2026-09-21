@@ -721,7 +721,24 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .protocol_driver
             .project_visible_assistant_prose(&response_text);
         if !text_streamed && !visible_text.is_empty() {
+            // Terminal-finish fallback: the projected remainder arrives as one
+            // block — still a full Started/Delta/Completed lifecycle so hosts
+            // never see an unpaired delta.
+            let block = crate::llm::types::StreamBlockIdentity::new(
+                format!("completed:{}:text", self.protocol_iteration),
+                0,
+            );
+            self.emit(SessionStreamEvent::StreamBlockStarted {
+                kind: crate::llm::types::StreamBlockKind::AssistantText,
+                block: block.clone(),
+            });
             self.emit(SessionStreamEvent::TextDelta {
+                content: visible_text.clone(),
+                block: block.clone(),
+            });
+            self.emit(SessionStreamEvent::StreamBlockCompleted {
+                kind: crate::llm::types::StreamBlockKind::AssistantText,
+                block,
                 content: visible_text.clone(),
             });
         }

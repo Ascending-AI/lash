@@ -623,7 +623,10 @@ where
 
 fn live_replay_text_payload(text: &str) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
-        TurnEvent::AssistantProseDelta { text: text.into() },
+        TurnEvent::AssistantProseDelta {
+            text: text.into(),
+            block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
+        },
     ))
 }
 
@@ -760,7 +763,7 @@ fn assert_live_replay_labels(events: &[Arc<SessionObservationEvent>], expected: 
 fn live_replay_event_label(event: &SessionObservationEvent) -> String {
     match &event.payload {
         SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-            TurnEvent::AssistantProseDelta { text } => format!("text:{text}"),
+            TurnEvent::AssistantProseDelta { text, .. } => format!("text:{text}"),
             other => format!("turn:{other:?}"),
         },
         SessionObservationEventPayload::Committed { .. } => "committed".to_string(),

@@ -519,11 +519,43 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         let mut actions = Vec::new();
 
         if !text_streamed {
-            for part in &response.parts {
-                if let StandardResponsePart::Text { text, .. } = part {
+            // Buffered completions publish the same Started/Delta/Completed
+            // lifecycle the streaming lane emits, with the same identity
+            // scheme (`item_id` where the provider named the item,
+            // `part:{index}` otherwise), so replay and live sessions are
+            // indistinguishable to hosts.
+            let mut ordinal = 0u64;
+            for (part_index, part) in response.parts.iter().enumerate() {
+                if let StandardResponsePart::Text {
+                    text,
+                    response_meta,
+                } = part
+                    && !text.is_empty()
+                {
+                    let item_id = response_meta.as_ref().and_then(|meta| meta.id.clone());
+                    let block = lash_sansio::llm::types::StreamBlockIdentity {
+                        id: item_id
+                            .clone()
+                            .unwrap_or_else(|| format!("part:{part_index}")),
+                        ordinal,
+                        item_id,
+                    };
+                    ordinal += 1;
+                    actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlockStarted {
+                        kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
+                        block: block.clone(),
+                    }));
                     actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
                         content: text.clone(),
+                        block: block.clone(),
                     }));
+                    actions.push(DriverAction::Emit(
+                        SessionStreamEvent::StreamBlockCompleted {
+                            kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
+                            block,
+                            content: text.clone(),
+                        },
+                    ));
                 }
             }
         }

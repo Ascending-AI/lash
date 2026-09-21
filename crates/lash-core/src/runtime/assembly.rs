@@ -8,12 +8,11 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use std::collections::BTreeSet;
-
 use crate::ToolCallRecord;
 use crate::llm::types::{
     LlmOutputPart, LlmResponse, LlmStreamEvent, LlmStreamEvidence, LlmUsage,
-    ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
+    ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta, StreamBlockIdentity,
+    StreamBlockKind,
 };
 use crate::session_model::{MessageRole, PartKind, SessionStreamEvent, TokenUsage};
 use crate::{TurnFinish, TurnOutcome, TurnStop};
@@ -25,96 +24,111 @@ use super::{
 #[derive(Clone, Debug, Default)]
 pub struct LlmStreamAccumulator {
     pub parts: Vec<LlmOutputPart>,
+    /// Provider-minted block id → index into `parts`, so deltas and
+    /// authoritative block ends land on their own block rather than the tail.
+    block_parts: std::collections::HashMap<String, usize>,
 }
 
-/// Reasoning parts already published as live activity during one LLM attempt.
+/// Reasoning blocks already published as live activity during one LLM
+/// attempt.
 ///
-/// Identified parts reconcile by provider item ID. Anonymous delta groups use
-/// provider delivery order; their text is deliberately never compared with
-/// the completed response.
+/// Reconciliation is by block identity alone: a completed item-level
+/// `LlmOutputPart::Reasoning` is already published when every summary entry
+/// of its item had a streamed block. Completed-part text is never compared
+/// with streamed text; the block's `item_id` + position in its item's block
+/// order is the join. Blocks without an `item_id` reconcile positionally
+/// against unstamped completed parts — the one case identity cannot cover.
 #[derive(Clone, Debug, Default)]
 pub(super) struct ReasoningPublicationState {
-    published_parts: Vec<Option<String>>,
-    open_delta_part: Option<usize>,
+    published_blocks: Vec<StreamBlockIdentity>,
 }
 
 impl ReasoningPublicationState {
-    pub(super) fn record_delta(&mut self) {
-        if self.open_delta_part.is_some() {
+    /// Records a reasoning block that streamed (start or delta), so the
+    /// completed part for its item does not re-publish it.
+    pub(super) fn record_streamed_block(&mut self, block: &StreamBlockIdentity) {
+        if self
+            .published_blocks
+            .iter()
+            .any(|published| published.id == block.id)
+        {
             return;
         }
-        self.published_parts.push(None);
-        self.open_delta_part = Some(self.published_parts.len() - 1);
+        self.published_blocks.push(block.clone());
     }
 
-    pub(super) fn record_anonymous_part(&mut self) {
-        self.published_parts.push(None);
-    }
-
-    /// Reconciles the open anonymous delta group with its completed part.
-    ///
-    /// Returns whether a live group was open, in which case the completed part
-    /// is reconciliation state rather than new visible text.
-    pub(super) fn reconcile_completed_part(&mut self, item_id: Option<&str>) -> bool {
-        let Some(index) = self.open_delta_part.take() else {
-            return false;
-        };
-        if let Some(item_id) = item_id.filter(|item_id| !item_id.is_empty()) {
-            self.published_parts[index] = Some(item_id.to_string());
-        }
-        true
-    }
-
-    pub(super) fn record_completed_part(&mut self, item_id: Option<&str>) {
-        self.published_parts.push(
-            item_id
-                .filter(|item_id| !item_id.is_empty())
-                .map(str::to_string),
-        );
-    }
-
-    pub(super) fn published_response_part_indices(
-        &self,
-        parts: &[LlmOutputPart],
-    ) -> BTreeSet<usize> {
-        let mut published = BTreeSet::new();
-
-        // Stable identity takes precedence over positional reconciliation.
-        for item_id in self.published_parts.iter().flatten() {
-            if let Some((index, _)) = parts.iter().enumerate().find(|(index, part)| {
-                !published.contains(index)
-                    && matches!(
-                        part,
-                        LlmOutputPart::Reasoning {
-                            replay: Some(replay),
-                            ..
-                        } if replay.item_id.as_ref() == Some(item_id)
-                    )
-            }) {
-                published.insert(index);
-            }
-        }
-
-        // ReasoningDelta has no wire identity. The stream protocol reconciles
-        // each anonymous live group with the next unmatched completed
-        // reasoning slot in provider delivery order.
-        let mut anonymous_remaining = self
-            .published_parts
+    /// The ordinal where runtime-minted blocks begin: after every live block
+    /// ordinal seen so far.
+    pub(super) fn next_block_ordinal(&self) -> u64 {
+        self.published_blocks
             .iter()
-            .filter(|item_id| item_id.is_none())
-            .count();
-        for (index, part) in parts.iter().enumerate() {
-            if anonymous_remaining == 0 {
-                break;
+            .map(|block| block.ordinal + 1)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Blocks of `part`'s reasoning item that were never streamed and still
+    /// owe the host visible text, minted deterministically from the part.
+    ///
+    /// `part_index` is the part's position in the completed response;
+    /// `next_ordinal` hands out ordinals continuing after the live blocks, so
+    /// persistence and replay order by `ordinal` without parsing `id`.
+    pub(super) fn unpublished_blocks(
+        &self,
+        part_index: usize,
+        part: &LlmOutputPart,
+        next_ordinal: &mut u64,
+    ) -> Vec<(StreamBlockIdentity, String)> {
+        let LlmOutputPart::Reasoning { text, replay } = part else {
+            return Vec::new();
+        };
+        let item_id = replay
+            .as_ref()
+            .and_then(|meta| meta.item_id.as_deref())
+            .filter(|item_id| !item_id.is_empty());
+        let summary = replay
+            .as_ref()
+            .map(|meta| meta.summary.as_slice())
+            .unwrap_or_default();
+        let mut minted = Vec::new();
+        let mut mint = |id: String, item_id: Option<&str>, text: &str| {
+            let block = StreamBlockIdentity {
+                id,
+                ordinal: *next_ordinal,
+                item_id: item_id.map(str::to_string),
+            };
+            *next_ordinal += 1;
+            minted.push((block, text.to_string()));
+        };
+        match item_id {
+            Some(item_id) => {
+                let streamed = self
+                    .published_blocks
+                    .iter()
+                    .filter(|block| block.item_id.as_deref() == Some(item_id))
+                    .count();
+                if summary.is_empty() {
+                    if streamed == 0 && !text.is_empty() {
+                        mint(item_id.to_string(), Some(item_id), text);
+                    }
+                } else {
+                    for (index, entry) in summary.iter().enumerate().skip(streamed) {
+                        mint(format!("{item_id}:summary:{index}"), Some(item_id), entry);
+                    }
+                }
             }
-            if matches!(part, LlmOutputPart::Reasoning { text, .. } if !text.is_empty())
-                && !published.contains(&index)
-            {
-                published.insert(index);
-                anonymous_remaining -= 1;
+            None => {
+                let anonymous_streamed = self
+                    .published_blocks
+                    .iter()
+                    .filter(|block| block.item_id.is_none())
+                    .count();
+                if anonymous_streamed == 0 && !text.is_empty() {
+                    mint(format!("part:{part_index}"), None, text);
+                }
             }
         }
-        published
+        minted
     }
 }
 
@@ -144,6 +158,9 @@ pub(super) struct LlmStreamEventLog<'a> {
     pub(super) event_type: &'a str,
     pub(super) text: LlmDebugText<'a>,
     pub(super) item_id: Option<&'a str>,
+    /// The streamed block's own identity — distinct blocks can share one
+    /// provider `item_id`, so traces need both to keep sub-blocks apart.
+    pub(super) block_id: Option<&'a str>,
     pub(super) usage: Option<&'a LlmUsage>,
     pub(super) tool_call: Option<LlmDebugToolCall<'a>>,
 }
@@ -155,8 +172,13 @@ pub(super) struct LlmStreamState<'a> {
     pub(super) stream_evidence: &'a mut LlmStreamEvidence,
     pub(super) debug: &'a mut LlmStreamDebugState,
     pub(super) protocol_iteration: usize,
-    pub(super) assistant_prose_correlation: &'a mut Option<crate::TurnActivityId>,
-    pub(super) reasoning_correlation: &'a mut Option<crate::TurnActivityId>,
+    /// Reasoning blocks the runtime itself mints for plugin-emitted reasoning
+    /// deltas (providers mint every other block). Counted per call so ids are
+    /// deterministic: `plugin-reasoning:{protocol_iteration}:{n}`.
+    pub(super) plugin_reasoning_blocks: &'a mut u64,
+    /// Position of the next completed `Part` event in the response, used to
+    /// mint deterministic `part:{n}` identities for unstamped completed parts.
+    pub(super) completed_part_index: &'a mut usize,
     pub(super) reasoning_publication: &'a mut ReasoningPublicationState,
     pub(super) assistant_prose_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
     pub(super) reasoning_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
@@ -166,6 +188,12 @@ pub(super) struct LlmStreamState<'a> {
     /// short-circuits the select loop, synthesizing a response from the
     /// already-streamed parts.
     pub(super) abort_requested: &'a mut bool,
+    /// Pre-transform text accumulated per streamed block id. The
+    /// authoritative `TextBlockEnd` payload is reconciled against this raw
+    /// accumulation: a prefix-extending completion forwards only the unseen
+    /// tail through the plugin transform, while a non-prefix correction seals
+    /// with the provider's text verbatim.
+    pub(super) block_raw_text: &'a mut std::collections::HashMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -250,6 +278,9 @@ impl LlmStreamSummary {
 }
 
 impl LlmStreamAccumulator {
+    /// Anonymous tail-append kept for tests that assemble accumulated parts
+    /// without going through provider block events.
+    #[allow(dead_code)]
     pub fn push_text(&mut self, piece: &str) {
         if piece.is_empty() {
             return;
@@ -341,6 +372,9 @@ impl LlmStreamAccumulator {
         });
     }
 
+    /// Anonymous reasoning append kept for tests; production paths carry a
+    /// provider-minted block identity.
+    #[allow(dead_code)]
     pub fn push_reasoning(
         &mut self,
         text: String,
@@ -411,6 +445,147 @@ impl LlmStreamAccumulator {
         self.parts.push(LlmOutputPart::Reasoning { text, replay });
     }
 
+    /// Opens the part slot for a just-started stream block, or returns the
+    /// existing slot when the block id is already known (a delta or end can
+    /// legally arrive at a slot the start already opened).
+    ///
+    /// A block keeps one part slot. For text blocks the provider's message
+    /// item id becomes `response_meta.id` — correlation identity supplied by
+    /// the provider, never minted here. Reasoning blocks carry `item_id` in
+    /// their replay meta so the item-level `Part(Reasoning)` event can
+    /// consolidate them (see [`Self::consolidate_reasoning_item`]); encrypted
+    /// content, signatures, and summary arrive with that item part.
+    fn open_block(&mut self, block: &StreamBlockIdentity, kind: StreamBlockKind) -> usize {
+        if let Some(index) = self.block_parts.get(&block.id) {
+            return *index;
+        }
+        let index = self.parts.len();
+        self.parts.push(match kind {
+            StreamBlockKind::AssistantText => LlmOutputPart::Text {
+                text: String::new(),
+                response_meta: block.item_id.clone().map(|id| ResponseTextMeta {
+                    id: Some(id),
+                    ..ResponseTextMeta::default()
+                }),
+            },
+            StreamBlockKind::Reasoning => LlmOutputPart::Reasoning {
+                text: String::new(),
+                replay: block
+                    .item_id
+                    .clone()
+                    .map(|item_id| ProviderReasoningReplay {
+                        item_id: Some(item_id),
+                        ..ProviderReasoningReplay::default()
+                    }),
+            },
+        });
+        self.block_parts.insert(block.id.clone(), index);
+        index
+    }
+
+    /// The accumulated text currently held for `block`'s part slot — the
+    /// post-transform total matching what deltas forwarded to hosts.
+    pub fn block_text(&self, block: &StreamBlockIdentity) -> Option<String> {
+        let index = self.block_parts.get(&block.id)?;
+        match self.parts.get(*index) {
+            Some(LlmOutputPart::Text { text, .. })
+            | Some(LlmOutputPart::Reasoning { text, .. }) => Some(text.clone()),
+            _ => None,
+        }
+    }
+
+    /// Appends a delta to `block`'s part (`authoritative == false`), or writes
+    /// the block's end-of-stream authoritative text over it
+    /// (`authoritative == true`). The end event seals the block; its text is
+    /// what the provider certifies, including the empty text of a zero-delta
+    /// block (redacted or signed-empty thinking).
+    fn push_block_piece(
+        &mut self,
+        block: &StreamBlockIdentity,
+        kind: StreamBlockKind,
+        text: &str,
+        authoritative: bool,
+    ) {
+        let index = self.open_block(block, kind);
+        match &mut self.parts[index] {
+            LlmOutputPart::Text {
+                text: part_text, ..
+            } if kind == StreamBlockKind::AssistantText => {
+                if authoritative {
+                    *part_text = text.to_string();
+                } else {
+                    append_stream_piece(part_text, text);
+                }
+            }
+            LlmOutputPart::Reasoning {
+                text: part_text, ..
+            } if kind == StreamBlockKind::Reasoning => {
+                if authoritative {
+                    *part_text = text.to_string();
+                } else {
+                    append_stream_piece(part_text, text);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Folds a completed item-level `Reasoning` part over the per-block slots
+    /// its item accumulated while streaming.
+    ///
+    /// `Part(Reasoning)` is pushed first (the newest matching slot is the
+    /// authoritative item part), then every earlier block slot owned by the
+    /// item is removed and the item part takes the earliest slot's position,
+    /// so `parts` stays at item granularity and keeps one copy of the item's
+    /// replay material.
+    fn consolidate_reasoning_item(&mut self, item_id: &str) {
+        let owned = |part: &LlmOutputPart| {
+            matches!(part, LlmOutputPart::Reasoning { replay: Some(replay), .. }
+                if replay.item_id.as_deref() == Some(item_id))
+        };
+        let indices: Vec<usize> = self
+            .parts
+            .iter()
+            .enumerate()
+            .filter(|(_, part)| owned(part))
+            .map(|(index, _)| index)
+            .collect();
+        let Some(&last) = indices.last() else {
+            return;
+        };
+        if indices.len() <= 1 {
+            return;
+        }
+        let item_part = self.parts[last].clone();
+        let keep = indices[0];
+        let removed: std::collections::HashSet<usize> = indices.iter().copied().collect();
+        let mut remap: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::with_capacity(self.parts.len());
+        let mut consolidated = Vec::with_capacity(self.parts.len() - indices.len() + 1);
+        for (old_index, part) in std::mem::take(&mut self.parts).into_iter().enumerate() {
+            if removed.contains(&old_index) {
+                if old_index == keep {
+                    remap.insert(old_index, consolidated.len());
+                    consolidated.push(item_part.clone());
+                }
+                continue;
+            }
+            remap.insert(old_index, consolidated.len());
+            consolidated.push(part);
+        }
+        self.parts = consolidated;
+        // Remap surviving block slots; drop ids whose slot was folded into
+        // the item so a late event for a consolidated block opens fresh
+        // rather than landing on the item part.
+        self.block_parts.retain(|_, index| match remap.get(index) {
+            Some(new_index) => {
+                *index = *new_index;
+                !owned(&self.parts[*index])
+            }
+            None => false,
+        });
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         !self.parts.iter().any(|part| match part {
             LlmOutputPart::Text { text, .. } => !text.is_empty(),
@@ -446,9 +621,23 @@ pub(super) fn fold_llm_stream_event(
             *accumulator = LlmStreamAccumulator::default();
             *usage = LlmUsage::default();
         }
-        LlmStreamEvent::Delta(text) => accumulator.push_text(text),
-        LlmStreamEvent::ReasoningDelta(text) => {
-            accumulator.push_reasoning(text.clone(), None, Vec::new(), None);
+        LlmStreamEvent::TextBlockStart { block } => {
+            accumulator.open_block(block, StreamBlockKind::AssistantText);
+        }
+        LlmStreamEvent::ReasoningBlockStart { block } => {
+            accumulator.open_block(block, StreamBlockKind::Reasoning);
+        }
+        LlmStreamEvent::Delta { block, text } => {
+            accumulator.push_block_piece(block, StreamBlockKind::AssistantText, text, false);
+        }
+        LlmStreamEvent::ReasoningDelta { block, text } => {
+            accumulator.push_block_piece(block, StreamBlockKind::Reasoning, text, false);
+        }
+        LlmStreamEvent::TextBlockEnd { block, text } => {
+            accumulator.push_block_piece(block, StreamBlockKind::AssistantText, text, true);
+        }
+        LlmStreamEvent::ReasoningBlockEnd { block, text } => {
+            accumulator.push_block_piece(block, StreamBlockKind::Reasoning, text, true);
         }
         LlmStreamEvent::Part(LlmOutputPart::Text {
             text,
@@ -466,7 +655,18 @@ pub(super) fn fold_llm_stream_event(
             replay.clone(),
         ),
         LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }) => {
+            let item_id = replay
+                .as_ref()
+                .and_then(|meta| meta.item_id.clone())
+                .filter(|item_id| !item_id.is_empty());
             accumulator.push_reasoning_with_replay(text.clone(), replay.clone());
+            // Streamed blocks of this item sit in per-block part slots. The
+            // completed item part is authoritative at item granularity, so it
+            // supersedes its blocks here — one reasoning item stays one part
+            // with one set of replay material.
+            if let Some(item_id) = item_id {
+                accumulator.consolidate_reasoning_item(&item_id);
+            }
         }
         LlmStreamEvent::Usage(streamed) => *usage = streamed.clone(),
         LlmStreamEvent::Evidence(_) => {}
@@ -551,7 +751,25 @@ fn reconcile_accumulated_parts(
                 }
             }
             LlmOutputPart::Reasoning { .. } => {
-                if !out.iter().any(|candidate| reasoning_matches(candidate, final_part)) {
+                let final_item_id = reasoning_part_item_id(final_part);
+                if let Some(item_id) = final_item_id
+                    && let Some(first) = out
+                        .iter()
+                        .position(|candidate| {
+                            reasoning_part_item_id(candidate) == Some(item_id)
+                        })
+                {
+                    // Per-block slots streamed under this item consolidate
+                    // back to the item-level part — one item, one set of
+                    // replay material — replacing them at their position.
+                    out.retain(|candidate| {
+                        reasoning_part_item_id(candidate) != Some(item_id)
+                    });
+                    out.insert(first.min(out.len()), final_part.clone());
+                } else if !out
+                    .iter()
+                    .any(|candidate| reasoning_matches(candidate, final_part))
+                {
                     out.push(final_part.clone());
                 }
             }
@@ -599,6 +817,19 @@ fn tool_calls_match(candidate: &LlmOutputPart, expected: &LlmOutputPart) -> bool
                 || (item_id.is_some() && expected_item_id.is_some() && item_id == expected_item_id)
         }
         _ => false,
+    }
+}
+
+fn reasoning_part_item_id(part: &LlmOutputPart) -> Option<&str> {
+    match part {
+        LlmOutputPart::Reasoning {
+            replay: Some(replay),
+            ..
+        } => replay
+            .item_id
+            .as_deref()
+            .filter(|item_id| !item_id.is_empty()),
+        _ => None,
     }
 }
 

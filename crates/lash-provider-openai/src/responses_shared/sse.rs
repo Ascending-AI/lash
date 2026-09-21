@@ -46,6 +46,7 @@ pub fn process_sse_event(
         .get("output_index")
         .and_then(Value::as_u64)
         .map(|value| value as usize);
+    let summary_index = event.get("summary_index").and_then(Value::as_u64);
 
     if let Some(response) = event.get("response") {
         state.capture_execution_evidence(response, event_type.is_terminal())?;
@@ -94,6 +95,7 @@ pub fn process_sse_event(
                     .begin_reasoning_part(
                         output_index,
                         event.get("item_id").and_then(Value::as_str),
+                        summary_index,
                     ),
                 ResponsesStreamEvent::ResponseReasoningSummaryTextDelta => {
                     if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
@@ -101,6 +103,7 @@ pub fn process_sse_event(
                             delta,
                             output_index,
                             event.get("item_id").and_then(Value::as_str),
+                            summary_index,
                         );
                     }
                 }
@@ -112,6 +115,7 @@ pub fn process_sse_event(
                             text,
                             output_index,
                             event.get("item_id").and_then(Value::as_str),
+                            summary_index,
                         );
                     }
                 }

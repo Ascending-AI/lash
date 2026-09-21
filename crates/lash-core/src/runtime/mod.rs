@@ -138,7 +138,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::llm::types::{
     LlmOutputPart, LlmProviderTraceEvent, LlmProviderTraceSender, LlmRequest, LlmResponse,
-    LlmStreamEvent, LlmUsage,
+    LlmStreamEvent, LlmUsage, StreamBlockIdentity, StreamBlockKind,
 };
 use crate::plugin::{
     CheckpointHookContext, PrepareTurnRequest, SessionConfigChangedContext, SessionRelation,

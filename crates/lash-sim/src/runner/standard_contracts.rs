@@ -340,7 +340,7 @@ impl StandardContractObserved {
                     self.checkpoints.push(checkpoint_kind_name(*checkpoint));
                 }
                 lash_core::Effect::Emit(
-                    lash_core::facade_support::SessionStreamEvent::TextDelta { content },
+                    lash_core::facade_support::SessionStreamEvent::TextDelta { content, .. },
                 ) => {
                     self.text_deltas.push(content.clone());
                 }

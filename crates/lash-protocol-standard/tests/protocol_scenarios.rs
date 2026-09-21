@@ -522,7 +522,7 @@ impl StandardProtocolRun {
                         }));
                 }
                 Effect::Checkpoint { checkpoint, .. } => self.checkpoints.push(*checkpoint),
-                Effect::Emit(SessionStreamEvent::TextDelta { content }) => {
+                Effect::Emit(SessionStreamEvent::TextDelta { content, .. }) => {
                     self.text_deltas.push(content.clone());
                 }
                 Effect::Emit(SessionStreamEvent::Error { message, .. }) => {

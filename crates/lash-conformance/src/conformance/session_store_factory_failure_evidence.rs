@@ -41,9 +41,10 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         })
         .complete(|request| async move {
             let stream = request.stream_events.expect("stream events");
-            stream.send(lash_sansio::llm::types::LlmStreamEvent::Delta(
-                PARTIAL_TEXT.to_string(),
-            ));
+            stream.send(lash_sansio::llm::types::LlmStreamEvent::Delta {
+                block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: PARTIAL_TEXT.to_string(),
+            });
             let usage = crate::llm::types::LlmUsage {
                 input_tokens: 13,
                 output_tokens: 5,

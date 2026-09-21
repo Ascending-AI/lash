@@ -134,6 +134,7 @@ pub(super) const LASH_ROLLING_HISTORY_THRESHOLD_TOKENS: &str =
 pub(super) const LASH_STORE_OPERATION: &str = "lash.store.operation";
 pub(super) const LASH_STREAM_ELAPSED_MS: &str = "lash.stream.elapsed_ms";
 pub(super) const LASH_STREAM_EVENT_NAME: &str = "lash.stream.event_name";
+pub(super) const LASH_STREAM_BLOCK_ID: &str = "lash.stream.block_id";
 pub(super) const LASH_STREAM_ITEM_ID: &str = "lash.stream.item_id";
 pub(super) const LASH_STREAM_OUTPUT_INDEX: &str = "lash.stream.output_index";
 pub(super) const LASH_STREAM_RAW_CHARS: &str = "lash.stream.raw_chars";

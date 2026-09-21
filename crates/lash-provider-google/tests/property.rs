@@ -110,7 +110,7 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
         ),
         output_spec: None,
         stream_events: Some(LlmEventSender::new(move |event| {
-            if let LlmStreamEvent::Delta(piece) = event {
+            if let LlmStreamEvent::Delta { text: piece, .. } = event {
                 deltas.lock_recover().push(piece);
             }
         })),

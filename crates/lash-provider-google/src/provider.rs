@@ -178,10 +178,12 @@ impl GoogleOAuthProvider {
                 execution_evidence,
                 generation_disposition,
                 response_metadata: response_metadata.into_metadata(),
+                expose_thinking: Some(self.options.expose_thinking),
             });
         }
 
         let mut stream_state = GoogleStreamState::default();
+        stream_state.expose_thinking = self.options.expose_thinking;
         stream_state.execution_evidence =
             provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),
@@ -231,8 +233,8 @@ impl GoogleOAuthProvider {
                             ..Default::default()
                         }));
                     }
-                    for delta in deltas.text_deltas {
-                        tx.send(LlmStreamEvent::Delta(delta));
+                    for event in deltas.text_events {
+                        tx.send(event);
                     }
                     for part in &stream_state.tool_call_parts[first_new_tool_call..] {
                         tx.send(LlmStreamEvent::Part(part.clone()));
@@ -244,11 +246,16 @@ impl GoogleOAuthProvider {
         .await;
 
         if stream_result.is_ok()
-            && self.options.expose_thinking
-            && let Some(event) = stream_state.flush_open_reasoning_part()
             && let Some(tx) = stream_events.as_ref()
         {
-            tx.send(event);
+            if self.options.expose_thinking {
+                for event in stream_state.flush_open_reasoning_part() {
+                    tx.send(event);
+                }
+            }
+            if let Some(event) = stream_state.seal_text_block() {
+                tx.send(event);
+            }
         }
 
         let partial_response = || {
@@ -280,6 +287,7 @@ impl GoogleOAuthProvider {
                 execution_evidence: stream_state.execution_evidence.clone(),
                 generation_disposition,
                 response_metadata: response_metadata.metadata(),
+                expose_thinking: Some(stream_state.expose_thinking),
             }
         };
         if let Err(error) = stream_result {
@@ -335,6 +343,7 @@ impl GoogleOAuthProvider {
             execution_evidence: stream_state.execution_evidence,
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
+            expose_thinking: Some(stream_state.expose_thinking),
         })
     }
 

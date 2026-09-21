@@ -49,6 +49,8 @@ turn_event_tags! {
     ModelRequestStarted => "model_request_started",
     AssistantProseDelta => "assistant_prose_delta",
     ReasoningDelta => "reasoning_delta",
+    StreamBlockStarted => "stream_block_started",
+    StreamBlockCompleted => "stream_block_completed",
     ModelAttemptReset => "model_attempt_reset",
     ModelCallRecorded => "model_call_recorded",
     CodeBlockStarted => "code_block_started",
@@ -64,6 +66,15 @@ turn_event_tags! {
     QueuedInputAccepted => "queued_input_accepted",
     QueuedMessagesCommitted => "queued_messages_committed",
     Error => "error",
+}
+
+fn block_identity(
+    id: &str,
+    ordinal: u64,
+    item_id: Option<&str>,
+) -> lash_core::llm::types::StreamBlockIdentity {
+    lash_core::llm::types::StreamBlockIdentity::new(id, ordinal)
+        .with_item_id(item_id.map(str::to_string))
 }
 
 fn token_usage_sample() -> TokenUsage {
@@ -137,15 +148,53 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         ),
         (
             "assistant_prose_delta",
-            TurnEvent::AssistantProseDelta { text: "hi".into() },
-            json!({ "type": "assistant_prose_delta", "text": "hi" }),
+            TurnEvent::AssistantProseDelta {
+                text: "hi".into(),
+                block: block_identity("msg-1:0", 0, Some("msg-1")),
+            },
+            json!({
+                "type": "assistant_prose_delta",
+                "text": "hi",
+                "block": { "id": "msg-1:0", "ordinal": 0, "item_id": "msg-1" },
+            }),
         ),
         (
             "reasoning_delta",
             TurnEvent::ReasoningDelta {
                 text: "thinking".into(),
+                block: block_identity("rs-1:summary:0", 1, Some("rs-1")),
             },
-            json!({ "type": "reasoning_delta", "text": "thinking" }),
+            json!({
+                "type": "reasoning_delta",
+                "text": "thinking",
+                "block": { "id": "rs-1:summary:0", "ordinal": 1, "item_id": "rs-1" },
+            }),
+        ),
+        (
+            "stream_block_started",
+            TurnEvent::StreamBlockStarted {
+                kind: lash_core::llm::types::StreamBlockKind::Reasoning,
+                block: block_identity("rs-1:summary:1", 2, Some("rs-1")),
+            },
+            json!({
+                "type": "stream_block_started",
+                "kind": "reasoning",
+                "block": { "id": "rs-1:summary:1", "ordinal": 2, "item_id": "rs-1" },
+            }),
+        ),
+        (
+            "stream_block_completed",
+            TurnEvent::StreamBlockCompleted {
+                kind: lash_core::llm::types::StreamBlockKind::AssistantText,
+                block: block_identity("msg-1:0", 3, None),
+                text: "done".into(),
+            },
+            json!({
+                "type": "stream_block_completed",
+                "kind": "assistant_text",
+                "block": { "id": "msg-1:0", "ordinal": 3 },
+                "text": "done",
+            }),
         ),
         (
             "model_attempt_reset",
@@ -589,11 +638,12 @@ fn arc_prose_and_activity_id_preserve_wire_bytes() {
         correlation_id: TurnActivityId::new("prose-1"),
         event: TurnEvent::AssistantProseDelta {
             text: "hello".into(),
+            block: block_identity("prose-1", 0, None),
         },
     };
 
     assert_eq!(
         serde_json::to_vec(&activity).expect("serialize pinned prose activity"),
-        br#"{"id":"activity-1","correlation_id":"prose-1","type":"assistant_prose_delta","text":"hello"}"#,
+        br#"{"id":"activity-1","correlation_id":"prose-1","type":"assistant_prose_delta","text":"hello","block":{"id":"prose-1","ordinal":0}}"#,
     );
 }

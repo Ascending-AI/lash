@@ -2327,7 +2327,7 @@ impl lash_core::facade_support::TurnActivitySink for CancellationGatedTurnEvents
     async fn emit(&self, activity: TurnActivity) {
         if matches!(
             &activity.event,
-            TurnEvent::AssistantProseDelta { text }
+            TurnEvent::AssistantProseDelta { text, .. }
                 if text.as_ref() == "drained before effect abort"
         ) {
             if let Some(entered) = self.entered.lock_recover().take() {

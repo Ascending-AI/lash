@@ -684,7 +684,9 @@ fn complete_buffered_responses(
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder);
-    if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
+    state.expose_thinking = provider.options.expose_thinking;
+    let body_was_sse = text.trim_start().starts_with("data:") || text.contains("\ndata:");
+    if body_was_sse {
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
@@ -741,19 +743,73 @@ fn complete_buffered_responses(
         if state.usage != LlmUsage::default() {
             tx.send(LlmStreamEvent::Usage(state.usage.clone()));
         }
-        if provider.options.expose_thinking {
-            for part in &parts {
-                if let LlmOutputPart::Reasoning { text, .. } = part
-                    && !text.is_empty()
-                {
-                    tx.send(LlmStreamEvent::ReasoningDelta(text.clone()));
-                    tx.send(LlmStreamEvent::Part(part.clone()));
+        if body_was_sse {
+            // The body was itself an SSE payload: the stream events were
+            // already minted while folding it.
+            for event in state.take_block_events() {
+                if !provider.options.expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+            if provider.options.expose_thinking {
+                for part in &parts {
+                    if matches!(part, LlmOutputPart::Reasoning { .. }) {
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
                 }
             }
-        }
-        let full_text = state.full_text();
-        if !full_text.is_empty() {
-            tx.send(LlmStreamEvent::Delta(full_text));
+        } else {
+            let mut next_ordinal = 0u64;
+            if provider.options.expose_thinking {
+                for part in &parts {
+                    if let LlmOutputPart::Reasoning { .. } = part {
+                        for (block, text) in reasoning_part_block_texts(part, &mut next_ordinal) {
+                            if text.is_empty() {
+                                continue;
+                            }
+                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                                block: block.clone(),
+                            });
+                            tx.send(LlmStreamEvent::ReasoningDelta {
+                                block: block.clone(),
+                                text: text.clone(),
+                            });
+                            tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                        }
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
+                }
+            }
+            // Each visible message item is its own text block, mirroring the
+            // live SSE mint (`message:{item_id}` / `text:{ordinal}`).
+            for part in &parts {
+                let LlmOutputPart::Text {
+                    text,
+                    response_meta,
+                } = part
+                else {
+                    continue;
+                };
+                if text.is_empty() {
+                    continue;
+                }
+                let block = crate::responses_shared::text_part_block_identity(
+                    response_meta.as_ref().and_then(|meta| meta.id.as_deref()),
+                    &mut next_ordinal,
+                );
+                tx.send(LlmStreamEvent::TextBlockStart {
+                    block: block.clone(),
+                });
+                tx.send(LlmStreamEvent::Delta {
+                    block: block.clone(),
+                    text: text.clone(),
+                });
+                tx.send(LlmStreamEvent::TextBlockEnd {
+                    block,
+                    text: text.clone(),
+                });
+            }
         }
     }
     Ok(LlmResponse {
@@ -767,6 +823,7 @@ fn complete_buffered_responses(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -779,6 +836,7 @@ fn complete_buffered_chat(
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.expose_thinking = provider.options.expose_thinking;
     let mut parsed_parts = None;
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
         OpenAiCompatibleProvider::parse_chat_sse_payload(&text, &mut state)?;
@@ -805,6 +863,7 @@ fn complete_buffered_chat(
         parsed_parts = Some(parts);
         state.terminal_reason = terminal_reason;
     }
+    let body_was_sse = parsed_parts.is_none();
     let parts = parsed_parts.unwrap_or_else(|| state.parts());
     if stream_termination == Some(StreamTermination::RequireTerminalEvidence)
         && state
@@ -832,15 +891,58 @@ fn complete_buffered_chat(
         if state.usage != LlmUsage::default() {
             tx.send(LlmStreamEvent::Usage(state.usage.clone()));
         }
-        if !state.full_text.is_empty() {
-            tx.send(LlmStreamEvent::Delta(state.full_text.clone()));
-        }
-        if provider.options.expose_thinking {
-            for part in parts
-                .iter()
-                .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
-            {
-                tx.send(LlmStreamEvent::Part(part.clone()));
+        if body_was_sse {
+            // The body was itself an SSE payload: the stream events were
+            // already minted while folding it.
+            for event in state.finish_blocks() {
+                if !provider.options.expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+            if provider.options.expose_thinking {
+                for part in &parts {
+                    if matches!(part, LlmOutputPart::Reasoning { .. }) {
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
+                }
+            }
+        } else {
+            let mut next_ordinal = 0u64;
+            if provider.options.expose_thinking {
+                for part in parts
+                    .iter()
+                    .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
+                {
+                    for (block, text) in reasoning_part_block_texts(part, &mut next_ordinal) {
+                        if text.is_empty() {
+                            continue;
+                        }
+                        tx.send(LlmStreamEvent::ReasoningBlockStart {
+                            block: block.clone(),
+                        });
+                        tx.send(LlmStreamEvent::ReasoningDelta {
+                            block: block.clone(),
+                            text: text.clone(),
+                        });
+                        tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                    }
+                    tx.send(LlmStreamEvent::Part(part.clone()));
+                }
+            }
+            if !state.full_text.is_empty() {
+                let block = StreamBlockIdentity::new(format!("text:{next_ordinal}"), next_ordinal);
+                tx.send(LlmStreamEvent::TextBlockStart {
+                    block: block.clone(),
+                });
+                tx.send(LlmStreamEvent::Delta {
+                    block: block.clone(),
+                    text: state.full_text.clone(),
+                });
+                tx.send(LlmStreamEvent::TextBlockEnd {
+                    block,
+                    text: state.full_text.clone(),
+                });
             }
         }
         for part in parts
@@ -867,6 +969,7 @@ fn complete_buffered_chat(
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -932,6 +1035,7 @@ async fn drive_streaming_responses(
         || ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder),
         |resume| resume.state,
     );
+    state.expose_thinking = provider.options.expose_thinking;
     let mut emitted_parts = Vec::new();
     let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
@@ -978,16 +1082,14 @@ async fn drive_streaming_responses(
             }
             emit_stream_progress(
                 stream_events.as_ref(),
-                state.take_text_deltas(),
+                state
+                    .take_block_events()
+                    .into_iter()
+                    .filter(|event| expose_thinking || !is_reasoning_block_event(event)),
                 &state.usage,
                 &prev_usage,
             );
             if let Some(tx) = &stream_events {
-                for delta in state.take_reasoning_deltas() {
-                    if expose_thinking {
-                        tx.send(LlmStreamEvent::ReasoningDelta(delta));
-                    }
-                }
                 for part in emitted_parts.drain(..) {
                     if matches!(part, LlmOutputPart::Reasoning { .. }) && !expose_thinking {
                         continue;
@@ -996,14 +1098,26 @@ async fn drive_streaming_responses(
                 }
             } else {
                 emitted_parts.clear();
-                state.take_reasoning_deltas();
             }
             Ok(())
         },
     )
     .await;
 
+    let seal_open_blocks = |state: &mut ResponsesStreamState| {
+        if let Some(tx) = &stream_events {
+            for event in state.finish_blocks() {
+                if !expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+        } else {
+            state.finish_blocks();
+        }
+    };
     if let Err(error) = stream_result {
+        seal_open_blocks(&mut state);
         return Err(responses_stream_failure(
             provider,
             request_key,
@@ -1018,6 +1132,7 @@ async fn drive_streaming_responses(
     if stream_termination == StreamTermination::RequireTerminalEvidence
         && !state.terminal_event_seen
     {
+        seal_open_blocks(&mut state);
         return Err(responses_stream_failure(
             provider,
             request_key,
@@ -1033,6 +1148,7 @@ async fn drive_streaming_responses(
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
         ));
     }
+    seal_open_blocks(&mut state);
 
     let parts = state.response_parts();
     let terminal_reason = state
@@ -1060,6 +1176,7 @@ async fn drive_streaming_responses(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -1081,6 +1198,7 @@ async fn drive_streaming_chat(
         ..
     } = context;
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.expose_thinking = provider.options.expose_thinking;
     let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
         body,
@@ -1104,19 +1222,13 @@ async fn drive_streaming_chat(
             }
             emit_stream_progress(
                 stream_events.as_ref(),
-                state.take_text_deltas(),
+                state
+                    .take_block_events()
+                    .into_iter()
+                    .filter(|event| expose_thinking || !is_reasoning_block_event(event)),
                 &state.usage,
                 &prev_usage,
             );
-            if let Some(tx) = &stream_events {
-                for delta in state.take_reasoning_deltas() {
-                    if expose_thinking {
-                        tx.send(LlmStreamEvent::ReasoningDelta(delta));
-                    }
-                }
-            } else {
-                state.take_reasoning_deltas();
-            }
             if let Some(tx) = &stream_events {
                 for part in state.take_completed_tool_call_parts() {
                     tx.send(LlmStreamEvent::Part(part));
@@ -1127,7 +1239,20 @@ async fn drive_streaming_chat(
     )
     .await;
 
+    let seal_open_blocks = |state: &mut ChatStreamState| {
+        if let Some(tx) = &stream_events {
+            for event in state.finish_blocks() {
+                if !expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+        } else {
+            state.finish_blocks();
+        }
+    };
     if let Err(error) = stream_result {
+        seal_open_blocks(&mut state);
         return Err(error.with_partial_response(chat_response_from_state(state, &url)));
     }
 
@@ -1138,6 +1263,7 @@ async fn drive_streaming_chat(
             .and_then(|evidence| evidence.provider_finish_reason.as_ref())
             .is_none()
     {
+        seal_open_blocks(&mut state);
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
             .with_adapter_code(TurnFailureCode::StreamEndedBeforeFinishReason)
@@ -1151,6 +1277,12 @@ async fn drive_streaming_chat(
         ));
     }
     if let Some(tx) = &stream_events {
+        for event in state.finish_blocks() {
+            if !expose_thinking && is_reasoning_block_event(&event) {
+                continue;
+            }
+            tx.send(event);
+        }
         for part in state.take_remaining_tool_call_parts() {
             tx.send(LlmStreamEvent::Part(part));
         }
@@ -1173,6 +1305,7 @@ async fn drive_streaming_chat(
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -1194,5 +1327,6 @@ fn chat_response_from_state(state: ChatStreamState, url: &str) -> LlmResponse {
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: Some(state.expose_thinking),
     }
 }

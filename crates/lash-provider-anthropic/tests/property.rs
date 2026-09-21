@@ -115,8 +115,8 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
         ),
         output_spec: None,
         stream_events: Some(LlmEventSender::new(move |event| {
-            if let LlmStreamEvent::Delta(piece) = event {
-                deltas.lock_recover().push(piece);
+            if let LlmStreamEvent::Delta { text, .. } = event {
+                deltas.lock_recover().push(text);
             }
         })),
         generation: lash_core::GenerationOptions::default(),
