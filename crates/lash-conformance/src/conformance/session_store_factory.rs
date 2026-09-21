@@ -54,6 +54,9 @@ turn_cancel_law! {
     turn_cancel_concurrent_opposing_requests_converge:
         "opposing first requests racing on one address converge on a single \
          accepted policy, durably and across reopen",
+    turn_cancel_wrong_binding_is_refused_at_every_phase:
+        "a closure artifact minted under another binding is refused at every \
+         phase that could carry it across",
 }
 
 /// `make` must return a fresh, empty factory on each call.

@@ -90,9 +90,32 @@ fn closure_authorization(
     proposed: crate::TurnCancelClosureProposal,
     fence: &crate::SessionExecutionLeaseAuthority,
 ) -> crate::TurnCancelClosureAuthorization {
-    let binding_id =
-        crate::turn_control_binding_id_for_scope(TURN_CANCEL_BINDING_ID, &admitted_scope)
-            .expect("bind physical cancellation scope");
+    closure_authorization_under(
+        address,
+        TURN_CANCEL_BINDING_ID,
+        admitted_scope,
+        observed,
+        proposed,
+        fence,
+    )
+}
+
+/// The same authorization minted under a different cancellation authority —
+/// the shape a wrong-binding injection needs, identical in every other field.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn closure_authorization_under(
+    address: &crate::TurnAddress,
+    binding_base: &str,
+    admitted_scope: crate::ExecutionScope,
+    observed: crate::TurnCancelIntentSnapshot,
+    proposed: crate::TurnCancelClosureProposal,
+    fence: &crate::SessionExecutionLeaseAuthority,
+) -> crate::TurnCancelClosureAuthorization {
+    let binding_id = crate::turn_control_binding_id_for_scope(binding_base, &admitted_scope)
+        .expect("bind physical cancellation scope");
     crate::TurnCancelClosureAuthorization::new(
         address.clone(),
         binding_id,
@@ -2230,5 +2253,240 @@ pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
             .request,
         accepted,
         "crash and reopen converge on the same winner",
+    );
+}
+
+/// One wrong binding, injected at each of the four phases a closure passes
+/// through, is refused by the phase — and the refusal costs the right binding
+/// nothing (FIG-3429).
+///
+/// The phases are the pipeline an authorization travels: *selection*
+/// (`validate_turn_cancellation_binding`), *authorize*
+/// (`authorize_turn_cancel_closure`), *enumerate*
+/// (`pending_turn_cancel_closures`), and *settle*
+/// (`TurnCancellationAuthority::settle_authorized_closure`). A leak at any one
+/// of them is enough: an artifact minted under a second binding must not be
+/// selected, persisted, enumerated, or settled as though it were the
+/// session's own.
+///
+/// Each phase is checked twice — the wrong binding refused with its typed
+/// error, then the right binding accepted — because a guard that refused
+/// everything would pass a refusal-only oracle, and a guard that passed
+/// everything would too. The settle phase's differential is the sharpest: a
+/// wrong binding is refused with `InvalidTurnCancelRequest` before the
+/// resolver is ever consulted, while the right binding proceeds past the gate
+/// and fails only on the conformance-fabricated keys with
+/// `TurnControlUnknownOrRevoked` — so a check that skipped the binding
+/// comparison would make the two calls indistinguishable, and this law would
+/// see it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    const OTHER_BINDING_ID: &str = "lash-conformance-turn-cancel-v1-impostor";
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-wrong-binding"),
+        "turn-cancel-wrong-binding-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &request.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "wrong-binding-owner",
+                "wrong-binding-owner:incarnation",
+            ),
+            "wrong-binding-executor",
+            60_000,
+        )
+        .await
+        .expect("claim the closure lane")
+        .acquired()
+        .expect("the closure lane is free");
+    let address = crate::TurnAddress::new(
+        &request.session_id,
+        TurnId::from("turn-cancel-wrong-binding:turn"),
+    );
+    let scope = address.execution_scope();
+
+    // Selection: the first binding persists; the second is refused by name
+    // and — the part a silent "replace" would break — the first still
+    // validates afterwards.
+    store
+        .validate_turn_cancellation_binding(
+            &request.session_id,
+            &lease.fence(),
+            TURN_CANCEL_BINDING_ID,
+            &scope,
+        )
+        .await
+        .expect("the session's binding is selected");
+    assert!(
+        matches!(
+            store
+                .validate_turn_cancellation_binding(
+                    &request.session_id,
+                    &lease.fence(),
+                    OTHER_BINDING_ID,
+                    &scope,
+                )
+                .await,
+            Err(crate::StoreError::TurnCancelBindingMismatch { .. })
+        ),
+        "a second binding is refused by name, not adopted and not replaced"
+    );
+    store
+        .validate_turn_cancellation_binding(
+            &request.session_id,
+            &lease.fence(),
+            TURN_CANCEL_BINDING_ID,
+            &scope,
+        )
+        .await
+        .expect("the refused selection changed nothing");
+
+    // Authorize: the authorization carrying the other binding is refused
+    // before the one carrying the session's binding is accepted — an oracle
+    // that only checks refusal would pass a store that refused everything.
+    // The honest authorization carries real await keys minted by the store's
+    // own resolver, so the settle phase's control is a *successful* closure,
+    // not a downstream error dressed as one.
+    let authority = crate::concrete_turn_cancellation_authority(
+        &store
+            .turn_cancellation_authority()
+            .expect("the store exposes a cancellation authority"),
+    );
+    let resolver = authority.resolver();
+    let authorized = crate::TurnCancelClosureAuthorization::new(
+        address.clone(),
+        crate::turn_control_binding_id_for_scope(TURN_CANCEL_BINDING_ID, &scope)
+            .expect("mint the session binding"),
+        scope.clone(),
+        resolver
+            .await_event_key(&scope, crate::AwaitEventWaitIdentity::TurnCancelGate)
+            .await
+            .expect("mint the cancel key"),
+        resolver
+            .await_event_key(&scope, crate::AwaitEventWaitIdentity::TurnCancelEscalation)
+            .await
+            .expect("mint the escalation key"),
+        resolver
+            .await_event_key(&scope, crate::AwaitEventWaitIdentity::TurnTerminal)
+            .await
+            .expect("mint the terminal key"),
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        crate::TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )
+    .expect("construct the session's own authorization");
+    let impostor = closure_authorization_under(
+        &address,
+        OTHER_BINDING_ID,
+        scope.clone(),
+        crate::TurnCancelIntentSnapshot::Absent,
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        &lease.fence(),
+    );
+    assert!(
+        matches!(
+            store
+                .authorize_turn_cancel_closure(&lease.fence(), &impostor)
+                .await,
+            Err(crate::StoreError::TurnCancelBindingMismatch { .. })
+        ),
+        "an authorization minted under another binding is refused"
+    );
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorized)
+        .await
+        .expect("the session's own authorization is accepted");
+
+    // Enumerate: recovery asks for the session's obligations under a binding;
+    // another binding must not see them — refused, not filtered, so a caller
+    // cannot distinguish "no obligations" from "not yours".
+    assert!(
+        matches!(
+            store
+                .pending_turn_cancel_closures(
+                    &request.session_id,
+                    &lease.fence(),
+                    OTHER_BINDING_ID,
+                    &scope,
+                )
+                .await,
+            Err(crate::StoreError::TurnCancelBindingMismatch { .. })
+        ),
+        "a different binding cannot enumerate the session's obligations"
+    );
+    assert_eq!(
+        store
+            .pending_turn_cancel_closures(
+                &request.session_id,
+                &lease.fence(),
+                TURN_CANCEL_BINDING_ID,
+                &scope,
+            )
+            .await
+            .expect("the session's binding enumerates its obligations"),
+        vec![authorized.clone()],
+        "the obligation survives the refused enumeration untouched"
+    );
+
+    // Settle: the authority side checks the authorization's binding against
+    // what its own identity mints for the admitted scope. Same resolver on
+    // both sides, so the difference is provably the binding — not whose
+    // machinery answered — and the honest call *succeeds*, which a skipped
+    // binding check could never produce for the impostor without also letting
+    // it settle.
+    let impostor_authority =
+        crate::TurnCancellationAuthority::new(OTHER_BINDING_ID, authority.resolver());
+    let wrong = impostor_authority
+        .settle_authorized_closure(&authorized)
+        .await
+        .expect_err("another binding cannot settle the session's closure");
+    assert_eq!(
+        wrong.code,
+        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+        "the refusal names the binding before the resolver is consulted"
+    );
+    let honest_authority =
+        crate::TurnCancellationAuthority::new(TURN_CANCEL_BINDING_ID, authority.resolver());
+    let settlement = honest_authority
+        .settle_authorized_closure(&authorized)
+        .await
+        .expect("the session's own authority settles its closure");
+    assert_eq!(
+        settlement.authorization(),
+        &authorized,
+        "the settlement is authenticated against the same authorization"
+    );
+    store
+        .repair_orphaned_active_turn_inputs(
+            &request.session_id,
+            &lease.fence(),
+            authorized.turn_id(),
+            &crate::TurnCancelIntentSnapshot::Absent,
+            Some(&settlement),
+        )
+        .await
+        .expect("consume the authenticated settlement")
+        .into_applied()
+        .expect("absent intent remains stable");
+    assert_eq!(
+        store
+            .pending_turn_cancel_closures(
+                &request.session_id,
+                &lease.fence(),
+                TURN_CANCEL_BINDING_ID,
+                &scope,
+            )
+            .await
+            .expect("the obligation list still answers"),
+        Vec::new(),
+        "the consumed settlement left no unconsumed obligation"
     );
 }

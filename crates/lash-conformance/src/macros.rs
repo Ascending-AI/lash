@@ -1539,6 +1539,7 @@ macro_rules! session_store_factory_tests {
             (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
             (turn_cancel_conflicting_repeat_leaves_no_durable_trace, "turn-cancel-conflicting-repeat"),
             (turn_cancel_concurrent_opposing_requests_converge, "turn-cancel-concurrent-opposing"),
+            (turn_cancel_wrong_binding_is_refused_at_every_phase, "turn-cancel-wrong-binding"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
