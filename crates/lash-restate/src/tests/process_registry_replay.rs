@@ -1190,12 +1190,14 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
 }
 
 #[tokio::test]
-pub(super) async fn session_turn_cancel_writes_the_cancelled_terminal_on_runner_failure() {
-    // Session processes settle like every other input: a runner failure after
-    // the committed cancellation is masked by the cancelled terminal — there
-    // is no cleanup step left to fail, and the child session stays retained.
+pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure() {
+    // A runner `Err` after the committed cancellation is an infrastructure
+    // failure — possibly a failed final child commit leaving the retained
+    // child's input unsettled — not a settled outcome. Restate must propagate
+    // it so the invocation retries, exactly as native does, instead of
+    // masking it with a `Cancelled` terminal over an unsettled child.
     let runner = Arc::new(CancellationAwareRunner {
-        failure_after_cancel: Some("simulated durable child cleanup failure"),
+        failure_after_cancel: Some("simulated durable child commit failure"),
         ..CancellationAwareRunner::default()
     });
     let registry = process_registry();
@@ -1254,23 +1256,91 @@ pub(super) async fn session_turn_cancel_writes_the_cancelled_terminal_on_runner_
     let outcome = tokio::time::timeout(Duration::from_secs(2), run)
         .await
         .expect("cancelled session turn settles")
-        .expect("join running process")
-        .expect("runner failure is masked by the committed cancellation");
-    assert!(matches!(
-        outcome,
-        lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if is_process_cancellation(output.as_ref())
-    ));
+        .expect("join running process");
+    assert!(
+        outcome.is_err(),
+        "a runner infrastructure failure survives cancellation so the process stays recoverable: {outcome:?}"
+    );
     let record = registry
         .get_process(&ProcessId::from("cancel-cleanup-failure"))
         .await
         .expect("read process after cancellation")
         .expect("process remains registered");
-    assert_eq!(record.status, lash_core::ProcessStatus::Cancelled);
+    assert!(
+        !record.status.is_terminal(),
+        "the process must not terminalize over a runner infrastructure failure: {:?}",
+        record.status
+    );
+}
+
+/// The post-completion arm is the other masking site: a runner that finishes
+/// with an infrastructure error while a durable cancellation lands must keep
+/// the error retryable rather than rewriting it to `Cancelled`.
+#[tokio::test]
+pub(super) async fn session_turn_runner_failure_after_completion_stays_recoverable() {
+    let runner = Arc::new(OpaqueFailureThenSuccessRunner {
+        runs: AtomicUsize::new(0),
+    });
+    let registry = process_registry();
+    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+        Arc::clone(&runner),
+        Arc::clone(&registry),
+        continuation_store(),
+    ));
+    let registration = rerunnable_session_turn_registration("cancel-after-failure");
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register process");
+    registry
+        .append_event(
+            &ProcessId::from("cancel-after-failure"),
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                &registry
+                    .resolve_process_ref(&ProcessId::from("cancel-after-failure"))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:session_turn_runner_failure_after_completion_stays_recoverable",
+                    11,
+                ),
+            ),
+        )
+        .await
+        .expect("append durable cancellation");
+
+    let outcome = workflow
+        .run_registration(
+            registration,
+            ProcessExecutionContext::default(),
+            native_process_scope(&ProcessId::from("cancel-after-failure")),
+            0,
+            None,
+            pending_process_cancel_signal(),
+        )
+        .await;
+    assert!(
+        outcome.is_err(),
+        "a runner error must not be rewritten to Cancelled by the post-completion fence: {outcome:?}"
+    );
+    let record = registry
+        .get_process(&ProcessId::from("cancel-after-failure"))
+        .await
+        .expect("read process after failed run")
+        .expect("process remains registered");
+    assert!(
+        !record.status.is_terminal(),
+        "the process stays recoverable while the runner failure is unsettled: {:?}",
+        record.status
+    );
 }
 
 #[tokio::test]
-pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on_runner_failure() {
+pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure() {
+    // Non-session inputs observe the token inside their own engine; the
+    // substrate never rewrites a runner error to a cancelled terminal, on
+    // Restate exactly as on native.
     let runner = Arc::new(CancellationAwareRunner {
         failure_after_cancel: Some("simulated non-session runner failure"),
         ..CancellationAwareRunner::default()
@@ -1312,8 +1382,17 @@ pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on
     registry
         .append_event(
             &ProcessId::from("non-session-cancel-failure"),
-            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from("non-session-cancel-failure")).await.expect("retained cancellation target"),
-&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:non_session_cancel_preserves_the_prior_cancelled_terminal_on_runner_failure", 11)),
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                &registry
+                    .resolve_process_ref(&ProcessId::from("non-session-cancel-failure"))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:non_session_cancel_propagates_runner_infrastructure_failure",
+                    11,
+                ),
+            ),
         )
         .await
         .expect("append cancel request");
@@ -1322,19 +1401,21 @@ pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on
     let outcome = tokio::time::timeout(Duration::from_secs(2), run)
         .await
         .expect("non-session cancellation settles")
-        .expect("join running process")
-        .expect("non-session runner failure remains masked by cancellation");
-    assert!(matches!(
-        outcome,
-        lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if is_process_cancellation(output.as_ref())
-    ));
+        .expect("join running process");
+    assert!(
+        outcome.is_err(),
+        "a runner infrastructure failure survives cancellation so the process stays recoverable: {outcome:?}"
+    );
     let record = registry
         .get_process(&ProcessId::from("non-session-cancel-failure"))
         .await
         .expect("read process")
         .expect("process remains registered");
-    assert_eq!(record.status, lash_core::ProcessStatus::Cancelled);
+    assert!(
+        !record.status.is_terminal(),
+        "the process must not terminalize over a runner infrastructure failure: {:?}",
+        record.status
+    );
 }
 
 #[tokio::test]

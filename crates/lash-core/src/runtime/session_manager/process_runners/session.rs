@@ -44,7 +44,7 @@ impl RuntimeSessionServices {
         .await
         {
             Ok(run) => {
-                let child_session_id = run.session.session_id.clone();
+                let child_session_id = run.session_id.clone();
                 let state = process_terminal_state_for_turn(&run.turn);
                 Ok(crate::ProcessAwaitOutput::from_tool_output(
                     output_from_process_turn(&registration, &child_session_id, run.turn, state),
@@ -58,39 +58,38 @@ impl RuntimeSessionServices {
                         "process session turn left a retained child session"
                     );
                 }
-                Ok(match err {
+                match err {
+                    // A cancelled output is only produced once the port has
+                    // settled (or never accepted) this turn's child input, so
+                    // the substrate's cancelled terminal cannot strand a
+                    // claimable input inside the retained session.
                     turns::SessionTurnInitError::CancelledBeforeCreate
                     | turns::SessionTurnInitError::CancelledAfterCreate { .. } => {
-                        cancelled_session_turn_output()
+                        Ok(cancelled_session_turn_output())
                     }
-                    turns::SessionTurnInitError::Create { source } => {
-                        crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-                            crate::ToolFailure::tool(
-                                crate::ToolFailureClass::Execution,
-                                "process_session_create_failed",
-                                source.to_string(),
-                            ),
-                        ))
-                    }
+                    // Authority validation is deterministic: retrying the
+                    // attempt cannot change it, so it stays an ordinary
+                    // terminal failure.
                     turns::SessionTurnInitError::Request { source, .. } => {
-                        crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-                            crate::ToolFailure::tool(
+                        Ok(crate::ProcessAwaitOutput::from_tool_output(
+                            crate::ToolCallOutput::failure(crate::ToolFailure::tool(
                                 crate::ToolFailureClass::Execution,
                                 "process_session_turn_scope_failed",
                                 source.to_string(),
-                            ),
+                            )),
                         ))
                     }
-                    turns::SessionTurnInitError::Turn { source, .. } => {
-                        crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-                            crate::ToolFailure::tool(
-                                crate::ToolFailureClass::Execution,
-                                "process_session_turn_failed",
-                                source.to_string(),
-                            ),
-                        ))
+                    // Create, turn-commit, and reconcile failures are
+                    // infrastructure failures: the durable child may hold
+                    // uncommitted or unsettled state. The process must stay
+                    // recoverable so a later attempt can resume or settle the
+                    // child rather than recording a terminal over it.
+                    turns::SessionTurnInitError::Create { source, .. }
+                    | turns::SessionTurnInitError::Turn { source, .. }
+                    | turns::SessionTurnInitError::Reconcile { source, .. } => {
+                        Err(crate::ProcessInfraError::new(*source))
                     }
-                })
+                }
             }
         }
     }
@@ -787,6 +786,279 @@ mod tests {
             "mid-turn",
         ))
         .await;
+    }
+
+    /// A process session-turn fixture that parks the child's first turn inside
+    /// a never-completing tool, returning everything the cancellation
+    /// regressions need. The host runs with a short session-execution-lease
+    /// TTL so a crashed attempt's claim dies quickly.
+    struct ParkedSessionTurn {
+        // The parent runtime owns the managed registry holding the child
+        // runtime; it must stay alive for the fixture's whole span.
+        _runtime: crate::runtime::LashRuntime,
+        services: Arc<crate::runtime::RuntimeSessionServices>,
+        factory: crate::InMemorySessionStoreFactory,
+        process_id: ProcessId,
+        child_session_id: SessionId,
+        create_request: crate::SessionCreateRequest,
+        registration: crate::ProcessRegistration,
+        started: tokio::sync::mpsc::Receiver<()>,
+    }
+
+    async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
+        let child_session_id = SessionId::from(format!("settle-{case}-child"));
+        let process_id = ProcessId::from(format!("process:subagent:settle-{case}"));
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let host = crate::EmbeddedRuntimeHost::new(
+            crate::RuntimeHostConfig::in_memory(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            )
+            .with_lease_timings(
+                crate::LeaseTimings::from_ttl(std::time::Duration::from_millis(120))
+                    .expect("short test lease timings"),
+            ),
+        )
+        .with_session_store_factory(Arc::new(factory.clone()));
+        let (started_tx, started_rx) = tokio::sync::mpsc::channel(1);
+        let transport = mock_provider(vec![MockCall {
+            stream_events: vec![LlmStreamEvent::Part(crate::LlmOutputPart::ToolCall {
+                call_id: format!("park-{case}"),
+                tool_name: "park_forever".to_string(),
+                input_json: "{}".to_string(),
+                replay: None,
+            })],
+            response: Ok(crate::LlmResponse::default()),
+        }]);
+        let runtime = runtime_with_plugins_and_tools_and_host(
+            Vec::new(),
+            Arc::new(ParkForever {
+                started: started_tx,
+            }),
+            transport,
+            host,
+        )
+        .await;
+        let services = runtime
+            .runtime_session_services()
+            .expect("runtime session services");
+        let plugin_init = runtime
+            .session_state_service()
+            .expect("session state")
+            .session_plugin_init(&SessionId::from(runtime.session_id()))
+            .await
+            .expect("plugin init");
+        let create_request = crate::SessionCreateRequest::child_session(
+            runtime.session_id(),
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        )
+        .with_session_id(&child_session_id)
+        .with_plugin_source(crate::SessionPluginSource::ParentFork)
+        .with_plugin_init(plugin_init);
+        let registration = crate::ProcessRegistration::new(
+            &process_id,
+            crate::ProcessInput::SessionTurn {
+                definition_key: "lash-subagent-session-turn:v1".to_string(),
+                create_request: Box::new(create_request.clone()),
+                turn_input: Box::new(crate::TurnInput::text("park the child turn")),
+                output_contract: crate::ToolOutputContract::Static,
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        ParkedSessionTurn {
+            _runtime: runtime,
+            services,
+            factory,
+            process_id,
+            child_session_id,
+            create_request,
+            registration,
+            started: started_rx,
+        }
+    }
+
+    /// A cancelled process whose child's final turn commit fails must stay
+    /// recoverable: the runner surfaces the infrastructure failure instead of
+    /// a terminal tool result, and the retained child keeps its accepted
+    /// input open until a redelivery settles it.
+    #[tokio::test]
+    async fn failed_final_child_commit_cancellation_stays_recoverable() {
+        let fixture = Box::pin(parked_session_turn("commit-failure")).await;
+        let ParkedSessionTurn {
+            services,
+            factory,
+            process_id,
+            child_session_id,
+            create_request,
+            registration,
+            mut started,
+            ..
+        } = fixture;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let mut run = Box::pin(services.run_process_session_turn(
+            registration.clone(),
+            create_request.clone(),
+            crate::TurnInput::text("park the child turn"),
+            native_scope(crate::ExecutionScope::process(&process_id)),
+            cancellation.clone(),
+        ));
+        tokio::select! {
+            started = started.recv() => assert_eq!(started, Some(())),
+            outcome = run.as_mut() => panic!("child turn completed before cancellation: {outcome:?}"),
+        }
+
+        // Fail the cancelled turn's final commit: the child input stays
+        // accepted-and-open, so this attempt must surface the infrastructure
+        // failure rather than a terminal process result.
+        let child_raw = factory
+            .raw_store_for_testing(&child_session_id)
+            .expect("child durable store exists");
+        *child_raw.fail_next_runtime_commit.lock_recover() = Some(crate::StoreError::Contended);
+        cancellation.cancel();
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), run)
+            .await
+            .expect("failed child commit attempt settles");
+        assert!(
+            outcome.is_err(),
+            "a failed final child commit is a recovery-level failure, not a terminal output"
+        );
+
+        // Redelivery after the durable cancellation reconciles the retained
+        // child: once the dead attempt's claim expires, the accepted input is
+        // cancelled durably and the process may terminalize `Cancelled`.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let replay_cancellation = tokio_util::sync::CancellationToken::new();
+        replay_cancellation.cancel();
+        let replay = services
+            .run_process_session_turn(
+                registration,
+                create_request,
+                crate::TurnInput::text("park the child turn"),
+                native_scope(crate::ExecutionScope::process(&process_id)),
+                replay_cancellation,
+            )
+            .await
+            .expect("cancelled redelivery settles the retained child input");
+        assert!(matches!(
+            replay.into_tool_output().outcome,
+            crate::ToolCallOutcome::Cancelled(_)
+        ));
+        assert!(
+            child_raw.raw_session_meta_for_testing().is_some(),
+            "the retained child session row survives the cancelled process"
+        );
+        assert!(
+            child_raw
+                .raw_pending_turn_inputs_for_testing()
+                .iter()
+                .all(|row| row.2.kind().is_terminal() && row.3.is_none()),
+            "the settled child leaves only terminal, unclaimed input receipts"
+        );
+        let child_store = factory
+            .open_existing_store_by_id(&child_session_id)
+            .await
+            .expect("inspect retained child")
+            .expect("retained child store stays openable");
+        assert!(
+            crate::store::TurnInputStore::list_pending_turn_inputs(
+                child_store.as_ref(),
+                &child_session_id,
+            )
+            .await
+            .expect("list retained child inputs")
+            .is_empty(),
+            "no claimable child input remains once the process may terminalize"
+        );
+    }
+
+    /// Crash after the child accepted the turn input, then redelivery with the
+    /// process already durably cancelled: the early-cancelled path reconciles
+    /// the existing child instead of returning blind — the open input is
+    /// settled before the cancelled outcome is produced.
+    #[tokio::test]
+    async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
+        let fixture = Box::pin(parked_session_turn("crash-redelivery")).await;
+        let ParkedSessionTurn {
+            services,
+            factory,
+            process_id,
+            child_session_id,
+            create_request,
+            registration,
+            mut started,
+            ..
+        } = fixture;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let mut run = Box::pin(services.run_process_session_turn(
+            registration.clone(),
+            create_request.clone(),
+            crate::TurnInput::text("park the child turn"),
+            native_scope(crate::ExecutionScope::process(&process_id)),
+            cancellation.clone(),
+        ));
+        tokio::select! {
+            started = started.recv() => assert_eq!(started, Some(())),
+            outcome = run.as_mut() => panic!("child turn completed before the crash: {outcome:?}"),
+        }
+        // The attempt dies mid-turn with the input accepted; the durable
+        // cancellation lands afterwards. The redelivery must reconcile the
+        // retained child's open input before producing the cancelled outcome.
+        drop(run);
+        let child_raw = factory
+            .raw_store_for_testing(&child_session_id)
+            .expect("child durable store exists");
+        // The dead attempt's input claim stays live while the crashed
+        // session-execution-lease generation does; reconcile refuses to
+        // settle over it until the lease expires.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let replay_cancellation = tokio_util::sync::CancellationToken::new();
+        replay_cancellation.cancel();
+        let replay = services
+            .run_process_session_turn(
+                registration,
+                create_request,
+                crate::TurnInput::text("park the child turn"),
+                native_scope(crate::ExecutionScope::process(&process_id)),
+                replay_cancellation,
+            )
+            .await
+            .expect("settled reconcile returns the cancelled outcome");
+        assert!(matches!(
+            replay.into_tool_output().outcome,
+            crate::ToolCallOutcome::Cancelled(_)
+        ));
+        assert!(
+            child_raw.raw_session_meta_for_testing().is_some(),
+            "the retained child session row survives the cancelled process"
+        );
+        assert!(
+            child_raw
+                .raw_pending_turn_inputs_for_testing()
+                .iter()
+                .all(|row| row.2.kind().is_terminal() && row.3.is_none()),
+            "the reconciled child leaves only terminal, unclaimed input receipts"
+        );
+        let child_store = factory
+            .open_existing_store_by_id(&child_session_id)
+            .await
+            .expect("inspect retained child")
+            .expect("retained child store stays openable");
+        assert!(
+            crate::store::TurnInputStore::list_pending_turn_inputs(
+                child_store.as_ref(),
+                &child_session_id,
+            )
+            .await
+            .expect("list retained child inputs")
+            .is_empty(),
+            "no claimable child input remains once the process may terminalize"
+        );
     }
 
     struct PermitSlots(Arc<tokio::sync::Semaphore>);
