@@ -1457,6 +1457,8 @@ fn retained_artifact_refs(checkpoint: &SessionCheckpoint) -> Vec<RetainedArtifac
 mod graph_error_tests;
 #[cfg(test)]
 mod read_failure_tests;
+#[cfg(test)]
+mod rendered_sql_pin_tests;
 
 #[cfg(test)]
 #[path = "tests.rs"]

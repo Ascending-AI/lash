@@ -31,10 +31,15 @@
 //! | SQLite | `?1` | `main.runtime_effect_replay` |
 //! | PostgreSQL | `$1` | `lash_runtime_effect_replay` |
 //!
-//! The SQLite schema qualifier is a render parameter because the retention
-//! sweep reaches the same tables through an `ATTACH`ed database, so the same
-//! statement is rendered once per schema it is read through rather than
-//! rebuilt with `format!` per call.
+//! The SQLite schema qualifier is a property of the **table**, resolved from
+//! the [`TableLayout`] the dialect carries: the retention sweep reaches the
+//! journal's tables through an `ATTACH`ed database while the catalog's stay in
+//! `main`, and the attachment GC joins `main.attachment_manifest` to
+//! `process_registry.processes`. A statement set is rendered once per
+//! deployment layout rather than rebuilt with `format!` per call, and a table
+//! the layout does not place is a startup refusal — which is how a statement
+//! that only a connection with a process registry attached may issue fails to
+//! render for the layout that has none.
 //!
 //! Rendering runs through a tokenizer that understands string literals, quoted
 //! identifiers and comments, so a `?` inside `'…'` and a `$1` inside `--` are
@@ -85,7 +90,10 @@ pub mod attachment;
 pub mod effect;
 pub mod wait;
 
-pub use render::{Dialect, Placeholder, RenderError, Vocabulary, VocabularyTerm, render};
+pub use render::{
+    Dialect, Placeholder, RenderError, SchemaTables, TableLayout, Vocabulary, VocabularyTerm,
+    render,
+};
 
 /// Every table name this crate owns.
 ///
@@ -120,6 +128,11 @@ pub const TABLES: &[&str] = &[
     "graph_nodes",
     "lashlang_artifacts",
     "node_anchors",
+    // The process registry's own table, reached from the session catalog
+    // through an `ATTACH`ed database on SQLite and as `lash_processes` in the
+    // one database on PostgreSQL. The attachment GC's owner-death proof is
+    // SQL over it; FIG-3384 converts the family.
+    "processes",
     "runtime_turn_commits",
     "session_head",
     "sessions",
@@ -137,6 +150,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(artifact::owners::OwnerStatements::NEUTRAL);
     statements.extend_from_slice(artifact::owner_retirements::OwnerRetirementStatements::NEUTRAL);
     statements.extend_from_slice(attachment::manifest::ManifestStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::manifest::ManifestProcessOwnerStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
     statements.extend_from_slice(effect::EffectJournalStatements::NEUTRAL);
     statements.extend_from_slice(effect::replay::ReplayStatements::NEUTRAL);

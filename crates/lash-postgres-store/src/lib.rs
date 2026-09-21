@@ -1182,6 +1182,8 @@ mod graph_integrity_tests;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 mod postgres_test_support;
+#[cfg(test)]
+mod rendered_sql_pin_tests;
 
 #[cfg(test)]
 mod tests;

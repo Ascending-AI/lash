@@ -123,5 +123,146 @@ crate::statements! {
 
         /// Every digest the manifest still roots.
         select_rooted_ids = "SELECT DISTINCT attachment_id FROM attachment_manifest";
+
+        /// Whether digest `?1` still has a live root, with `?2` the
+        /// intent-grace cutoff.
+        ///
+        /// The row is live unless it is eligible for exactly the forget
+        /// [`ManifestStatements::delete_aged_uncommitted`] performs, which is
+        /// why the two carry the same predicate: the delete-time probe and
+        /// the reconciliation sweep cannot be allowed to disagree about what
+        /// a root is. Age alone only retires an unscoped host put; a scoped
+        /// intent needs its owner proven gone.
+        ///
+        /// This is the shape a deployment with no process registry issues.
+        /// The one that can prove a process owner dead is
+        /// [`ManifestProcessOwnerStatements::select_live_root_proving_process_death`], a separate
+        /// statement rather than an optional predicate: neither
+        /// `COALESCE(?N, column)` nor `?N IS NULL OR …` is sargable, and the
+        /// two shapes are two production shapes.
+        select_live_root = "SELECT 1 FROM attachment_manifest AS manifest
+             WHERE manifest.attachment_id = ?1
+               AND NOT (
+                    manifest.committed_at_ms IS NULL
+                    AND manifest.intent_at_ms <= ?2
+                    AND (
+                        manifest.owner_kind IS NULL
+                        OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                                   WHERE deleted.session_id = manifest.session_id)
+                        OR (
+                            {{turn_attachment_owner(manifest.owner_kind)}}
+                            AND EXISTS (
+                                SELECT 1 FROM runtime_turn_commits AS turn_commit
+                                WHERE turn_commit.session_id = manifest.session_id
+                                  AND turn_commit.turn_id <> manifest.owner_id
+                                  AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                            )
+                        )
+                    )
+               )
+             LIMIT 1";
+
+        /// Forget every uncommitted intent older than `?1` whose owner is
+        /// provably gone. The negation of
+        /// [`ManifestStatements::select_live_root`], over every digest at
+        /// once.
+        delete_aged_uncommitted = "DELETE FROM attachment_manifest AS manifest
+             WHERE manifest.committed_at_ms IS NULL
+               AND manifest.intent_at_ms <= ?1
+               AND (
+                    manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
+                    OR (
+                        {{turn_attachment_owner(manifest.owner_kind)}}
+                        AND EXISTS (
+                            SELECT 1 FROM runtime_turn_commits AS turn_commit
+                            WHERE turn_commit.session_id = manifest.session_id
+                              AND turn_commit.turn_id <> manifest.owner_id
+                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                        )
+                    )
+               )";
+    }
+}
+
+crate::statements! {
+    /// The same two operations, for a deployment that can prove a process
+    /// owner dead.
+    ///
+    /// A process-owned intent outlives its session's turn, so age cannot
+    /// retire it; what retires it is the absence of the owning incarnation
+    /// from the process registry. Reading that in the *same* statement is the
+    /// point — a read-process-then-forget pair would race a registration
+    /// across the per-session topology — and on SQLite the registry is a
+    /// different database, reached through an `ATTACH`ed name. That is the
+    /// join a per-statement schema qualifier could not spell and a per-table
+    /// layout can (FIG-3406).
+    ///
+    /// These render only for a layout that places `processes`. A connection
+    /// with no registry bound has no such layout, so it cannot issue them at
+    /// all and conservatively retains process-owned rows rather than guessing
+    /// liveness — the behaviour the `format!`ed pair had, now enforced by the
+    /// renderer instead of by an `if`.
+    pub struct ManifestProcessOwnerStatements @ "attachment_manifest" {
+        /// [`ManifestStatements::select_live_root`] plus the owner-death
+        /// proof.
+        select_live_root_proving_process_death = "SELECT 1 FROM attachment_manifest AS manifest
+             WHERE manifest.attachment_id = ?1
+               AND NOT (
+                    manifest.committed_at_ms IS NULL
+                    AND manifest.intent_at_ms <= ?2
+                    AND (
+                        manifest.owner_kind IS NULL
+                        OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                                   WHERE deleted.session_id = manifest.session_id)
+                        OR (
+                            {{turn_attachment_owner(manifest.owner_kind)}}
+                            AND EXISTS (
+                                SELECT 1 FROM runtime_turn_commits AS turn_commit
+                                WHERE turn_commit.session_id = manifest.session_id
+                                  AND turn_commit.turn_id <> manifest.owner_id
+                                  AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                            )
+                        )
+                        OR (
+                            {{process_attachment_owner(manifest.owner_kind)}}
+                            AND NOT EXISTS (
+                                SELECT 1 FROM processes AS process
+                                WHERE process.process_id = manifest.owner_id
+                                  AND process.incarnation = manifest.owner_incarnation
+                            )
+                        )
+                    )
+               )
+             LIMIT 1";
+
+        /// [`ManifestStatements::delete_aged_uncommitted`] plus the
+        /// owner-death proof.
+        delete_aged_uncommitted_proving_process_death = "DELETE FROM attachment_manifest AS manifest
+             WHERE manifest.committed_at_ms IS NULL
+               AND manifest.intent_at_ms <= ?1
+               AND (
+                    manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
+                    OR (
+                        {{turn_attachment_owner(manifest.owner_kind)}}
+                        AND EXISTS (
+                            SELECT 1 FROM runtime_turn_commits AS turn_commit
+                            WHERE turn_commit.session_id = manifest.session_id
+                              AND turn_commit.turn_id <> manifest.owner_id
+                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                        )
+                    )
+                    OR (
+                        {{process_attachment_owner(manifest.owner_kind)}}
+                        AND NOT EXISTS (
+                            SELECT 1 FROM processes AS process
+                            WHERE process.process_id = manifest.owner_id
+                              AND process.incarnation = manifest.owner_incarnation
+                        )
+                    )
+               )";
     }
 }

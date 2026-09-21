@@ -18,7 +18,8 @@ use std::sync::LazyLock;
 use crate::scope_fence::Schema;
 use lash_sansio::SessionId;
 use lash_store_sql::attachment::condemnation::CondemnationStatements;
-use lash_store_sql::attachment::manifest::ManifestStatements;
+use lash_store_sql::attachment::manifest::{ManifestProcessOwnerStatements, ManifestStatements};
+use lash_store_sql::{SchemaTables, TableLayout, Vocabulary, VocabularyTerm};
 
 use super::*;
 
@@ -96,34 +97,97 @@ lash_store_sql::statements! {
     }
 }
 
+/// The attachment owner classes, spelled once in `lash-core` and named as
+/// tokens by the GC predicates that compare against them.
+const ATTACHMENT_OWNER: Vocabulary = Vocabulary::new(&[
+    VocabularyTerm::new(
+        "turn_attachment_owner",
+        lash_core::store_backend_support::turn_attachment_owner_predicate_sql,
+    ),
+    VocabularyTerm::new(
+        "process_attachment_owner",
+        lash_core::store_backend_support::process_attachment_owner_predicate_sql,
+    ),
+]);
+
+/// The tables the attachment family's statements name that live in the
+/// session catalog: its own two, and the three root sets its GC predicates
+/// consult. Every one of them is in the catalog's own file, so they are
+/// addressed through `main` on the connection that owns it.
+const CATALOG_TABLES: &[&str] = &[
+    lash_store_sql::attachment::manifest::TABLE,
+    lash_store_sql::attachment::condemnation::TABLE,
+    "deleted_sessions",
+    "graph_nodes",
+    "runtime_turn_commits",
+];
+
+/// The session catalog alone: no process registry is bound, so `processes` is
+/// not placed and the statements that prove a process owner dead cannot be
+/// rendered for this layout at all.
+const CATALOG: TableLayout =
+    TableLayout::new(&[SchemaTables::new(Schema::Main.qualifier(), CATALOG_TABLES)]);
+
+/// The session catalog beside a bound process registry.
+///
+/// This is the layout FIG-3406 exists for: one statement addressing
+/// `main.attachment_manifest` and `process_registry.processes`, so the
+/// owner-death proof is part of the same SQLite statement and transaction as
+/// the forget it guards rather than a read-then-forget pair racing a
+/// registration.
+const CATALOG_BESIDE_REGISTRY: TableLayout = TableLayout::new(&[
+    SchemaTables::new(Schema::Main.qualifier(), CATALOG_TABLES),
+    SchemaTables::new(Schema::ProcessRegistry.qualifier(), &["processes"]),
+]);
+
 /// Every attachment-family statement, rendered once.
 pub(crate) struct AttachmentSql {
     /// `attachment_manifest` statements both backends issue verbatim.
     pub(crate) manifest: ManifestStatements,
     /// `attachment_manifest` statements only SQLite issues.
     pub(crate) manifest_sqlite: ManifestSqliteStatements,
+    /// The GC probes that prove a process owner dead, rendered for the layout
+    /// that reaches a bound registry. A store with none never reads them.
+    pub(crate) manifest_process_owner: ManifestProcessOwnerStatements,
     /// `attachment_condemnations` statements both backends issue verbatim.
     pub(crate) condemnation: CondemnationStatements,
     /// `attachment_condemnations` statements only SQLite issues.
     pub(crate) condemnation_sqlite: CondemnationSqliteStatements,
 }
 
-/// Both tables live in the session catalog's own database and are never
-/// reached through an `ATTACH`ed name, so one dialect renders the family —
-/// unlike the effect journal, which is read through two schemas.
+/// The family's own tables live in the session catalog and are never reached
+/// through an `ATTACH`ed name; the process registry its GC consults is. Two
+/// layouts, both rendered once here, and the call site picks by whether a
+/// registry is bound.
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
-    let dialect = Schema::Main.dialect();
+    let catalog = lash_store_sql::Dialect::sqlite(CATALOG).with_vocabulary(ATTACHMENT_OWNER);
+    let beside_registry =
+        lash_store_sql::Dialect::sqlite(CATALOG_BESIDE_REGISTRY).with_vocabulary(ATTACHMENT_OWNER);
     AttachmentSql {
-        manifest: ManifestStatements::render(dialect),
-        manifest_sqlite: ManifestSqliteStatements::render(dialect),
-        condemnation: CondemnationStatements::render(dialect),
-        condemnation_sqlite: CondemnationSqliteStatements::render(dialect),
+        manifest: ManifestStatements::render(catalog),
+        manifest_sqlite: ManifestSqliteStatements::render(catalog),
+        manifest_process_owner: ManifestProcessOwnerStatements::render(beside_registry),
+        condemnation: CondemnationStatements::render(catalog),
+        condemnation_sqlite: CondemnationSqliteStatements::render(catalog),
     }
 });
 
 /// The attachment-family statements, rendered once at first use.
 pub(crate) fn attachment_sql() -> &'static AttachmentSql {
     &ATTACHMENT_SQL
+}
+
+/// The live-root probe this store may issue: the one that proves a process
+/// owner dead only when a registry is attached to read it from.
+fn live_root_sql(process_registry_attached: bool) -> &'static str {
+    if process_registry_attached {
+        attachment_sql()
+            .manifest_process_owner
+            .select_live_root_proving_process_death
+            .sql()
+    } else {
+        attachment_sql().manifest.select_live_root.sql()
+    }
 }
 
 /// Adopt stored references under the boundary transaction.
@@ -195,53 +259,6 @@ pub(crate) fn commit_attachment_refs_conn(
     Ok(())
 }
 
-/// The `EXISTS (...)` body that decides whether one digest still has a live
-/// root, parameterised `?1 = attachment_id`, `?2 = intent_grace_cutoff_ms`.
-/// Shared by the targeted probe and the condemn CAS so the fence and the probe
-/// cannot drift apart.
-fn live_ref_exists_sql(process_registry_attached: bool) -> String {
-    let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
-    let process_dead = if process_registry_attached {
-        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
-        format!(
-            "OR (
-            manifest.owner_kind = '{process_owner_kind}'
-            AND NOT EXISTS (
-                SELECT 1 FROM process_registry.processes AS process
-                WHERE process.process_id = manifest.owner_id
-                  AND process.incarnation = manifest.owner_incarnation
-            )
-        )"
-        )
-    } else {
-        String::new()
-    };
-    format!(
-        "SELECT 1 FROM attachment_manifest AS manifest
-         WHERE manifest.attachment_id = ?1
-           AND NOT (
-                manifest.committed_at_ms IS NULL
-                AND manifest.intent_at_ms <= ?2
-                AND (
-                    manifest.owner_kind IS NULL
-                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                               WHERE deleted.session_id = manifest.session_id)
-                    OR (
-                        manifest.owner_kind = '{turn_owner_kind}'
-                        AND EXISTS (
-                            SELECT 1 FROM runtime_turn_commits AS turn_commit
-                            WHERE turn_commit.session_id = manifest.session_id
-                              AND turn_commit.turn_id <> manifest.owner_id
-                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                        )
-                    )
-                    {process_dead}
-                )
-           )
-         LIMIT 1"
-    )
-}
-
 impl Store {
     /// Enumerate the durable condemnation authority without exposing write
     /// tokens. Persisted phase/provenance combinations are decoded strictly so
@@ -298,12 +315,12 @@ impl Store {
     ) -> Result<lash_core::AttachmentCondemnation, StoreError> {
         let attachment_id = attachment_id.as_str().to_string();
         let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        let live_ref_sql = live_ref_exists_sql(self.process_registry_attached);
+        let live_ref_sql = live_root_sql(self.process_registry_attached);
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<lash_core::AttachmentCondemnation, StoreError> = (|| {
                     let rooted = tx
-                        .query_row(&live_ref_sql, params![attachment_id, cutoff], |_| Ok(()))
+                        .query_row(live_ref_sql, params![attachment_id, cutoff], |_| Ok(()))
                         .optional()
                         .map_err(sqlite_error)?
                         .is_some();
@@ -765,7 +782,22 @@ impl AttachmentManifest for Store {
     ) -> Result<(), StoreError> {
         {
             let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-            let process_registry_attached = self.process_registry_attached;
+            // One conditional DELETE composes age with owner-death proof. The
+            // attached process registry makes the NOT EXISTS predicate part of
+            // this same SQLite statement and transaction, avoiding a
+            // read-process-then-forget race across the per-session topology —
+            // which is why the two shapes are two statements rendered for two
+            // layouts. Without a registry the owner-death statement has no
+            // layout to render for, so process-owned rows are conservatively
+            // retained rather than guessed at.
+            let forget = if self.process_registry_attached {
+                attachment_sql()
+                    .manifest_process_owner
+                    .delete_aged_uncommitted_proving_process_death
+                    .sql()
+            } else {
+                attachment_sql().manifest.delete_aged_uncommitted.sql()
+            };
             self.conn
                 .write(move |tx| {
                     tx.execute(
@@ -775,49 +807,7 @@ impl AttachmentManifest for Store {
                             .sql(),
                         [],
                     )?;
-                    // One conditional DELETE composes age with owner-death proof.
-                    // The attached process DB makes the NOT EXISTS predicate part
-                    // of this same SQLite statement/transaction, avoiding a
-                    // read-process-then-forget race across the per-session topology.
-                    let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
-                    let process_dead = if process_registry_attached {
-                        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
-                        format!(
-                            "OR (
-                            manifest.owner_kind = '{process_owner_kind}'
-                            AND NOT EXISTS (
-                                SELECT 1 FROM process_registry.processes AS process
-                                WHERE process.process_id = manifest.owner_id
-                                  AND process.incarnation = manifest.owner_incarnation
-                            )
-                        )"
-                        )
-                    } else {
-                        // Without a configured process registry, conservatively
-                        // retain process-owned rows rather than guess liveness.
-                        String::new()
-                    };
-                    let sql = format!(
-                        "DELETE FROM attachment_manifest AS manifest
-                         WHERE manifest.committed_at_ms IS NULL
-                           AND manifest.intent_at_ms <= ?1
-                           AND (
-                                manifest.owner_kind IS NULL
-                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                               WHERE deleted.session_id = manifest.session_id)
-                                OR (
-                                    manifest.owner_kind = '{turn_owner_kind}'
-                                    AND EXISTS (
-                                        SELECT 1 FROM runtime_turn_commits AS turn_commit
-                                        WHERE turn_commit.session_id = manifest.session_id
-                                          AND turn_commit.turn_id <> manifest.owner_id
-                                          AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                                    )
-                                )
-                                {process_dead}
-                           )"
-                    );
-                    tx.execute(&sql, params![cutoff])?;
+                    tx.execute(forget, params![cutoff])?;
                     Ok(())
                 })
                 .await
@@ -834,10 +824,10 @@ impl AttachmentManifest for Store {
         {
             let attachment_id = attachment_id.as_str().to_string();
             let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-            let sql = live_ref_exists_sql(self.process_registry_attached);
+            let sql = live_root_sql(self.process_registry_attached);
             self.conn
                 .call(move |conn| {
-                    conn.query_row(&sql, params![attachment_id, cutoff], |_| Ok(()))
+                    conn.query_row(sql, params![attachment_id, cutoff], |_| Ok(()))
                         .optional()
                         .map(|found| found.is_some())
                 })
@@ -882,5 +872,305 @@ impl AttachmentManifest for Store {
                 .await
                 .map_err(sqlite_error)
         }
+    }
+}
+
+#[cfg(test)]
+mod cross_database_plan_tests {
+    use super::*;
+
+    /// The text the live-root probe was built with per call before FIG-3406,
+    /// reproduced verbatim, including the `format!` site's indentation.
+    ///
+    /// It is the oracle: the named statement is meant to be the *same query*,
+    /// not merely a similar one, so the two must plan identically. Whitespace
+    /// is deliberately not matched — an authored statement is indented like
+    /// the block it lives in — which is exactly what makes the comparison a
+    /// test of the plan rather than of the bytes.
+    fn historical_live_ref_sql() -> String {
+        let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
+        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
+        let process_dead = format!(
+            "OR (
+            manifest.owner_kind = '{process_owner_kind}'
+            AND NOT EXISTS (
+                SELECT 1 FROM process_registry.processes AS process
+                WHERE process.process_id = manifest.owner_id
+                  AND process.incarnation = manifest.owner_incarnation
+            )
+        )"
+        );
+        format!(
+            "SELECT 1 FROM attachment_manifest AS manifest
+         WHERE manifest.attachment_id = ?1
+           AND NOT (
+                manifest.committed_at_ms IS NULL
+                AND manifest.intent_at_ms <= ?2
+                AND (
+                    manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
+                    OR (
+                        manifest.owner_kind = '{turn_owner_kind}'
+                        AND EXISTS (
+                            SELECT 1 FROM runtime_turn_commits AS turn_commit
+                            WHERE turn_commit.session_id = manifest.session_id
+                              AND turn_commit.turn_id <> manifest.owner_id
+                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                        )
+                    )
+                    {process_dead}
+                )
+           )
+         LIMIT 1"
+        )
+    }
+
+    /// The historical aged-intent forget, same provenance.
+    fn historical_forget_sql() -> String {
+        let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
+        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
+        let process_dead = format!(
+            "OR (
+                            manifest.owner_kind = '{process_owner_kind}'
+                            AND NOT EXISTS (
+                                SELECT 1 FROM process_registry.processes AS process
+                                WHERE process.process_id = manifest.owner_id
+                                  AND process.incarnation = manifest.owner_incarnation
+                            )
+                        )"
+        );
+        format!(
+            "DELETE FROM attachment_manifest AS manifest
+                         WHERE manifest.committed_at_ms IS NULL
+                           AND manifest.intent_at_ms <= ?1
+                           AND (
+                                manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
+                                OR (
+                                    manifest.owner_kind = '{turn_owner_kind}'
+                                    AND EXISTS (
+                                        SELECT 1 FROM runtime_turn_commits AS turn_commit
+                                        WHERE turn_commit.session_id = manifest.session_id
+                                          AND turn_commit.turn_id <> manifest.owner_id
+                                          AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                                    )
+                                )
+                                {process_dead}
+                           )"
+        )
+    }
+
+    /// A session catalog with a real process registry attached under the name
+    /// production attaches it by, both provisioned from this crate's own
+    /// schema so the planner sees the real indexes.
+    fn catalog_with_registry() -> (tempfile::TempDir, rusqlite::Connection) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let registry_path = directory.path().join("registry.sqlite3");
+        {
+            let registry =
+                rusqlite::Connection::open(&registry_path).expect("open process registry");
+            registry
+                .execute_batch(crate::schema::PROCESS_SCHEMA)
+                .expect("apply the process registry schema");
+            registry
+                .execute_batch(crate::schema_fragments::SCOPE_RETIREMENT_TABLE)
+                .expect("apply the shared fence fragment");
+        }
+        let connection = rusqlite::Connection::open(directory.path().join("catalog.sqlite3"))
+            .expect("open session catalog");
+        connection
+            .execute_batch(crate::schema::SCHEMA)
+            .expect("apply the durable-core schema");
+        connection
+            .execute_batch(crate::schema_fragments::AWAIT_EVENT_TABLES)
+            .expect("apply the shared await-event fragment");
+        connection
+            .execute(
+                "ATTACH DATABASE ?1 AS process_registry",
+                params![registry_path.to_string_lossy().into_owned()],
+            )
+            .expect("attach the process registry");
+        (directory, connection)
+    }
+
+    fn seed(connection: &rusqlite::Connection) {
+        connection
+            .execute_batch(
+                "WITH RECURSIVE n(i) AS (
+                     SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000
+                 )
+                 INSERT INTO attachment_manifest (
+                     attachment_id, session_id, canonical_uri, intent_at_ms,
+                     owner_kind, owner_id, owner_incarnation
+                 )
+                 SELECT printf('blake3:%064d', i), printf('session-%04d', i), 'uri', i,
+                        CASE WHEN i % 2 = 0 THEN 'turn' ELSE 'process' END,
+                        printf('owner-%04d', i),
+                        CASE WHEN i % 2 = 0 THEN NULL ELSE i END
+                 FROM n;
+                 ANALYZE;",
+            )
+            .expect("seed the manifest");
+    }
+
+    fn plan(connection: &rusqlite::Connection, sql: &str, parameters: usize) -> String {
+        let mut statement = connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap_or_else(|error| panic!("prepare `{sql}`: {error}"));
+        let bindings: Vec<rusqlite::types::Value> = (0..parameters)
+            .map(|_| rusqlite::types::Value::Integer(0))
+            .collect();
+        statement
+            .query_map(rusqlite::params_from_iter(bindings), |row| {
+                row.get::<_, String>(3)
+            })
+            .expect("explain")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("explain rows")
+            .join(" | ")
+    }
+
+    /// FIG-3406's load-bearing claim on the hot path: making the probe a
+    /// named, per-table-rendered statement did not change what SQLite does
+    /// with it.
+    #[test]
+    fn the_live_root_probe_and_the_aged_forget_plan_exactly_as_they_did() {
+        let (_directory, connection) = catalog_with_registry();
+        seed(&connection);
+
+        let probe = plan(&connection, live_root_sql(true), 2);
+        assert_eq!(
+            probe,
+            plan(&connection, &historical_live_ref_sql(), 2),
+            "the named live-root probe must plan exactly as the format!ed one did"
+        );
+        let forget = plan(
+            &connection,
+            attachment_sql()
+                .manifest_process_owner
+                .delete_aged_uncommitted_proving_process_death
+                .sql(),
+            1,
+        );
+        assert_eq!(
+            forget,
+            plan(&connection, &historical_forget_sql(), 1),
+            "the named aged-intent forget must plan exactly as the format!ed one did"
+        );
+
+        // And the plan is the one worth keeping: the probe reaches its digest
+        // through an index rather than reading the whole manifest, and the
+        // owner-death proof reaches the attached registry through its primary
+        // key.
+        assert!(
+            probe.contains("idx_attachment_manifest_written")
+                || probe.contains("USING INDEX")
+                || probe.contains("USING COVERING INDEX"),
+            "the live-root probe must find its digest through an index: {probe}"
+        );
+        assert!(
+            !probe.contains("SCAN manifest"),
+            "the live-root probe must not scan the manifest: {probe}"
+        );
+        assert!(
+            probe.contains("process") && probe.contains("INDEX"),
+            "the owner-death proof must reach the registry through an index: {probe}"
+        );
+    }
+
+    /// The shape a store with no registry issues is the same query minus the
+    /// clause it cannot answer — and it plans without ever naming the
+    /// registry, which is the observable half of "unrenderable for that
+    /// layout".
+    #[test]
+    fn the_registryless_probe_never_reaches_the_process_registry() {
+        let (_directory, connection) = catalog_with_registry();
+        seed(&connection);
+
+        let without = live_root_sql(false);
+        assert!(
+            !without.contains("processes"),
+            "a store with no registry must not name the registry's table: {without}"
+        );
+        assert!(!plan(&connection, without, 2).contains("process "));
+        assert!(
+            !attachment_sql()
+                .manifest
+                .delete_aged_uncommitted
+                .sql()
+                .contains("processes")
+        );
+    }
+
+    /// The live-root probe and the reconciliation forget are the same
+    /// predicate asked two ways; a digest that the sweep would forget must be
+    /// exactly a digest the probe reports unrooted, or the GC can delete
+    /// bytes something still roots.
+    #[test]
+    fn the_probe_and_the_forget_agree_on_every_seeded_row() {
+        let (_directory, connection) = catalog_with_registry();
+        connection
+            .execute_batch(
+                "INSERT INTO attachment_manifest
+                     (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id,
+                      owner_incarnation)
+                 VALUES
+                     ('blake3:aged-host', 's1', 'uri', 10, NULL, NULL, NULL),
+                     ('blake3:live-turn', 's2', 'uri', 10, 'turn', 't2', NULL),
+                     ('blake3:dead-process', 's3', 'uri', 10, 'process', 'p3', 7);",
+            )
+            .expect("seed the three owner classes");
+
+        let mut unrooted = Vec::new();
+        for digest in [
+            "blake3:aged-host",
+            "blake3:live-turn",
+            "blake3:dead-process",
+        ] {
+            let rooted = connection
+                .query_row(live_root_sql(true), params![digest, 100_i64], |_| Ok(()))
+                .optional()
+                .expect("probe")
+                .is_some();
+            if !rooted {
+                unrooted.push(digest.to_string());
+            }
+        }
+
+        connection
+            .execute(
+                attachment_sql()
+                    .manifest_process_owner
+                    .delete_aged_uncommitted_proving_process_death
+                    .sql(),
+                params![100_i64],
+            )
+            .expect("forget");
+        let survivors: Vec<String> = {
+            let mut statement = connection
+                .prepare("SELECT attachment_id FROM attachment_manifest ORDER BY attachment_id")
+                .expect("read survivors");
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .expect("rows");
+            rows.collect::<Result<_, _>>().expect("survivors")
+        };
+
+        unrooted.sort();
+        assert_eq!(
+            unrooted,
+            vec![
+                "blake3:aged-host".to_string(),
+                "blake3:dead-process".to_string()
+            ],
+            "an unscoped aged put and a dead process owner are unrooted; a live turn owner is not"
+        );
+        assert_eq!(
+            survivors,
+            vec!["blake3:live-turn".to_string()],
+            "the sweep forgets exactly the digests the probe reported unrooted"
+        );
     }
 }

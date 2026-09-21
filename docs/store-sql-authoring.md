@@ -207,8 +207,8 @@ static EFFECT_SQL: LazyLock<EffectSql> = LazyLock::new(|| {
 pub(crate) fn effect_sql() -> &'static EffectSql { &EFFECT_SQL }
 ```
 
-SQLite reaches the same tables through more than one schema, so it renders one
-set per schema and indexes:
+SQLite reaches the same tables through more than one database, so it renders
+one set per **deployment layout** and indexes:
 
 ```rust
 static EFFECT_SQL: LazyLock<[EffectSql; 3]> = LazyLock::new(|| Schema::ALL.map(EffectSql::render));
@@ -217,17 +217,57 @@ pub(crate) fn effect_sql(schema: Schema) -> &'static EffectSql { &EFFECT_SQL[sch
 ```
 
 `Schema` (`crates/lash-sqlite-store/src/scope_fence.rs`) is `Main`,
-`EffectJournal` or `ProcessRegistry`. A function that used to take a
-`schema: &str` and `format!` its statement takes a `Schema` and indexes
-instead. Call sites read `sql.group.select_by_key.sql()`; `.name()` is the
-statement's reported name for tracing and store metrics.
+`EffectJournal` or `ProcessRegistry`, and it *selects a layout* rather than
+being a qualifier the dialect staples onto every table (FIG-3406). A function
+that used to take a `schema: &str` and `format!` its statement takes a
+`Schema` and indexes instead. Call sites read `sql.group.select_by_key.sql()`;
+`.name()` is the statement's reported name for tracing and store metrics.
+
+### The schema is a property of the table, under a layout
+
+A SQLite `Dialect` carries a [`TableLayout`]: an ordered list of the databases
+this connection reaches and the tables each one holds. The renderer resolves
+**each table name separately**, so one statement can join
+`main.attachment_manifest` to `process_registry.processes`:
+
+```rust
+const CATALOG_TABLES: &[&str] = &[manifest::TABLE, condemnation::TABLE, "deleted_sessions"];
+
+/// The session catalog with a bound process registry attached.
+const CATALOG_BESIDE_REGISTRY: TableLayout = TableLayout::new(&[
+    SchemaTables::new("main", CATALOG_TABLES),
+    SchemaTables::new("process_registry", &["processes"]),
+]);
+```
+
+Three consequences worth knowing before you declare one:
+
+* **A table the layout does not place is a startup refusal**, naming the table
+  and the databases the layout does reach. That is a feature, not a hazard: the
+  attachment family renders the probe that proves a process owner dead only
+  under the layout that has a registry, so the statement a connection with no
+  registry must not issue cannot be rendered for it at all. Two production
+  shapes, two named statements, one layout each.
+* **The first placement wins.** `effect_scope_retirements` lives in both the
+  effect journal and a bound process registry (ADR 0049), so the layout that
+  reaches the registry's copy is a different layout, not a second entry in the
+  same one.
+* **A layout may place every table the crate owns** — that is what
+  `Schema::Main` is, and it is the truth for a deployment whose catalog and
+  journal are one file. It is still per-table resolution; the list is just
+  total.
 
 A family that lives on **one** SQLite connection — the process registry's own
 database — renders once with `Dialect::sqlite_unqualified()` instead, which
 addresses its tables the way they have always been addressed. Keep that: the
 rendered text is what a statement's `INDEXED BY` plan assertions were measured
-against, and the multi-schema `Schema` machinery buys nothing for a family
-reached through one name.
+against, and the layout machinery buys nothing for a family reached through one
+name.
+
+PostgreSQL has no layout: every table is `lash_<table>` in one database, so
+`Dialect::postgres()` qualifies nothing. A statement whose SQLite half needs
+two databases is still one shared statement, because the difference is a render
+axis.
 
 Attach the vocabulary (§3) to the dialect here, once, if the family's
 statements use tokens: `Dialect::postgres().with_vocabulary(PROCESS_LIFECYCLE)`.
