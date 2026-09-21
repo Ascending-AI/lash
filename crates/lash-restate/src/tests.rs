@@ -35,7 +35,7 @@ use lash_core::ProcessClockRebind as _;
 use lash_core::ProcessWorkSubstrate as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
-use lash_core::testing::store_fixtures::durable_admission;
+use lash_core::testing::store_fixtures::{durable_admission, recorded_process_admission};
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress,
     EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,

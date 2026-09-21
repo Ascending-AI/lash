@@ -2084,9 +2084,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             let process_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
                 let controller = RestateRuntimeEffectController::new_for_test(process_task_context);
                 let scoped_effect_controller = controller
-                    .scoped_effect_controller(durable_admission(&ExecutionScope::process(
-                        &process_task_id,
-                    )))
+                    .scoped_effect_controller(
+                        recorded_process_admission(
+                            worker.config().process_registry().as_ref(),
+                            &process_task_id,
+                        )
+                        .await,
+                    )
                     .map_err(TerminalError::from_error)?;
                 let cancellation = tokio_util::sync::CancellationToken::new();
                 let execution_write_authority =

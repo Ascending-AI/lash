@@ -237,7 +237,32 @@ impl<'run> TestExecutionContextBuilder<'run> {
         };
         let effect_controller = match self.effect_controller {
             TestEffectController::Shared(effect_controller) => {
-                crate::runtime::RuntimeEffectControllerHandle::shared(effect_controller)
+                // The admitted pair must match the scope the installed parent
+                // invocation claims: the fixture models the turn driver, which
+                // scopes its controller to the same scope the code-execution
+                // effect runs under, and `HostBridge` refuses a claim/opener
+                // disagreement rather than re-pairing the two halves itself.
+                // A fixture that installs an invocation naming a scope the
+                // unpinned constructors cannot admit (a process scope needs
+                // its incarnation) must hand the builder an already-scoped
+                // `Borrowed` controller instead.
+                let admitted = self
+                    .runtime_parent_invocation
+                    .as_ref()
+                    .and_then(crate::RuntimeInvocation::effect_address)
+                    .and_then(|address| {
+                        crate::AdmittedScope::unpinned(address.execution_scope.clone()).ok()
+                    })
+                    .unwrap_or_else(|| {
+                        crate::AdmittedScope::turn(
+                            self.session_id.clone(),
+                            crate::TurnId::from("test-turn"),
+                        )
+                    });
+                crate::runtime::RuntimeEffectControllerHandle::Shared {
+                    controller: effect_controller,
+                    admitted,
+                }
             }
             TestEffectController::Borrowed(effect_controller) => {
                 crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)

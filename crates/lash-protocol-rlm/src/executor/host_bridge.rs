@@ -76,8 +76,18 @@ pub(super) struct HostBridgeConfig<'run> {
 enum LashlangCellOpener {
     #[error("lashlang cell runs outside a code-execution effect, so it has no logical opener")]
     NoEffect,
-    #[error(transparent)]
-    Admission(lash_core::AdmittedScopeError),
+    /// The effect the cell runs under names a different scope than the
+    /// controller was admitted under — a claim/opener disagreement, refused
+    /// rather than resolved in either direction.
+    #[error(
+        "code-execution effect names scope `{address}` but this execution was admitted under `{admitted}`"
+    )]
+    AddressScope {
+        /// The scope the installed effect address claims.
+        address: String,
+        /// The scope the controller's checked admitted pair carries.
+        admitted: String,
+    },
     #[error(transparent)]
     Scope(lash_core::EffectOpenerError),
 }
@@ -90,28 +100,31 @@ impl<'run> HostBridge<'run> {
         // The opener this cell belongs to and the cell's own key within it,
         // resolved once from the code-execution effect the turn driver
         // installed (`turn_driver/effects.rs` always sets the parent
-        // invocation). The opener is the turn; the replay key is the cell.
-        let admitted_process = config.ctx.admitted_process();
+        // invocation). The opener is the controller's own admitted scope —
+        // the checked pair it already carries — not a pair re-paired here
+        // from a scope claim and a separately read pin. The address must name
+        // that same scope; a disagreement is refused rather than resolved.
+        let admitted_scope = config.ctx.admitted_scope();
         let identities = config
             .ctx
             .parent_invocation()
             .and_then(lash_core::RuntimeInvocation::effect_address)
             .ok_or(LashlangCellOpener::NoEffect)
             .and_then(|address| {
-                lash_core::AdmittedScope::new(
-                    address.execution_scope.clone(),
-                    admitted_process.clone(),
-                )
-                .map_err(LashlangCellOpener::Admission)
-                .and_then(|admitted| {
-                    lash_core::EffectOpener::for_scope(&admitted).map_err(LashlangCellOpener::Scope)
-                })
-                .map(|opener| {
-                    lash_lashlang_runtime::LashlangHostIdentities::cell(
-                        opener,
-                        address.replay_key.clone(),
-                    )
-                })
+                if address.execution_scope != *admitted_scope.scope() {
+                    return Err(LashlangCellOpener::AddressScope {
+                        address: address.execution_scope.id().to_string(),
+                        admitted: admitted_scope.scope().id().to_string(),
+                    });
+                }
+                lash_core::EffectOpener::for_scope(&admitted_scope)
+                    .map_err(LashlangCellOpener::Scope)
+                    .map(|opener| {
+                        lash_lashlang_runtime::LashlangHostIdentities::cell(
+                            opener,
+                            address.replay_key.clone(),
+                        )
+                    })
             });
         Self {
             identities,

@@ -585,15 +585,24 @@ impl DurableProcessWorker {
             "attachment owner must carry the incarnation the authority CAS admitted"
         );
         let admitted_incarnation = admitted.incarnation;
-        // The authority CAS above is the admission: rebind the controller onto
-        // the pair it returned so the incarnation this run carries is always
-        // the admitted one, never whichever record read the caller pinned it
-        // from (ADR 0099 §1).
-        let scoped_effect_controller = scoped_effect_controller
-            .rescope(crate::AdmittedScope::process(
-                crate::ProcessRef::from_record(&admitted),
-            ))
-            .map_err(|err| PluginError::Session(err.to_string()))?;
+        // The authority CAS above is the admission: the controller must
+        // already carry the exact pair it returned, because the caller pinned
+        // it from the same record read. A mismatch means the pin was minted
+        // from a stale record — a same-name successor — which is refused as a
+        // admission error, never relabelled (ADR 0099 §1).
+        let cas_admission =
+            crate::AdmittedScope::process(crate::ProcessRef::from_record(&admitted));
+        if scoped_effect_controller.admitted_scope() != &cas_admission {
+            return Err(PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+                format!(
+                    "process worker for `{}` was pinned to {:?} but the admission CAS admitted {:?}",
+                    registration.id,
+                    scoped_effect_controller.admitted_scope(),
+                    cas_admission,
+                ),
+            )));
+        }
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;

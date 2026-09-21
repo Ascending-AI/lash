@@ -266,7 +266,10 @@ pub mod facade_ops {
 #[cfg(test)]
 mod admitted_scope_tests {
     use super::*;
-    use crate::{AdmittedScopeError, ProcessIncarnation, ProcessRef};
+    use crate::{
+        AdmittedScopeError, ProcessIncarnation, ProcessLifecycle, ProcessRef, ProcessRegistrar,
+        ProcessRetention,
+    };
 
     fn process_ref(name: &str, incarnation: u64) -> ProcessRef {
         ProcessRef::new(
@@ -368,25 +371,102 @@ mod admitted_scope_tests {
         assert!(rescoped.admitted_process().is_none());
     }
 
-    /// The one production rescope onto another process — the process runner
-    /// rebinding its controller onto the incarnation the authority CAS
-    /// admitted — swaps the pin rather than carrying the stale read over.
-    #[test]
-    fn a_rescope_onto_another_incarnation_rebinds_the_pin() {
+    /// A same-name successor incarnation is a different opener, so rescope
+    /// refuses it outright rather than rebinding the pin: the admission a
+    /// controller carries is fixed at construction (ADR 0099 §1). The
+    /// incarnations here come from the real registry — one name registered,
+    /// completed, pruned and registered again — not fabricated sequence
+    /// numbers, so the pair the controller refuses is exactly the pair a
+    /// stale pin would present.
+    #[tokio::test]
+    async fn a_rescope_onto_a_same_name_successor_incarnation_is_refused() {
+        let registry = crate::TestLocalProcessRegistry::default();
+        let process_id = crate::ProcessId::from("worker");
+        let registration = || {
+            crate::ProcessRegistration::new(
+                process_id.clone(),
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            )
+        };
+        let old = registry
+            .register_process(registration())
+            .await
+            .expect("register the old incarnation");
+        registry
+            .complete_process(
+                &process_id,
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::json!("old"),
+                )),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete the old incarnation");
+        registry
+            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune the old incarnation so the name is reusable");
+        let successor = registry
+            .register_process(registration())
+            .await
+            .expect("register the same-name successor incarnation");
+        let old_ref = ProcessRef::from_record(&old);
+        let successor_ref = ProcessRef::from_record(&successor);
+        assert_ne!(old_ref.incarnation, successor_ref.incarnation);
+
         let scoped = ScopedEffectController::shared(
             shared_controller(),
-            AdmittedScope::process(process_ref("worker", 2)),
+            AdmittedScope::process(old_ref.clone()),
         )
         .expect("process scope");
 
-        let rescoped = scoped
-            .rescope(AdmittedScope::process(process_ref("worker", 7)))
-            .expect("rescope onto the admitted incarnation");
+        // Rescoping onto the pin it already carries is still fine — that is
+        // the same admission restated, not a repin.
+        scoped
+            .rescope(AdmittedScope::process(old_ref))
+            .expect("rescope onto the same incarnation");
 
-        assert_eq!(rescoped.admitted_process(), Some(&process_ref("worker", 7)));
+        let error = scoped
+            .rescope(AdmittedScope::process(successor_ref))
+            .err()
+            .expect("the successor incarnation is a different opener");
         assert_eq!(
-            rescoped.execution_scope(),
-            &ExecutionScope::process("worker")
+            error.code,
+            crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused
+        );
+        assert_eq!(
+            scoped.admitted_process(),
+            Some(&ProcessRef::from_record(&old)),
+            "a refused rescope leaves the admitted pair untouched"
+        );
+    }
+
+    /// A non-process controller has no pin a process target could match, so
+    /// it can never rescope into a process controller: process admission only
+    /// exists at construction.
+    #[test]
+    fn a_non_process_controller_cannot_rescope_into_a_process() {
+        let scoped = ScopedEffectController::shared(
+            shared_controller(),
+            AdmittedScope::turn("session-1", "turn-1"),
+        )
+        .expect("turn scope");
+
+        let error = scoped
+            .rescope(AdmittedScope::process(process_ref("worker", 3)))
+            .err()
+            .expect("a turn controller cannot become a process controller");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused
         );
     }
 }

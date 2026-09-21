@@ -418,6 +418,18 @@ impl<'run> RuntimeExecutionContext<'run> {
             .to_string()
     }
 
+    /// The admitted scope this execution's controller carries: the execution
+    /// scope plus, when it is a process, the incarnation it was admitted
+    /// under. This is the checked pair — consumers that need an opener derive
+    /// it from this value rather than re-pairing scope and pin themselves.
+    pub fn admitted_scope(&self) -> crate::AdmittedScope {
+        self.dispatch
+            .effect_controller
+            .scoped()
+            .admitted_scope()
+            .clone()
+    }
+
     /// The process incarnation this execution's scope was admitted under, when
     /// it runs under one.
     ///

@@ -3,17 +3,31 @@ use super::*;
 impl<'run> ScopedEffectController<'run> {
     /// This controller bound to another admitted scope.
     ///
-    /// The admitted process ref is deliberately *not* carried over: it names
-    /// the incarnation of the scope being left, and the new scope is a
-    /// different opener (ADR 0099 §1). The caller passes the complete admitted
-    /// pair — the process runner's rebind onto the incarnation its authority
-    /// CAS admitted (`crates/lash-core/src/runtime/session_manager/process_runners/runner.rs`)
-    /// works through this, as does a managed turn narrowing a session scope to
-    /// its own turn scope.
+    /// A rescope changes the claim address, never the admission: the only
+    /// process target this accepts names the same [`ProcessRef`] the
+    /// controller was already admitted under, and a non-process controller has
+    /// no pin a process target could match, so it cannot rescope into a
+    /// process controller. A same-name successor incarnation is refused rather
+    /// than rebound — ADR 0099 §1 rules that "a retired or mismatched
+    /// incarnation is refused, never rebound to the current process carrying
+    /// the same name". Dropping the pin is fine: a process controller may
+    /// rescope onto a turn or any other unpinned scope, which is what the
+    /// managed turn narrowing a session scope to its own turn scope does.
     pub fn rescope(
         &self,
         admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        if let Some(target) = admitted.process_ref()
+            && self.admitted.process_ref() != Some(target)
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+                format!(
+                    "cannot rescope {existing} onto process incarnation {target}: a scoped controller carries its admission and is never repinned",
+                    existing = self.admitted.scope().id(),
+                ),
+            ));
+        }
         match &self.controller {
             ScopedEffectControllerInner::Borrowed(controller) => {
                 ScopedEffectController::borrowed(*controller, admitted)
