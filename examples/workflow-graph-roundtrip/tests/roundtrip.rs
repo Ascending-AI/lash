@@ -1,3 +1,4 @@
+#[path = "support/catalog_span_oracles.rs"]
 mod catalog_span_oracles;
 
 use std::collections::{BTreeMap, BTreeSet};
