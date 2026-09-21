@@ -13,6 +13,9 @@ pub use lash_core::TestLocalProcessRegistry;
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;
 pub use lash_core::testing::run_tool;
+/// Runs one granted tool call with mock contexts, so a provider's granted
+/// branch is exercisable outside a live turn.
+pub use lash_core::testing::run_tool_granted;
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_tool_context, mock_tool_context_with_execution_binding, test_code_protocol_factories,

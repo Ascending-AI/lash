@@ -551,6 +551,34 @@ impl<'run> crate::AttemptContext<'run> {
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
         )
     }
+
+    /// Test-only projection of a mock tool context onto the granted route:
+    /// the context a call admitted by `grant` executes under. Dispatch
+    /// applies the grant's execution binding and source id together
+    /// (`AttemptAuthority::apply_execution_binding`), so this hook does the
+    /// same rather than leaving the pair to drift in a hand-built fixture.
+    /// Like [`__for_testing`](Self::__for_testing), no completion key is
+    /// reserved: a test harness is not the attempt coordinator.
+    ///
+    /// The double-underscore name is deliberate: this is a fixture hook for
+    /// tests that must stand up a granted attempt context by hand, not part
+    /// of the attempt-context API surface.
+    pub fn __for_granted_source(
+        context: &crate::ToolContext<'run>,
+        execution_scope_id: impl Into<String>,
+        grant: &crate::ToolExecutionGrant,
+    ) -> Self {
+        let context = context
+            .clone()
+            .with_tool_execution_binding(grant.execution_binding.clone())
+            .with_granted_source_id(grant.source_id.clone());
+        Self::from_tool_context(
+            &context,
+            execution_scope_id.into(),
+            None,
+            crate::tool_provider::AttemptCompletionSupport::NotDeclared,
+        )
+    }
 }
 
 /// Project an existing mock host context into the leaf-attempt context. Use
@@ -1616,6 +1644,29 @@ where
         return crate::ToolOutcome::err_fmt(format!("unknown tool: {name}")).into();
     };
     tool.execute(crate::ToolCall::new(&manifest, args, &context))
+        .await
+}
+
+/// Like [`run_tool`], but the attempt context rides the granted route: the
+/// context a call admitted by `grant` executes under in a live turn.
+///
+/// The manifest comes from the grant rather than a catalog lookup —
+/// executing outside Tool Catalog membership is what a
+/// [`crate::ToolExecutionGrant`] is for — and the grant's execution binding
+/// and source id are applied exactly as dispatch applies them, so a
+/// provider's granted branch is exercisable outside a live turn.
+/// [`run_tool`] remains the ungranted, catalog-route variant.
+pub async fn run_tool_granted<P>(
+    tool: &P,
+    grant: &crate::ToolExecutionGrant,
+    args: &serde_json::Value,
+) -> crate::ToolAttemptOutcome
+where
+    P: crate::ToolProvider + ?Sized,
+{
+    let context =
+        crate::AttemptContext::__for_granted_source(&mock_tool_context(), "test-turn", grant);
+    tool.execute(crate::ToolCall::new(grant.manifest(), args, &context))
         .await
 }
 
