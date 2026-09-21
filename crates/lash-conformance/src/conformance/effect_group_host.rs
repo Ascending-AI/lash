@@ -48,6 +48,141 @@ use pretty_assertions::assert_eq;
 /// A caller's whole interaction with one group: open, await, close.
 type Host = Arc<dyn EffectHost>;
 
+/// W1 — a reopen dispatches the **retained accepted membership**, never the
+/// children the reopening caller happened to supply (ADR 0099 §3, crash window
+/// W1).
+///
+/// The window is "after the group open is journaled, before any child is
+/// dispatched": the opener is gone, and a successor holds the group key. Before
+/// §3 the journal held a child *count*, so the successor had no choice but to
+/// re-supply children it could not know, and whatever it passed is what ran.
+///
+/// The law makes that difference observable rather than asserting an internal.
+/// The successor reopens with children carrying **different replay keys**,
+/// staged against their own counter. A host that dispatched the caller's vector
+/// runs them; a host that reconstructs from the journal never touches them and
+/// runs the accepted children instead — which the suite's process-wide staging
+/// table still has executors for, because those envelopes are the ones the
+/// opener staged.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_reopen_dispatches_the_retained_membership<F: Fn() -> Host>(make: &F, prefix: &str) {
+    let opener = make();
+    let scoped = opener
+        .scoped(scope(prefix, "w1-membership"))
+        .expect("a scope binds");
+    let key = group_key(prefix, "w1-membership");
+
+    // Parked children: the group is journaled with its membership retained and
+    // nothing settled, which is exactly the W1 window.
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let handle = scoped
+        .controller()
+        .open_effect_group(staged(
+            group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![counts_then_parks(&accepted), counts_then_parks(&accepted)],
+        ))
+        .await
+        .expect("the group opens");
+    until(|| accepted.load(Ordering::SeqCst) == 2).await;
+    drop(handle);
+    drop(scoped);
+    drop(opener);
+
+    // A successor that never saw the opener's group, reopening with impostors.
+    let successor = make();
+    let scoped = successor
+        .scoped(scope(prefix, "w1-membership"))
+        .expect("a scope binds");
+    let impostor = Arc::new(AtomicUsize::new(0));
+    let reopened = scoped
+        .controller()
+        .open_effect_group(partially_staged(
+            impostor_group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
+            vec![
+                Some(counts_then_parks(&impostor)),
+                Some(counts_then_parks(&impostor)),
+            ],
+        ))
+        .await
+        .expect("a journaled group reopens");
+
+    assert_eq!(
+        reopened.children(),
+        2,
+        "the reopen's arity is the journal's, not the caller's"
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        impostor.load(Ordering::SeqCst),
+        0,
+        "a reopen must dispatch the children the journal retained, not the ones \
+         this caller supplied"
+    );
+    close(&scoped, reopened, RUN)
+        .await
+        .expect("the group closes");
+}
+
+/// A group whose children carry replay keys no accepted child has.
+///
+/// Same key, arity, wake rule and declared disposition, so the durable reopen
+/// fence passes and the only difference left is *which children* the caller
+/// offered.
+fn impostor_group(
+    execution_scope: &ExecutionScope,
+    key: &str,
+    children: usize,
+    wake: GroupWakePolicy,
+    disposition: LoserPolicy,
+) -> RuntimeEffectGroup {
+    RuntimeEffectGroup::try_new(
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(execution_scope.clone(), format!("{key}:group"))
+                .expect("valid group address"),
+            RuntimeAttribution::none(),
+            "group",
+        ),
+        key,
+        (0..children)
+            .map(|position| {
+                RuntimeEffectEnvelope::new(
+                    RuntimeEffectInvocation::new(
+                        EffectAddress::new(
+                            execution_scope.clone(),
+                            format!("{key}:impostor:{position}"),
+                        )
+                        .expect("valid group-child address"),
+                        RuntimeAttribution::none(),
+                        "effect",
+                    ),
+                    RuntimeEffectCommand::LanguageRuntimeValue {
+                        operation: format!("impostor-child-{position}"),
+                    },
+                )
+            })
+            .collect(),
+        wake,
+        disposition,
+    )
+    .expect("a group with at least one child assembles")
+}
+
+/// An executor that records it was dispatched and then never settles.
+fn counts_then_parks(runs: &Arc<AtomicUsize>) -> RuntimeEffectLocalExecutor<'static> {
+    let runs = Arc::clone(runs);
+    RuntimeEffectLocalExecutor::testing(move |_| {
+        let runs = Arc::clone(&runs);
+        async move {
+            runs.fetch_add(1, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+            unreachable!("a parked child is never polled to completion")
+        }
+    })
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
