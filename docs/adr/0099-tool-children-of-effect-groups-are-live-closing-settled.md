@@ -275,15 +275,6 @@ cases are one field with two arms, not two optional fields, because "neither"
 and "both" are not states a child can be in. No retry policy is stored beside
 the manifest, since the manifest already holds it.
 
-**2. Completion routing is recorded, not re-derived.** Completion-key
-preparation answers `Issued | NotNeeded | Unsupported` from two live inputs —
-whether the tool may defer, which consults the live registry or provider, and
-whether the host routes completions durably. Both are deployment facts at
-recovery time and admission facts at formation time. The request records which
-of `inline`, `durable` or `process-lifetime` the child was admitted under, so a
-recovered child never derives a key nothing will resolve; a process-lifetime
-child recovered in another process is a typed refusal, never a fresh key (§14).
-
 **1b. The opener is a typed identity, not a scope.** §1's opener is
 `Turn(session_id, turn_id)` or `Process(ProcessRef { process_id, incarnation })`,
 and `ExecutionScope::Process` carries only `process_id`, so a retained scope
@@ -296,6 +287,15 @@ is free-form text that can spell `{process_id}#{incarnation}` exactly; untagged,
 the two openers would mint one identity. The child's *claim address* stays an
 `ExecutionScope`, which is what the journal fences a row on. An enclosing
 process is likewise a `ProcessRef`, never a bare name.
+
+**2. Completion routing is recorded, not re-derived.** Completion-key
+preparation answers `Issued | NotNeeded | Unsupported` from two live inputs —
+whether the tool may defer, which consults the live registry or provider, and
+whether the host routes completions durably. Both are deployment facts at
+recovery time and admission facts at formation time. The request records which
+of `inline`, `durable` or `process-lifetime` the child was admitted under, so a
+recovered child never derives a key nothing will resolve; a process-lifetime
+child recovered in another process is a typed refusal, never a fresh key (§14).
 
 **2b. The cancellation authority is a validated identity.** It is the value
 `turn_control_binding_id_for_scope` mints and `binding_id_admits_scope` checks —
