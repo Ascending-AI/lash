@@ -95,6 +95,64 @@ impl CellFailure {
     }
 }
 
+/// Why an `exec_code` effect failed before the executor produced a response.
+///
+/// This is the closed classification offline trace analysis keys on; the human
+/// detail lives in [`ExecCodeFailure::message`]. Serialized snake_case on the
+/// durable journal and trace surfaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecCodeFailureReason {
+    /// No code executor is installed on the session.
+    ExecutorUnavailable,
+    /// The executor's language runtime exited unexpectedly.
+    RuntimeStopped,
+    /// Any other session-layer failure; `message` carries the detail.
+    Session,
+    /// A journal entry written before the reason was typed: only the human
+    /// message survived the erasure, so no closed reason can be recovered.
+    Erased,
+}
+
+/// Journaled failure of an `exec_code` effect. `reason` is the closed
+/// classification; `message` is the human-readable detail for operators.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ExecCodeFailure {
+    pub reason: ExecCodeFailureReason,
+    pub message: String,
+}
+
+impl ExecCodeFailure {
+    pub fn new(reason: ExecCodeFailureReason, message: impl Into<String>) -> Self {
+        Self {
+            reason,
+            message: message.into(),
+        }
+    }
+}
+
+// Journal entries written before the failure was typed journaled only the
+// erased message string; those still decode, with the honest `Erased` reason.
+impl<'de> serde::Deserialize<'de> for ExecCodeFailure {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Typed {
+            reason: ExecCodeFailureReason,
+            message: String,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Typed(Typed),
+            Erased(String),
+        }
+        Ok(match Repr::deserialize(deserializer)? {
+            Repr::Typed(Typed { reason, message }) => Self { reason, message },
+            Repr::Erased(message) => Self::new(ExecCodeFailureReason::Erased, message),
+        })
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct Observation {
     pub text: String,
@@ -133,6 +191,28 @@ pub struct PromptUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-2362: journal entries written before the failure was typed carry only
+    /// the erased message string; they still decode, under the honest `erased`
+    /// reason.
+    #[test]
+    fn legacy_erased_exec_code_failure_still_decodes() {
+        let legacy = serde_json::json!("code execution is not available in this session");
+        let decoded: ExecCodeFailure =
+            serde_json::from_value(legacy).expect("legacy erased failure decodes");
+        assert_eq!(decoded.reason, ExecCodeFailureReason::Erased);
+        assert_eq!(
+            decoded.message,
+            "code execution is not available in this session"
+        );
+
+        let typed = ExecCodeFailure::new(ExecCodeFailureReason::RuntimeStopped, "boom");
+        let round_trip: ExecCodeFailure =
+            serde_json::from_value(serde_json::to_value(&typed).expect("encode typed failure"))
+                .expect("typed failure decodes");
+        assert_eq!(round_trip, typed);
+        assert_eq!(round_trip.reason, ExecCodeFailureReason::RuntimeStopped);
+    }
 
     #[test]
     fn legacy_exec_response_payload_with_images_field_still_decodes() {

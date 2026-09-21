@@ -424,7 +424,8 @@ impl RuntimeTurnDriver<'_> {
         code: String,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
-    ) -> Result<Result<crate::ExecResponse, String>, RuntimeEffectControllerError> {
+    ) -> Result<Result<crate::ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError>
+    {
         self.execute_typed_turn_effect(
             machine,
             event_tx,
@@ -652,7 +653,10 @@ impl RuntimeTurnDriver<'_> {
         invocation: crate::RuntimeInvocation,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancellation: &CancellationToken,
-    ) -> Result<Result<crate::ExecResponse, String>, crate::RuntimeEffectControllerError> {
+    ) -> Result<
+        Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        crate::RuntimeEffectControllerError,
+    > {
         let (session_event_tx, mut session_event_rx) = mpsc::channel::<SessionStreamEvent>(100);
         let (turn_event_tx, mut turn_event_rx) = mpsc::channel::<TurnActivity>(100);
         let relay_tx = event_tx.clone();
@@ -707,8 +711,8 @@ impl RuntimeTurnDriver<'_> {
                     },
                 )
                 .await
-                .map_err(|e| e.to_string()),
-            None => Err(crate::SessionError::CodeExecutionUnavailable.to_string()),
+                .map_err(|e| e.to_exec_code_failure()),
+            None => Err(crate::SessionError::CodeExecutionUnavailable.to_exec_code_failure()),
         };
         let nested_effect_error = context.take_nested_effect_error();
         drop(context);

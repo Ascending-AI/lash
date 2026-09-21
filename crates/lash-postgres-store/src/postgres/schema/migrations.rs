@@ -20,6 +20,9 @@ use super::*;
 /// now targets 107. A pre-107 catalog lacks that table rather than contradicting
 /// it, which is why it joins the source-missing lists: the fixture rebuilds an
 /// older published catalog by removing what was introduced above its floor.
+/// Component 108 types the journaled `exec_code` outcome failure (FIG-2362) —
+/// again a journaled-encoding cutover with no relational DDL — so component
+/// 107 is retained as the endpoint and no row targets component 108.
 ///
 /// Component 102's child table is why the cutover is a refusal rather than a
 /// creation migration: a component-101 store recorded the evidence as two

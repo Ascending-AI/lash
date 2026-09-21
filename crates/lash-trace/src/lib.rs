@@ -38,7 +38,9 @@ mod lashlang_graph;
 pub mod otel;
 
 pub use lash_sansio::llm::types::GenerationReceipt;
-pub use lash_sansio::{CellFailure, CellFailureKind, TextProjectionMetadata};
+pub use lash_sansio::{
+    CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
+};
 pub use lashlang_graph::{
     TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
     TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
@@ -105,7 +107,10 @@ pub use lashlang_graph::{
 /// refused instead of decoded — and drops the unreachable `rejected` branch-edge
 /// selection, replacing it with the typed arm the `branch_selected` event
 /// already carried.
-pub const TRACE_SCHEMA_VERSION: u32 = 22;
+/// Version 23 adds a closed [`ExecCodeFailureReason`] to `exec_code_failed` so
+/// the classification survives JSONL and OTel without string-matching the
+/// human-readable `error` text.
+pub const TRACE_SCHEMA_VERSION: u32 = 23;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -445,6 +450,10 @@ pub enum TraceEvent {
         tool_calls: Vec<TraceExecToolCall>,
     },
     ExecCodeFailed {
+        /// Closed failure classification; offline analysis keys on this rather
+        /// than matching `error` prose.
+        reason: ExecCodeFailureReason,
+        /// Human-readable detail. Not a stable classification surface.
         error: String,
     },
     ObservationProjection {

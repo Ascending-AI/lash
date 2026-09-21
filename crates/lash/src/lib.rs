@@ -909,27 +909,27 @@ pub mod tracing {
         facade_support::TraceRecord, facade_support::TraceRuntimeScope,
         facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
     };
-    pub use lash_trace::{
-        StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,
-        TraceToolCallOutput,
-    };
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
     /// can name — match on, take in a signature, or build in a test — what a
     /// `TurnCompleted` or tool-call variant carries. The `LanguageExecution`
     /// variant exists in every build, so its payload types are unconditional
     /// `lash-trace` re-exports rather than `rlm`-gated.
     pub use lash_trace::{
-        TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageDisposition,
-        TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
-        TraceExecutionEvidence, TraceJournaledEffectStatus, TraceLanguageChildExecution,
-        TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-        TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
+        ExecCodeFailureReason, TextProjectionMetadata, TraceAgentFrameSwitch,
+        TraceAttemptUsageDisposition, TraceDurableTimerStatus, TraceDurableWaitResolution,
+        TraceExecToolCall, TraceExecutionEvidence, TraceJournaledEffectStatus,
+        TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
+        TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
         TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
         TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
         TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
         TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome, TraceToolCallStatus,
         TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
         TraceTurnOutcome,
+    };
+    pub use lash_trace::{
+        StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,
+        TraceToolCallOutput,
     };
 }
 

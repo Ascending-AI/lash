@@ -1,7 +1,7 @@
 use super::{
-    CronRegistrationDisposition, CronSessionDisposition, CronTickBasis, WorkbenchCronRequest,
-    classified_embed_handler_error, cron_occurrence_key, cron_session_disposition,
-    emit_cron_occurrence_with_effect_controller,
+    CronRegistrationDisposition, CronSessionDisposition, CronTerminalCode, CronTickBasis,
+    WorkbenchCronRequest, classified_embed_handler_error, cron_occurrence_key,
+    cron_session_disposition, cron_terminal_error, emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
 use lash::ProcessId;
