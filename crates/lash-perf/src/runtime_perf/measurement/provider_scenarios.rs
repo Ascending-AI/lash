@@ -89,168 +89,91 @@ pub(super) async fn run_once_direct_llm_client(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::DirectLlmClient;
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
+    let mut client = run
+        .build(async {
+            let provider =
+                crate::runtime_perf::providers::benchmark_provider(scenario).into_handle();
+            Ok(lash::direct::DirectLlmClient::new(provider))
+        })
+        .await?;
+    run.seed(async { Ok(()) }).await?;
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let provider = crate::runtime_perf::providers::benchmark_provider(scenario).into_handle();
-    let mut client = lash::direct::DirectLlmClient::new(provider);
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
-
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
-
-    let mut turns = Vec::with_capacity(chat_turns);
     let mut response_bytes = 0usize;
     for turn_index in 0..chat_turns {
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let response = runtime_perf_timed(
-            scenario,
+        run.turn_then(
             turn_index,
-            "direct_llm_client.complete",
-            None,
             async {
-                client
-                    .complete(direct_llm_client_request(turn_index))
-                    .await
-                    .map_err(anyhow::Error::from)
+                let response = runtime_perf_timed(
+                    scenario,
+                    turn_index,
+                    "direct_llm_client.complete",
+                    None,
+                    async {
+                        client
+                            .complete(direct_llm_client_request(turn_index))
+                            .await
+                            .map_err(anyhow::Error::from)
+                    },
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "run runtime perf scenario {} turn {}",
+                        scenario.name(),
+                        turn_index + 1
+                    )
+                })?;
+                validate_direct_llm_response(turn_index, &response)?;
+                response_bytes += response.full_text().len();
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        turn_usage: token_usage_from_llm_usage(&response.usage),
+                        ..TurnTail::default()
+                    },
+                })
+            },
+            async {
+                tokio::task::yield_now().await;
+                Ok(())
+            },
+            |_, spans, tail| {
+                tail.phase_profile.insert(
+                    "direct_llm_client.complete".to_string(),
+                    RuntimePerfPhaseRunResult {
+                        samples: 1,
+                        duration_ms: spans.run.duration_ms,
+                        allocations: spans.run.allocations.clone(),
+                        rss_growth_kb: diff_opt_i64(
+                            spans.run.memory_before.rss_kb,
+                            spans.run.memory_after.rss_kb,
+                        ),
+                    },
+                );
+                Ok(())
             },
         )
-        .await
-        .with_context(|| {
-            format!(
-                "run runtime perf scenario {} turn {}",
-                scenario.name(),
-                turn_index + 1
-            )
-        })?;
-        validate_direct_llm_response(turn_index, &response)?;
-        response_bytes += response.full_text().len();
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        tokio::task::yield_now().await;
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        let mut phase_profile = BTreeMap::new();
-        phase_profile.insert(
-            "direct_llm_client.complete".to_string(),
-            RuntimePerfPhaseRunResult {
-                samples: 1,
-                duration_ms: run_turn_ms,
-                allocations: run_turn_alloc.clone(),
-                rss_growth_kb: diff_opt_i64(turn_before_memory.rss_kb, after_turn_memory.rss_kb),
-            },
-        );
-
-        turns.push(RuntimePerfTurnResult {
-            turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: memory_span(turn_before_memory, after_await_memory),
-            phase_profile,
-            turn_usage: token_usage_from_llm_usage(&response.usage),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
-        });
+        .await?;
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let _export_shape = serde_json::json!({
-        "response_bytes": response_bytes,
-        "responses": turns.len(),
+    let turns_count = run.turns().len();
+    run.export(async {
+        let _export_shape = serde_json::json!({
+            "response_bytes": response_bytes,
+            "responses": turns_count,
+        })
+        .to_string();
+        Ok(())
     })
-    .to_string();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
+    .await?;
 
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
-        session_nodes: 0,
+    Ok(run.finish(RunTail {
         active_path_messages: chat_turns,
         extra_counters: BTreeMap::from([
             ("response_bytes".to_string(), response_bytes as u64),
-            ("responses".to_string(), turns.len() as u64),
+            ("responses".to_string(), turns_count as u64),
         ]),
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: memory_span(before_memory, after_export_memory),
-        phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turns,
-        cumulative_usage: SessionUsageReport::default(),
-    })
+        ..RunTail::default()
+    }))
 }
