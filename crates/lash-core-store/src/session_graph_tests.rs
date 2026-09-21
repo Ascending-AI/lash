@@ -1,3 +1,8 @@
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 use crate::facade_support::AgentFrameReasonFacadeOps;
 use crate::{GraphAppend, MessageRole, Part, shared_parts};
@@ -693,6 +698,59 @@ fn message_tree_marks_active_nodes_without_using_message_identity() {
     assert!(!tree[0].children[0].active);
     assert_eq!(tree[0].children[1].node_id, active);
     assert!(tree[0].children[1].active);
+}
+
+/// FIG-1641 witness: sibling order is authoritative history order, not a
+/// timestamp sort. Two message siblings are separated in the graph by a plugin
+/// node, and their timestamps are skewed against generation order — a
+/// timestamp sort would invert them, so generation order must win.
+#[test]
+fn message_tree_orders_siblings_by_graph_position_not_timestamp() {
+    let mut graph = SessionGraph::default();
+    let parent = graph
+        .append_node_drafts_at(
+            "witness-parent",
+            [SessionNodeDraft::message(text_message(
+                "parent",
+                MessageRole::User,
+                "shared parent",
+            ))],
+            "2026-09-12T00:00:00Z".to_string(),
+        )
+        .remove(0);
+    let older_sibling = graph
+        .append_node_drafts_at(
+            "witness-older-sibling",
+            [SessionNodeDraft::message(text_message(
+                "older",
+                MessageRole::User,
+                "appended first, stamped late",
+            ))],
+            "2026-09-12T00:00:02Z".to_string(),
+        )
+        .remove(0);
+    graph.append_plugin("witness-plugin", serde_json::json!({"separates": true}));
+    graph = SessionGraph::from_nodes(graph.nodes.clone(), Some(parent))
+        .expect("reselect the shared parent as leaf");
+    let younger_sibling = graph
+        .append_node_drafts_at(
+            "witness-younger-sibling",
+            [SessionNodeDraft::message(text_message(
+                "younger",
+                MessageRole::User,
+                "appended last, stamped early",
+            ))],
+            "2026-09-12T00:00:01Z".to_string(),
+        )
+        .remove(0);
+
+    let tree = graph.message_tree();
+    assert_eq!(tree.len(), 1);
+    let children = &tree[0].children;
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].node_id, older_sibling);
+    assert_eq!(children[1].node_id, younger_sibling);
+    assert!(children[0].timestamp > children[1].timestamp);
 }
 
 #[test]

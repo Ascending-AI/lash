@@ -9,6 +9,11 @@
 //! stores/registry. Peer coherence rejects mixed durable session stores with
 //! inline attachment or artifact stores, so the cases stay tier-consistent.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 use crate::testing::conformance::{RuntimeRebuildBackend, runtime_rebuild_and_worker_recovery};
 

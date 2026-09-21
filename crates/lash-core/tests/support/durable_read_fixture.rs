@@ -228,6 +228,11 @@
 //! after each pass. Released-pin reproducibility starts with the next published alpha;
 //! until then, the committed generators at HEAD are the source of truth.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use lash_sansio::{ProcessId, SessionId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

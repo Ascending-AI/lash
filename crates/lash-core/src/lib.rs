@@ -427,6 +427,7 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolSourceHandle;
     pub use crate::tool_registry::ToolSourcePolicy;
     pub use crate::tool_registry::ToolStateEntry;
+    pub use crate::tool_registry::ToolSurfaceOpenMode;
     pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
     pub use crate::triggers::InMemoryTriggerStore;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
@@ -614,6 +615,7 @@ pub use tool_provider::{
 };
 pub use tool_registry::{
     SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
+    ToolSurfaceOpenMode,
 };
 pub use tool_result::{
     CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,

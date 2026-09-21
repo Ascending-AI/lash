@@ -156,6 +156,10 @@ impl LashRuntime {
         input: TurnInput,
         opts: TurnOptions<'_>,
     ) -> Result<AgentFrameRun, RuntimeError> {
+        // FIG-3353: an enqueue-only (`PreservePersisted`) open may never run a
+        // turn — refuse before the acceptance commit becomes admission
+        // evidence.
+        self.refuse_turn_execution_on_preserved_tool_surface()?;
         use futures_util::FutureExt;
 
         // Keep the guard outside the unwinding body. Both streamed facade turns
@@ -683,6 +687,9 @@ impl LashRuntime {
         initial_queue_claim: Option<crate::QueuedWorkClaim>,
         initial_turn_input_claim: Option<crate::TurnInputClaim>,
     ) -> Result<AssembledTurn, RuntimeError> {
+        // FIG-3353: queued/prepared drives are turn execution too; a
+        // `PreservePersisted` open refuses before claiming the lane.
+        self.refuse_turn_execution_on_preserved_tool_surface()?;
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let mut session_execution_lease = self.claim_session_execution_lease().await?;
         if let Some(store) = self.session.as_ref().and_then(Session::history_store) {

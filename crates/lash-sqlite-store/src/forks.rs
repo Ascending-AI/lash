@@ -1,6 +1,10 @@
 use super::*;
 use crate::session_sql::session_sql;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the sqlite store factory ensures the host-supplied store root exists before opening (FIG-2971)"
+)]
 async fn open_factory_catalog(
     root: &Path,
     policy: SqliteConnectionPolicy,

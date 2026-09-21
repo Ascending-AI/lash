@@ -258,7 +258,18 @@ impl LashRuntime {
         }
         let mut session = Session::new(services.clone(), &state.session_id).await?;
         let mut tool_restore_report = None;
-        if let Some(tool_state) = state.tool_state_snapshot().cloned() {
+        // FIG-3353: an open that will not run a turn declares
+        // `PreservePersisted` and leaves the durable tool surface alone — no
+        // reconcile, no catalog rebuild, no generation bump, and no report or
+        // lost-tools warning for what is an intentional no-source open.
+        let preserve_persisted_tools = host.core.control.tool_surface_open_mode
+            == crate::ToolSurfaceOpenMode::PreservePersisted;
+        // The marker rides the state (never the durable encoding) so every
+        // later stamp — park, appends, turn drafts — keeps the loaded snapshot
+        // instead of restamping the unreconciled registry.
+        state.preserve_tool_state_snapshot = preserve_persisted_tools;
+        if !preserve_persisted_tools && let Some(tool_state) = state.tool_state_snapshot().cloned()
+        {
             // Cold rebuild reconciles the persisted catalog over live tools,
             // adopting its generation when the surface is unchanged.
             // `apply_state` (a delta-apply that
@@ -285,7 +296,9 @@ impl LashRuntime {
                 ),
             )?);
         }
-        session.refresh_tool_catalog().await?;
+        if !preserve_persisted_tools {
+            session.refresh_tool_catalog().await?;
+        }
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = state.session_id.clone();
         protocol_session

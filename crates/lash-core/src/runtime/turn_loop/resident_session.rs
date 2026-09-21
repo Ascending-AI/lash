@@ -426,7 +426,13 @@ impl LashRuntime {
                 )
             })?;
             session.invalidate_runtime_caches();
-            if let Some(tool_state) = durable_state.tool_state_snapshot().cloned() {
+            // A `PreservePersisted` open never installed its snapshot, so the
+            // reload does not reconcile it either (FIG-3353).
+            let preserve_persisted_tools = self.host.core.control.tool_surface_open_mode
+                == crate::ToolSurfaceOpenMode::PreservePersisted;
+            if !preserve_persisted_tools
+                && let Some(tool_state) = durable_state.tool_state_snapshot().cloned()
+            {
                 // The re-sync has no return value to hand the host, so the
                 // installer's delivery is the contract: trace evidence plus the
                 // typed report the runtime retains for
@@ -456,15 +462,17 @@ impl LashRuntime {
                 })?;
                 reloaded_tool_restore = Some(report);
             }
-            session.refresh_tool_catalog().await.map_err(|err| {
-                (
-                    ResidentReloadStage::ToolCatalogRefresh,
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        err.to_string(),
-                    ),
-                )
-            })?;
+            if !preserve_persisted_tools {
+                session.refresh_tool_catalog().await.map_err(|err| {
+                    (
+                        ResidentReloadStage::ToolCatalogRefresh,
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            err.to_string(),
+                        ),
+                    )
+                })?;
+            }
             if let Some(snapshot) = durable_state.plugin_state() {
                 session.plugins().hydrate_state(snapshot).map_err(|err| {
                     (
@@ -535,6 +543,10 @@ impl LashRuntime {
                     )
                 })?;
             self.state = durable_state;
+            // The durable reload replaced the whole resident state; reassert
+            // the per-open `PreservePersisted` claim from host configuration
+            // so later stamps keep the loaded snapshot (FIG-3353).
+            self.reapply_tool_state_preservation_marker();
             self.publish_plugin_tool_access();
             // A successful reload is a full durable adoption: settle the
             // freshness facts so the turn loop does not issue a second

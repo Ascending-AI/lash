@@ -983,6 +983,14 @@ impl SessionGraph {
         Self::from_validated_nodes(nodes, leaf_node_id)
     }
 
+    /// Strong count of the shared graph-data allocation. Tests use it to
+    /// prove how many holders pin this graph version.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn data_strong_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
+    }
+
     pub fn validate_resident_integrity(&self) -> Result<(), crate::StoreError> {
         if !self.nodes.is_empty() && self.leaf_node_id.is_none() {
             return Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None });
@@ -1572,6 +1580,10 @@ impl SessionGraph {
 
     /// Exposes message tree to store, effect-host, and protocol implementors while materializing,
     /// executing, or persisting a session turn.
+    ///
+    /// Sibling order is the graph's own node order — the durable generation
+    /// order for store-loaded graphs and append order otherwise. Timestamps
+    /// are informational only and never reorder siblings.
     pub fn message_tree(&self) -> Vec<SessionMessageTreeNode> {
         let active_node_ids = self
             .active_path_nodes()
@@ -1658,16 +1670,7 @@ fn build_tree(mut nodes: Vec<SessionMessageTreeNode>) -> Vec<SessionMessageTreeN
             .or_default()
             .push(node);
     }
-    let mut roots = build_tree_children(None, &mut children_by_parent);
-    sort_tree(&mut roots);
-    roots
-}
-
-fn sort_tree(nodes: &mut [SessionMessageTreeNode]) {
-    nodes.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-    for node in nodes {
-        sort_tree(&mut node.children);
-    }
+    build_tree_children(None, &mut children_by_parent)
 }
 
 fn build_tree_children(

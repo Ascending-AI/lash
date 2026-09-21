@@ -270,6 +270,14 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
+    /// Choose what an open does with the persisted tool surface. See
+    /// [`crate::ToolSurfaceOpenMode`]; the default is `Reconcile`. Set
+    /// `PreservePersisted` for an open that will not run a turn.
+    pub fn with_tool_surface_open_mode(mut self, mode: crate::ToolSurfaceOpenMode) -> Self {
+        self.env.core.control.tool_surface_open_mode = mode;
+        self
+    }
+
     pub fn with_termination(mut self, termination: TerminationPolicy) -> Self {
         self.env.core.control.termination = termination;
         self
@@ -321,6 +329,7 @@ impl RuntimeEnvironment {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {
     use super::*;
 

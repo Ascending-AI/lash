@@ -10,6 +10,11 @@
 //! * `gc_unreachable` never panics on a corrupt rooted manifest and keeps
 //!   every blob in that conservative case.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::future::Future;

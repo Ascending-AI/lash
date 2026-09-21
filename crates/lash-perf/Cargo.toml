@@ -27,8 +27,10 @@ workspace = true
 
 [dependencies]
 lash-sansio = { workspace = true }
+lash-conformance = { workspace = true }
 lash-core = { workspace = true, features = ["perf-witness", "testing"] }
 lash-lashlang-runtime = { workspace = true }
+lash-restate = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["perf-witness", "testing"] }
 lash = { workspace = true, features = ["rlm"] }
 lash-llm-tools = { workspace = true }
@@ -45,8 +47,12 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures-util = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
+restate-sdk = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
 stats_alloc = "0.1"
 dhat = { version = "0.3", optional = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

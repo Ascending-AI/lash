@@ -20,8 +20,12 @@
 //! alone; a path that stops resolving is still E0432, a hard error.
 
 #![allow(unused_imports)]
-
 // --- Ungated facade: lash-internal-core, -sansio, -trace, -remote-protocol ---
+
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
 
 use lash::ModelSpec as _;
 use lash::PendingTurnInput as _;

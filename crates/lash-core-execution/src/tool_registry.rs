@@ -25,6 +25,7 @@ use sources::{
 mod registry_types;
 pub use registry_types::{
     ReconfigureError, SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy,
+    ToolSurfaceOpenMode,
 };
 pub(crate) use registry_types::{ToolRegistrationKind, ToolSourceKey};
 use registry_types::{

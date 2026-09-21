@@ -38,6 +38,11 @@
 //! through the remaining machinery. Every one must come back as a diagnostic or
 //! a successful parse.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 /// Every shape that aborted the process in rounds 1 through 6, at the depth
 /// that a 64 KiB source allows — far past the depth that originally aborted.
 fn abort_corpus() -> Vec<(String, String)> {

@@ -4,6 +4,10 @@
     clippy::expect_used,
     reason = "test-only helper binary: the store conformance tests spawn it, and a broken setup assumption must abort it loudly"
 )]
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
 
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
