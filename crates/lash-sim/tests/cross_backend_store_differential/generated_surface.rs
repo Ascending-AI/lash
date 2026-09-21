@@ -342,6 +342,35 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
             .execute_effect(envelope, local_executor)
             .await
     }
+
+    async fn open_effect_group(
+        &self,
+        group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        self.inner.controller().open_effect_group(group).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .controller()
+            .await_next_settlement(handle, cancel)
+            .await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .controller()
+            .close_effect_group(handle, disposition)
+            .await
+    }
 }
 
 fn surface_operation_id(key: u8) -> String {

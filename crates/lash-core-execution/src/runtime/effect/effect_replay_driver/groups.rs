@@ -3,9 +3,9 @@
 //! Layer 1 gave the substrates the *journal shape* of a group — a group row
 //! carrying the counter, a `group_key` and `settlement_seq` on each child, and
 //! the N1/N2/N3 rules that keep rank a fact. What it did not give them was a
-//! **host**: on sqlite and postgres the four contract methods
-//! (`supports_effect_groups`, `open_effect_group`, `await_next_settlement`,
-//! `close_effect_group`) still inherited their fail-closed defaults, so no
+//! **host**: on sqlite and postgres the three contract methods
+//! (`open_effect_group`, `await_next_settlement`, `close_effect_group`) still
+//! inherited the fail-closed defaults they carried until FIG-2266, so no
 //! production group row was ever written and no child ever carried a
 //! `group_key`. This module is that host, written once over
 //! [`EffectReplayRowStore`] so both stores delegate to it exactly as they
@@ -271,7 +271,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     /// dispatch is still producing.
     ///
     /// A host with no registered [`GroupExecutors`] resolver refuses here —
-    /// coherently with `supports_effect_groups`, with
+    /// as its two sibling methods do, with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
     /// and **before the group row is written**, so a refused open journals
     /// nothing at all.

@@ -46,6 +46,35 @@ impl lash::runtime::RuntimeEffectController for CountingProcessEffectController 
         }
         local_executor.execute(envelope).await
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash::runtime::RuntimeEffectGroup,
+    ) -> Result<lash::runtime::EffectGroupHandle, lash::runtime::RuntimeEffectControllerError> {
+        Err(lash::runtime::effect_groups_unsupported(
+            "CountingProcessEffectController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash::runtime::EffectGroupHandle,
+        _cancel: lash::CancellationToken,
+    ) -> Result<lash::runtime::GroupSettlement, lash::runtime::RuntimeEffectControllerError> {
+        Err(lash::runtime::effect_groups_unsupported(
+            "CountingProcessEffectController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash::runtime::EffectGroupHandle,
+        _disposition: lash::runtime::LoserPolicy,
+    ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
+        Err(lash::runtime::effect_groups_unsupported(
+            "CountingProcessEffectController",
+        ))
+    }
 }
 
 struct OccurrenceFailureTriggerStore {

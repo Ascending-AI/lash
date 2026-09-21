@@ -50,6 +50,29 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
             resolution: crate::Resolution::Ok(serde_json::json!({"done": true})),
         })
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("AwaitShapeRecorder"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("AwaitShapeRecorder"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("AwaitShapeRecorder"))
+    }
 }
 
 struct ScalarRetryTool {

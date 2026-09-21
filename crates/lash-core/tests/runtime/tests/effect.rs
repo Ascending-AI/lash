@@ -562,6 +562,35 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
             )),
         }
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "CapturingRuntimeReplayController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash_core::EffectGroupHandle,
+        _cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "CapturingRuntimeReplayController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash_core::EffectGroupHandle,
+        _disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "CapturingRuntimeReplayController",
+        ))
+    }
 }
 
 struct TriggerEventTool;

@@ -124,6 +124,29 @@ impl RuntimeEffectController for CompletionKeyProbe {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         unreachable!("completion-key preparation test does not execute effects")
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("CompletionKeyProbe"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("CompletionKeyProbe"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("CompletionKeyProbe"))
+    }
 }
 
 #[tokio::test]
@@ -164,6 +187,29 @@ impl RuntimeEffectController for TestResolver {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         unreachable!("queued-lane controller tests do not execute effects")
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("TestResolver"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("TestResolver"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("TestResolver"))
+    }
 }
 
 #[derive(Default)]
@@ -184,6 +230,29 @@ impl RuntimeEffectController for EffectAdmissionProbe {
         self.controller_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(RuntimeEffectOutcome::Sleep)
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("EffectAdmissionProbe"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("EffectAdmissionProbe"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("EffectAdmissionProbe"))
     }
 }
 

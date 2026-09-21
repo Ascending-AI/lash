@@ -107,9 +107,8 @@ use super::group::LoserPolicy;
 /// must be able to outlive the caller that opened it, because
 /// [`LoserPolicy::RunToCompletion`] says a losing promise keeps running;
 /// the executors handed out here are `'static`, so
-/// [`supports_effect_groups`](super::RuntimeEffectController::supports_effect_groups)
-/// may answer `true` exactly where a host has registered one of these and not
-/// otherwise.
+/// a host implements the three group methods exactly where it has registered
+/// one of these, and refuses them otherwise.
 ///
 /// # `None` is a routing fact, not an outcome
 ///

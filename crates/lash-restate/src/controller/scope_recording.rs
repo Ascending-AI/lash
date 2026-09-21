@@ -194,10 +194,6 @@ where
         self.inner.supports_concurrent_effects()
     }
 
-    fn supports_effect_groups(&self) -> bool {
-        self.inner.supports_effect_groups()
-    }
-
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,

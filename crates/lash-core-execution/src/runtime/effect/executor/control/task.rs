@@ -388,6 +388,36 @@ impl RuntimeEffectController for EffectTaskController {
             }
         }
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        // Not forwarded, on purpose. This proxy relays execute_effect and
+        // three other calls over an mpsc channel, so forwarding groups needs
+        // new request variants that round-trip `&mut EffectGroupHandle` and a
+        // long-lived cancellation token — a design change, not a delegation.
+        // Until FIG-3415 does that, a controller reached through this proxy
+        // has no groups, and now says so instead of inheriting a default that
+        // looked identical to a host which had simply never considered them.
+        Err(crate::effect_groups_unsupported("EffectTaskController"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("EffectTaskController"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("EffectTaskController"))
+    }
 }
 
 pub async fn drive_effect_controller_task(

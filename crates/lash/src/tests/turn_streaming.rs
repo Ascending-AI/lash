@@ -458,6 +458,37 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
         }
         local_executor.execute(envelope).await
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash_core::RuntimeEffectGroup,
+    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
+    {
+        Err(lash_core::effect_groups_unsupported(
+            "RecordingDurableEffectController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash_core::EffectGroupHandle,
+        _cancel: lash_core::CancellationToken,
+    ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
+    {
+        Err(lash_core::effect_groups_unsupported(
+            "RecordingDurableEffectController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash_core::EffectGroupHandle,
+        _disposition: lash_core::LoserPolicy,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "RecordingDurableEffectController",
+        ))
+    }
 }
 
 #[derive(Default)]
@@ -564,6 +595,37 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
                 .push(serde_json::to_string(outcome).expect("serialize effect outcome"));
         }
         outcome
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash_core::RuntimeEffectGroup,
+    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
+    {
+        Err(lash_core::effect_groups_unsupported(
+            "RecordingNativeEffectController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash_core::EffectGroupHandle,
+        _cancel: lash_core::CancellationToken,
+    ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
+    {
+        Err(lash_core::effect_groups_unsupported(
+            "RecordingNativeEffectController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash_core::EffectGroupHandle,
+        _disposition: lash_core::LoserPolicy,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "RecordingNativeEffectController",
+        ))
     }
 }
 

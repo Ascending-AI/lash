@@ -25,6 +25,35 @@ impl lash_core::RuntimeEffectController for FailingDeferredJournalController {
             local_executor.execute(envelope).await
         }
     }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "FailingDeferredJournalController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash_core::EffectGroupHandle,
+        _cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "FailingDeferredJournalController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash_core::EffectGroupHandle,
+        _disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::effect_groups_unsupported(
+            "FailingDeferredJournalController",
+        ))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -70,6 +99,29 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
                 SqliteDeferredFault::AfterDurableRecord => "injected crash after durable record",
             },
         ))
+    }
+
+    async fn open_effect_group(
+        &self,
+        group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        self.inner.open_effect_group(group).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        self.inner.await_next_settlement(handle, cancel).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.close_effect_group(handle, disposition).await
     }
 }
 

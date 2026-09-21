@@ -70,6 +70,29 @@ impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
             .execute_effect(envelope, local_executor)
             .await
     }
+
+    async fn open_effect_group(
+        &self,
+        group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        self.rejecting.open_effect_group(group).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        self.rejecting.await_next_settlement(handle, cancel).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.rejecting.close_effect_group(handle, disposition).await
+    }
 }
 
 #[tokio::test]

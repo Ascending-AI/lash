@@ -36,6 +36,28 @@ pub use control::{
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::effect_opener::EffectOpener;
+
+/// The one typed refusal a controller that does not implement durable effect
+/// groups returns from `open_effect_group`, `await_next_settlement` and
+/// `close_effect_group`.
+///
+/// Since FIG-2266 the three group methods have no default bodies, so every
+/// controller answers the question in its own source: it implements groups, or
+/// it calls this. Before that a `supports_effect_groups()` flag defaulted to
+/// `false` beside three methods that defaulted to refusing, which made "I have
+/// not thought about groups" and "I refuse groups" the same program text — and
+/// made a delegating wrapper that forgot to forward look coherent while
+/// silently denying a capability its inner controller had.
+///
+/// `controller` names the refusing type, so the error says which link in a
+/// wrapper chain answered rather than only that something did.
+#[must_use]
+pub fn effect_groups_unsupported(controller: &str) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::EffectGroupUnsupported,
+        format!("{controller} does not implement durable effect groups"),
+    )
+}
 pub use lash_core_store::turn_control_binding::admitted_turn_cancel_scope;
 pub use lash_core_store::turn_control_binding::turn_control_binding_id_for_scope;
 pub use lash_core_store::turn_control_binding::{TurnControlBindingId, TurnControlBindingIdError};

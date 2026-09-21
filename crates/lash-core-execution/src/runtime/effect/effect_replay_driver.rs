@@ -1103,9 +1103,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     ///
     /// Until it is called, this host does not support effect groups — the
     /// `'static` executors a grouped child needs to outlive its caller have
-    /// nowhere to come from — so
-    /// [`supports_effect_groups`](StoreEffectReplayDriver::supports_effect_groups)
-    /// answers `false` and all three group methods refuse with
+    /// nowhere to come from — so all three group methods refuse with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
     /// rather than journaling a group nothing can run.
     ///
@@ -1143,24 +1141,14 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
     }
 
-    /// Whether a resolver has been registered, which is exactly whether this
-    /// host supports effect groups.
-    ///
-    /// A **per-deployment** fact established at wiring time: deployment
-    /// validation reads it after the registration, and before wiring it reads
-    /// `false` and the three group methods refuse coherently with it.
-    pub fn supports_effect_groups(&self) -> bool {
-        self.group_executors.get().is_some()
-    }
-
     /// The registered resolver, or the refusal that says this host does not
     /// implement groups at all.
     ///
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
     /// not a shape refusal: an unwired host is not a host with a bad group, it is
-    /// the host `supports_effect_groups` answers `false` for, and the coherence
-    /// law binds the flag to all three methods. A *per-child* resolver miss on a
-    /// wired host is the other fact and keeps its typed routing refusal.
+    /// a host that does no groups at all, and it answers so through all three
+    /// methods alike. A *per-child* resolver miss on a wired host is the other
+    /// fact and keeps its typed routing refusal.
     pub(super) fn group_executors(
         &self,
     ) -> Result<&Arc<dyn GroupExecutors>, RuntimeEffectControllerError> {
