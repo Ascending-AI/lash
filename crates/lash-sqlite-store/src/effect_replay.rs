@@ -1190,6 +1190,15 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                             sql.replay.delete_by_session.sql(),
                             params![session_id.as_str()],
                         )?;
+                        // Membership before the group rows it keys off: the
+                        // statement selects the session's groups, so deleting
+                        // them first would strand every accepted request and
+                        // leave it naming environment bytes the retirement is
+                        // about to reclaim (ADR 0099 §3).
+                        tx.execute(
+                            sql.group_child.delete_by_session.sql(),
+                            params![session_id.as_str()],
+                        )?;
                         tx.execute(
                             sql.group.delete_by_session.sql(),
                             params![session_id.as_str()],
@@ -1432,6 +1441,8 @@ pub(crate) fn delete_scope_rows(
 ) -> rusqlite::Result<usize> {
     let sql = effect_sql(schema);
     let deleted = tx.execute(sql.replay.delete_by_scope.sql(), params![scope_id])?;
+    // Membership before the group rows it keys off (see the session path).
+    tx.execute(sql.group_child.delete_by_scope.sql(), params![scope_id])?;
     tx.execute(sql.group.delete_by_scope.sql(), params![scope_id])?;
     tx.execute(
         wait_sql(schema).shared.delete_by_scope_json.sql(),

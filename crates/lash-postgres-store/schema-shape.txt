@@ -286,6 +286,14 @@ table lash_runtime_effect_group
   column session_id text nullable
   column wake text not-null
   primary-key (group_key)
+table lash_runtime_effect_group_child
+  column created_at_ms bigint not-null
+  column envelope_json text not-null
+  column group_key text not-null
+  column position bigint not-null
+  column replay_key text not-null
+  column request_version bigint not-null
+  primary-key (group_key, position)
 table lash_runtime_effect_replay
   column created_at_ms bigint not-null
   column due_at_ms bigint nullable

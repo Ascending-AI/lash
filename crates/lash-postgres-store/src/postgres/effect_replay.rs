@@ -865,9 +865,10 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             )
         };
         let sql = effect_sql();
-        let (children_sql, groups_sql, key, fenced_scope) = match retirement {
+        let (children_sql, membership_sql, groups_sql, key, fenced_scope) = match retirement {
             lash_core::EffectJournalRetirement::Session { session_id } => (
                 sql.replay.delete_by_session.sql(),
+                sql.group_child.delete_by_session.sql(),
                 sql.group.delete_by_session.sql(),
                 session_id.as_str().to_string(),
                 None,
@@ -886,6 +887,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 );
                 (
                     sql.replay.delete_by_scope.sql(),
+                    sql.group_child.delete_by_scope.sql(),
                     sql.group.delete_by_scope.sql(),
                     identity.key().to_string(),
                     Some(scope),
@@ -939,6 +941,15 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .await
             .map_err(retirement_error)?
             .rows_affected();
+        // Membership before the group rows it keys off: the statement selects
+        // the retiring groups, so deleting them first would strand every
+        // accepted request and leave it naming environment bytes this
+        // retirement is about to reclaim (ADR 0099 §3).
+        sqlx::query(membership_sql)
+            .bind(&key)
+            .execute(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
         sqlx::query(groups_sql)
             .bind(&key)
             .execute(&mut *tx)
@@ -1070,6 +1081,11 @@ pub(crate) async fn retire_scope_rows_tx(
         .execute(&mut **tx)
         .await?
         .rows_affected();
+    // Membership before the group rows it keys off (see `retire_journal`).
+    sqlx::query(sql.group_child.delete_by_scope.sql())
+        .bind(scope_id)
+        .execute(&mut **tx)
+        .await?;
     sqlx::query(sql.group.delete_by_scope.sql())
         .bind(scope_id)
         .execute(&mut **tx)
