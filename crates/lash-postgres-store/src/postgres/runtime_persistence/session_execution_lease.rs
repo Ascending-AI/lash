@@ -145,40 +145,18 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         // and an auditable lock-ordering rule, not a repair for a reachable
         // stale-read race.
         lock_session_execution_lease_tx(&mut tx, &fence.session_id).await?;
+        // `now` is the database transaction clock, not this host's wall clock:
+        // several hosts write one database, so one clock must decide expiry.
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        let current = load_session_execution_lease_tx(&mut tx, &fence.session_id).await?;
-        let Some(current) = current else {
-            return Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: fence.session_id.clone(),
-            });
-        };
-        if !current
-            .owner
-            .as_ref()
-            .is_some_and(|owner| owner.same_incarnation(&fence.owner))
-            || current.executor_id.as_deref() != Some(fence.executor_id.as_str())
-            || current.lease_token.as_deref() != Some(fence.lease_token.as_str())
-        {
-            lash_core::store_backend_support::trace_session_execution_lease_refusal(
-                lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
-                "owner_or_token_mismatch",
-                "postgres_locked_transaction",
-                fence,
-                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
-                    current.owner.as_ref(),
-                    current.executor_id.as_deref(),
-                    current.lease_token.as_deref(),
-                ),
-            );
-            return Err(StoreError::SessionExecutionLeaseRenewalRefused {
-                session_id: fence.session_id.clone(),
-            });
-        }
-        if current.expires_at_ms <= now {
-            return Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: fence.session_id.clone(),
-            });
-        }
+        let observed = load_session_execution_lease_tx(&mut tx, &fence.session_id).await?;
+        // The shared verdict is the decision; the row above is already locked.
+        let current = lash_core::store_backend_support::require_renewable_session_execution_lease(
+            observed.as_ref(),
+            fence,
+            now,
+            lash_core::store_backend_support::FenceTimeAuthority::DatabaseTransaction,
+            "postgres_locked_transaction",
+        )?;
         let expires_at = now.saturating_add(lease_ttl_ms);
         let sql_expires_at =
             sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
@@ -203,24 +181,19 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        if renewed.rows_affected() != 1 {
-            lash_core::store_backend_support::trace_session_execution_lease_refusal(
-                lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
-                "conditional_update_did_not_match",
-                "postgres_locked_transaction",
-                fence,
-                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
-                    current.owner.as_ref(),
-                    current.executor_id.as_deref(),
-                    current.lease_token.as_deref(),
-                ),
-            );
-            return Err(StoreError::SessionExecutionLeaseRenewalRefused {
+        // Backstop: the five-column predicate stays on the statement, but the
+        // row is locked and the verdict already authorized the write, so any
+        // row count other than one is a defect, never a race.
+        lash_core::store_backend_support::require_fenced_write_applied(
+            lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRenewal,
+            POSTGRES_BACKEND,
+            fence.session_id.as_str(),
+            renewed.rows_affected(),
+            || StoreError::SessionExecutionLeaseRenewalRefused {
                 session_id: fence.session_id.clone(),
-            });
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(SessionExecutionLease {
+            },
+        )?;
+        let renewed_lease = SessionExecutionLease {
             session_id: fence.session_id.clone(),
             owner: fence.owner.clone(),
             executor_id: fence.executor_id.clone(),
@@ -229,7 +202,9 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
             claimed_at_epoch_ms: current.claimed_at_ms,
             lease_term_ms: lease_ttl_ms,
             expires_at_epoch_ms: expires_at,
-        })
+        };
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(renewed_lease)
     }
 
     async fn release_session_execution_lease(
@@ -241,27 +216,26 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        if !release_session_execution_lease_tx(&mut tx, completion).await? {
-            let current = load_session_execution_lease_tx(&mut tx, &completion.session_id).await?;
-            lash_core::store_backend_support::trace_session_execution_lease_refusal(
-                lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,
-                "token_scoped_release_did_not_match",
-                "postgres_locked_transaction",
-                completion,
-                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
-                    current.as_ref().and_then(|lease| lease.owner.as_ref()),
-                    current
-                        .as_ref()
-                        .and_then(|lease| lease.executor_id.as_deref()),
-                    current
-                        .as_ref()
-                        .and_then(|lease| lease.lease_token.as_deref()),
-                ),
-            );
-            return Err(StoreError::SessionExecutionLeaseReleaseRefused {
+        // Lock and read first, then decide, then write. The release used to
+        // read the row only after a failed write, which made rows-affected the
+        // verdict and the read a diagnostic afterthought.
+        let observed = load_session_execution_lease_tx(&mut tx, &completion.session_id).await?;
+        lash_core::store_backend_support::require_releasable_session_execution_lease(
+            observed.as_ref(),
+            completion,
+            "postgres_locked_transaction",
+        )?;
+        let released = release_session_execution_lease_tx(&mut tx, completion).await?;
+        // Backstop: the five-column predicate stays and must agree.
+        lash_core::store_backend_support::require_fenced_write_applied(
+            lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRelease,
+            POSTGRES_BACKEND,
+            completion.session_id.as_str(),
+            u64::from(released),
+            || StoreError::SessionExecutionLeaseReleaseRefused {
                 session_id: completion.session_id.clone(),
-            });
-        }
+            },
+        )?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
     }

@@ -1,9 +1,12 @@
 //! Turn-input settlement for the PostgreSQL store.
 //!
-//! One conditional write serves both settlement regimes (ADR 0069 §5): the
-//! claim fields strengthen the predicate when a claim exists, and the terminal
-//! state set — derived from `TurnInputState` so it cannot drift — bounds it
-//! when one does not.
+//! Settlement authority is decided once, in
+//! [`require_settleable_turn_input`](lash_core::store_backend_support::require_settleable_turn_input),
+//! over the row this module locks `FOR UPDATE`. One conditional write then
+//! serves both settlement regimes (ADR 0069 §5) with that same predicate as
+//! its backstop: the claim fields strengthen it when a claim exists, and the
+//! terminal state set — derived from `TurnInputState` so it cannot drift —
+//! bounds it when one does not.
 
 use crate::*;
 
@@ -39,59 +42,27 @@ pub(crate) async fn ensure_turn_input_completion_tx(
                 ))
             })
             .transpose()?;
-        // One predicate, two regimes: the claim fields only strengthen it
-        // (ADR 0069 section 5).
-        let owns_row = match completed.claim.as_ref() {
-            Some(claim) => observed
+        // The shared verdict is the decision. One predicate, two regimes: the
+        // claim fields only strengthen it (ADR 0069 section 5).
+        lash_core::store_backend_support::require_settleable_turn_input(
+            completed,
+            input_id,
+            observed
                 .as_ref()
-                .is_some_and(|(claim_id, claim_token, _, _)| {
-                    claim_id.as_deref() == Some(claim.claim_id.as_str())
-                        && claim_token.as_deref() == Some(claim.lease_token.as_str())
+                .map(|(claim_id, claim_token, generation, state)| {
+                    lash_core::store_backend_support::TurnInputSettlementFacts {
+                        claim_id: claim_id.as_deref(),
+                        claim_token: claim_token.as_deref(),
+                        claim_session_lease_generation: *generation,
+                        state: state.as_str(),
+                    }
                 }),
-            None => observed.as_ref().is_some_and(|(claim_id, _, _, state)| {
-                claim_id.is_none() && unclaimed_turn_input_is_settleable(state)
-            }),
-        };
-        if !owns_row {
-            return Err(match completed.claim.as_ref() {
-                Some(claim) => StoreError::TurnInputClaimSuperseded {
-                    session_id: completed.session_id.clone(),
-                    claim_id: claim.claim_id.clone(),
-                    row_id: Some(input_id.as_str().to_string().into_boxed_str()),
-                    superseding_claim_id: observed
-                        .as_ref()
-                        .and_then(|(claim_id, _, _, _)| claim_id.clone())
-                        .map(String::into_boxed_str),
-                    superseding_session_lease_generation: observed.as_ref().and_then(
-                        |(claim_id, _, generation, _)| {
-                            claim_id.as_ref().map(|_| Box::new(*generation))
-                        },
-                    ),
-                },
-                None => StoreError::UnclaimedTurnInputSettlementSuperseded {
-                    session_id: completed.session_id.clone(),
-                    input_id: input_id.clone(),
-                    observed_state: observed
-                        .as_ref()
-                        .map(|(_, _, _, state)| state.clone().into_boxed_str()),
-                    superseding_claim_id: observed
-                        .as_ref()
-                        .and_then(|(claim_id, _, _, _)| claim_id.clone())
-                        .map(String::into_boxed_str),
-                },
-            });
-        }
+        )?;
     }
     Ok(())
 }
 
-/// Whether an unclaimed row is still open for settlement.
-pub(crate) fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
-    !lash_core::TurnInputStateKind::from_wire_str(state)
-        .is_some_and(lash_core::TurnInputStateKind::is_terminal)
-}
-
-/// The same terminal set spelled as the body of a SQL `IN (...)` list, so the
+/// The terminal state set spelled as the body of a SQL `IN (...)` list, so the
 /// settlement predicate and its Rust twin above cannot drift from the enum.
 pub(crate) fn unclaimed_turn_input_terminal_states_sql() -> String {
     lash_core::store_backend_support::terminal_turn_input_states_sql()

@@ -617,55 +617,23 @@ impl SessionCommitStore for Store {
                                     ))
                                 })
                                 .transpose()?;
-                            // One predicate, two regimes: the claim fields only
-                            // strengthen it (ADR 0069 section 5). Claimed
-                            // settlement requires the row to still carry this
-                            // claim; unclaimed settlement requires it to still
-                            // be unclaimed and unsettled.
-                            let owns_row = match completed.claim.as_ref() {
-                                Some(claim) => observed.as_ref().is_some_and(
-                                    |(claim_id, claim_token, _, _)| {
-                                        claim_id.as_deref() == Some(claim.claim_id.as_str())
-                                            && claim_token.as_deref()
-                                                == Some(claim.lease_token.as_str())
+                            // The shared verdict is the decision. One
+                            // predicate, two regimes: the claim fields only
+                            // strengthen it (ADR 0069 section 5).
+                            lash_core::store_backend_support::require_settleable_turn_input(
+                                completed,
+                                input_id,
+                                observed.as_ref().map(
+                                    |(claim_id, claim_token, generation, state)| {
+                                        lash_core::store_backend_support::TurnInputSettlementFacts {
+                                            claim_id: claim_id.as_deref(),
+                                            claim_token: claim_token.as_deref(),
+                                            claim_session_lease_generation: *generation,
+                                            state: state.as_str(),
+                                        }
                                     },
                                 ),
-                                None => observed.as_ref().is_some_and(|(claim_id, _, _, state)| {
-                                    claim_id.is_none()
-                                        && unclaimed_turn_input_is_settleable(state)
-                                }),
-                            };
-                            if !owns_row {
-                                return Err(match completed.claim.as_ref() {
-                                    Some(claim) => StoreError::TurnInputClaimSuperseded {
-                                        session_id: completed.session_id.clone(),
-                                        claim_id: claim.claim_id.clone(),
-                                        row_id: Some(input_id.as_str().to_string().into_boxed_str()),
-                                        superseding_claim_id: observed
-                                            .as_ref()
-                                            .and_then(|(claim_id, _, _, _)| claim_id.clone())
-                                            .map(String::into_boxed_str),
-                                        superseding_session_lease_generation: observed
-                                            .as_ref()
-                                            .and_then(|(claim_id, _, generation, _)| {
-                                                claim_id.as_ref().map(|_| Box::new(*generation))
-                                            }),
-                                    },
-                                    None => StoreError::UnclaimedTurnInputSettlementSuperseded {
-                                        session_id: completed.session_id.clone(),
-                                        input_id: input_id.clone(),
-                                        observed_state: observed
-                                            .as_ref()
-                                            .map(|(_, _, _, state)| {
-                                                state.clone().into_boxed_str()
-                                            }),
-                                        superseding_claim_id: observed
-                                            .as_ref()
-                                            .and_then(|(claim_id, _, _, _)| claim_id.clone())
-                                            .map(String::into_boxed_str),
-                                    },
-                                });
-                            }
+                            )?;
                         }
                     }
 
@@ -716,6 +684,56 @@ impl SessionCommitStore for Store {
                         plan.planned_node_facts(),
                     )?;
                     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
+                    // Divergence ruling (FIG-3381): SQLite carries no CAS
+                    // predicate on its head upsert and needs none. `existing`
+                    // was read inside this `BEGIN IMMEDIATE` transaction,
+                    // which is SQLite's database-wide single-writer lock, so
+                    // no revision can move between that read and this write.
+                    // The invariant is asserted rather than assumed: if the
+                    // head read is ever moved out of the write transaction,
+                    // this refuses the publication instead of publishing over
+                    // a revision nobody held.
+                    lash_core::store_backend_support::require_single_writer_head_publication(
+                        &commit.session_id,
+                        crate::SQLITE_BACKEND,
+                        !tx.is_autocommit(),
+                    )?;
+                    // Read the published revision again, inside the same
+                    // write transaction, and let the shared verdict decide.
+                    // This is SQLite's equivalent of PostgreSQL's
+                    // `SELECT head_revision … FOR UPDATE`: under
+                    // `BEGIN IMMEDIATE` it must still be the revision the plan
+                    // was built on, and if the earlier read is ever moved out
+                    // of this transaction it will not be.
+                    let published_revision = tx
+                        .query_row(
+                            "SELECT head_revision FROM session_head WHERE session_id = ?1",
+                            params![commit.session_id.as_str()],
+                            |row| row.get::<_, i64>(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .map(|revision| {
+                            u64_from_sql("SessionHeadMeta", "head_revision", revision)
+                        })
+                        .transpose()
+                        .map_err(sqlite_error)?
+                        .unwrap_or(0);
+                    match lash_core::store_backend_support::head_publication_verdict(
+                        plan.actual_head_revision(),
+                        published_revision,
+                    ) {
+                        lash_core::store_backend_support::HeadPublicationVerdict::Publish => {}
+                        lash_core::store_backend_support::HeadPublicationVerdict::HeadMoved {
+                            observed_head_revision,
+                            ..
+                        } => {
+                            return Err(StoreError::HeadRevisionConflict {
+                                expected: plan.actual_head_revision(),
+                                actual: observed_head_revision,
+                            });
+                        }
+                    }
                     tx.execute(
                         "INSERT OR REPLACE INTO session_head
                          (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
@@ -830,12 +848,27 @@ impl SessionCommitStore for Store {
                                 ),
                             }
                             .map_err(sqlite_error)?;
-                            if settled != 1 {
-                                return Err(match completed.claim.as_ref() {
+                            // Backstop: the verdict was already taken over
+                            // this row earlier in the same write transaction,
+                            // so the predicate cannot legitimately miss. A
+                            // miss is recorded as evidence and then fails
+                            // closed with the same supersession this site has
+                            // always returned.
+                            lash_core::store_backend_support::require_fenced_write_applied(
+                                match completed.claim.as_ref() {
+                                    Some(_) => lash_core::store_backend_support::FencedWrite::TurnInputClaimSettlement,
+                                    None => lash_core::store_backend_support::FencedWrite::UnclaimedTurnInputSettlement,
+                                },
+                                crate::SQLITE_BACKEND,
+                                input_id.as_str(),
+                                u64::try_from(settled).unwrap_or(u64::MAX),
+                                || match completed.claim.as_ref() {
                                     Some(claim) => StoreError::TurnInputClaimSuperseded {
                                         session_id: completed.session_id.clone(),
                                         claim_id: claim.claim_id.clone(),
-                                        row_id: Some(input_id.as_str().to_string().into_boxed_str()),
+                                        row_id: Some(
+                                            input_id.as_str().to_string().into_boxed_str(),
+                                        ),
                                         superseding_claim_id: None,
                                         superseding_session_lease_generation: None,
                                     },
@@ -845,8 +878,8 @@ impl SessionCommitStore for Store {
                                         observed_state: None,
                                         superseding_claim_id: None,
                                     },
-                                });
-                            }
+                                },
+                            )?;
                         }
                     }
                     let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();

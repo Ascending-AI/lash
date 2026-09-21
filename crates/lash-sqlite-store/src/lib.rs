@@ -148,6 +148,13 @@ pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 /// cannot drift onto different files.
 pub(crate) const DURABLE_CORE_DB_FILE: &str = "durable-core.db";
 
+/// Backend name this store reports in shared fencing diagnostics.
+///
+/// Every fenced write names its backend so
+/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core::StoreError::FencedWriteVerdictDisagreed)
+/// says which store's locked read and backstop predicate disagreed.
+pub(crate) const SQLITE_BACKEND: &str = "sqlite";
+
 use conn::TxOutcome;
 pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,

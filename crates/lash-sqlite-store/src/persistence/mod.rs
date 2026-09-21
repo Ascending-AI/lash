@@ -152,15 +152,10 @@ const TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS: &str = "claim_id = NULL,
                                      claim_token = NULL,
                                      claim_session_lease_generation = 0";
 
-/// Whether an unclaimed row is still open for settlement.
-fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
-    !lash_core::TurnInputStateKind::from_wire_str(state)
-        .is_some_and(lash_core::TurnInputStateKind::is_terminal)
-}
-
-/// The same terminal set spelled as the body of a SQL `IN (...)` list, so the
-/// unclaimed settlement predicate and its Rust twin above cannot drift from
-/// the enum.
+/// The terminal state set spelled as the body of a SQL `IN (...)` list, so the
+/// unclaimed settlement predicate and the shared verdict's
+/// [`unclaimed_turn_input_is_settleable`](lash_core::store_backend_support::unclaimed_turn_input_is_settleable)
+/// cannot drift from the enum.
 fn unclaimed_turn_input_terminal_states_sql() -> String {
     lash_core::store_backend_support::terminal_turn_input_states_sql()
 }

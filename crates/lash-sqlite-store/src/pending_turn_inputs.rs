@@ -41,6 +41,19 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) claim_session_lease_generation: u64,
 }
 
+impl PendingTurnInputRow {
+    /// The claim columns the shared claimability verdict consults.
+    ///
+    /// Exposed as one value rather than two fields so a call site cannot pass
+    /// a generation that belongs to a different row's token.
+    pub(crate) fn claim_facts(&self) -> lash_core::store_backend_support::WorkRowClaimFacts<'_> {
+        lash_core::store_backend_support::WorkRowClaimFacts {
+            claim_token: self.claim_token.as_deref(),
+            claim_session_lease_generation: self.claim_session_lease_generation,
+        }
+    }
+}
+
 pub(crate) fn pending_turn_input_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<PendingTurnInputRow> {

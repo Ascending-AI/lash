@@ -444,6 +444,15 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
     };
     let mut inputs = Vec::new();
     for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
+        // The candidate row was read inside the `BEGIN IMMEDIATE` write
+        // transaction, so it cannot move before the claim below. The shared
+        // verdict decides; the read-side copy of this predicate stays because
+        // it is also the `ORDER BY … LIMIT` filter.
+        if !lash_core::store_backend_support::turn_input_claimability(row.claim_facts(), generation)
+            .is_claimable()
+        {
+            return Ok(TxOutcome::Rollback(None));
+        }
         let claimed = tx
             .execute(
                 "UPDATE pending_turn_inputs
@@ -473,7 +482,17 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
                 ],
             )
             .map_err(sqlite_error)?;
-        if claimed == 0 {
+        // Backstop: the generation predicate stays on the write, but the
+        // verdict above already authorized it over the locked row. A
+        // disagreement is recorded as evidence and then fails closed exactly
+        // as this site always did — the whole claim transaction rolls back and
+        // no claim is reported.
+        if !lash_core::store_backend_support::fenced_write_applied(
+            lash_core::store_backend_support::FencedWrite::TurnInputClaimAcquisition,
+            crate::SQLITE_BACKEND,
+            row.input_id.as_str(),
+            u64::try_from(claimed).unwrap_or(u64::MAX),
+        ) {
             return Ok(TxOutcome::Rollback(None));
         }
         if state_after_claim == lash_core::TurnInputStateKind::Accepted

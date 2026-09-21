@@ -67,6 +67,10 @@ path = "tests/conformance.rs"
 required-features = ["testing"]
 
 [[test]]
+name = "fencing_backstop"
+path = "tests/fencing_backstop.rs"
+
+[[test]]
 name = "process_change_horizon"
 path = "tests/process_change_horizon.rs"
 
