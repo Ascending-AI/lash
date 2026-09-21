@@ -209,6 +209,14 @@ impl ProviderHandle {
         Self { components }
     }
 
+    /// Decompose the handle back into the component bundle it was built from.
+    /// This is the exact inverse of [`Self::new`]: a host adapter that resolves
+    /// its route per request can recover the inner provider without sealing a
+    /// second `LlmCallRecord` around the call.
+    pub fn into_components(self) -> ProviderComponents {
+        self.components
+    }
+
     pub fn unconfigured() -> Self {
         Self::new(UnconfiguredProvider::default().into_components())
     }
@@ -1413,5 +1421,33 @@ mod retry_verdict_tests {
             .0,
             RetryVerdict::Refusal(RetryRefusal::RetryAfterCap)
         );
+    }
+}
+
+#[cfg(test)]
+mod handle_tests {
+    use super::*;
+
+    #[test]
+    fn into_components_recovers_the_original_bundle() {
+        let options = ProviderOptions {
+            max_output_tokens: Some(2_048),
+            ..Default::default()
+        };
+        let mut provider = UnconfiguredProvider::default();
+        provider.set_options(options.clone());
+        let components = provider.into_components();
+        let failure_classifier = Arc::clone(&components.failure_classifier);
+        let rate_limiter = Arc::clone(&components.rate_limiter);
+
+        let recovered = ProviderHandle::new(components).into_components();
+
+        assert_eq!(recovered.provider.kind(), "unconfigured");
+        assert_eq!(recovered.provider.options(), options);
+        assert!(Arc::ptr_eq(
+            &recovered.failure_classifier,
+            &failure_classifier
+        ));
+        assert!(Arc::ptr_eq(&recovered.rate_limiter, &rate_limiter));
     }
 }
