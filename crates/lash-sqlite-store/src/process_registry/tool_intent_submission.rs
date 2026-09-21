@@ -17,10 +17,10 @@ pub(super) async fn admit(
                 let replay_key = submission.identity.replay_key.clone();
                 let inserted = tx
                     .execute(
-                        "INSERT OR IGNORE INTO tool_intent_submissions (
-                            replay_key, session_id, execution_scope_id, tool_call_id,
-                            intent_index, kind, payload_hash, submission_json
-                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        crate::turn_ingress::tool_intent_sql()
+                            .sqlite
+                            .insert_new
+                            .sql(),
                         params![
                             replay_key,
                             submission.identity.session_id.as_str(),
@@ -38,7 +38,10 @@ pub(super) async fn admit(
                 }
                 let encoded = tx
                     .query_row(
-                        "SELECT submission_json FROM tool_intent_submissions WHERE replay_key = ?1",
+                        crate::turn_ingress::tool_intent_sql()
+                            .shared
+                            .select_by_replay_key
+                            .sql(),
                         params![submission.identity.replay_key],
                         |row| row.get::<_, String>(0),
                     )
@@ -63,7 +66,10 @@ pub(super) async fn complete(
             Ok(tx_outcome((|| {
                 let encoded = tx
                     .query_row(
-                        "SELECT submission_json FROM tool_intent_submissions WHERE replay_key = ?1",
+                        crate::turn_ingress::tool_intent_sql()
+                            .shared
+                            .select_by_replay_key
+                            .sql(),
                         params![replay_key],
                         |row| row.get::<_, String>(0),
                     )
@@ -73,7 +79,10 @@ pub(super) async fn complete(
                 if submission.outcome.is_none() {
                     submission.outcome = Some(outcome);
                     tx.execute(
-                        "UPDATE tool_intent_submissions SET submission_json = ?2 WHERE replay_key = ?1",
+                        crate::turn_ingress::tool_intent_sql()
+                            .shared
+                            .update_submission
+                            .sql(),
                         params![
                             submission.identity.replay_key,
                             serde_json::to_string(&submission).map_err(process_decode_error)?,

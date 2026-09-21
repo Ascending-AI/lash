@@ -371,7 +371,7 @@ impl SessionCommitStore for Store {
                         && commit.interrupted_turn_input_cancellation.as_ref() == settlement.effective_cancellation()
                     {
                                     let closure = settlement.authorization();
-                                    tx.execute("DELETE FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2 AND authorization_json = ?3",
+                                    tx.execute(crate::turn_ingress::turn_ingress_sql().closures.delete_settled.sql(),
                                         params![closure.session_id().as_str(), closure.turn_id().as_str(), encode_json(closure)?],
                                     ).map_err(sqlite_error)?;
                                 }
@@ -413,7 +413,10 @@ impl SessionCommitStore for Store {
                             let scope_id = closure.admitted_scope().journal_identity()
                                 .map_err(|error| StoreError::Backend(error.to_string()))?.key().to_string();
                             let retired = tx.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM turn_cancel_retired_scopes WHERE scope_id = ?1)",
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .retired_scopes
+                                    .exists_for_scope
+                                    .sql(),
                                 params![scope_id], |row| row.get::<_, bool>(0),
                             ).map_err(sqlite_error)?;
                             if retired { return Err(StoreError::TurnCancelClosureScopeRetired { scope_id }); }
@@ -430,7 +433,10 @@ impl SessionCommitStore for Store {
                         }
                         let stored = tx
                             .query_row(
-                                "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .closures_sqlite
+                                    .select_by_turn
+                                    .sql(),
                                 params![closure.session_id().as_str(), closure.turn_id().as_str()],
                                 |row| row.get::<_, String>(0),
                             )
@@ -532,9 +538,10 @@ impl SessionCommitStore for Store {
                         for input_id in &completed.input_ids {
                             let observed = tx
                                 .query_row(
-                                    "SELECT claim_id, claim_token, claim_session_lease_generation, state
-                                     FROM pending_turn_inputs
-                                     WHERE session_id = ?1 AND input_id = ?2",
+                                    crate::turn_ingress::turn_ingress_sql()
+                                        .pending_inputs_sqlite
+                                        .settlement_facts
+                                        .sql(),
                                     params![completed.session_id.as_str(), input_id.as_str()],
                                     |row| {
                                         Ok((
@@ -700,6 +707,7 @@ impl SessionCommitStore for Store {
                     }
                     for completed in &commit.completed_queue_claims {
                         for batch_id in &completed.batch_ids {
+                            let turn_ingress = crate::turn_ingress::turn_ingress_sql();
                             tx.execute(
                                 crate::process_registry::sql::process_sql()
                                     .fence_sqlite
@@ -713,20 +721,38 @@ impl SessionCommitStore for Store {
                                 ],
                             )
                             .map_err(sqlite_error)?;
-                            tx.execute(
-                                "DELETE FROM queued_work_batches
-                                 WHERE session_id = ?1
-                                   AND batch_id = ?2
-                                   AND claim_id = ?3
-                                   AND claim_token = ?4",
-                                params![
-                                    completed.session_id.as_str(),
-                                    batch_id.as_str(),
-                                    completed.claim_id,
-                                    completed.lease_token
-                                ],
-                            )
-                            .map_err(sqlite_error)?;
+                            let settled = tx
+                                .execute(
+                                    turn_ingress.queued_batches.settle_claimed.sql(),
+                                    params![
+                                        completed.session_id.as_str(),
+                                        batch_id.as_str(),
+                                        completed.claim_id,
+                                        completed.lease_token
+                                    ],
+                                )
+                                .map_err(sqlite_error)?;
+                            // Backstop: `ensure_queued_work_completion_conn`
+                            // already took the verdict over this row earlier in
+                            // the same write transaction, so the predicate
+                            // cannot legitimately miss. A miss is recorded as
+                            // evidence and then fails closed with the same
+                            // supersession this site has always returned.
+                            lash_core::store_backend_support::require_fenced_write_applied(
+                                lash_core::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
+                                crate::SQLITE_BACKEND,
+                                batch_id.as_str(),
+                                u64::try_from(settled).unwrap_or(u64::MAX),
+                                || StoreError::QueuedWorkClaimSuperseded {
+                                    session_id: completed.session_id.clone(),
+                                    claim_id: completed.claim_id.clone(),
+                                    row_id: Some(
+                                        batch_id.as_str().to_string().into_boxed_str(),
+                                    ),
+                                    superseding_claim_id: None,
+                                    superseding_session_lease_generation: None,
+                                },
+                            )?;
                         }
                     }
                     for completed in &commit.completed_turn_input_claims {
@@ -735,17 +761,11 @@ impl SessionCommitStore for Store {
                             // regimes: the claim fields are an optional
                             // predicate strengthener, and either way exactly
                             // one row must change (ADR 0069 section 5).
+                            let pending_inputs =
+                                &crate::turn_ingress::turn_ingress_sql().pending_inputs;
                             let settled = match completed.claim.as_ref() {
                                 Some(claim) => tx.execute(
-                                    &format!(
-                                        "UPDATE pending_turn_inputs
-                                         SET state = ?3,
-                                             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-                                         WHERE session_id = ?1
-                                           AND input_id = ?2
-                                           AND claim_id = ?4
-                                           AND claim_token = ?5"
-                                    ),
+                                    pending_inputs.settle_claimed.sql(),
                                     params![
                                         completed.session_id.as_str(),
                                         input_id.as_str(),
@@ -755,17 +775,7 @@ impl SessionCommitStore for Store {
                                     ],
                                 ),
                                 None => tx.execute(
-                                    &format!(
-                                        "UPDATE pending_turn_inputs
-                                         SET state = ?3,
-                                             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-                                         WHERE session_id = ?1
-                                           AND input_id = ?2
-                                           AND claim_id IS NULL
-                                           AND state NOT IN ({terminal_states})",
-                                        terminal_states =
-                                            unclaimed_turn_input_terminal_states_sql()
-                                    ),
+                                    pending_inputs.settle_unclaimed.sql(),
                                     params![
                                         completed.session_id.as_str(),
                                         input_id.as_str(),
@@ -839,61 +849,59 @@ impl SessionCommitStore for Store {
                         let input_ids = {
                             let mut stmt = tx
                                 .prepare(
-                                    "SELECT input_id, ingress_json, input_json
-                                     FROM pending_turn_inputs
-                                     WHERE session_id = ?1 AND state = ?2 ORDER BY enqueue_seq ASC",
+                                    crate::turn_ingress::turn_ingress_sql()
+                                        .pending_inputs_sqlite
+                                        .select_pending_active
+                                        .sql(),
                                 )
                                 .map_err(sqlite_error)?;
                             let rows = stmt
                                 .query_map(
-                                    params![
-                                        commit.session_id.as_str(),
-                                        lash_core::TurnInputStateKind::PendingActive.as_str()
-                                    ],
-                                    |row| {
-                                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-                                    },
+                                    params![commit.session_id.as_str()],
+                                    pending_turn_input_row_from_sql,
                                 )
                                 .map_err(sqlite_error)?;
                             let mut input_ids = Vec::new();
                             for row in rows {
-                                let (input_id, ingress_json, input_json) = row.map_err(sqlite_error)?;
-                                let ingress = decode_turn_input_ingress(ingress_json)?;
+                                let row = row.map_err(sqlite_error)?;
+                                let ingress = decode_turn_input_ingress(row.ingress_json)?;
                                 if ingress
                                     .active_turn_id()
                                     .is_some_and(|active| active == turn_id)
                                 {
-                                    input_ids.push((input_id, decode_stored_json(&input_json, "turn input")?));
+                                    input_ids.push((row.input_id, decode_stored_json(&row.input_json, "turn input")?));
                                 }
                             }
                             input_ids
                         };
                         let deferred = lash_core::TurnInputState::DeferredNextTurn;
                         let deferred_ingress = encode_json(&deferred.ingress())?;
-                        let mut stmt = tx
-                            .prepare(
-                                &format!(
-                                    "UPDATE pending_turn_inputs
-                                     SET state = ?3,
-                                         ingress_json = COALESCE(?4, ingress_json),
-                                         {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-                                     WHERE session_id = ?1 AND input_id = ?2"
-                                ),
-                            )
-                            .map_err(sqlite_error)?;
+                        let pending_inputs =
+                            &crate::turn_ingress::turn_ingress_sql().pending_inputs;
                         for (input_id, payload) in input_ids {
-                            stmt.execute(params![
-                                commit.session_id.as_str(),
-                                input_id,
-                                match disposition {
-                                    lash_core::TurnCancelDisposition::Defer => deferred.as_str(),
-                                    lash_core::TurnCancelDisposition::Drop => lash_core::TurnInputStateKind::Cancelled.as_str(),
-                                },
-                                match disposition {
-                                    lash_core::TurnCancelDisposition::Defer => Some(deferred_ingress.as_str()),
-                                    lash_core::TurnCancelDisposition::Drop => None,
-                                }
-                            ])
+                            // Two dispositions, two named statements: deferring
+                            // rewrites the ingress so the row stops naming a
+                            // turn that is over, dropping is the cancel this
+                            // table already has.
+                            match disposition {
+                                lash_core::TurnCancelDisposition::Defer => tx.execute(
+                                    pending_inputs.defer_to_next_turn.sql(),
+                                    params![
+                                        commit.session_id.as_str(),
+                                        input_id,
+                                        deferred.as_str(),
+                                        deferred_ingress.as_str(),
+                                    ],
+                                ),
+                                lash_core::TurnCancelDisposition::Drop => tx.execute(
+                                    pending_inputs.cancel.sql(),
+                                    params![
+                                        commit.session_id.as_str(),
+                                        input_id,
+                                        lash_core::TurnInputStateKind::Cancelled.as_str(),
+                                    ],
+                                ),
+                            }
                             .map_err(sqlite_error)?;
                             let affected = lash_core::TurnCancelAffectedInput { input_id: input_id.into(), payload, disposition };
                             if cancellation.is_some() {
@@ -986,7 +994,10 @@ impl SessionCommitStore for Store {
                     if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
                         let closure = settlement.authorization();
                         tx.execute(
-                            "DELETE FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                            crate::turn_ingress::turn_ingress_sql()
+                                .closures
+                                .delete_by_turn
+                                .sql(),
                             params![closure.session_id().as_str(), closure.turn_id().as_str()],
                         )
                         .map_err(sqlite_error)?;

@@ -53,19 +53,21 @@ impl TurnInputStore for Store {
                 let outcome: Result<(), StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
                     ensure_session_execution_lease_conn(tx, &session_id, &fence, now)?;
+                    let sql = crate::turn_ingress::turn_ingress_sql();
                     let existing = tx
-                    .query_row(
-                        "SELECT binding_id, admitted_scope_json FROM turn_cancellation_bindings WHERE session_id = ?1",
-                        params![session_id.as_str()],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?;
+                        .query_row(
+                            sql.bindings.select_by_session.sql(),
+                            params![session_id.as_str()],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
                     match existing {
                         Some((expected, encoded_scope))
                             if expected != binding_id
                                 || decode_binding_scope(encoded_scope.as_deref())?
-                                    != admitted_physical_scope => {
+                                    != admitted_physical_scope =>
+                        {
                             Err(StoreError::TurnCancelBindingMismatch {
                                 session_id,
                                 expected,
@@ -75,7 +77,7 @@ impl TurnInputStore for Store {
                         Some(_) => Ok(()),
                         None => {
                             tx.execute(
-                                "INSERT INTO turn_cancellation_bindings (session_id, binding_id, admitted_scope_json) VALUES (?1, ?2, ?3)",
+                                sql.bindings_sqlite.insert_new.sql(),
                                 params![session_id.as_str(), binding_id, admitted_scope_json],
                             )
                             .map_err(sqlite_error)?;
@@ -115,95 +117,110 @@ impl TurnInputStore for Store {
         let authorization = authorization.clone();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> = (|| {
-                    ensure_session_not_deleted_conn(tx, authorization.session_id())?;
-                    if authorization.session_id() != fence.session_id
-                        || authorization.authorizing_fencing_token() != fence.fencing_token {
-                        return Err(StoreError::SessionExecutionLeaseExpired {
-                            session_id: authorization.session_id().clone(),
-                        });
-                    }
-                    if authorization.admitted_scope().session_id().is_none() {
-                        let scope_id = authorization
-                            .admitted_scope()
-                            .journal_identity()
-                            .map_err(|error| StoreError::Backend(error.to_string()))?
-                            .key()
-                            .to_string();
-                        let retired = tx
-                            .query_row(
-                                "SELECT EXISTS(SELECT 1 FROM turn_cancel_retired_scopes WHERE scope_id = ?1)",
-                                params![scope_id],
-                                |row| row.get::<_, bool>(0),
-                            )
-                            .map_err(sqlite_error)?;
-                        if retired {
-                            return Err(StoreError::TurnCancelClosureScopeRetired { scope_id });
+                let outcome: Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> =
+                    (|| {
+                        let sql = crate::turn_ingress::turn_ingress_sql();
+                        ensure_session_not_deleted_conn(tx, authorization.session_id())?;
+                        if authorization.session_id() != fence.session_id
+                            || authorization.authorizing_fencing_token() != fence.fencing_token
+                        {
+                            return Err(StoreError::SessionExecutionLeaseExpired {
+                                session_id: authorization.session_id().clone(),
+                            });
                         }
-                    }
-                    let selected = tx
-                        .query_row(
-                            "SELECT binding_id, admitted_scope_json FROM turn_cancellation_bindings WHERE session_id = ?1",
-                            params![authorization.session_id().as_str()],
-                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?;
-                    let admitted_physical_scope = authorization
-                        .admitted_scope()
-                        .session_id()
-                        .is_none()
-                        .then(|| authorization.admitted_scope().clone());
-                    let selected_matches = selected.as_ref().is_some_and(|(binding, encoded_scope)| {
-                        binding == authorization.binding_id()
-                            && decode_binding_scope(encoded_scope.as_deref())
-                            .is_ok_and(|scope| scope == admitted_physical_scope)
-                    });
-                    if !selected_matches {
-                        return Err(StoreError::TurnCancelBindingMismatch {
-                            session_id: authorization.session_id().clone(),
-                            expected: selected.map(|(binding, scope)| format!("{binding} at {scope:?}")).unwrap_or_default(),
-                            presented: authorization.binding_id().to_string(),
-                        });
-                    }
-                    let encoded = encode_json(&authorization)?;
-                    let existing = tx
-                        .query_row(
-                            "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
-                            params![authorization.session_id().as_str(), authorization.turn_id().as_str()],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?;
-                    match existing {
-                        Some(existing) if existing == encoded => {
-                            Ok(lash_core::TurnCancelClosureAuthorizationOutcome::AdoptedExact)
-                        }
-                        Some(_) => Err(StoreError::TurnCancelClosureConflict {
-                            session_id: authorization.session_id().clone(),
-                            turn_id: authorization.turn_id().clone(),
-                        }),
-                        None => {
-                            if load_turn_cancel_intent_snapshot_conn(
-                                tx,
-                                authorization.session_id(),
-                                authorization.turn_id(),
-                            )? != *authorization.observed_intent()
-                            {
-                                return Err(StoreError::TurnCancelIntentChanged {
-                                    session_id: authorization.session_id().clone(),
-                                    turn_id: authorization.turn_id().clone(),
-                                });
+                        if authorization.admitted_scope().session_id().is_none() {
+                            let scope_id = authorization
+                                .admitted_scope()
+                                .journal_identity()
+                                .map_err(|error| StoreError::Backend(error.to_string()))?
+                                .key()
+                                .to_string();
+                            let retired = tx
+                                .query_row(
+                                    sql.retired_scopes.exists_for_scope.sql(),
+                                    params![scope_id],
+                                    |row| row.get::<_, bool>(0),
+                                )
+                                .map_err(sqlite_error)?;
+                            if retired {
+                                return Err(StoreError::TurnCancelClosureScopeRetired { scope_id });
                             }
-                            tx.execute(
-                                "INSERT INTO turn_cancel_closure_authorizations (session_id, turn_id, authorization_json) VALUES (?1, ?2, ?3)",
-                                params![authorization.session_id().as_str(), authorization.turn_id().as_str(), encoded],
-                            )
-                            .map_err(sqlite_error)?;
-                            Ok(lash_core::TurnCancelClosureAuthorizationOutcome::Authorized)
                         }
-                    }
-                })();
+                        let selected = tx
+                            .query_row(
+                                sql.bindings.select_by_session.sql(),
+                                params![authorization.session_id().as_str()],
+                                |row| {
+                                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                                },
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        let admitted_physical_scope = authorization
+                            .admitted_scope()
+                            .session_id()
+                            .is_none()
+                            .then(|| authorization.admitted_scope().clone());
+                        let selected_matches =
+                            selected.as_ref().is_some_and(|(binding, encoded_scope)| {
+                                binding == authorization.binding_id()
+                                    && decode_binding_scope(encoded_scope.as_deref())
+                                        .is_ok_and(|scope| scope == admitted_physical_scope)
+                            });
+                        if !selected_matches {
+                            return Err(StoreError::TurnCancelBindingMismatch {
+                                session_id: authorization.session_id().clone(),
+                                expected: selected
+                                    .map(|(binding, scope)| format!("{binding} at {scope:?}"))
+                                    .unwrap_or_default(),
+                                presented: authorization.binding_id().to_string(),
+                            });
+                        }
+                        let encoded = encode_json(&authorization)?;
+                        let existing = tx
+                            .query_row(
+                                sql.closures_sqlite.select_by_turn.sql(),
+                                params![
+                                    authorization.session_id().as_str(),
+                                    authorization.turn_id().as_str()
+                                ],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        match existing {
+                            Some(existing) if existing == encoded => {
+                                Ok(lash_core::TurnCancelClosureAuthorizationOutcome::AdoptedExact)
+                            }
+                            Some(_) => Err(StoreError::TurnCancelClosureConflict {
+                                session_id: authorization.session_id().clone(),
+                                turn_id: authorization.turn_id().clone(),
+                            }),
+                            None => {
+                                if load_turn_cancel_intent_snapshot_conn(
+                                    tx,
+                                    authorization.session_id(),
+                                    authorization.turn_id(),
+                                )? != *authorization.observed_intent()
+                                {
+                                    return Err(StoreError::TurnCancelIntentChanged {
+                                        session_id: authorization.session_id().clone(),
+                                        turn_id: authorization.turn_id().clone(),
+                                    });
+                                }
+                                tx.execute(
+                                    sql.closures.insert_new.sql(),
+                                    params![
+                                        authorization.session_id().as_str(),
+                                        authorization.turn_id().as_str(),
+                                        encoded
+                                    ],
+                                )
+                                .map_err(sqlite_error)?;
+                                Ok(lash_core::TurnCancelClosureAuthorizationOutcome::Authorized)
+                            }
+                        }
+                    })();
                 Ok(match outcome {
                     Ok(value) => TxOutcome::Commit(Ok(value)),
                     Err(error) => TxOutcome::Rollback(Err(error)),
@@ -228,14 +245,17 @@ impl TurnInputStore for Store {
         )
         .await?;
         let session_id = session_id.clone();
-        let encoded = self.conn
+        let encoded = self
+            .conn
             .call(move |conn| {
-                let mut statement = conn
-                    .prepare("SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 ORDER BY turn_id")
-                    ?;
+                let mut statement = conn.prepare(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .closures
+                        .list_by_session
+                        .sql(),
+                )?;
                 let rows = statement
-                    .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
-                    ?;
+                    .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))?;
                 rows.collect::<Result<Vec<_>, _>>()
             })
             .await
@@ -265,7 +285,10 @@ impl TurnInputStore for Store {
             .conn
             .call(move |conn| {
                 let mut statement = conn.prepare(
-                    "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 ORDER BY turn_id",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .closures
+                        .list_by_session
+                        .sql(),
                 )?;
                 let rows = statement
                     .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))?;
@@ -373,8 +396,10 @@ impl TurnInputStore for Store {
                                 )
                             })?;
                             tx.execute(
-                                "UPDATE turn_cancel_requests SET intent_revision = ?3
-                                 WHERE session_id = ?1 AND turn_id = ?2",
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .cancel_requests
+                                    .advance_intent_revision
+                                    .sql(),
                                 params![
                                     session_id.as_str(),
                                     turn_id.as_str(),
@@ -390,8 +415,10 @@ impl TurnInputStore for Store {
                         outcome: None,
                     };
                     tx.execute(
-                        "INSERT OR IGNORE INTO turn_cancel_requests
-                         (session_id, turn_id, record_json, intent_revision) VALUES (?1, ?2, ?3, 1)",
+                        crate::turn_ingress::turn_ingress_sql()
+                            .cancel_requests_sqlite
+                            .insert_first
+                            .sql(),
                         params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
                     )
                     .map_err(sqlite_error)?;
@@ -482,9 +509,10 @@ impl TurnInputStore for Store {
                     if let Some(source_key) = draft.source_key.as_deref() {
                         let existing_id: Option<String> = tx
                             .query_row(
-                                "SELECT input_id
-                                 FROM pending_turn_inputs
-                                 WHERE session_id = ?1 AND source_key = ?2",
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .pending_inputs_sqlite
+                                    .select_id_by_source_key
+                                    .sql(),
                                 params![draft.session_id.as_str(), source_key],
                                 |row| row.get(0),
                             )
@@ -525,11 +553,10 @@ impl TurnInputStore for Store {
                     });
                     let state = lash_core::TurnInputState::open(draft.ingress.clone());
                     tx.execute(
-                        "INSERT INTO pending_turn_inputs (
-                            input_id, session_id, source_key, ingress_json, state,
-                            input_json, enqueued_at_ms
-                         )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        crate::turn_ingress::turn_ingress_sql()
+                            .pending_inputs_sqlite
+                            .insert_new
+                            .sql(),
                         params![
                             input_id.as_str(),
                             draft.session_id.as_str(),
@@ -566,31 +593,16 @@ impl TurnInputStore for Store {
                 let outcome: Result<Vec<lash_core::PendingTurnInputRead>, StoreError> = (|| {
                     let rows = {
                         let mut stmt = conn
-                            .prepare(&format!(
-                                "SELECT {PENDING_TURN_INPUT_COLUMNS},
-                                        (SELECT sel.lease_expires_at_ms
-                                         FROM session_execution_leases sel
-                                         WHERE pending_turn_inputs.claim_token IS NOT NULL
-                                           AND sel.session_id = ?1
-                                           AND sel.lease_token IS NOT NULL
-                                           AND sel.lease_expires_at_ms > ?4
-                                           AND sel.lease_fencing_token
-                                               = pending_turn_inputs.claim_session_lease_generation)
-                                            AS live_lease_expires_at_ms
-                                 FROM pending_turn_inputs
-                                 WHERE session_id = ?1
-                                   AND state IN (?2, ?3)
-                                 ORDER BY enqueue_seq ASC"
-                            ))
+                            .prepare(
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .pending_inputs
+                                    .list_undelivered
+                                    .sql(),
+                            )
                             .map_err(sqlite_error)?;
                         let rows = stmt
                             .query_map(
-                                params![
-                                    session_id.as_str(),
-                                    lash_core::TurnInputStateKind::PendingActive.as_str(),
-                                    lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
-                                    now as i64
-                                ],
+                                params![session_id.as_str(), now as i64],
                                 pending_turn_input_read_row_from_sql,
                             )
                             .map_err(sqlite_error)?;
@@ -718,12 +730,12 @@ impl TurnInputStore for Store {
                         };
                         let rows = {
                             let mut stmt = tx
-                                .prepare(&format!(
-                                    "SELECT {PENDING_TURN_INPUT_COLUMNS}
-                                     FROM pending_turn_inputs
-                                     WHERE session_id = ?1 AND enqueue_seq >= ?2
-                                     ORDER BY enqueue_seq ASC"
-                                ))
+                                .prepare(
+                                    crate::turn_ingress::turn_ingress_sql()
+                                        .pending_inputs_sqlite
+                                        .select_suffix
+                                        .sql(),
+                                )
                                 .map_err(sqlite_error)?;
                             let rows = stmt
                                 .query_map(
@@ -804,24 +816,14 @@ impl TurnInputStore for Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    &format!(
-                        "UPDATE pending_turn_inputs
-                         SET state = CASE
-                                 WHEN state = ?4 THEN
-                                     CASE json_extract(ingress_json, '$.scope')
-                                         WHEN 'active_turn' THEN ?5
-                                         ELSE ?6
-                                     END
-                                 ELSE state
-                             END,
-                             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-                         WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3"
-                    ),
+                    crate::turn_ingress::turn_ingress_sql()
+                        .pending_inputs_sqlite
+                        .abandon_claim
+                        .sql(),
                     params![
                         session_id.as_str(),
                         claim_id.as_str(),
                         lease_token,
-                        lash_core::TurnInputStateKind::Accepted.as_str(),
                         lash_core::TurnInputStateKind::PendingActive.as_str(),
                         lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
                     ],
@@ -890,10 +892,15 @@ impl TurnInputStore for Store {
                         &session_execution_lease,
                         now,
                     )?;
-                    let closure = settlement.as_ref().map(lash_core::TurnCancelClosureSettlement::authorization);
+                    let closure = settlement
+                        .as_ref()
+                        .map(lash_core::TurnCancelClosureSettlement::authorization);
                     let stored = tx
                         .query_row(
-                            "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                            crate::turn_ingress::turn_ingress_sql()
+                                .closures_sqlite
+                                .select_by_turn
+                                .sql(),
                             params![session_id.as_str(), turn_id.as_str()],
                             |row| row.get::<_, String>(0),
                         )
@@ -913,12 +920,13 @@ impl TurnInputStore for Store {
                         });
                     }
                     if let Some(closure) = closure
-                        && stored.as_deref() != Some(encode_json(closure)?.as_str()) {
-                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                                session_id: session_id.clone(),
-                                turn_id: turn_id.clone(),
-                            });
-                        }
+                        && stored.as_deref() != Some(encode_json(closure)?.as_str())
+                    {
+                        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                            session_id: session_id.clone(),
+                            turn_id: turn_id.clone(),
+                        });
+                    }
                     let repaired = repair_orphaned_active_turn_inputs_conn(
                         tx,
                         &session_id,
@@ -931,7 +939,10 @@ impl TurnInputStore for Store {
                         && matches!(repaired, lash_core::TurnCancelRepairResult::Applied(_))
                     {
                         tx.execute(
-                            "DELETE FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                            crate::turn_ingress::turn_ingress_sql()
+                                .closures
+                                .delete_by_turn
+                                .sql(),
                             params![session_id.as_str(), turn_id.as_str()],
                         )
                         .map_err(sqlite_error)?;
@@ -961,62 +972,35 @@ impl TurnInputStore for Store {
         // batch abandon is one caller giving up one set of rows, and a crash
         // between two statements would leave half the batch claimed by a
         // claim id the caller has already dropped.
-        let claims: Vec<&lash_core::TurnInputClaim> = claims.iter().collect();
-        let statements = if claims.is_empty() {
-            Vec::new()
-        } else {
-            vec![abandon_turn_input_claims_statement(&claims)]
-        };
+        // The triples the batch gives up are bound as one JSON array, so the
+        // statement's own text is fixed however many claims there are.
+        let triples = claims
+            .iter()
+            .map(|claim| {
+                [
+                    claim.session_id.as_str(),
+                    claim.claim_id.as_str(),
+                    claim.lease_token.as_str(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let triples = encode_json(&triples)?;
         self.conn
             .write(move |tx| {
-                for (sql, values) in &statements {
-                    tx.execute(sql, rusqlite::params_from_iter(values.iter()))?;
-                }
-                Ok(())
+                tx.execute(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .pending_inputs_sqlite
+                        .abandon_claims
+                        .sql(),
+                    params![
+                        triples,
+                        lash_core::TurnInputStateKind::PendingActive.as_str(),
+                        lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
+                    ],
+                )
             })
             .await
             .map_err(sqlite_error)?;
         Ok(())
     }
-}
-
-/// One `UPDATE` restoring a batch of abandoned claims to the open spelling
-/// each row's own `ingress_json` carries (FIG-1573, FIG-3232).
-fn abandon_turn_input_claims_statement(
-    claims: &[&lash_core::TurnInputClaim],
-) -> (String, Vec<rusqlite::types::Value>) {
-    let accepted_state = lash_core::store_backend_support::state_sql_literal(
-        lash_core::TurnInputStateKind::Accepted,
-    );
-    let pending_active = lash_core::store_backend_support::state_sql_literal(
-        lash_core::TurnInputStateKind::PendingActive,
-    );
-    let deferred_next_turn = lash_core::store_backend_support::state_sql_literal(
-        lash_core::TurnInputStateKind::DeferredNextTurn,
-    );
-    let mut sql = format!(
-        "UPDATE pending_turn_inputs
-             SET state = CASE
-                     WHEN state = {accepted_state} THEN
-                         CASE json_extract(ingress_json, '$.scope')
-                             WHEN 'active_turn' THEN {pending_active}
-                             ELSE {deferred_next_turn}
-                         END
-                     ELSE state
-                 END,
-                 {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
-             WHERE (session_id, claim_id, claim_token) IN ("
-    );
-    let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(claims.len() * 3);
-    for (index, claim) in claims.iter().enumerate() {
-        if index > 0 {
-            sql.push_str(", ");
-        }
-        sql.push_str("(?, ?, ?)");
-        values.push(claim.session_id.as_str().to_string().into());
-        values.push(claim.claim_id.clone().into());
-        values.push(claim.lease_token.clone().into());
-    }
-    sql.push(')');
-    (sql, values)
 }

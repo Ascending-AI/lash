@@ -43,12 +43,7 @@ impl SessionExecutionLeaseStore for Store {
                                 sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
                             let claimed_at = current.claimed_at_ms;
                             tx.execute(
-                                "UPDATE session_execution_leases
-                                 SET lease_token = ?2,
-                                     lease_claimed_at_ms = ?3,
-                                     lease_expires_at_ms = ?4,
-                                     lease_term_ms = ?5
-                                 WHERE session_id = ?1",
+                                crate::turn_ingress::turn_ingress_sql().leases.reenter.sql(),
                                 params![
                                     session_id.as_str(),
                                     lease_token,
@@ -180,14 +175,7 @@ impl SessionExecutionLeaseStore for Store {
                         lease_ttl_ms,
                     )?;
                     let renewed = tx.execute(
-                        "UPDATE session_execution_leases
-                         SET lease_expires_at_ms = ?6,
-                             lease_term_ms = ?7
-                         WHERE session_id = ?1
-                           AND lease_owner_id = ?2
-                           AND lease_owner_incarnation_id = ?3
-                           AND lease_executor_id = ?4
-                           AND lease_token = ?5",
+                        crate::turn_ingress::turn_ingress_sql().leases.renew.sql(),
                         params![
                             fence.session_id.as_str(),
                             fence.owner.owner_id.as_str(),

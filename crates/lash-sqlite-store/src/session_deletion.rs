@@ -35,7 +35,10 @@ pub(super) async fn delete_session_from_catalog(
         let outcome: Result<lash_core::SessionBlobReclaimReport, lash_core::StoreError> = (|| {
             let pending_count = tx
                 .query_row(
-                    "SELECT COUNT(*) FROM turn_cancel_closure_authorizations WHERE session_id = ?1",
+                    crate::turn_ingress::turn_ingress_sql()
+                        .closures
+                        .count_by_session
+                        .sql(),
                     params![session_id.as_str()],
                     |row| row.get::<_, i64>(0),
                 )
@@ -163,8 +166,9 @@ pub(super) async fn delete_session_from_catalog(
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
+            let turn_ingress = crate::turn_ingress::turn_ingress_sql();
             tx.execute(
-                "DELETE FROM queued_work_batches WHERE session_id = ?1",
+                turn_ingress.queued_batches.delete_by_session.sql(),
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
@@ -176,21 +180,18 @@ pub(super) async fn delete_session_from_catalog(
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
-            for table in [
-                "pending_turn_inputs",
-                "turn_cancel_requests",
-                // Administration revokes the session's effect authority before
-                // entering store deletion. Only then may the pinned closure
-                // obligation and its selected-owner identity be retired.
-                "turn_cancel_closure_authorizations",
-                "turn_cancellation_bindings",
-                "session_execution_leases",
+            // Administration revokes the session's effect authority before
+            // entering store deletion. Only then may the pinned closure
+            // obligation and its selected-owner identity be retired.
+            for statement in [
+                turn_ingress.pending_inputs.delete_by_session.sql(),
+                turn_ingress.cancel_requests.delete_by_session.sql(),
+                turn_ingress.closures.delete_by_session.sql(),
+                turn_ingress.bindings.delete_by_session.sql(),
+                turn_ingress.leases.delete_by_session.sql(),
             ] {
-                tx.execute(
-                    &format!("DELETE FROM {table} WHERE session_id = ?1"),
-                    params![session_id.as_str()],
-                )
-                .map_err(sqlite_error)?;
+                tx.execute(statement, params![session_id.as_str()])
+                    .map_err(sqlite_error)?;
             }
             // The session-core rows the family owns, named rather than spelled.
             for statement in [
