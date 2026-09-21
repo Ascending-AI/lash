@@ -169,7 +169,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     state.set_plugin_state(Some(PluginState {
         plugins: Default::default(),
     }));
-    state.set_execution_state_snapshot(Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
+    state.set_execution_state_snapshot(Some(vec![0xDE, 0xAD, 0xBE, 0xEF].into()));
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
         .await

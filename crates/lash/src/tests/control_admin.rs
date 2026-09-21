@@ -143,7 +143,7 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
         .admin()
         .state()
         .restore_execution(&lash_core::plugin::HydratedExecutionState {
-            root: vec![1, 2, 3],
+            root: vec![1, 2, 3].into(),
             components: std::collections::BTreeMap::new(),
         })
         .await

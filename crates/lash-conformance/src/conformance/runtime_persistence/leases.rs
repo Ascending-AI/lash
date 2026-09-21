@@ -42,7 +42,7 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(
     state.agent_frames = state
         .session_graph
         .agent_frame_records(&SessionId::from("root"));
-    state.set_execution_state_snapshot(Some(b"frame-vm".to_vec()));
+    state.set_execution_state_snapshot(Some(b"frame-vm".to_vec().into()));
 
     commit_runtime_state_for_test(
         &store,

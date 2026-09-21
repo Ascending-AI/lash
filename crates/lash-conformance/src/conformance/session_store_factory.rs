@@ -1814,7 +1814,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         session_id: source_request.session_id.clone(),
         ..crate::RuntimeSessionState::new(source_request.policy.clone())
     };
-    state.set_execution_state_snapshot(Some(vec![0xFA, 0xCE]));
+    state.set_execution_state_snapshot(Some(vec![0xFA, 0xCE].into()));
     state.ensure_agent_frame_initialized();
     let root_ids = state
         .session_graph

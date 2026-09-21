@@ -796,13 +796,13 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
                 hash_bytes >= changed_bytes,
                 "{prefix} sample {sample} hashed {hash_bytes} bytes for {changed_bytes} changed-body bytes"
             );
-            assert!(
-                copy_count >= changed_count,
-                "{prefix} sample {sample} observed {copy_count} runtime body copies for {changed_count} changed bodies"
+            assert_eq!(
+                copy_count, 0,
+                "{prefix} sample {sample} observed {copy_count} runtime body copies; bodies are shared, not copied"
             );
-            assert!(
-                copy_bytes >= changed_bytes,
-                "{prefix} sample {sample} copied {copy_bytes} bytes for {changed_bytes} changed-body bytes"
+            assert_eq!(
+                copy_bytes, 0,
+                "{prefix} sample {sample} copied {copy_bytes} bytes; bodies are shared, not copied"
             );
         }
     }

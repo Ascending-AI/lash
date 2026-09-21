@@ -1414,7 +1414,7 @@ fn install_component_bodies(state: &mut RuntimeSessionState, mode: u8, value: u8
     if selection.clear_execution {
         state.set_execution_state_snapshot(None);
     } else if selection.store_execution {
-        state.set_execution_state_snapshot(Some(vec![value, value.wrapping_add(1)]));
+        state.set_execution_state_snapshot(Some(vec![value, value.wrapping_add(1)].into()));
     }
 }
 

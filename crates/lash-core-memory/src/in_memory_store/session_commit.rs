@@ -663,7 +663,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let mut roots = HashSet::new();
             for component in hydrated_checkpoint.components.values() {
                 if let Some(blob_ref) = component.blob_ref().cloned() {
-                    if let Some(body) = component.body().map(<[u8]>::to_vec) {
+                    if let Some(body) = component.body_arc() {
                         blobs.insert(blob_ref.clone(), body);
                     }
                     roots.insert(blob_ref);

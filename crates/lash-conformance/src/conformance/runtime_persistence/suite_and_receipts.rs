@@ -518,7 +518,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     state.session_id = SessionId::from("execution-state-replace-then-clear".to_string());
-    state.set_execution_state_snapshot(Some(b"initial-execution-state".to_vec()));
+    state.set_execution_state_snapshot(Some(b"initial-execution-state".to_vec().into()));
 
     let initial = commit_runtime_state_for_test(
         &store,
@@ -529,7 +529,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     .expect("commit initial execution state");
     state.apply_persisted_commit_result(initial);
 
-    state.set_execution_state_snapshot(Some(b"replacement-execution-state".to_vec()));
+    state.set_execution_state_snapshot(Some(b"replacement-execution-state".to_vec().into()));
     let replacement = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&state, &[]),

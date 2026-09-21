@@ -198,22 +198,12 @@ impl RuntimeCheckpointComponents {
                 }
                 crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT => {
                     ResidentCheckpointComponentBody::ExecutionState(
-                        checkpoint.checked_component_body(key)?.map(|body| {
-                            let copied = body.to_vec();
-                            #[cfg(feature = "perf-witness")]
-                            crate::perf_witness::record_body_copy(body.len());
-                            copied
-                        }),
+                        checkpoint.checked_component_body(key)?,
                     )
                 }
-                _ => ResidentCheckpointComponentBody::Opaque(
-                    checkpoint.checked_component_body(key)?.map(|body| {
-                        let copied = body.to_vec();
-                        #[cfg(feature = "perf-witness")]
-                        crate::perf_witness::record_body_copy(body.len());
-                        copied
-                    }),
-                ),
+                _ => {
+                    ResidentCheckpointComponentBody::Opaque(checkpoint.checked_component_body(key)?)
+                }
             };
             entries.insert(
                 key.clone(),
@@ -263,17 +253,16 @@ impl RuntimeCheckpointComponents {
                 ResidentCheckpointComponent::Changed { body, .. } => {
                     let body = match body {
                         PendingCheckpointComponentBody::ToolState { snapshot, .. } => {
-                            crate::store::encode_checkpoint_component(key, snapshot)?
+                            crate::store::encode_checkpoint_component(key, snapshot)
+                                .map(std::sync::Arc::from)?
                         }
                         PendingCheckpointComponentBody::PluginState { snapshot, .. } => {
-                            crate::store::encode_checkpoint_component(key, snapshot)?
+                            crate::store::encode_checkpoint_component(key, snapshot)
+                                .map(std::sync::Arc::from)?
                         }
                         PendingCheckpointComponentBody::ExecutionState(bytes)
                         | PendingCheckpointComponentBody::Opaque(bytes) => {
-                            let copied = bytes.clone();
-                            #[cfg(feature = "perf-witness")]
-                            crate::perf_witness::record_body_copy(bytes.len());
-                            copied
+                            std::sync::Arc::clone(bytes)
                         }
                     };
                     crate::HydratedCheckpointComponent::changed(body)
@@ -365,19 +354,19 @@ impl RuntimeCheckpointComponents {
         );
     }
 
-    fn execution_state_snapshot(&self) -> Option<&[u8]> {
+    fn execution_state_snapshot(&self) -> Option<std::sync::Arc<[u8]>> {
         self.component(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
             .and_then(ResidentCheckpointComponent::execution_state_body)
     }
 
-    fn set_execution_state_snapshot(&mut self, snapshot: Option<Vec<u8>>) {
+    fn set_execution_state_snapshot(&mut self, snapshot: Option<std::sync::Arc<[u8]>>) {
         self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
         self.entries
             .retain(|key, _| !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
         self.set_execution_state_root(snapshot);
     }
 
-    fn set_execution_state_root(&mut self, snapshot: Option<Vec<u8>>) {
+    fn set_execution_state_root(&mut self, snapshot: Option<std::sync::Arc<[u8]>>) {
         let key = crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string();
         let Some(snapshot) = snapshot else {
             self.entries.remove(&key);
@@ -416,15 +405,12 @@ impl RuntimeCheckpointComponents {
             }
             let replacement = match component {
                 crate::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
-                    let copied = body.clone();
-                    #[cfg(feature = "perf-witness")]
-                    crate::perf_witness::record_body_copy(body.len());
                     ResidentCheckpointComponent::Changed {
                         descriptor: self
                             .entries
                             .get(key)
                             .and_then(|entry| entry.descriptor().cloned()),
-                        body: PendingCheckpointComponentBody::Opaque(copied),
+                        body: PendingCheckpointComponentBody::Opaque(std::sync::Arc::clone(body)),
                     }
                 }
                 crate::plugin::ExecutionStateComponentSnapshot::Unchanged => {
@@ -532,14 +518,8 @@ impl RuntimeCheckpointComponents {
                     message: format!("execution-state leaf component `{key}` was not hydrated"),
                 });
             };
-            let copied = body.to_vec();
-            #[cfg(feature = "perf-witness")]
-            crate::perf_witness::record_body_copy(body.len());
-            components.insert(key.clone(), copied);
+            components.insert(key.clone(), body);
         }
-        let root = root.to_vec();
-        #[cfg(feature = "perf-witness")]
-        crate::perf_witness::record_body_copy(root.len());
         Ok(Some(crate::plugin::HydratedExecutionState {
             root,
             components,
@@ -953,7 +933,10 @@ impl RuntimeSessionState {
 
     /// Updates execution state snapshot state for protocol and process-engine implementors while
     /// materializing or restoring protocol session state.
-    pub fn set_execution_state_snapshot(&mut self, execution_state_snapshot: Option<Vec<u8>>) {
+    pub fn set_execution_state_snapshot(
+        &mut self,
+        execution_state_snapshot: Option<std::sync::Arc<[u8]>>,
+    ) {
         // A materialized frame-switch outcome passes `None` here to clear the checkpoint. Clear
         // the durable ref with the resident body: every store interprets an absent body with a
         // present ref as an unchanged component, which would otherwise restore the old frame.
@@ -1003,7 +986,7 @@ impl RuntimeSessionState {
     /// Exposes execution state snapshot to protocol and process-engine implementors while
     /// materializing or restoring protocol session state. Returns `None` when no execution state
     /// snapshot is present.
-    pub fn execution_state_snapshot(&self) -> Option<&[u8]> {
+    pub fn execution_state_snapshot(&self) -> Option<std::sync::Arc<[u8]>> {
         self.checkpoint_components.execution_state_snapshot()
     }
 

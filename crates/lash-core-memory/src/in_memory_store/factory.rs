@@ -29,7 +29,7 @@ pub struct InMemorySessionStoreFactory {
     pub(super) global_session_heads: Arc<Mutex<HashMap<SessionId, Option<crate::NodeId>>>>,
     pub(super) fork_plans: Arc<Mutex<HashMap<SessionId, crate::store::ForkPlan>>>,
     pub(super) node_anchors: InMemoryNodeAnchors,
-    pub(super) checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
+    pub(super) checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Arc<[u8]>>>>,
     /// Factory-global session -> live checkpoint component edges; see
     /// [`InMemorySessionStore::checkpoint_blob_roots`].
     pub(super) checkpoint_blob_roots: super::SharedCheckpointBlobRoots,
@@ -101,7 +101,7 @@ impl InMemorySessionStoreFactory {
         let blob_ref = crate::BlobRef::for_content(&body);
         self.checkpoint_component_blobs
             .lock_recover()
-            .insert(blob_ref.clone(), body);
+            .insert(blob_ref.clone(), Arc::from(body));
         blob_ref
     }
 }

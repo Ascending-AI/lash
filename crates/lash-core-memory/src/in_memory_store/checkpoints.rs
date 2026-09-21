@@ -1,9 +1,9 @@
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub(super) fn resolve_components(
-    blobs: &Mutex<HashMap<crate::BlobRef, Vec<u8>>>,
+    blobs: &Mutex<HashMap<crate::BlobRef, Arc<[u8]>>>,
     checkpoint: &crate::HydratedSessionCheckpoint,
 ) -> Result<crate::HydratedSessionCheckpoint, crate::store::StoreError> {
     let manifest = checkpoint.manifest()?;
@@ -16,8 +16,8 @@ pub(super) fn resolve_components(
                 message: format!("manifest projection lost component `{key}`"),
             }
         })?;
-        let body = match submitted.body() {
-            Some(body) => body.to_vec(),
+        let body = match submitted.body_arc() {
+            Some(body) => body,
             None => stored.get(&descriptor.blob_ref).cloned().ok_or_else(|| {
                 crate::store::StoreError::CheckpointComponentMissing {
                     key: key.clone(),

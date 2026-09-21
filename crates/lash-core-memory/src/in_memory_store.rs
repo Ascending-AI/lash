@@ -176,7 +176,7 @@ pub struct InMemorySessionStore {
     pub deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
     pub session_catalog: SharedSessionCatalog,
     pub checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
-    pub checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
+    pub checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Arc<[u8]>>>>,
     /// Factory-global reference edges from a session to the component blobs its
     /// *live* checkpoint holds. Edges, not counts (ADR 0067 §4): a commit
     /// replaces its session's edge set, a delete drops it, and
@@ -315,7 +315,7 @@ impl InMemorySessionStore {
         global_node_owners: Arc<Mutex<HashMap<crate::NodeId, SessionId>>>,
         global_session_heads: Arc<Mutex<HashMap<SessionId, Option<crate::NodeId>>>>,
         node_anchors: InMemoryNodeAnchors,
-        checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
+        checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Arc<[u8]>>>>,
         checkpoint_blob_roots: SharedCheckpointBlobRoots,
         tombstoned_node_ids: Arc<Mutex<HashSet<crate::NodeId>>>,
         deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,

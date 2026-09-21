@@ -263,7 +263,7 @@ impl lash_core::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
             ));
         }
         Ok(lash_core::plugin::ExecutionStateSnapshot::from_root(Some(
-            self.snapshot.lock_recover().clone(),
+            self.snapshot.lock_recover().clone().into(),
         )))
     }
 
@@ -286,7 +286,7 @@ impl lash_core::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), lash_core::SessionError> {
-        self.restored.lock_recover().push(state.root.clone());
+        self.restored.lock_recover().push(state.root.to_vec());
         Ok(())
     }
 }
@@ -321,7 +321,7 @@ impl lash_core::plugin::ProtocolSessionPlugin for ResetExecutorOnSwitchProtocol 
                 source,
             })?
             .unwrap_or_else(|| lash_core::plugin::HydratedExecutionState {
-                root: b"fresh-frame-execution-state".to_vec(),
+                root: b"fresh-frame-execution-state".as_slice().into(),
                 components: std::collections::BTreeMap::new(),
             });
         lash_core::plugin::CodeExecutorPlugin::restore_execution_state(

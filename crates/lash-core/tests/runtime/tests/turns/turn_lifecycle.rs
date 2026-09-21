@@ -679,7 +679,7 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .expect("baseline state exists");
     assert_eq!(durable.head_revision, 1);
     assert_eq!(
-        durable.execution_state_snapshot(),
+        durable.execution_state_snapshot().as_deref(),
         Some(b"committed-before-failure".as_slice())
     );
 
@@ -809,7 +809,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         .expect("load no-op switch state")
         .expect("no-op switch state is durable");
     assert_eq!(
-        durable.execution_state_snapshot(),
+        durable.execution_state_snapshot().as_deref(),
         Some(b"live-frame-execution-state".as_slice())
     );
     drop(runtime);

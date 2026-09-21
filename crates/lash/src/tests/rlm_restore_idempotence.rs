@@ -173,7 +173,7 @@ fn snapshot_globals(
                 .components
                 .get(component)
                 .unwrap_or_else(|| panic!("leaf `{component}` must be hydrated"))
-                .as_slice(),
+                .as_ref(),
         };
         let snapshot = lashlang::Snapshot::from_canonical_bytes(body).expect("decode the global");
         format!("{:?}", snapshot.globals().get("value"))

@@ -624,7 +624,7 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
     let snapshot = hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
     assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
-    let mut encoded = snapshot.root.clone();
+    let mut encoded = snapshot.root.to_vec();
     for body in snapshot.components.values() {
         encoded.extend_from_slice(body);
     }

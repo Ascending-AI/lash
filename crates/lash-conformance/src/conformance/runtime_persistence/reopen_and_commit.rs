@@ -708,7 +708,7 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
-    state.set_execution_state_snapshot(Some(vec![7; 1_024]));
+    state.set_execution_state_snapshot(Some(vec![7; 1_024].into()));
     let operation = crate::OperationId::turn("root", "provider-turn", "final");
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation.clone())

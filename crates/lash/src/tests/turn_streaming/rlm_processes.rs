@@ -122,9 +122,7 @@ impl RlmExecutionSnapshotProbe {
     ) -> Option<lashlang::Value> {
         let body = match self.globals.get(name)? {
             RlmPersistedValueProbe::Inline { body } => body.as_slice(),
-            RlmPersistedValueProbe::Leaf { component } => {
-                state.components.get(component)?.as_slice()
-            }
+            RlmPersistedValueProbe::Leaf { component } => state.components.get(component)?.as_ref(),
         };
         lashlang::Snapshot::from_canonical_bytes(body)
             .ok()?
