@@ -1908,7 +1908,7 @@ jobs:
           - name: effect-group-conformance
             recipe: effect-group-conformance-e2e
             node: false
-            artifact: none
+            artifact: effect-group-conformance
             browser: false
             runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
@@ -2007,6 +2007,7 @@ jobs:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
           LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
           LASH_SESSION_LEASE_ARTIFACT_DIR: target/functional-e2e-artifacts/session-lease-triage
+          LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
 

@@ -1024,7 +1024,7 @@ async fn the_profiles_differ_on_every_axis_and_the_checklist_covers_them() {
                     value_a, value_b,
                     "a Fresh field carries no axis to differ on: {field:?}"
                 ),
-                _ => assert_ne!(
+                RebindDisposition::Rebound | RebindDisposition::Lent => assert_ne!(
                     value_a, value_b,
                     "child {position}: opener deployments must differ on axis \
                      {field:?}: a differential that agrees asserts nothing"

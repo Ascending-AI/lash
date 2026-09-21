@@ -16,36 +16,27 @@ use super::context_source::dispatch_context_fields;
 use crate::tool_dispatch::REBIND_FIELDS;
 
 #[test]
-fn every_dispatch_context_field_has_a_rebind_ruling() {
-    let fields = dispatch_context_fields();
+fn rebind_rulings_and_context_fields_are_the_same_set() {
+    let declared: BTreeSet<String> = dispatch_context_fields().into_iter().collect();
     let ruled: BTreeSet<&'static str> = REBIND_FIELDS
         .iter()
         .map(|field| field.context_field())
         .collect();
-    let unruled: Vec<&String> = fields
+    let unruled: Vec<&String> = declared
         .iter()
         .filter(|field| !ruled.contains(field.as_str()))
         .collect();
-    assert!(
-        unruled.is_empty(),
-        "ToolDispatchContext fields with no REBIND_FIELDS ruling: {unruled:?}; \
-         add each to RebindField, give it a disposition, and bump \
-         TOOL_CHILD_REBIND_VERSION"
-    );
-}
-
-#[test]
-fn every_ruling_names_a_real_dispatch_context_field() {
-    let declared = dispatch_context_fields();
-    let fields: BTreeSet<&str> = declared.iter().map(String::as_str).collect();
-    let stray: Vec<&'static str> = REBIND_FIELDS
+    let stray: Vec<&'static str> = ruled
         .iter()
-        .map(|field| field.context_field())
-        .filter(|name| !fields.contains(name))
+        .filter(|name| !declared.contains(**name))
+        .copied()
         .collect();
     assert!(
-        stray.is_empty(),
-        "REBIND_FIELDS names fields ToolDispatchContext does not have: {stray:?}"
+        unruled.is_empty() && stray.is_empty(),
+        "ToolDispatchContext fields and REBIND_FIELDS rulings differ; \
+         unruled fields: {unruled:?}; stray rulings: {stray:?}; add each new \
+         field to RebindField, give it a disposition, and bump \
+         TOOL_CHILD_REBIND_VERSION"
     );
 }
 
