@@ -186,7 +186,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_a_family_removed_from_converted_makes_the_gate_silent_about_it(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "attachment", "effect", "wait"]',
+            'converted = ["artifact", "attachment", "effect", "trigger", "wait"]',
             'converted = ["artifact", "attachment", "effect"]',
         )
         self.tree.substitute(
@@ -346,8 +346,8 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         """The red side of the case above: the rule, not the seed, is new."""
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "attachment", "effect", "wait"]',
-            'converted = ["artifact", "effect", "wait"]',
+            'converted = ["artifact", "attachment", "effect", "trigger", "wait"]',
+            'converted = ["artifact", "effect", "trigger", "wait"]',
         )
         stray = (
             'const STRAY: &str = "SELECT 1 FROM lash_attachment_manifest '

@@ -1,12 +1,341 @@
-//! SQLite-backed runtime trigger store.
+//! SQLite-backed runtime trigger store, and the SQLite owner of the trigger
+//! family's four tables.
 //!
 //! This is the durable peer of [`SqliteProcessRegistry`]: it stores trigger
 //! subscriptions and append-only trigger occurrences at deployment scope,
 //! outside any session database.
+//!
+//! The family lives in its own database file, which this store opens directly
+//! and never attaches anywhere, so every statement is rendered once, through
+//! the unqualified SQLite dialect — the text this store has always issued.
+//! The effect family needs a schema qualifier because its tables are also
+//! reached through an `ATTACH`ed name; this one does not.
 
 use super::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
+use lash_store_sql::trigger::deliveries::DeliveryStatements;
+use lash_store_sql::trigger::mutation_receipts::MutationReceiptStatements;
+use lash_store_sql::trigger::occurrences::{
+    ListShape as OccurrenceListShape, OccurrenceStatements,
+};
+use lash_store_sql::trigger::subscriptions::{
+    ListShape as SubscriptionListShape, SubscriptionStatements,
+};
+use std::sync::LazyLock;
+
+lash_store_sql::statements! {
+    /// `trigger_subscriptions` statements only SQLite issues.
+    pub(crate) struct SubscriptionSqliteStatements @ "trigger_subscription" {
+        /// The record of subscription `?1`, read before a mutation is
+        /// evaluated against it.
+        ///
+        /// No `FOR UPDATE`: `BEGIN IMMEDIATE` already holds the database write
+        /// lock, so the read and the write it decides cannot interleave.
+        select_record_by_id = "SELECT record_json FROM trigger_subscriptions
+             WHERE subscription_id = ?1";
+
+        /// Every live record owned by scope `?1`, the input a prune evaluates.
+        /// Forks for the same reason
+        /// [`SubscriptionSqliteStatements::select_record_by_id`] does.
+        select_records_for_prune = "SELECT record_json FROM trigger_subscriptions
+             WHERE owner_scope = ?1 AND lifecycle <> 'tombstoned'";
+
+        /// Every enabled subscription an occurrence of `?1`/`?2` fires at.
+        ///
+        /// Plain equalities, so the read seeks
+        /// `(source_type, source_key, lifecycle)` on all three columns — this
+        /// is the ingress path, and it runs once per firing. PostgreSQL adds
+        /// `FOR SHARE` so a concurrent mutation cannot retire a subscription
+        /// between this read and the delivery it reserves; SQLite holds the
+        /// write lock for the whole ingress.
+        select_enabled_for_source = "SELECT subscription_id, record_json
+             FROM trigger_subscriptions
+             WHERE lifecycle = 'enabled'
+               AND source_type = ?1
+               AND source_key = ?2
+             ORDER BY owner_scope ASC, subscription_key ASC";
+
+        /// The same read narrowed to owner scope `?3`, which is what an
+        /// occurrence that names a session fires at. Its own statement rather
+        /// than an optional predicate, for the reason in
+        /// [`lash_store_sql::trigger::subscriptions::ListShape`].
+        select_enabled_for_source_and_owner = "SELECT subscription_id, record_json
+             FROM trigger_subscriptions
+             WHERE lifecycle = 'enabled'
+               AND source_type = ?1
+               AND source_key = ?2
+               AND owner_scope = ?3
+             ORDER BY owner_scope ASC, subscription_key ASC";
+
+        /// Every subscription in the store, tombstoned ones included.
+        ///
+        /// SQLite alone reads the whole table to delete a session's
+        /// subscriptions: it decides ownership from the decoded record's
+        /// registrant session rather than from the `owner_scope` column, and
+        /// skips a row whose JSON is malformed with a warning instead of
+        /// failing the sweep. PostgreSQL selects by `owner_scope` under
+        /// `FOR UPDATE` and has no counterpart. The two are deliberately left
+        /// as they stand; closing the difference is a behaviour change, not a
+        /// rendering one.
+        select_all_for_session_sweep = "SELECT subscription_id, record_json
+             FROM trigger_subscriptions";
+
+        /// Delete every subscription of the owner scopes in JSON array `?1`
+        /// that no delivery still references.
+        ///
+        /// SQLite unnests the array with `json_each`; PostgreSQL binds a real
+        /// `TEXT[]`.
+        delete_unreferenced_for_owners = "DELETE FROM trigger_subscriptions
+             WHERE owner_scope IN (SELECT value FROM json_each(?1))
+               AND NOT EXISTS (
+                   SELECT 1 FROM trigger_deliveries
+                   WHERE trigger_deliveries.subscription_id =
+                         trigger_subscriptions.subscription_id
+               )";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `trigger_occurrences` statements only SQLite issues.
+    pub(crate) struct OccurrenceSqliteStatements @ "trigger_occurrence" {
+        /// The occurrence already stored under idempotency key `?1`.
+        ///
+        /// PostgreSQL takes the row's write lock (`FOR UPDATE`) to hold the
+        /// idempotency comparison across the insert that follows it; SQLite
+        /// reads it under `BEGIN IMMEDIATE`.
+        select_record_by_idempotency_key = "SELECT record_json
+             FROM trigger_occurrences
+             WHERE idempotency_key = ?1";
+
+        /// Delete every fired occurrence no delivery references.
+        ///
+        /// SQLite reads the outcome with `json_extract`, PostgreSQL with
+        /// `jsonb #>>`.
+        delete_orphan_fired = "DELETE FROM trigger_occurrences
+             WHERE COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+               AND NOT EXISTS (
+                   SELECT 1 FROM trigger_deliveries
+                   WHERE trigger_deliveries.occurrence_id =
+                         trigger_occurrences.occurrence_id
+               )";
+
+        /// Arm at `?2` every occurrence named in the candidate array `?1`
+        /// whose last delivery this pass removed. Forks on `json_each` and on
+        /// the outcome read.
+        arm_reclaimable_for_candidates = "UPDATE trigger_occurrences
+             SET reclaimable_at_ms = ?2
+             WHERE reclaimable_at_ms IS NULL
+               AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+               AND NOT EXISTS (
+                   SELECT 1 FROM trigger_deliveries
+                   WHERE trigger_deliveries.occurrence_id =
+                         trigger_occurrences.occurrence_id
+               )
+               AND occurrence_id IN (
+                   SELECT DISTINCT json_extract(candidate.value, '$.occurrence_id')
+                   FROM json_each(?1) AS candidate
+               )";
+
+        /// The reclamation sweep's scope proof and its worklist, from one
+        /// snapshot at cutoff `?1`.
+        ///
+        /// The aggregate visits the whole table so `NothingToDo` stays
+        /// witnessed emptiness; only eligible ids are materialized. Forks on
+        /// the outcome read alone — see
+        /// [`lash_store_sql::trigger::occurrences::RECLAMATION_SCOPE_COUNTS_SQLITE`].
+        select_reclamation_scope = "WITH scope AS (
+                 SELECT COUNT(*) AS inspected_count,
+                        COUNT(*) FILTER (
+                            WHERE reclaimable_at_ms IS NULL
+                              AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+                        ) AS live_fan_out_count,
+                        COUNT(*) FILTER (
+                            WHERE COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') != 'fired'
+                        ) AS audit_retained_count,
+                        COUNT(*) FILTER (
+                            WHERE reclaimable_at_ms > ?1
+                              AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+                        ) AS grace_deferred_count
+                 FROM trigger_occurrences
+             ), candidates AS (
+                 SELECT occurrence_id
+                 FROM trigger_occurrences
+                 WHERE reclaimable_at_ms IS NOT NULL
+                   AND reclaimable_at_ms <= ?1
+                   AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+             )
+             SELECT scope.inspected_count,
+                    scope.live_fan_out_count,
+                    scope.grace_deferred_count,
+                    scope.audit_retained_count,
+                    candidates.occurrence_id
+             FROM scope
+             LEFT JOIN candidates ON TRUE
+             ORDER BY candidates.occurrence_id ASC";
+
+        /// Reclaim occurrence `?1` if it is still eligible at cutoff `?2`. The
+        /// whole eligibility test is re-proved here, because the worklist was
+        /// read from an earlier snapshot. Forks on the outcome read.
+        delete_reclaimable_by_id = "DELETE FROM trigger_occurrences
+             WHERE occurrence_id = ?1
+               AND reclaimable_at_ms IS NOT NULL
+               AND reclaimable_at_ms <= ?2
+               AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+               AND NOT EXISTS (
+                   SELECT 1 FROM trigger_deliveries
+                   WHERE trigger_deliveries.occurrence_id =
+                         trigger_occurrences.occurrence_id
+               )";
+
+        /// Drop non-fired (audit) occurrences older than `?1`. Forks on the
+        /// outcome read.
+        prune_non_fired = "DELETE FROM trigger_occurrences
+             WHERE occurred_at_ms < ?1
+               AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') != 'fired'";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `trigger_deliveries` statements only SQLite issues.
+    pub(crate) struct DeliverySqliteStatements @ "trigger_delivery" {
+        /// Delete every delivery named in the candidate array `?1`.
+        ///
+        /// SQLite unnests the candidates with `json_each` and compares the
+        /// three ids through `json_extract`; PostgreSQL joins three bound
+        /// `TEXT[]`s with `UNNEST`.
+        delete_retention_candidates = "DELETE FROM trigger_deliveries
+             WHERE EXISTS (
+                 SELECT 1
+                 FROM json_each(?1) AS candidate
+                 WHERE trigger_deliveries.occurrence_id =
+                           json_extract(candidate.value, '$.occurrence_id')
+                   AND trigger_deliveries.subscription_id =
+                           json_extract(candidate.value, '$.subscription_id')
+                   AND trigger_deliveries.process_id =
+                           json_extract(candidate.value, '$.process_id')
+             )";
+
+        /// Every session whose deliveries are still outstanding: the scopes a
+        /// retention pass must not reclaim receipts for. Forks on the JSON
+        /// read.
+        select_session_owner_scopes = "SELECT DISTINCT
+                                'session:' || json_extract(
+                                    subscription_snapshot_json,
+                                    '$.owner_scope.session_id'
+                                )
+             FROM trigger_deliveries
+             WHERE json_extract(
+                       subscription_snapshot_json,
+                       '$.owner_scope.type'
+                   ) = 'session'";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `trigger_mutation_receipts` statements only SQLite issues.
+    pub(crate) struct MutationReceiptSqliteStatements @ "trigger_mutation_receipt" {
+        /// Drop the session-owned receipts of the owner ids in JSON array
+        /// `?1`. Forks on `json_each` against PostgreSQL's bound `TEXT[]`.
+        delete_for_session_owners = "DELETE FROM trigger_mutation_receipts
+             WHERE owner_kind = 'session'
+               AND owner_id IN (SELECT value FROM json_each(?1))";
+    }
+}
+
+lash_store_sql::statements! {
+    /// The trigger family's cross-table retention read, as SQLite issues it.
+    pub(crate) struct RetentionSqliteStatements @ "trigger_retention" {
+        /// Every session that owns a subscription, a delivery's frozen
+        /// subscription, or a mutation receipt: the candidate set a session
+        /// retention pass reconciles against the session catalog.
+        ///
+        /// The one statement of this family that reads all three tables, and
+        /// it forks on the JSON read in the delivery arm.
+        select_session_owner_ids = "SELECT owner_scope
+             FROM (
+                 SELECT owner_scope
+                 FROM trigger_subscriptions
+                 UNION
+                 SELECT 'session:' || json_extract(
+                            subscription_snapshot_json,
+                            '$.owner_scope.session_id'
+                        )
+                 FROM trigger_deliveries
+                 WHERE json_extract(
+                           subscription_snapshot_json,
+                           '$.owner_scope.type'
+                       ) = 'session'
+                 UNION
+                 SELECT 'session:' || owner_id
+                 FROM trigger_mutation_receipts
+                 WHERE owner_kind = 'session'
+             )
+             WHERE owner_scope LIKE 'session:%'
+             ORDER BY owner_scope";
+    }
+}
+
+/// Every trigger-family statement, rendered once.
+pub(crate) struct TriggerSql {
+    /// `trigger_subscriptions` statements both backends issue verbatim.
+    subscription: SubscriptionStatements,
+    /// `trigger_subscriptions` statements only SQLite issues.
+    subscription_sqlite: SubscriptionSqliteStatements,
+    /// `trigger_occurrences` statements both backends issue verbatim.
+    occurrence: OccurrenceStatements,
+    /// `trigger_occurrences` statements only SQLite issues.
+    occurrence_sqlite: OccurrenceSqliteStatements,
+    /// `trigger_deliveries` statements both backends issue verbatim.
+    delivery: DeliveryStatements,
+    /// `trigger_deliveries` statements only SQLite issues.
+    delivery_sqlite: DeliverySqliteStatements,
+    /// `trigger_mutation_receipts` statements both backends issue verbatim.
+    receipt: MutationReceiptStatements,
+    /// `trigger_mutation_receipts` statements only SQLite issues.
+    receipt_sqlite: MutationReceiptSqliteStatements,
+    /// The family's cross-table retention read.
+    retention_sqlite: RetentionSqliteStatements,
+}
+
+static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
+    let dialect = lash_store_sql::Dialect::sqlite_unqualified();
+    TriggerSql {
+        subscription: SubscriptionStatements::render(dialect),
+        subscription_sqlite: SubscriptionSqliteStatements::render(dialect),
+        occurrence: OccurrenceStatements::render(dialect),
+        occurrence_sqlite: OccurrenceSqliteStatements::render(dialect),
+        delivery: DeliveryStatements::render(dialect),
+        delivery_sqlite: DeliverySqliteStatements::render(dialect),
+        receipt: MutationReceiptStatements::render(dialect),
+        receipt_sqlite: MutationReceiptSqliteStatements::render(dialect),
+        retention_sqlite: RetentionSqliteStatements::render(dialect),
+    }
+});
+
+/// The trigger-family statements, rendered at first use and never again.
+///
+/// One set, not one per schema: the trigger database is never attached to
+/// another connection, so these tables are never addressed through a
+/// qualifier.
+fn trigger_sql() -> &'static TriggerSql {
+    &TRIGGER_SQL
+}
+
+/// The rendered listing statement `filter`'s shape is served by, for the
+/// conformance assertion that the owner filter is pushed into SQL rather than
+/// applied in Rust.
+pub(crate) fn subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> &'static str {
+    trigger_sql()
+        .subscription
+        .list_for(subscription_list_shape(filter))
+        .sql()
+}
+
+/// Planner witnesses for the named listings, and the dispatch that picks them.
+#[cfg(test)]
+#[path = "triggers/listing_plan_tests.rs"]
+mod listing_plan_tests;
 
 pub struct SqliteTriggerStore {
     conn: SqliteConnection,
@@ -98,23 +427,20 @@ impl SqliteTriggerStore {
         })
     }
 
-    async fn list_deliveries_where(
+    /// Run one of the four named delivery listings.
+    ///
+    /// `sql` is a rendered statement, never a clause this function completes:
+    /// the listing used to be one `format!` over a `where_clause` argument,
+    /// and each caller now names the statement it means.
+    async fn list_deliveries_with(
         &self,
-        where_clause: &'static str,
+        sql: &'static str,
         values: Vec<rusqlite::types::Value>,
     ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let sql = format!(
-                        "SELECT d.process_id, d.created_at_ms, o.record_json,
-                                d.subscription_snapshot_json
-                         FROM trigger_deliveries d
-                         JOIN trigger_occurrences o ON o.occurrence_id = d.occurrence_id
-                         WHERE {where_clause}
-                         ORDER BY d.created_at_ms ASC, d.occurrence_id ASC, d.subscription_id ASC"
-                    );
-                    let mut stmt = conn.prepare(&sql).map_err(process_sqlite_error)?;
+                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             Ok((
@@ -152,6 +478,73 @@ fn trigger_tx_outcome<T>(
         Ok(value) => TxOutcome::Commit(Ok(value)),
         Err(err) => TxOutcome::Rollback(Err(err)),
     }
+}
+
+/// The listing statement shape `filter` is served by.
+fn subscription_list_shape(filter: &lash_core::TriggerSubscriptionFilter) -> SubscriptionListShape {
+    SubscriptionListShape::of(
+        filter.registrant_scope_id.is_some(),
+        filter.subscription_key.is_some(),
+        filter.source_type.is_some(),
+        filter.source_key.is_some(),
+    )
+}
+
+/// What the statement of `shape` binds, in its parameter order.
+///
+/// Exhaustive over the shape, so a new listing statement cannot be added
+/// without deciding what it binds.
+fn subscription_list_values(
+    filter: &lash_core::TriggerSubscriptionFilter,
+    shape: SubscriptionListShape,
+) -> Vec<rusqlite::types::Value> {
+    let text =
+        |value: &Option<String>| rusqlite::types::Value::Text(value.clone().unwrap_or_default());
+    match shape {
+        SubscriptionListShape::All => Vec::new(),
+        SubscriptionListShape::ByOwner => vec![text(&filter.registrant_scope_id)],
+        SubscriptionListShape::ByOwnerAndKey => vec![
+            text(&filter.registrant_scope_id),
+            text(&filter.subscription_key),
+        ],
+        SubscriptionListShape::BySourceType => vec![text(&filter.source_type)],
+        SubscriptionListShape::BySource => {
+            vec![text(&filter.source_type), text(&filter.source_key)]
+        }
+    }
+}
+
+/// What the occurrence listing of `shape` binds, in its parameter order.
+///
+/// The window is always bound: an unset start is `i64::MIN` and an unset end
+/// `i64::MAX`, so the comparison stays a plain one against a value and the
+/// index range survives. The closed `[start, end]` this produces is a superset
+/// of the filter's half-open `[start, end)`, which
+/// `TriggerOccurrenceFilter::matches` then narrows exactly.
+fn occurrence_list_values(
+    filter: &lash_core::TriggerOccurrenceFilter,
+    shape: OccurrenceListShape,
+) -> Vec<rusqlite::types::Value> {
+    let text =
+        |value: &Option<String>| rusqlite::types::Value::Text(value.clone().unwrap_or_default());
+    let mut values = match shape {
+        OccurrenceListShape::All => Vec::new(),
+        OccurrenceListShape::BySourceType => vec![text(&filter.source_type)],
+        OccurrenceListShape::BySource => {
+            vec![text(&filter.source_type), text(&filter.source_key)]
+        }
+    };
+    values.push(rusqlite::types::Value::Integer(
+        filter
+            .occurred_at_start_ms
+            .map_or(i64::MIN, crate::clamp_epoch_ms),
+    ));
+    values.push(rusqlite::types::Value::Integer(
+        filter
+            .occurred_at_end_ms
+            .map_or(i64::MAX, crate::clamp_epoch_ms),
+    ));
+    values
 }
 
 #[async_trait::async_trait]
@@ -202,11 +595,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
+                let sql = trigger_sql();
                 Ok(trigger_tx_outcome((|| {
                     let receipt: Option<(String, String)> = tx
                         .query_row(
-                            "SELECT request_fingerprint, result_json
-                             FROM trigger_mutation_receipts WHERE operation_id = ?1",
+                            sql.receipt.select_by_operation_id.sql(),
                             params![operation_id.as_str()],
                             |row| Ok((row.get(0)?, row.get(1)?)),
                         )
@@ -237,10 +630,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     } = &command
                     {
                         let mut stmt = tx
-                            .prepare(
-                                "SELECT record_json FROM trigger_subscriptions
-                                 WHERE owner_scope = ?1 AND lifecycle <> 'tombstoned'",
-                            )
+                            .prepare(sql.subscription_sqlite.select_records_for_prune.sql())
                             .map_err(process_sqlite_error)?;
                         let rows = stmt
                             .query_map(params![owner_scope.namespace()], |row| {
@@ -264,8 +654,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     } else {
                         let current = tx
                             .query_row(
-                                "SELECT record_json FROM trigger_subscriptions
-                                 WHERE subscription_id = ?1",
+                                sql.subscription_sqlite.select_record_by_id.sql(),
                                 params![subscription_id.as_str()],
                                 |row| row.get::<_, String>(0),
                             )
@@ -302,25 +691,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             record.revision,
                         )?;
                         tx.execute(
-                            "INSERT INTO trigger_subscriptions (
-                            subscription_id, owner_scope, subscription_key, incarnation, revision,
-                            definition_fingerprint, source_type, source_key, lifecycle,
-                            deleted_at_ms,
-                            created_at_ms, updated_at_ms, record_json
-                         )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-                         ON CONFLICT(subscription_id) DO UPDATE SET
-                            owner_scope = excluded.owner_scope,
-                            subscription_key = excluded.subscription_key,
-                            incarnation = excluded.incarnation,
-                            revision = excluded.revision,
-                            definition_fingerprint = excluded.definition_fingerprint,
-                            source_type = excluded.source_type,
-                            source_key = excluded.source_key,
-                            lifecycle = excluded.lifecycle,
-                            deleted_at_ms = excluded.deleted_at_ms,
-                            updated_at_ms = excluded.updated_at_ms,
-                            record_json = excluded.record_json",
+                            sql.subscription.upsert.sql(),
                             params![
                                 record.subscription_id.as_str(),
                                 record.owner_scope.namespace(),
@@ -340,10 +711,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                     }
                     tx.execute(
-                        "INSERT INTO trigger_mutation_receipts (
-                            operation_id, owner_kind, owner_id,
-                            request_fingerprint, result_json, created_at_ms
-                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        sql.receipt.insert.sql(),
                         params![
                             operation_id.as_str(),
                             owner_scope.owner_kind_column(),
@@ -368,8 +736,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let (sql, values) = list_subscriptions_query(&filter);
-                    let mut stmt = conn.prepare(&sql).map_err(process_sqlite_error)?;
+                    let shape = subscription_list_shape(&filter);
+                    let values = subscription_list_values(&filter, shape);
+                    let mut stmt = conn
+                        .prepare(trigger_sql().subscription.list_for(shape).sql())
+                        .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -408,9 +779,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
+                let sql = trigger_sql();
                 Ok(trigger_tx_outcome((|| {
                     let mut stmt = tx
-                        .prepare("SELECT subscription_id, record_json FROM trigger_subscriptions")
+                        .prepare(sql.subscription_sqlite.select_all_for_session_sweep.sql())
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map([], |row| {
@@ -452,10 +824,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         )?;
                         deleted += tx
                             .execute(
-                                "UPDATE trigger_subscriptions
-                                 SET lifecycle = 'tombstoned', deleted_at_ms = ?3,
-                                     revision = ?2, updated_at_ms = ?3, record_json = ?4
-                                 WHERE subscription_id = ?1",
+                                sql.subscription.tombstone.sql(),
                                 params![
                                     subscription_id.as_str(),
                                     sql_revision,
@@ -481,12 +850,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         let occurred_at_ms = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
+                let sql = trigger_sql();
                 Ok(trigger_tx_outcome((|| {
                     let existing: Option<String> = tx
                         .query_row(
-                            "SELECT record_json
-                             FROM trigger_occurrences
-                             WHERE idempotency_key = ?1",
+                            sql.occurrence_sqlite.select_record_by_idempotency_key.sql(),
                             params![request.idempotency_key.as_str()],
                             |row| row.get(0),
                         )
@@ -516,11 +884,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             occurred_at_ms,
                         };
                         tx.execute(
-                            "INSERT INTO trigger_occurrences (
-                                occurrence_id, idempotency_key, source_type,
-                                source_key, occurred_at_ms, record_json
-                             )
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            sql.occurrence.insert.sql(),
                             params![
                                 record.occurrence_id.as_str(),
                                 record.idempotency_key.as_str(),
@@ -550,9 +914,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         && reservations.is_empty()
                     {
                         tx.execute(
-                            "UPDATE trigger_occurrences
-                             SET reclaimable_at_ms = ?2
-                             WHERE occurrence_id = ?1 AND reclaimable_at_ms IS NULL",
+                            sql.occurrence.arm_reclaimable.sql(),
                             params![record.occurrence_id.as_str(), record.occurred_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
@@ -575,28 +937,14 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let mut sql =
-                        "SELECT occurrence_id, record_json FROM trigger_occurrences WHERE 1 = 1"
-                            .to_string();
-                    let mut values = Vec::<rusqlite::types::Value>::new();
-                    if let Some(source_type) = filter.source_type.as_ref() {
-                        sql.push_str(" AND source_type = ?");
-                        values.push(source_type.clone().into());
-                    }
-                    if let Some(source_key) = filter.source_key.as_ref() {
-                        sql.push_str(" AND source_key = ?");
-                        values.push(source_key.clone().into());
-                    }
-                    if let Some(start_ms) = filter.occurred_at_start_ms {
-                        sql.push_str(" AND occurred_at_ms >= ?");
-                        values.push(crate::clamp_epoch_ms(start_ms).into());
-                    }
-                    if let Some(end_ms) = filter.occurred_at_end_ms {
-                        sql.push_str(" AND occurred_at_ms < ?");
-                        values.push(crate::clamp_epoch_ms(end_ms).into());
-                    }
-                    sql.push_str(" ORDER BY occurred_at_ms ASC, occurrence_id ASC");
-                    let mut stmt = conn.prepare(&sql).map_err(process_sqlite_error)?;
+                    let shape = OccurrenceListShape::of(
+                        filter.source_type.is_some(),
+                        filter.source_key.is_some(),
+                    );
+                    let values = occurrence_list_values(&filter, shape);
+                    let mut stmt = conn
+                        .prepare(trigger_sql().occurrence.list_for(shape).sql())
+                        .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -605,7 +953,13 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     let mut records = Vec::new();
                     for row in rows {
                         let (_, json) = row.map_err(process_sqlite_error)?;
-                        records.push(Self::decode_occurrence(json)?);
+                        // The statement's window is the clamped closed one;
+                        // the filter's own half-open bounds, over the raw
+                        // `u64`s, decide each record.
+                        let record = Self::decode_occurrence(json)?;
+                        if filter.matches(&record) {
+                            records.push(record);
+                        }
                     }
                     Ok(records)
                 })())
@@ -618,8 +972,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         &self,
         occurrence_id: &str,
     ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
-        self.list_deliveries_where(
-            "d.occurrence_id = ?1",
+        self.list_deliveries_with(
+            trigger_sql().delivery.list_by_occurrence_id.sql(),
             vec![occurrence_id.to_string().into()],
         )
         .await
@@ -629,8 +983,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         &self,
         subscription_id: &str,
     ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
-        self.list_deliveries_where(
-            "d.subscription_id = ?1",
+        self.list_deliveries_with(
+            trigger_sql().delivery.list_by_subscription_id.sql(),
             vec![subscription_id.to_string().into()],
         )
         .await
@@ -640,14 +994,18 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         &self,
         process_id: &ProcessId,
     ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
-        self.list_deliveries_where("d.process_id = ?1", vec![process_id.to_string().into()])
-            .await
+        self.list_deliveries_with(
+            trigger_sql().delivery.list_by_process_id.sql(),
+            vec![process_id.to_string().into()],
+        )
+        .await
     }
 
     async fn list_deliveries(
         &self,
     ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
-        self.list_deliveries_where("1 = 1", Vec::new()).await
+        self.list_deliveries_with(trigger_sql().delivery.list_all.sql(), Vec::new())
+            .await
     }
 
     async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, lash_core::PluginError> {
@@ -655,11 +1013,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             .call(|conn| {
                 Ok((|| {
                     let mut stmt = conn
-                        .prepare(
-                            "SELECT DISTINCT process_id
-                             FROM trigger_deliveries
-                             ORDER BY process_id ASC",
-                        )
+                        .prepare(trigger_sql().delivery.select_distinct_process_ids.sql())
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map([], |row| row.get::<_, String>(0))
@@ -680,11 +1034,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             .call(|conn| {
                 Ok((|| {
                     let mut stmt = conn
-                        .prepare(
-                            "SELECT occurrence_id, subscription_id, process_id
-                             FROM trigger_deliveries
-                             ORDER BY occurrence_id ASC, subscription_id ASC",
-                        )
+                        .prepare(trigger_sql().delivery.select_retention_candidates.sql())
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map([], |row| {
@@ -711,27 +1061,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                 Ok((|| {
                     let mut stmt = conn
                         .prepare(
-                            "SELECT owner_scope
-                             FROM (
-                                 SELECT owner_scope
-                                 FROM trigger_subscriptions
-                                 UNION
-                                 SELECT 'session:' || json_extract(
-                                            subscription_snapshot_json,
-                                            '$.owner_scope.session_id'
-                                        )
-                                 FROM trigger_deliveries
-                                 WHERE json_extract(
-                                           subscription_snapshot_json,
-                                           '$.owner_scope.type'
-                                       ) = 'session'
-                                 UNION
-                                 SELECT 'session:' || owner_id
-                                 FROM trigger_mutation_receipts
-                                 WHERE owner_kind = 'session'
-                             )
-                             WHERE owner_scope LIKE 'session:%'
-                             ORDER BY owner_scope",
+                            trigger_sql()
+                                .retention_sqlite
+                                .select_session_owner_ids
+                                .sql(),
                         )
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
@@ -765,48 +1098,18 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             serde_json::to_string(&deleted_owner_scopes).map_err(process_decode_error)?;
         self.conn
             .call(move |conn| {
+                let sql = trigger_sql();
                 let tx = conn.transaction()?;
                 let reclaimed_delivery_count = tx.execute(
-                    "DELETE FROM trigger_deliveries
-                     WHERE EXISTS (
-                         SELECT 1
-                         FROM json_each(?1) AS candidate
-                         WHERE trigger_deliveries.occurrence_id =
-                                   json_extract(candidate.value, '$.occurrence_id')
-                           AND trigger_deliveries.subscription_id =
-                                   json_extract(candidate.value, '$.subscription_id')
-                           AND trigger_deliveries.process_id =
-                                   json_extract(candidate.value, '$.process_id')
-                     )",
+                    sql.delivery_sqlite.delete_retention_candidates.sql(),
                     params![&candidates_json],
                 )?;
-                let reclaimed_occurrence_count = tx.execute(
-                    "DELETE FROM trigger_occurrences
-                     WHERE COALESCE(
-                               json_extract(record_json, '$.outcome.kind'),
-                               'fired'
-                           ) = 'fired'
-                       AND NOT EXISTS (
-                         SELECT 1 FROM trigger_deliveries
-                         WHERE trigger_deliveries.occurrence_id =
-                               trigger_occurrences.occurrence_id
-                     )",
-                    [],
-                )?;
+                let reclaimed_occurrence_count =
+                    tx.execute(sql.occurrence_sqlite.delete_orphan_fired.sql(), [])?;
 
                 let blocked_owner_scopes = {
-                    let mut stmt = tx.prepare(
-                        "SELECT DISTINCT
-                                'session:' || json_extract(
-                                    subscription_snapshot_json,
-                                    '$.owner_scope.session_id'
-                                )
-                         FROM trigger_deliveries
-                         WHERE json_extract(
-                                   subscription_snapshot_json,
-                                   '$.owner_scope.type'
-                               ) = 'session'",
-                    )?;
+                    let mut stmt =
+                        tx.prepare(sql.delivery_sqlite.select_session_owner_scopes.sql())?;
                     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
                     rows.collect::<Result<std::collections::HashSet<_>, _>>()?
                 };
@@ -819,19 +1122,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
 
                 let reclaimed_subscription_count = tx.execute(
-                    "DELETE FROM trigger_subscriptions
-                     WHERE owner_scope IN (SELECT value FROM json_each(?1))
-                       AND NOT EXISTS (
-                           SELECT 1 FROM trigger_deliveries
-                           WHERE trigger_deliveries.subscription_id =
-                                 trigger_subscriptions.subscription_id
-                       )",
+                    sql.subscription_sqlite.delete_unreferenced_for_owners.sql(),
                     params![&deleted_owner_scopes_json],
                 )?;
                 let reclaimed_mutation_receipt_count = tx.execute(
-                    "DELETE FROM trigger_mutation_receipts
-                     WHERE owner_kind = 'session'
-                       AND owner_id IN (SELECT value FROM json_each(?1))",
+                    sql.receipt_sqlite.delete_for_session_owners.sql(),
                     params![&receipt_owner_ids_json],
                 )?;
 
@@ -858,38 +1153,14 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         let armed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         self.conn
             .call(move |conn| {
+                let sql = trigger_sql();
                 let tx = conn.transaction()?;
                 let deleted = tx.execute(
-                    "DELETE FROM trigger_deliveries
-                     WHERE EXISTS (
-                         SELECT 1
-                         FROM json_each(?1) AS candidate
-                         WHERE trigger_deliveries.occurrence_id =
-                                   json_extract(candidate.value, '$.occurrence_id')
-                           AND trigger_deliveries.subscription_id =
-                                   json_extract(candidate.value, '$.subscription_id')
-                           AND trigger_deliveries.process_id =
-                                   json_extract(candidate.value, '$.process_id')
-                     )",
+                    sql.delivery_sqlite.delete_retention_candidates.sql(),
                     params![&candidates_json],
                 )?;
                 tx.execute(
-                    "UPDATE trigger_occurrences
-                     SET reclaimable_at_ms = ?2
-                     WHERE reclaimable_at_ms IS NULL
-                       AND COALESCE(
-                               json_extract(record_json, '$.outcome.kind'),
-                               'fired'
-                           ) = 'fired'
-                       AND NOT EXISTS (
-                           SELECT 1 FROM trigger_deliveries
-                           WHERE trigger_deliveries.occurrence_id =
-                                 trigger_occurrences.occurrence_id
-                       )
-                       AND occurrence_id IN (
-                           SELECT DISTINCT json_extract(candidate.value, '$.occurrence_id')
-                           FROM json_each(?1) AS candidate
-                       )",
+                    sql.occurrence_sqlite.arm_reclaimable_for_candidates.sql(),
                     params![&candidates_json, armed_at_ms],
                 )?;
                 tx.commit()?;
@@ -910,65 +1181,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         let partial_for_call = Arc::clone(&partial);
         self.conn
             .call(move |conn| {
+                let sql = trigger_sql();
                 Ok((|| {
-                    // One statement gives the scope proof and the indexed
-                    // worklist from the same snapshot. The aggregate visits the
-                    // whole table so `NothingToDo` stays witnessed emptiness;
-                    // only eligible ids are materialized.
                     let rows = {
                         let mut stmt = conn
-                            .prepare(
-                                "WITH scope AS (
-                                     SELECT COUNT(*) AS inspected_count,
-                                            COUNT(*) FILTER (
-                                                WHERE reclaimable_at_ms IS NULL
-                                                  AND COALESCE(
-                                                          json_extract(
-                                                              record_json,
-                                                              '$.outcome.kind'
-                                                          ),
-                                                          'fired'
-                                                      ) = 'fired'
-                                            ) AS live_fan_out_count,
-                                            COUNT(*) FILTER (
-                                                WHERE COALESCE(
-                                                          json_extract(
-                                                              record_json,
-                                                              '$.outcome.kind'
-                                                          ),
-                                                          'fired'
-                                                      ) != 'fired'
-                                            ) AS audit_retained_count,
-                                            COUNT(*) FILTER (
-                                                WHERE reclaimable_at_ms > ?1
-                                                  AND COALESCE(
-                                                          json_extract(
-                                                              record_json,
-                                                              '$.outcome.kind'
-                                                          ),
-                                                          'fired'
-                                                      ) = 'fired'
-                                            ) AS grace_deferred_count
-                                     FROM trigger_occurrences
-                                 ), candidates AS (
-                                     SELECT occurrence_id
-                                     FROM trigger_occurrences
-                                     WHERE reclaimable_at_ms IS NOT NULL
-                                       AND reclaimable_at_ms <= ?1
-                                       AND COALESCE(
-                                               json_extract(record_json, '$.outcome.kind'),
-                                               'fired'
-                                           ) = 'fired'
-                                 )
-                                 SELECT scope.inspected_count,
-                                        scope.live_fan_out_count,
-                                        scope.grace_deferred_count,
-                                        scope.audit_retained_count,
-                                        candidates.occurrence_id
-                                 FROM scope
-                                 LEFT JOIN candidates ON TRUE
-                                 ORDER BY candidates.occurrence_id ASC",
-                            )
+                            .prepare(sql.occurrence_sqlite.select_reclamation_scope.sql())
                             .map_err(|error| {
                                 lash_core::MaintenanceFailure::failed_before_any_work(Box::new(
                                     process_sqlite_error(error),
@@ -1015,19 +1232,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     for occurrence_id in candidates {
                         let deleted = conn
                             .execute(
-                                "DELETE FROM trigger_occurrences
-                                 WHERE occurrence_id = ?1
-                                   AND reclaimable_at_ms IS NOT NULL
-                                   AND reclaimable_at_ms <= ?2
-                                   AND COALESCE(
-                                           json_extract(record_json, '$.outcome.kind'),
-                                           'fired'
-                                       ) = 'fired'
-                                   AND NOT EXISTS (
-                                       SELECT 1 FROM trigger_deliveries
-                                       WHERE trigger_deliveries.occurrence_id =
-                                             trigger_occurrences.occurrence_id
-                                   )",
+                                sql.occurrence_sqlite.delete_reclaimable_by_id.sql(),
                                 params![occurrence_id, cutoff_epoch_ms],
                             )
                             .map_err(|error| {
@@ -1068,9 +1273,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    "DELETE FROM trigger_mutation_receipts
-                     WHERE created_at_ms < ?1
-                       AND owner_kind IN ('host', 'platform')",
+                    trigger_sql().receipt.prune_host_and_platform.sql(),
                     params![cutoff_epoch_ms],
                 )
             })
@@ -1086,12 +1289,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    "DELETE FROM trigger_occurrences
-                     WHERE occurred_at_ms < ?1
-                       AND COALESCE(
-                               json_extract(record_json, '$.outcome.kind'),
-                               'fired'
-                           ) != 'fired'",
+                    trigger_sql().occurrence_sqlite.prune_non_fired.sql(),
                     params![cutoff_epoch_ms],
                 )
             })
@@ -1100,62 +1298,28 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     }
 }
 
-pub(crate) fn list_subscriptions_query(
-    filter: &lash_core::TriggerSubscriptionFilter,
-) -> (String, Vec<rusqlite::types::Value>) {
-    let mut sql =
-        "SELECT subscription_id, record_json FROM trigger_subscriptions WHERE 1 = 1".to_string();
-    let mut values = Vec::new();
-    if let Some(registrant_scope_id) = filter.registrant_scope_id.as_ref() {
-        sql.push_str(" AND owner_scope = ?");
-        values.push(registrant_scope_id.clone().into());
-    }
-    if let Some(subscription_key) = filter.subscription_key.as_ref() {
-        sql.push_str(" AND subscription_key = ?");
-        values.push(subscription_key.clone().into());
-    }
-    if let Some(source_type) = filter.source_type.as_ref() {
-        sql.push_str(" AND source_type = ?");
-        values.push(source_type.clone().into());
-    }
-    if let Some(source_key) = filter.source_key.as_ref() {
-        sql.push_str(" AND source_key = ?");
-        values.push(source_key.clone().into());
-    }
-    if let Some(enabled) = filter.enabled {
-        sql.push_str(" AND lifecycle = ?");
-        values.push(
-            if enabled { "enabled" } else { "disabled" }
-                .to_string()
-                .into(),
-        );
-    }
-    sql.push_str(" AND lifecycle <> 'tombstoned' ORDER BY owner_scope ASC, subscription_key ASC");
-    (sql, values)
-}
-
 fn reserve_sqlite_deliveries(
     tx: &rusqlite::Transaction<'_>,
     occurrence: &lash_core::TriggerOccurrenceRecord,
     created_at_ms: u64,
 ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
-    let mut sql = "SELECT subscription_id, record_json FROM trigger_subscriptions
-         WHERE lifecycle = 'enabled' AND source_type = ?1 AND source_key = ?2"
-        .to_string();
+    let sql = trigger_sql();
     let mut values: Vec<rusqlite::types::Value> = vec![
         occurrence.source_type.clone().into(),
         occurrence.source_key.clone().into(),
     ];
-    if let Some(session_id) = occurrence.session_id.as_deref() {
-        sql.push_str(" AND owner_scope = ?3");
-        values.push(
-            lash_core::TriggerOwnerScope::session(session_id)
-                .namespace()
-                .into(),
-        );
-    }
-    sql.push_str(" ORDER BY owner_scope ASC, subscription_key ASC");
-    let mut stmt = tx.prepare(&sql).map_err(process_sqlite_error)?;
+    let statement = match occurrence.session_id.as_deref() {
+        Some(session_id) => {
+            values.push(
+                lash_core::TriggerOwnerScope::session(session_id)
+                    .namespace()
+                    .into(),
+            );
+            &sql.subscription_sqlite.select_enabled_for_source_and_owner
+        }
+        None => &sql.subscription_sqlite.select_enabled_for_source,
+    };
+    let mut stmt = tx.prepare(statement.sql()).map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -1186,10 +1350,7 @@ fn reserve_sqlite_deliveries(
             subscription.revision,
         )?;
         tx.execute(
-            "INSERT INTO trigger_deliveries (
-                occurrence_id, subscription_id, process_id, subscription_incarnation,
-                subscription_revision, subscription_snapshot_json, created_at_ms
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            sql.delivery.insert.sql(),
             params![
                 occurrence.occurrence_id.as_str(),
                 subscription.subscription_id.as_str(),
@@ -1219,11 +1380,7 @@ fn sqlite_delivery_snapshots(
     reservation_status: lash_core::TriggerDeliveryReservationOutcome,
 ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
     let mut stmt = tx
-        .prepare(
-            "SELECT process_id, created_at_ms, subscription_snapshot_json
-             FROM trigger_deliveries
-             WHERE occurrence_id = ?1",
-        )
+        .prepare(trigger_sql().delivery.select_snapshots_by_occurrence.sql())
         .map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(params![occurrence.occurrence_id.as_str()], |row| {

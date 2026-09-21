@@ -382,6 +382,41 @@ fn malformed_neutral_text_is_refused_rather_than_rendered() {
 }
 
 #[test]
+fn a_name_the_statement_binds_for_itself_is_not_a_table() {
+    let neutral = "WITH scope AS (
+             SELECT COUNT(*) AS total FROM await_event_waits
+         ), keys AS (
+             SELECT key_id FROM await_event_waits WHERE scope_json = ?1
+         )
+         SELECT scope.total, keys.key_id FROM scope LEFT JOIN keys ON TRUE";
+
+    assert_eq!(
+        sqlite(neutral),
+        "WITH scope AS (
+             SELECT COUNT(*) AS total FROM main.await_event_waits
+         ), keys AS (
+             SELECT key_id FROM main.await_event_waits WHERE scope_json = ?1
+         )
+         SELECT scope.total, keys.key_id FROM scope LEFT JOIN keys ON TRUE"
+    );
+    // A derived table's own alias binds the same way.
+    assert_eq!(
+        postgres("SELECT rows.key_id FROM (SELECT key_id FROM await_event_waits) AS rows"),
+        "SELECT rows.key_id FROM (SELECT key_id FROM lash_await_event_waits) AS rows"
+    );
+    // A column alias is not a relation: `total` is still refused in a table
+    // position, so the rule stays as narrow as `WITH … AS (`.
+    let aliased = "SELECT COUNT(*) AS total FROM await_event_waits; SELECT 1 FROM total";
+    assert_eq!(
+        render(aliased, Dialect::postgres(), TABLES).expect_err("a column alias is not a relation"),
+        RenderError::UnknownTable {
+            name: "total".to_string(),
+            at: aliased.rfind("total").expect("the trailing alias"),
+        }
+    );
+}
+
+#[test]
 fn every_owned_statement_renders_for_both_backends() {
     // Over the crate's real table list rather than this module's fixture: a
     // statement set is only renderable for a layout that places every table

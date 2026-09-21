@@ -16,10 +16,12 @@
 use sqlx::{Connection, PgConnection};
 
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
+///
+/// The filter no longer builds the statement; it selects one (FIG-3385). The
+/// text is the named statement its shape is served by, which is what the
+/// listing actually issues.
 pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> String {
-    crate::trigger_store::list_subscriptions_query(filter)
-        .sql()
-        .to_string()
+    crate::trigger_store::subscription_list_sql(filter).to_string()
 }
 
 /// Deterministic PostgreSQL substrate fault injection, the twin of
