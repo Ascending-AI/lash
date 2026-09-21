@@ -59,7 +59,8 @@ pub use materialization::materialize_process_event_semantics;
 pub use model::{
     AbandonRequest, ArtifactOwner, DeclaredProcessIdentity, HandleId,
     InMemoryProcessExecutionEnvStore, ObserverInheritance, OnParentEnd,
-    PROCESS_LEASE_SCHEMA_VERSION, ParentScope, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_LEASE_SCHEMA_VERSION, ParentScope,
+    ParentScopeStorageError, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
     ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
     ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,

@@ -127,10 +127,10 @@ fn parent_scope_query_seeks_the_parent_scope_index() {
     let (sql, values) = list_processes_query(
         &lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
-            parent_scope: Some(lash_core::ParentScope::Turn {
-                session_id: lash_sansio::SessionId::from("plan-session"),
-                turn_id: lash_core::TurnId::from("plan-turn"),
-            }),
+            parent_scope: Some(lash_core::ParentScope::turn(
+                lash_sansio::SessionId::from("plan-session"),
+                lash_core::TurnId::from("plan-turn"),
+            )),
             ..lash_core::ProcessListFilter::default()
         },
         None,

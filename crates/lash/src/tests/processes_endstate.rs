@@ -1665,10 +1665,10 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     assert_eq!(
         child.lifecycle,
         lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Process {
-                process_id: parent.id,
-                incarnation: parent.incarnation,
-            },
+            lash_core::ParentScope::process(lash_core::ProcessRef::new(
+                parent.id,
+                parent.incarnation,
+            )),
             lash_core::OnParentEnd::Abandon,
         )
     );

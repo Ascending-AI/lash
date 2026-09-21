@@ -221,7 +221,11 @@ pub use usage_activity::*;
 // block-start and block-completion events. A window-82 peer writes deltas
 // with no block field and cannot express the new event variants, so its
 // stream records are refused rather than defaulted; peers must adopt 83.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 83;
+// Window 84 (FIG-3418) rewrites `RemoteParentScope` from the
+// `{turn|process|host}` vocabulary to `Owned(RemoteEffectOpener) | Host`,
+// adding the drain arm a peer could not name before; a window-83 peer's scope
+// fails this decode and vice versa, so peers must adopt 84.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 84;
 
 /// One versioned remote-protocol message.
 ///

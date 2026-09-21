@@ -1,48 +1,30 @@
-//! PostgreSQL proof that a `Cancel` child registering while its parent scope
-//! ends is either refused or swept, never left live under an ended scope.
+//! SQLite proof that a `Cancel` child registering while its parent scope ends
+//! is either refused or swept, never left live under an ended scope.
 //!
-//! PostgreSQL is the only tier where those two writes are genuinely concurrent:
-//! SQLite serializes registration and the ledger write through one write flow,
-//! and the in-memory registry through one transaction mutex. Here registration
-//! runs in its own transaction on its own pooled connection, so without the
-//! parent-scope advisory lock the fence is a check-then-act under READ
-//! COMMITTED — the child reads "no ledger row", the row commits, the sweep
-//! pages children and cannot see the still-uncommitted child, the sweep settles
-//! the row, and the child then commits live with `Cancel` under a scope that
-//! has ended and will never be swept again.
-//!
-//! This replaces `concurrent_parent_end_scanners_cancel_once_on_postgres`,
-//! which proved the same class of property for the retired per-intent action
-//! list.
+//! SQLite serializes registration and the ledger write through one write
+//! flow, so this cannot interleave the way the PostgreSQL race does — but the
+//! same invariant must hold on this backend, and this test is what keeps the
+//! scope-keyed ledger honest against a regression that reads "no row" outside
+//! the serialized write path (for example through a stale read of the index
+//! projection rather than the fence the write flow holds).
 
 use std::sync::Arc;
 
 use lash_core::ProcessRegistry;
-use lash_postgres_store::PostgresStorage;
+use lash_sqlite_store::SqliteProcessRegistry;
 
-use crate::support::{SharedDatabaseLock, database_url};
-
-/// One race per scope, enough of them that the interleaving is exercised
-/// rather than hoped for.
+/// One race per scope, enough of them that the ordering is exercised rather
+/// than hoped for.
 const SCOPES: usize = 24;
 
-async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
-    let url = database_url()?;
-    let database_lock = SharedDatabaseLock::acquire(&url).await;
-    let storage = PostgresStorage::connect(&url)
-        .await
-        .expect("connect postgres");
-    Some((database_lock, storage))
-}
-
 fn session_name(index: usize) -> String {
-    format!("parent-end-race-session-{index:02}")
+    format!("sqlite-parent-end-race-session-{index:02}")
 }
 
 fn turn_scope(index: usize) -> lash_core::ParentScope {
     lash_core::ParentScope::turn(
         lash_sansio::SessionId::from(session_name(index)),
-        lash_core::TurnId::from(format!("parent-end-race-turn-{index:02}")),
+        lash_core::TurnId::from(format!("sqlite-parent-end-race-turn-{index:02}")),
     )
 }
 
@@ -50,7 +32,7 @@ fn turn_scope(index: usize) -> lash_core::ParentScope {
 /// originator session to be the turn's own session, so both come from `index`.
 fn cancel_child(index: usize, parent: lash_core::ParentScope) -> lash_core::ProcessRegistration {
     lash_core::ProcessRegistration::new(
-        format!("parent-end-race-child-{index:02}"),
+        format!("sqlite-parent-end-race-child-{index:02}"),
         lash_core::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -77,7 +59,7 @@ async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core::ParentS
                 .request_process_cancel(
                     &lash_core::ProcessRef::from_record(child),
                     lash_core::CancelOrigin::ParentEnded,
-                    "parent-end-race".to_string(),
+                    "sqlite-parent-end-race".to_string(),
                     None,
                 )
                 .await
@@ -92,11 +74,14 @@ async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core::ParentS
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping PostgreSQL parent-end registration race: database URL is not set");
-        return;
-    };
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let process_path = dir.path().join("processes.db");
+    let sessions = dir.path().join("sessions");
+    let registry = Arc::new(
+        SqliteProcessRegistry::open(&process_path, &sessions)
+            .await
+            .expect("process registry"),
+    ) as Arc<dyn ProcessRegistry>;
     let barrier = Arc::new(tokio::sync::Barrier::new(SCOPES * 2));
 
     let mut races = Vec::new();
@@ -130,37 +115,37 @@ async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
     for (index, parent, registering, ending) in races {
         let registration = registering.await.expect("registration task");
         ending.await.expect("parent-end task");
-        let Ok(record) = registration else {
-            assert!(
-                matches!(
-                    registration,
-                    Err(lash_core::PluginError::ParentEnded { .. })
-                ),
-                "a child racing its parent's end is refused with ParentEnded, not {registration:?}"
-            );
-            continue;
-        };
-        let observed = registry
-            .get_process(&record.id)
-            .await
-            .expect("read the registered child")
-            .expect("the registered child row exists");
-        assert!(
-            observed.cancel_request.is_some(),
-            "child {index} committed before the ledger row, so the sweep must have cancelled it; \
-             a live Cancel child under an ended scope is never revisited"
-        );
-        assert_eq!(
-            observed.cancel_request.map(|request| request.origin),
-            Some(lash_core::CancelOrigin::ParentEnded)
-        );
+        match registration {
+            Err(error) => assert!(
+                matches!(error, lash_core::PluginError::ParentEnded { .. }),
+                "a child racing its parent's end is refused with ParentEnded, not {error:?}"
+            ),
+            Ok(record) => {
+                let observed = registry
+                    .get_process(&record.id)
+                    .await
+                    .expect("read the committed child")
+                    .expect("the committed child exists");
+                assert!(
+                    observed.cancel_request.is_some(),
+                    "child {index} committed before the ledger row, so the sweep must have \
+                     cancelled it; a live Cancel child under an ended scope is never revisited"
+                );
+                assert_eq!(
+                    observed.cancel_request.map(|request| request.origin),
+                    Some(lash_core::CancelOrigin::ParentEnded)
+                );
+            }
+        }
         assert!(
             registry
                 .get_parent_end_plan(&parent)
                 .await
-                .expect("read the ledger row")
-                .is_some_and(|plan| plan.settled_at_ms.is_some()),
-            "the racing sweep settled the scope"
+                .expect("read the settled ledger row")
+                .expect("the ledger row exists")
+                .settled_at_ms
+                .is_some(),
+            "scope {index} settled"
         );
     }
 }

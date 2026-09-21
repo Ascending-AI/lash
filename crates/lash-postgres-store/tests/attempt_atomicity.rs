@@ -2444,10 +2444,10 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     .expect_err("the phase probe crashes after the turn commit and before the ledger row");
     assert!(crashed.is_panic());
 
-    let parent = lash_core::ParentScope::Turn {
-        session_id: SessionId::from(SESSION.to_string()),
-        turn_id: TurnId::from(TURN.to_string()),
-    };
+    let parent = lash_core::ParentScope::turn(
+        SessionId::from(SESSION.to_string()),
+        TurnId::from(TURN.to_string()),
+    );
     let page = std::num::NonZeroUsize::new(16).expect("page bound");
 
     // The crash lands in the exact window recovery exists for: the turn's own

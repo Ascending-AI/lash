@@ -663,6 +663,22 @@ IDENTIFIER_RENAME_BASELINES = {
     # SCHEMA_VERSION stays 108 and TURN_CHECKPOINT_SCHEMA_VERSION stays 5.
     'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:2955b2a75bc5f7b21d5d90181e45998022dd1162ee3a0c499b8fc0bba2c47b2e',
     'crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION': 'sha256:c47b1c80a5d170e70556653319621cc219a493ba54bea2ccdee7317fc9f850b9',
+    # FIG-3418: the guarded surface moved for two reasons, neither of which
+    # reaches a serialized byte. `EffectOpener` gained a `schemars::JsonSchema`
+    # derive (needed so the typed `ParentScope` can carry it inside a
+    # versioned storage payload) and had a doc comment reworded; JsonSchema
+    # emits no serde output and the enum's serde attributes, variants and
+    # fields are untouched. `tool_provider.rs` moved only inside `mod tests`,
+    # where `ParentScope::Process { .. }` became `ParentScope::process(..)` —
+    # a constructor retype in test code that is not part of the request's
+    # serialized closure at all. `ParentScope` itself is not a field type of
+    # `ToolChildRequest` or anything it reaches. Every other guarded file is
+    # byte-identical to the merge-base, so the tool-child request wire bytes
+    # cannot have changed and TOOL_CHILD_REQUEST_VERSION stays 4.
+    # One-time baseline; any further guarded-shape drift re-fails the gate.
+    "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
+        "sha256:ea4860d85513148e0a596e26fd07fd262d07f542746df766146fb597870c8c00"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

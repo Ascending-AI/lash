@@ -52,10 +52,10 @@ impl DurableProcessWorker {
         drop(cursor);
         let mut unopenable_sessions = 0usize;
         for parent in candidates {
-            let ParentScope::Turn {
+            let ParentScope::Owned(crate::EffectOpener::Turn {
                 session_id,
                 turn_id,
-            } = &parent
+            }) = &parent
             else {
                 continue;
             };
@@ -249,10 +249,7 @@ impl DurableProcessWorker {
             .await
             .ok()
             .flatten()?;
-        let parent = ParentScope::Process {
-            process_id: record.id.clone(),
-            incarnation: record.incarnation,
-        };
+        let parent = ParentScope::process(crate::ProcessRef::from_record(&record));
         self.config
             .process_registry()
             .get_parent_end_plan(&parent)

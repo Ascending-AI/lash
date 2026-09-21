@@ -47,10 +47,10 @@ mod tests {
     fn parent_ended_refusal_stays_typed_and_terminal_through_effect_controller() {
         let error = PluginError::ParentEnded {
             process_id: ProcessId::from("late-child"),
-            parent: crate::ParentScope::Process {
-                process_id: ProcessId::from("ended-parent"),
-                incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
-            },
+            parent: crate::ParentScope::process(crate::ProcessRef::new(
+                ProcessId::from("ended-parent"),
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            )),
         };
         assert!(error.is_terminal());
         assert!(!error.is_retryable());

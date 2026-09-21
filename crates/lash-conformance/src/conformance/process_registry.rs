@@ -821,6 +821,14 @@ pub async fn a_turn_scope_ends_through_its_recorded_ledger_row(registry: Arc<dyn
     turn_parent_end::a_turn_scope_ends_through_its_recorded_ledger_row(registry).await;
 }
 
+/// Two scopes whose components render to one stored id under the retired
+/// delimiter codec must share no ledger key, children page or fence.
+pub async fn scopes_that_collide_in_rendering_share_no_ledger_key(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    turn_parent_end::scopes_that_collide_in_rendering_share_no_ledger_key(registry).await;
+}
+
 /// A turn that committed without its ledger row is a recovery candidate until
 /// the row exists, and no other shape of row ever is.
 pub async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_written(

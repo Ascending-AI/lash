@@ -1268,10 +1268,10 @@ async fn register_turn_child(
             lash::process::RecoveryContract::ExternallyOwned,
             lash::process::ProcessProvenance::session(lash::process::SessionScope::new(session_id)),
             lash::process::ProcessLifecyclePolicy::new(
-                lash::process::ParentScope::Turn {
-                    session_id: lash::SessionId::from(session_id),
-                    turn_id: TurnId::from(turn_id),
-                },
+                lash::process::ParentScope::turn(
+                    lash::SessionId::from(session_id),
+                    TurnId::from(turn_id),
+                ),
                 lash::process::OnParentEnd::Abandon,
             ),
         ))

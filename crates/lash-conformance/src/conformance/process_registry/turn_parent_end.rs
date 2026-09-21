@@ -16,10 +16,7 @@ use pretty_assertions::assert_eq;
 const PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::new(16).expect("page bound");
 
 fn turn_scope(session: &SessionId, turn: &str) -> lash_core::ParentScope {
-    lash_core::ParentScope::Turn {
-        session_id: session.clone(),
-        turn_id: crate::TurnId::from(turn),
-    }
+    lash_core::ParentScope::turn(session.clone(), crate::TurnId::from(turn))
 }
 
 async fn register_child(
@@ -234,6 +231,100 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
     );
 }
 
+/// Two scopes whose components rendered to the same stored id under the
+/// retired `{session}/{turn}` codec must share nothing: not a ledger key, not
+/// a children page, not a fence. `("collision-session/a", "c")` and
+/// `("collision-session", "a/c")` were one `parent_id` before FIG-3418 — one
+/// scope's end would have swept the other's children. The canonical
+/// projection is injective, so they are independent scopes end to end.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn scopes_that_collide_in_rendering_share_no_ledger_key(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let first_originator = SessionScope::new("collision-session/a");
+    let second_originator = SessionScope::new("collision-session");
+    let first = lash_core::ParentScope::turn(
+        SessionId::from("collision-session/a"),
+        crate::TurnId::from("c"),
+    );
+    let second = lash_core::ParentScope::turn(
+        SessionId::from("collision-session"),
+        crate::TurnId::from("a/c"),
+    );
+    assert_ne!(
+        first.storage_id(),
+        second.storage_id(),
+        "the index projection is injective where the rendered id was not"
+    );
+
+    let first_child = register_child(
+        &registry,
+        &first_originator,
+        "collision-first-child",
+        &first,
+        lash_core::OnParentEnd::Cancel,
+    )
+    .await
+    .expect("register a Cancel child under the first colliding scope");
+    register_child(
+        &registry,
+        &second_originator,
+        "collision-second-child",
+        &second,
+        lash_core::OnParentEnd::Cancel,
+    )
+    .await
+    .expect("register a Cancel child under the second colliding scope");
+
+    registry
+        .record_parent_end(&first)
+        .await
+        .expect("end only the first scope");
+    let recorded = registry
+        .get_parent_end_plan(&first)
+        .await
+        .expect("read the first scope's ledger row")
+        .expect("recording the end writes the row");
+    assert_eq!(
+        recorded.parent, first,
+        "the row decodes to the typed scope it ended, not a rendered id"
+    );
+    assert!(
+        registry
+            .get_parent_end_plan(&second)
+            .await
+            .expect("read the second scope's ledger row")
+            .is_none(),
+        "a scope that renders identically must not alias the ended scope's row"
+    );
+
+    assert_eq!(
+        registry
+            .list_parent_end_children(&first, None, PAGE)
+            .await
+            .expect("page the ended scope's children")
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![first_child.id.clone()],
+        "the sweep sees only the ended scope's own children"
+    );
+    assert_eq!(
+        registry
+            .list_parent_end_children(&second, None, PAGE)
+            .await
+            .expect("page the surviving scope's children")
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![ProcessId::from("collision-second-child")],
+        "children of a rendering-identical scope are not swept by the other's end"
+    );
+}
+
 /// A turn whose commit outran its ledger row is reported as a recovery
 /// candidate until the row exists — and nothing else is.
 #[expect(
@@ -309,10 +400,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
         &registry,
         &originator,
         "unrecorded-turn-process-child",
-        &lash_core::ParentScope::Process {
-            process_id: process_parent.id.clone(),
-            incarnation: process_parent.incarnation,
-        },
+        &lash_core::ParentScope::process(lash_core::ProcessRef::from_record(&process_parent)),
         lash_core::OnParentEnd::Cancel,
     )
     .await

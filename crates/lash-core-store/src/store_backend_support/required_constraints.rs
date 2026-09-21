@@ -291,12 +291,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         rendered(
             "processes",
             "ck_processes_parent_scope_kind",
-            "parent_scope_kind IN ('turn', 'process', 'host')",
+            "parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')",
         ),
         rendered(
             "lash_processes",
             "ck_processes_parent_scope_kind",
-            "parent_scope_kind IN ('turn', 'process', 'host')",
+            "parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')",
         ),
     ),
     expected_constraint(
@@ -304,12 +304,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         rendered(
             "processes",
             "ck_processes_parent_scope_id",
-            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
+            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)",
         ),
         rendered(
             "lash_processes",
             "ck_processes_parent_scope_id",
-            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
+            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)",
         ),
     ),
     expected_constraint(
@@ -330,12 +330,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         rendered(
             "parent_end_plans",
             "ck_parent_end_plans_kind",
-            "parent_kind IN ('turn', 'process')",
+            "parent_kind IN ('turn', 'queue_drain', 'process')",
         ),
         rendered(
             "lash_parent_end_plans",
             "ck_parent_end_plans_kind",
-            "parent_kind IN ('turn', 'process')",
+            "parent_kind IN ('turn', 'queue_drain', 'process')",
         ),
     ),
     expected_constraint(

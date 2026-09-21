@@ -82,10 +82,10 @@ async fn pending_cancel_list_uses_the_partial_cancel_index() {
 async fn parent_scope_list_uses_the_parent_scope_index() {
     let Some(plan) = plan_for(&lash_core::ProcessListFilter {
         status: lash_core::ProcessStatusFilter::Any,
-        parent_scope: Some(lash_core::ParentScope::Turn {
-            session_id: SessionId::from("plan-session"),
-            turn_id: lash_core::TurnId::from("plan-turn"),
-        }),
+        parent_scope: Some(lash_core::ParentScope::turn(
+            SessionId::from("plan-session"),
+            lash_core::TurnId::from("plan-turn"),
+        )),
         ..lash_core::ProcessListFilter::default()
     })
     .await

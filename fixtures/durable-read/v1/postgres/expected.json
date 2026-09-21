@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 93,
+  "fixture_schema_version": 94,
   "head_revision": 4,
   "node_ids_in_read_order": [
     "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
@@ -645,7 +645,7 @@
     "id": "durable-read-waiting-process",
     "incarnation": 1,
     "last_event_sequence": 2,
-    "registration_fingerprint": "process-registration-definition:v7:blake3:475915c5b1c3c61ba97644d5bf21c12ae6981ce3678331abfbae749c062eec36",
+    "registration_fingerprint": "process-registration-definition:v8:blake3:82759cdfcd0d8f802217223ee19bdb1fb96fce63c138dc68bd2333710835e5a8",
     "input": {
       "type": "engine",
       "kind": "durable-read-engine",

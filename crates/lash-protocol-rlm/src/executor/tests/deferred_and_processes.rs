@@ -2165,10 +2165,10 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     assert_eq!(
         record.lifecycle,
         lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Turn {
-                session_id: SessionId::from("test-session"),
-                turn_id: lash_core::TurnId::from("test-turn")
-            },
+            lash_core::ParentScope::turn(
+                SessionId::from("test-session"),
+                lash_core::TurnId::from("test-turn"),
+            ),
             lash_core::OnParentEnd::Abandon,
         )
     );

@@ -890,10 +890,7 @@ impl LashRuntime {
         let Some(registry) = self.host.process_registry() else {
             return Ok(());
         };
-        let parent = crate::ParentScope::Turn {
-            session_id: self.state.session_id.clone(),
-            turn_id: turn_id.clone(),
-        };
+        let parent = crate::ParentScope::turn(self.state.session_id.clone(), turn_id.clone());
         registry.record_parent_end(&parent).await.map_err(|error| {
             RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
         })

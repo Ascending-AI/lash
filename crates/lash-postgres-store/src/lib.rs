@@ -404,7 +404,14 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // survives to the trace event on replay. No relation or column moves -- the
 // cutover is in the journaled outcome encoding -- so component-107 catalogs
 // are rejected and recreated rather than replayed under mixed spellings.
-const SCHEMA_VERSION: i32 = 108;
+// Version 109 (FIG-3418) makes the parent scope a typed fact:
+// `lash_parent_end_plans` gains the versioned `parent_payload` column the
+// ledger decodes instead of parsing its `(parent_kind, parent_id)` key, both
+// kind CHECKs admit the `queue_drain` arm, `parent_scope_id` becomes a
+// collision-free canonical projection, and the journaled `ParentScope` shape
+// inside start declarations moves to `Owned(EffectOpener) | Host`.
+// Component-108 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 109;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

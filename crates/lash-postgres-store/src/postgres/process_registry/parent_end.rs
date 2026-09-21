@@ -27,15 +27,20 @@ fn ledger_key(parent: &ParentScope) -> Result<(&'static str, String), PluginErro
     }
 }
 
+/// The typed payload a ledger row persists beside the projection key.
+fn ledger_payload(parent: &ParentScope) -> Result<String, PluginError> {
+    parent.storage_payload().map_err(process_decode_error)
+}
+
 fn decode_plan(
     kind: String,
     id: String,
+    payload: String,
     ended_at_ms: i64,
     settled_at_ms: Option<i64>,
 ) -> Result<ParentEndPlan, PluginError> {
-    let parent = ParentScope::from_storage(&kind, Some(id.as_str())).ok_or_else(|| {
-        PluginError::Session(format!("unreadable parent-end ledger key `{kind}`/`{id}`"))
-    })?;
+    let parent = ParentScope::from_storage_columns(&kind, Some(id.as_str()), &payload)
+        .map_err(|error| PluginError::Session(error.to_string()))?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended_at_ms.max(0) as u64,
@@ -82,6 +87,7 @@ pub(crate) async fn record_tx(
     sqlx::query(process_sql().plan.insert_if_absent.sql())
         .bind(kind)
         .bind(id)
+        .bind(ledger_payload(parent)?)
         .bind(ended_at_ms as i64)
         .execute(&mut **tx)
         .await
@@ -129,7 +135,7 @@ pub(super) async fn list_pending(
         .await
         .map_err(plugin_sqlx_error)?;
     rows.into_iter()
-        .map(|row| decode_plan(row.get(0), row.get(1), row.get(2), row.get(3)))
+        .map(|row| decode_plan(row.get(0), row.get(1), row.get(2), row.get(3), row.get(4)))
         .collect()
 }
 
@@ -144,7 +150,7 @@ pub(super) async fn get(
         .fetch_optional(pool)
         .await
         .map_err(plugin_sqlx_error)?;
-    row.map(|row| decode_plan(kind.to_string(), id, row.get(0), row.get(1)))
+    row.map(|row| decode_plan(kind.to_string(), id, row.get(0), row.get(1), row.get(2)))
         .transpose()
 }
 
@@ -178,8 +184,17 @@ pub(super) async fn list_unrecorded_turn_parents(
     rows.into_iter()
         .map(|row| {
             let id: String = row.get(0);
-            ParentScope::from_storage("turn", Some(id.as_str()))
-                .ok_or_else(|| PluginError::Session(format!("unreadable turn parent scope `{id}`")))
+            let record_json: String = row.get(1);
+            let record: ProcessRecord =
+                serde_json::from_str(&record_json).map_err(process_decode_error)?;
+            let parent = record.lifecycle.parent;
+            (parent.storage_kind() == "turn" && parent.storage_id().as_deref() == Some(id.as_str()))
+                .then_some(parent)
+                .ok_or_else(|| {
+                    PluginError::Session(format!(
+                        "turn parent-scope candidate `{id}` names a different scope in its record"
+                    ))
+                })
         })
         .collect()
 }

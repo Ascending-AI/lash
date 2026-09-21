@@ -450,10 +450,7 @@ async fn a_child_started_from_a_turn_parents_on_the_turn() {
         context
             .child_process_parent_scope()
             .expect("a turn scope derives a turn parent"),
-        crate::ParentScope::Turn {
-            session_id: SessionId::from("session-1"),
-            turn_id: crate::TurnId::from("turn-7"),
-        },
+        crate::ParentScope::turn(SessionId::from("session-1"), crate::TurnId::from("turn-7")),
     );
 }
 
@@ -540,10 +537,7 @@ async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
         context
             .child_process_parent_scope()
             .expect("the pinned incarnation is the parent"),
-        crate::ParentScope::Process {
-            process_id: retired.id.clone(),
-            incarnation: retired.incarnation,
-        },
+        crate::ParentScope::process(crate::ProcessRef::from_record(&retired)),
     );
 }
 

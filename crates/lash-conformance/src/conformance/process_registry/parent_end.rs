@@ -28,10 +28,7 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         ))
         .await
         .expect("register parent-end-plan process");
-    let parent_scope = lash_core::ParentScope::Process {
-        process_id: process_id.clone(),
-        incarnation: parent.incarnation,
-    };
+    let parent_scope = lash_core::ParentScope::process(lash_core::ProcessRef::from_record(&parent));
     let child = ProcessRegistration::new(
         ProcessId::from("process-parent-end-child"),
         ProcessInput::External {
@@ -261,10 +258,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
         ))
         .await
         .expect("register parent-end-reclaim process");
-    let parent_scope = lash_core::ParentScope::Process {
-        process_id: process_id.clone(),
-        incarnation: parent.incarnation,
-    };
+    let parent_scope = lash_core::ParentScope::process(lash_core::ProcessRef::from_record(&parent));
     let child_id = ProcessId::from("process-parent-end-reclaim-child");
     let child = registry
         .register_process(ProcessRegistration::new(

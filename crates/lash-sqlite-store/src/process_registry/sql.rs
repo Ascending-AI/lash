@@ -191,7 +191,12 @@ lash_store_sql::statements! {
 
         /// Turn scopes with live `Cancel` children and no ledger row yet:
         /// after `?1`, at most `?2`.
-        list_unrecorded_turn_parents = "SELECT DISTINCT child.parent_scope_id FROM processes AS child
+        ///
+        /// The projection id is never parsed back: `parent_scope_id` is a
+        /// collision-free canonical key, so one `record_json` per group —
+        /// any child's, since every row sharing the key names the same
+        /// typed parent — carries the authority.
+        list_unrecorded_turn_parents = "SELECT child.parent_scope_id, MIN(child.record_json) FROM processes AS child
                  WHERE child.parent_scope_kind = 'turn'
                    AND child.on_parent_end = 'cancel'
                    AND child.cancel_requested_at_ms IS NULL
@@ -202,6 +207,7 @@ lash_store_sql::statements! {
                          AND plan.parent_id = child.parent_scope_id
                    )
                    AND (?1 IS NULL OR child.parent_scope_id > ?1)
+                 GROUP BY child.parent_scope_id
                  ORDER BY child.parent_scope_id
                  LIMIT ?2";
 

@@ -758,8 +758,8 @@ CREATE TABLE IF NOT EXISTS processes (
     record_json           TEXT NOT NULL,
     UNIQUE(process_id, incarnation),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
-    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'process', 'host')),
-    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)),
+    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')),
+    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)),
     CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel'))
 );
 
@@ -922,10 +922,11 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 CREATE TABLE IF NOT EXISTS parent_end_plans (
     parent_kind      TEXT NOT NULL,
     parent_id        TEXT NOT NULL,
+    parent_payload   TEXT NOT NULL,
     ended_at_ms      INTEGER NOT NULL,
     settled_at_ms    INTEGER,
     PRIMARY KEY (parent_kind, parent_id),
-    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'process'))
+    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'queue_drain', 'process'))
 );
 CREATE INDEX IF NOT EXISTS idx_parent_end_plans_pending
     ON parent_end_plans(ended_at_ms, parent_kind, parent_id)
@@ -1028,7 +1029,14 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version 41 (FIG-3376) moves the durable `SessionCreateRequest` stored in
 /// process payloads to the spawn-time plugin-init cutover and drops
 /// `usage_source`; a pre-41 registry is rejected at open and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 41;
+/// Version 42 (FIG-3418) makes the parent scope a typed fact: `parent_end_plans`
+/// gains the versioned `parent_payload` column the ledger decodes instead of
+/// parsing its `(parent_kind, parent_id)` key, both kind CHECKs admit the
+/// `queue_drain` arm, and `parent_scope_id` becomes a collision-free canonical
+/// projection rather than a delimiter-joined rendering. A pre-42 registry
+/// holds non-injective ids and payload-less ledger rows, so it is rejected at
+/// open and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 42;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1307,7 +1315,11 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// accepts a bare string as `reason: "erased"`, but the written encoding moved,
 /// so a pre-28 journal is rejected at open and recreated rather than replayed
 /// under mixed spellings.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 28;
+/// Version 29 (FIG-3418) rewrites the `ParentScope` nested inside journaled
+/// start declarations from `{turn|process|host}` to `Owned(EffectOpener) |
+/// Host`: a pre-29 journal's command bytes no longer decode to the current
+/// shape, so it is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 29;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -1792,8 +1804,8 @@ mod check_constraint_tests {
         );
         assert_check_rejects(
             &process,
-            "INSERT INTO parent_end_plans (parent_kind, parent_id, ended_at_ms)
-             VALUES ('host', 'scope', 0)",
+            "INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms)
+             VALUES ('host', 'scope', '{}', 0)",
             "ck_parent_end_plans_kind",
         );
         process

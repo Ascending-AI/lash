@@ -53,7 +53,7 @@ use crate::{SessionId, TurnId};
 /// request (FIG-3408) records it, recovery validates it (FIG-3396 §1), and the
 /// Lashlang host bridges mint their identities under it (FIG-3394). One type so
 /// the three cannot disagree about what an opener is.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EffectOpener {
     /// A turn of a session.
@@ -158,9 +158,10 @@ impl EffectOpener {
     /// there: `invalid_process_key_reason`
     /// (`crates/lash-core-store/src/store/process_key.rs`) refuses any process
     /// id containing `#` as a "reserved segment separator", and ADR 0094's
-    /// `ParentScope::from_storage`
-    /// (`crates/lash-core-execution/src/runtime/process/model/lifecycle.rs`)
-    /// splits a stored turn scope on `/` and a stored process scope on `#`.
+    /// retired `ParentScope` storage codec split a stored turn scope on `/`
+    /// and a stored process scope on `#` — the shape FIG-3418 replaced with
+    /// [`EffectOpener::identity_encoding`] precisely because delimiters make a
+    /// key unparseable-but-collidable.
     /// A `#` here therefore does not misparse — it makes the child process
     /// unregistrable, which surfaces as the parent turn never finishing.
     /// Measured: it turned every subagent spawn into `Stopped(MaxTurns)`.
