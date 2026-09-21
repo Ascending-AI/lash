@@ -410,15 +410,18 @@ pub const SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS: &[BoundaryKind] = &[
     BoundaryKind::Observer,
 ];
 
-pub fn scheduler_owned_runtime_completions(events: &[DeliveredBoundary]) -> OracleVerdict {
+pub fn scheduler_owned_runtime_completions(
+    events: &[DeliveredBoundary],
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
     let mut missing = Vec::new();
     for &kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
-        let mut saw_kind = false;
+        let mut observed = 0usize;
         for event in events
             .iter()
             .filter(|event| event.kind == kind && !is_suspend_resume(event))
         {
-            saw_kind = true;
+            observed += 1;
             let Some(completion) = event.payload.get(PendingRuntimeBoundary::PAYLOAD_KEY) else {
                 return OracleVerdict::failed(
                     SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
@@ -465,8 +468,18 @@ pub fn scheduler_owned_runtime_completions(events: &[DeliveredBoundary]) -> Orac
                 ),
             );
         }
-        if !saw_kind {
-            missing.push(format!("{kind:?}"));
+        match expectations.declared_completion_count(kind) {
+            Some(declared) if observed < declared => {
+                return OracleVerdict::failed(
+                    SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
+                    format!(
+                        "generated trace delivered {observed} scheduler-owned {kind:?} runtime completions; the workload declared {declared}"
+                    ),
+                );
+            }
+            Some(_) => {}
+            None if observed == 0 => missing.push(format!("{kind:?}")),
+            None => {}
         }
     }
     if !missing.is_empty() {

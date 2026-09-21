@@ -446,14 +446,17 @@ fn process_lifecycle_recovery_oracles_verify_disposition_and_evidence() {
 
 #[test]
 fn scheduler_owned_runtime_completion_oracle_rejects_missing_pending_evidence() {
-    let verdict = scheduler_owned_runtime_completions(&[delivered_with_payload(
-        0,
-        "session-001:provider:001",
-        "session-001",
-        BoundaryKind::Provider,
-        json!({}),
-        json!({"provider_output": "answer"}),
-    )]);
+    let verdict = scheduler_owned_runtime_completions(
+        &[delivered_with_payload(
+            0,
+            "session-001:provider:001",
+            "session-001",
+            BoundaryKind::Provider,
+            json!({}),
+            json!({"provider_output": "answer"}),
+        )],
+        &WorkloadExpectations::default(),
+    );
 
     assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
     assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
@@ -504,14 +507,17 @@ fn scheduler_owned_runtime_completion_oracle_rejects_incomplete_pending_evidence
             }),
         ),
     ] {
-        let verdict = scheduler_owned_runtime_completions(&[delivered_with_payload(
-            0,
-            "session-001:provider:001",
-            "session-001",
-            BoundaryKind::Provider,
-            json!({"runtime_completion": completion}),
-            json!({"provider_output": "answer"}),
-        )]);
+        let verdict = scheduler_owned_runtime_completions(
+            &[delivered_with_payload(
+                0,
+                "session-001:provider:001",
+                "session-001",
+                BoundaryKind::Provider,
+                json!({"runtime_completion": completion}),
+                json!({"provider_output": "answer"}),
+            )],
+            &WorkloadExpectations::default(),
+        );
 
         assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
         assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
@@ -586,14 +592,17 @@ fn boundary_kind_name_matches_serde_serialization() {
 fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_process_wake_and_observer()
  {
     for kind in [BoundaryKind::ProcessWake, BoundaryKind::Observer] {
-        let verdict = scheduler_owned_runtime_completions(&[delivered_with_payload(
-            0,
-            "session-001:boundary:001",
-            "session-001",
-            kind,
-            json!({}),
-            json!({}),
-        )]);
+        let verdict = scheduler_owned_runtime_completions(
+            &[delivered_with_payload(
+                0,
+                "session-001:boundary:001",
+                "session-001",
+                kind,
+                json!({}),
+                json!({}),
+            )],
+            &WorkloadExpectations::default(),
+        );
 
         assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
         assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
@@ -692,7 +701,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
         ),
     ];
 
-    let verdict = scheduler_owned_runtime_completions(&events);
+    let verdict = scheduler_owned_runtime_completions(&events, &WorkloadExpectations::default());
     assert_eq!(verdict.status, crate::trace::OracleStatus::Passed);
     assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
 }
@@ -716,7 +725,8 @@ fn scheduler_owned_runtime_completion_oracle_fails_when_kind_is_missing() {
             ));
             seq += 1;
         }
-        let verdict = scheduler_owned_runtime_completions(&events);
+        let verdict =
+            scheduler_owned_runtime_completions(&events, &WorkloadExpectations::default());
         assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
         assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
         assert!(
@@ -1146,5 +1156,73 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
     assert_eq!(
         duplicate_sequence.status,
         crate::trace::OracleStatus::Failed
+    );
+}
+
+#[test]
+fn scheduler_owned_runtime_completion_oracle_fails_on_declared_count_shortfall() {
+    let mut events = Vec::new();
+    for (seq, kind) in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS
+        .iter()
+        .enumerate()
+    {
+        events.push(delivered_with_payload(
+            seq,
+            &format!("boundary:{seq:03}"),
+            "session-001",
+            *kind,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, seq as u64)}),
+            json!({}),
+        ));
+    }
+    // One declared Provider completion was shrunk away: observed 1, declared 2.
+    // Every other kind still meets its declared count.
+    let expectations = SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS
+        .iter()
+        .map(|&kind| {
+            (
+                kind,
+                if kind == BoundaryKind::Provider {
+                    2usize
+                } else {
+                    1
+                },
+            )
+        })
+        .collect();
+    let expectations = WorkloadExpectations::default().with_completion_counts(expectations);
+    let verdict = scheduler_owned_runtime_completions(&events, &expectations);
+    assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
+    assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
+    for fragment in ["Provider", "1", "2", "declared"] {
+        assert!(
+            verdict.message.contains(fragment),
+            "under-delivery message must name the kind and both counts; got: {}",
+            verdict.message
+        );
+    }
+}
+
+#[test]
+fn scheduler_owned_runtime_completion_oracle_keeps_presence_floor_when_undeclared() {
+    // A declaration for other kinds must not exempt an undeclared kind.
+    let expectations = WorkloadExpectations::default()
+        .with_completion_counts(BTreeMap::from([(BoundaryKind::Provider, 1)]));
+    let events = vec![delivered_with_payload(
+        0,
+        "session-001:provider:001",
+        "session-001",
+        BoundaryKind::Provider,
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 0)}),
+        json!({}),
+    )];
+    let verdict = scheduler_owned_runtime_completions(&events, &expectations);
+    assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
+    assert!(
+        verdict
+            .message
+            .contains("did not include scheduler-owned runtime completion kinds"),
+        "undeclared kinds must still hit the presence floor, got: {}",
+        verdict.message
     );
 }
