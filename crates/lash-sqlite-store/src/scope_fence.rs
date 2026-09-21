@@ -338,7 +338,7 @@ impl RegistryAttachment {
             .call(move |connection| {
                 let main_file: Option<String> = connection
                     .query_row(
-                        "SELECT file FROM pragma_database_list WHERE name = 'main'",
+                        crate::connection_sql::SELECT_MAIN_DATABASE_FILE,
                         [],
                         |row| row.get(0),
                     )
@@ -351,10 +351,7 @@ impl RegistryAttachment {
                     return Ok(FenceLocations::JOURNAL_ONLY);
                 }
                 connection.execute(
-                    // `ATTACH` names a schema rather than qualifying a table, so
-                    // the renderer has nothing to say about it; the name is
-                    // `Schema::ProcessRegistry.qualifier()`.
-                    "ATTACH DATABASE ?1 AS process_registry",
+                    crate::connection_sql::ATTACH_PROCESS_REGISTRY,
                     params![path.to_string_lossy().into_owned()],
                 )?;
                 Ok(FenceLocations::attached(Schema::Main))

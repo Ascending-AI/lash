@@ -14,7 +14,9 @@ pub(crate) async fn postgres_transaction_epoch_ms(
     #[cfg(any(test, feature = "testing"))]
     {
         let injected: Option<String> = sqlx::query_scalar(
-            "SELECT NULLIF(current_setting('lash.test_lease_epoch_ms', true), '')",
+            crate::connection_sql::connection_sql()
+                .select_injected_lease_epoch_ms
+                .sql(),
         )
         .fetch_one(&mut **tx)
         .await
@@ -26,7 +28,9 @@ pub(crate) async fn postgres_transaction_epoch_ms(
         }
     }
     let now: i64 = sqlx::query_scalar(
-        "SELECT floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
+        crate::connection_sql::connection_sql()
+            .select_transaction_epoch_ms
+            .sql(),
     )
     .fetch_one(&mut **tx)
     .await

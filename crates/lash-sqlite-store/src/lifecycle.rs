@@ -446,19 +446,18 @@ pub(crate) async fn attach_process_registry(
     }
     let path = process_registry_path.to_string_lossy().into_owned();
     conn.call(move |conn| {
-        conn.execute("ATTACH DATABASE ?1 AS process_registry", params![path])?;
+        conn.execute(crate::connection_sql::ATTACH_PROCESS_REGISTRY, params![path])?;
         let expected_version = crate::schema::PROCESS_SCHEMA_VERSION;
         let deadline = std::time::Instant::now() + policy.busy_timeout;
         loop {
             let version: i32 = conn.query_row(
-                "PRAGMA process_registry.user_version",
+                crate::connection_sql::SELECT_PROCESS_REGISTRY_USER_VERSION,
                 [],
                 |row| row.get(0),
             )?;
             let has_processes = conn
                 .query_row(
-                    "SELECT 1 FROM process_registry.sqlite_master
-                     WHERE type = 'table' AND name = 'processes'",
+                    crate::connection_sql::SELECT_PROCESS_REGISTRY_IS_PROVISIONED,
                     [],
                     |_| Ok(()),
                 )

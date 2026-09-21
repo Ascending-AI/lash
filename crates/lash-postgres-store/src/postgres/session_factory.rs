@@ -247,10 +247,14 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let rows = sqlx::query(session_sql().head.select_fork_points.sql())
             .fetch_all(&mut *tx)
             .await

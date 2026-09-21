@@ -197,12 +197,16 @@ pub(crate) async fn lock_attachment_fence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     attachment_id: &str,
 ) -> Result<(), StoreError> {
-    sqlx::query("SELECT pg_advisory_xact_lock($1, hashtext($2))")
-        .bind(ATTACHMENT_FENCE_LOCK_NAMESPACE)
-        .bind(attachment_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_class_and_text
+            .sql(),
+    )
+    .bind(ATTACHMENT_FENCE_LOCK_NAMESPACE)
+    .bind(attachment_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     Ok(())
 }
 

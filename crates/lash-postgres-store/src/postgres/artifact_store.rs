@@ -45,6 +45,46 @@ lash_store_sql::statements! {
     }
 }
 
+lash_store_sql::statements! {
+    /// `lash_lashlang_artifacts` statements. The table has no SQLite half —
+    /// SQLite reaches the same bytes through `blobs` and `artifact_refs` — so
+    /// every statement over it is PostgreSQL-only by construction.
+    pub(crate) struct LashlangArtifactStatements @ "lashlang_artifact" {
+        /// Publish `?3` as artifact `?1`/`?2`. Publishing the same reference
+        /// twice is the same fact as publishing it once; the bytes are
+        /// content-addressed, so a conflict is the same bytes.
+        insert_bytes = "INSERT INTO lashlang_artifacts (namespace, artifact_ref, artifact_bytes)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (namespace, artifact_ref)
+             DO NOTHING";
+
+        /// Artifact `?1`/`?2`'s bytes.
+        ///
+        /// One name for one text: the publish path reads it back to prove
+        /// immutability and the get path reads it to serve a caller, and
+        /// before FIG-3387 those were two verbatim copies of this statement
+        /// in one module.
+        select_bytes = "SELECT artifact_bytes FROM lashlang_artifacts
+             WHERE namespace = ?1 AND artifact_ref = ?2";
+
+        /// Whether artifact `?1`/`?2` exists, without carrying its bytes back.
+        exists = "SELECT EXISTS (
+                 SELECT 1 FROM lashlang_artifacts
+                 WHERE namespace = ?1 AND artifact_ref = ?2
+             )";
+
+        /// One page of namespace `?1`'s artifacts after `?2`, at most `?3`
+        /// rows, ordered by the content-addressed reference so a preflight
+        /// walk resumes without a table-sized offset scan.
+        list_namespace_page = "SELECT artifact_ref, artifact_bytes
+             FROM lashlang_artifacts
+             WHERE namespace = ?1
+               AND (?2::text IS NULL OR artifact_ref > ?2::text)
+             ORDER BY artifact_ref
+             LIMIT ?3";
+    }
+}
+
 /// Every artifact-owner statement, rendered once.
 pub(crate) struct ArtifactSql {
     /// `artifact_owners` statements both backends issue verbatim.
@@ -53,6 +93,8 @@ pub(crate) struct ArtifactSql {
     pub(crate) owners_postgres: OwnerPostgresStatements,
     /// `artifact_owner_retirements` statements both backends issue verbatim.
     pub(crate) retirements: OwnerRetirementStatements,
+    /// `lashlang_artifacts` statements, all of them PostgreSQL-only.
+    pub(crate) lashlang_artifacts: LashlangArtifactStatements,
 }
 
 static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
@@ -61,6 +103,7 @@ static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
         owners: OwnerStatements::render(dialect),
         owners_postgres: OwnerPostgresStatements::render(dialect),
         retirements: OwnerRetirementStatements::render(dialect),
+        lashlang_artifacts: LashlangArtifactStatements::render(dialect),
     }
 });
 
@@ -120,11 +163,15 @@ impl PostgresLashlangArtifactStore {
         owner_id: &str,
     ) -> Result<(), sqlx::Error> {
         let key = format!("lash-artifact-owner:{owner_kind}:{owner_id}");
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(key)
-            .execute(&mut **tx)
-            .await
-            .map(|_| ())
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(key)
+        .execute(&mut **tx)
+        .await
+        .map(|_| ())
     }
 
     /// Serialize every mutation of one logical artifact at a stable PostgreSQL
@@ -136,11 +183,15 @@ impl PostgresLashlangArtifactStore {
         artifact_ref: &str,
     ) -> Result<(), sqlx::Error> {
         let key = format!("lash-artifact:{namespace}:{artifact_ref}");
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(key)
-            .execute(&mut **tx)
-            .await
-            .map(|_| ())
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(key)
+        .execute(&mut **tx)
+        .await
+        .map(|_| ())
     }
 
     async fn publish_namespaced_bytes(
@@ -173,27 +224,20 @@ impl PostgresLashlangArtifactStore {
         if retired {
             return Err(ArtifactStoreFailure::OwnerRetired);
         }
-        sqlx::query(
-            "INSERT INTO lash_lashlang_artifacts (namespace, artifact_ref, artifact_bytes)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (namespace, artifact_ref)
-             DO NOTHING",
-        )
-        .bind(namespace)
-        .bind(artifact_ref)
-        .bind(bytes)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let stored: Vec<u8> = sqlx::query_scalar(
-            "SELECT artifact_bytes FROM lash_lashlang_artifacts
-             WHERE namespace = $1 AND artifact_ref = $2",
-        )
-        .bind(namespace)
-        .bind(artifact_ref)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
+        sqlx::query(artifact_sql().lashlang_artifacts.insert_bytes.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .bind(bytes)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
+        let stored: Vec<u8> =
+            sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
         if stored != bytes {
             return Err(ArtifactStoreFailure::Backend(format!(
                 "artifact `{artifact_ref}` in namespace `{namespace}` is immutable"
@@ -217,14 +261,11 @@ impl PostgresLashlangArtifactStore {
         namespace: &str,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, sqlx::Error> {
-        sqlx::query_scalar(
-            "SELECT artifact_bytes FROM lash_lashlang_artifacts
-             WHERE namespace = $1 AND artifact_ref = $2",
-        )
-        .bind(namespace)
-        .bind(artifact_ref)
-        .fetch_optional(&self.pool)
-        .await
+        sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .fetch_optional(&self.pool)
+            .await
     }
 
     async fn retain_namespaced_bytes(
@@ -256,17 +297,12 @@ impl PostgresLashlangArtifactStore {
         if retired {
             return Err(ArtifactStoreFailure::OwnerRetired);
         }
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS (
-                 SELECT 1 FROM lash_lashlang_artifacts
-                 WHERE namespace = $1 AND artifact_ref = $2
-             )",
-        )
-        .bind(namespace)
-        .bind(artifact_ref)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
+        let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
         if !exists {
             return Err(ArtifactStoreFailure::Backend(format!(
                 "missing artifact `{artifact_ref}`"

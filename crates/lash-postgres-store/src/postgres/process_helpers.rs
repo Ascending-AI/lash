@@ -605,11 +605,14 @@ pub(crate) async fn validate_process_execution_authority_tx(
 pub(crate) async fn process_lease_now_epoch_ms_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
-    let now: i64 =
-        sqlx::query_scalar("SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+    let now: i64 = sqlx::query_scalar(
+        crate::connection_sql::connection_sql()
+            .select_statement_epoch_ms
+            .sql(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
     u64::try_from(now).map_err(|_| PluginError::ClockBeforeUnixEpoch {
         clock: "Postgres database clock".to_string(),
         epoch_ms: now,

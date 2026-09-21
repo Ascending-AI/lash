@@ -637,10 +637,14 @@ impl QueuedWorkStore for PostgresSessionStore {
         // One snapshot for the batch rows and their item rows. Under the
         // default READ COMMITTED every statement re-snapshots, so a batch
         // consumed between the two reads is seen as a header with no payloads.
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -714,10 +718,14 @@ impl QueuedWorkStore for PostgresSessionStore {
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // One snapshot for the batch rows and their item rows; see
         // `list_queued_work`.
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;

@@ -1,9 +1,16 @@
 # Writing a table module for the SQL stores
 
-How to convert one table family to the single-owner layout, or add a table to a
-family that is already converted. The reasoning behind the layout is
+How to add a table to the single-owner layout, and how to add a dialect-only
+statement to one that is already there. The reasoning behind the layout is
 [ADR 0098](adr/0098-one-owner-per-sql-table-across-both-stores.md); this is the
 procedure.
+
+Every table family is converted (FIG-3387), so `scripts/check-store-sql-ownership.py`
+is **total**: it reads both store crates whole, and there is no list of families
+it is silent about. Practically, that means a new statement cannot be written at
+a call site at all. It is declared in a `statements!` block in a listed owner
+module, or — if it names no table — in that backend's connection module, and
+anything else is a refusal naming the file and line.
 
 The worked example is the effect and wait families (FIG-3380):
 
@@ -368,11 +375,88 @@ backend only carries `backends = ["sqlite"]` and a reason that says why the
 other backend has no such operation — that entry *is* how "exists in one backend
 only" gets named.
 
-Then add the family to `converted` and give it a `[families.<name>]` block: its
-tables, its statement prefixes, its shared, sqlite and postgres owner modules,
-its schema artifacts, a `table_modules` map, and `vocabulary_columns` if any of
-its columns carry domain vocabulary. Until the family is in `converted` the gate
-is silent about it; once it is there the gate is total for it.
+`kind` is the short tag; `reason` is the prose. Both are required. The tag is
+what makes the manifest countable — the per-reason census in ADR 0098 is summed
+from it — so reuse an existing tag where one fits rather than inventing a synonym.
+
+A new family gets a `[families.<name>]` block: its tables, its statement
+prefixes, its shared, sqlite and postgres owner modules, its schema artifacts, a
+`table_modules` map, and `vocabulary_columns` if any of its columns carry domain
+vocabulary. A family is checked because it is declared there; there is no second
+list to add it to.
+
+### Adding a dialect-only statement to a family that is already there
+
+Four edits, and the gate names each one you forget:
+
+1. Declare it in that backend's owner module for the family, in a `statements!`
+   block whose `@ "prefix"` is one of the family's statement prefixes. The
+   neutral text uses `?N` even on PostgreSQL; the renderer rewrites it.
+2. Add the field to the backend's rendered `…Sql` struct and its `render`
+   constructor, so it is rendered once at startup rather than per call.
+3. Add a `[[dialect_only]]` entry with `backends`, `kind` and `reason`.
+   `backends` must match the declarations exactly — a statement only PostgreSQL
+   has carries `backends = ["postgres"]`, and that entry *is* how "exists in one
+   backend only" gets named.
+4. Call it. A declared statement that nothing issues is refused: a statement set
+   holds what the store sends, not what it might send.
+
+If the statement projects two or more columns of the table, the projection must
+already be one of the table module's column-list constants, or become one.
+
+### Statements that name no table
+
+Pragmas, `ATTACH`, advisory locks, isolation levels, the server clock and
+catalog probes are SQL the table rules cannot see: they name no relation. They
+have one home per backend, listed in the manifest:
+
+```toml
+[[connection]]
+path = "crates/lash-postgres-store/src/postgres/connection_sql.rs"
+reason = """
+PostgreSQL's connection-scoped SQL: the advisory-lock shapes, the isolation
+levels, the two `set_config` timeouts, the two clock reads and the `CHECK`
+constraint catalog probe.
+"""
+```
+
+Two rules hold that list to being a home rather than an exemption. A literal
+there that is SQL over an owned table is refused — that statement belongs to
+the table's family. And two literals with the same text in one store crate are
+refused, which is the duplicate rule applied to the SQL the duplicate rule
+cannot otherwise reach: before FIG-3387, `SELECT
+pg_advisory_xact_lock(hashtextextended($1, 0))` existed six times verbatim
+across six modules.
+
+PostgreSQL's connection module is mostly a `statements!` set, so each one is
+named for tracing and rendered once. SQLite's is plain constants, because a
+pragma takes no bound parameter and no table name and there is nothing for the
+renderer to rewrite.
+
+Two shapes cannot be declared statements. The first is **a probe that reads a
+system catalog in a table position.** `FROM pg_catalog.pg_constraint`
+and `FROM sqlite_schema` name relations `lash-store-sql` does not own, and the
+renderer refuses those — correctly, since a system catalog must never acquire
+the `lash_` prefix. Such a probe is a plain constant in the connection module
+and spells its own placeholders. The refusal is a `LazyLock` panic at first
+use, so it is a startup failure rather than a bad query — and
+`rendered_statement_sets_tests.rs` in each store crate forces every set so that
+failure lands in the ordinary unit test rather than only in a service-backed
+suite PR CI does not run.
+
+The second is **a table whose name is also a column of another table.** The
+renderer rewrites a table name wherever the token appears, not only in a table
+position, so registering `schema_versions` would rewrite
+`lash_release_stamp.schema_versions` too and every PostgreSQL open would fail.
+That table stays with its schema artifacts, which the gate already lists.
+Check a new table's name against the schemas' column names before adding it to
+`TABLES`; there is exactly one such collision today and it is this one.
+
+What does **not** belong there: anything that reaches a row lash stores. The
+`lash_release_stamp` privilege probe reads a table, so it is a `release_stamp`
+statement in the session-core family even though `has_table_privilege` takes
+the relation as text — which is the one place the `lash_` prefix is spelled
+rather than rendered, named as such in its manifest reason.
 
 ### Statements that span families
 
@@ -394,7 +478,7 @@ would let a child start between them.
 """
 ```
 
-`touches` is exactly the set of converted tables outside the owner's family
+`touches` is exactly the set of owned tables outside the owner's family
 that the statement is SQL over — the gate computes that set and compares, so
 an entry cannot drift from the statement. A statement that reaches another
 family with no entry is refused, and so is an entry for a statement that
@@ -405,17 +489,24 @@ rather than in your own modules.
 An `exempt` entry is not an alternative. It is for sources that are not
 production runtime SQL at all — the deterministic-simulation reset, the
 out-of-runtime runbook harness (`runbooks/restate-postgres-workers/`, a
-subtree exemption: a path ending in `/`) — and no production runtime statement
-may be parked there.
+subtree exemption: a path ending in `/`), and the three `testing`-feature
+modules no production build compiles — and no production runtime statement may
+be parked there.
 
 ## 8. Prove it
 
 ```
 kiln test //crates/lash-sqlite-store:all
+kiln test //crates/lash-postgres-store:lash-postgres-store__unit_test
 python3 scripts/check-store-sql-ownership.py
 python3 scripts/test_check_store_sql_ownership.py
 bash scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
 ```
+
+The two unit-test targets include `rendered_statement_sets_tests.rs`, which
+forces every rendered statement set. Run them before the service-backed suite:
+a statement that does not render fails there in one second, and in the
+PostgreSQL suite as a poisoned `LazyLock` behind thirty other failures.
 
 `pg-store` is the PostgreSQL conformance run. The suite is package-wide by
 design — narrowing it to the conformance binary would silently drop

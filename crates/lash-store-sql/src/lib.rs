@@ -77,9 +77,10 @@
 //! 3. In each backend, declare a `statements!` block for the statements that
 //!    fork, and render both sets once into a `LazyLock`.
 //! 4. Add one `[[dialect_only]]` entry per forked statement to
-//!    `crates/lash-store-sql/dialect-only.toml`, with a reason, and add the
-//!    family to `converted` there. Until the family is listed the gate is
-//!    silent about it; once listed it is total for it.
+//!    `crates/lash-store-sql/dialect-only.toml`, with a reason, and list the
+//!    module under its family there. The ownership gate is total over both
+//!    store crates: a statement in a module it does not know is a refusal,
+//!    not a statement it is silent about.
 //!
 //! `docs/store-sql-authoring.md` is the long form.
 
@@ -105,6 +106,7 @@ pub use render::{
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
     artifact::blobs::TABLE,
+    artifact::lashlang_artifacts::TABLE,
     artifact::owner_retirements::TABLE,
     artifact::owners::TABLE,
     artifact::refs::TABLE,
@@ -131,6 +133,7 @@ pub const TABLES: &[&str] = &[
     trigger::mutation_receipts::TABLE,
     trigger::occurrences::TABLE,
     trigger::subscriptions::TABLE,
+    turn_ingress::cancel_affected_inputs::TABLE,
     turn_ingress::cancel_requests::TABLE,
     turn_ingress::cancellation_bindings::TABLE,
     turn_ingress::closure_authorizations::TABLE,
@@ -157,14 +160,6 @@ pub const TABLES: &[&str] = &[
     session::sessions::TABLE,
     session::turn_commits::TABLE,
     session::usage_deltas::TABLE,
-    // Tables a converted family's statements reach but no converted family
-    // owns yet. The renderer has to know a name to address it, and a
-    // cross-family statement is a statement like any other — it cannot wait
-    // for its neighbour's lane. Each one is a bare name rather than a module
-    // path precisely because no module owns it: when its family converts, its
-    // lane replaces the string with that module's `TABLE` and adds the
-    // `[[cross_family]]` entry the gate then starts demanding.
-    "lashlang_artifacts",
 ];
 
 /// Every shared statement this crate owns, across every family.

@@ -736,6 +736,25 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `release_stamp` statements. All of them fork; see the SQLite twin.
     pub(crate) struct ReleaseStampStatements @ "release_stamp" {
+        /// Whether this connection may write the stamp at all.
+        ///
+        /// A host-provisioned deployment can admit a role holding nothing but
+        /// `SELECT`, and that is a published property of that mode rather than
+        /// an accident. The privilege is asked for with a catalog read instead
+        /// of discovered by letting an `INSERT` raise `42501`: a refused
+        /// statement would poison the admitting transaction, so the open would
+        /// fail rather than proceed unstamped.
+        ///
+        /// The one place in this crate where the `lash_` prefix is spelled
+        /// rather than rendered: `to_regclass` and `has_table_privilege` take
+        /// the relation as *text*, which the renderer's token rewriter cannot
+        /// reach.
+        select_is_writable = "SELECT CASE
+                  WHEN to_regclass('lash_release_stamp') IS NULL THEN FALSE
+                  ELSE has_table_privilege('lash_release_stamp', 'INSERT')
+                       AND has_table_privilege('lash_release_stamp', 'UPDATE')
+                END";
+
         /// The whole stamp.
         select_stamp = "SELECT release_version, schema_versions, written_at_epoch_ms
          FROM release_stamp WHERE singleton = TRUE";

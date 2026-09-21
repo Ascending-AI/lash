@@ -222,16 +222,34 @@ lash_conformance::signed_counter_write_domain_tests!({
     )
 });
 
-async fn wait_for_session_lease_advisory_waiters(pool: &sqlx::PgPool, at_least: i64) {
+/// Block until at least `at_least` backends are queued on `session_id`'s
+/// session-execution-lease advisory lock.
+///
+/// Asked of `pg_locks` by the lock's own identity rather than of
+/// `pg_stat_activity` by the waiter's statement *text*. The text was the one
+/// spelling of the lock that existed when this test was written; FIG-3387
+/// gave the six call sites that take a seed-`0` text lock one named statement,
+/// and a text match would have gone silently to zero waiters. The key is what
+/// the lock is: `pg_advisory_xact_lock(bigint)` splits its argument into
+/// `classid` (high 32 bits) and `objid` (low 32), with `objsubid = 1`.
+async fn wait_for_session_lease_advisory_waiters(
+    pool: &sqlx::PgPool,
+    session_id: &str,
+    at_least: i64,
+) {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             let waiters: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*)
-                 FROM pg_stat_activity
-                 WHERE wait_event_type = 'Lock'
-                   AND wait_event = 'advisory'
-                   AND query LIKE '%pg_advisory_xact_lock(hashtextextended($1, 0::bigint))%'",
+                "WITH target AS (SELECT hashtextextended($1, 0) AS key)
+                 SELECT COUNT(*)
+                 FROM pg_locks AS waiting, target
+                 WHERE waiting.locktype = 'advisory'
+                   AND NOT waiting.granted
+                   AND waiting.objsubid = 1
+                   AND waiting.classid = ((target.key >> 32) & 4294967295)::oid
+                   AND waiting.objid = (target.key & 4294967295)::oid",
             )
+            .bind(session_id)
             .fetch_one(pool)
             .await
             .expect("inspect session-lease advisory-lock waiters");
@@ -379,7 +397,7 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
             )
             .await
     });
-    wait_for_session_lease_advisory_waiters(storage.pool(), 1).await;
+    wait_for_session_lease_advisory_waiters(storage.pool(), session_id, 1).await;
 
     let renew_store = Arc::clone(&store);
     let predecessor_fence = predecessor.fence();
@@ -392,7 +410,7 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
         result = &mut renewal => {
             panic!("renewal did not wait on the shared session advisory lock: {result:?}")
         }
-        () = wait_for_session_lease_advisory_waiters(storage.pool(), 2) => {}
+        () = wait_for_session_lease_advisory_waiters(storage.pool(), session_id, 2) => {}
     }
 
     blocker

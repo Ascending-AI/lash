@@ -60,15 +60,6 @@ crate::statements! {
              WHERE group_key = ?1
              ORDER BY position";
 
-        /// How many children group `?1` has accepted.
-        ///
-        /// A named projection of one column rather than a read of the whole
-        /// membership: the reopen fence compares arity before it decodes any
-        /// envelope, and `envelope_json` is an unbounded column this avoids
-        /// decoding entirely.
-        count_membership = "SELECT COUNT(*) FROM runtime_effect_group_child
-             WHERE group_key = ?1";
-
         /// Delete every accepted child of session `?1`.
         delete_by_session = "DELETE FROM runtime_effect_group_child
              WHERE group_key IN (

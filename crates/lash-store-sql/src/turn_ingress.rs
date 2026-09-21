@@ -19,6 +19,7 @@
 //! submitted tool intents; it shares this family because it is the fourth
 //! `(replay_key) -> payload` ingress ledger and has no other home.
 
+pub mod cancel_affected_inputs;
 pub mod cancel_requests;
 pub mod cancellation_bindings;
 pub mod closure_authorizations;

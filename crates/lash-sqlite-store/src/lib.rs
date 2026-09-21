@@ -47,6 +47,8 @@ mod namespace;
 mod process_key;
 #[cfg(test)]
 mod process_lifecycle_sql_tests;
+#[cfg(test)]
+mod rendered_statement_sets_tests;
 mod session_deletion;
 
 use std::collections::BTreeMap;
@@ -108,6 +110,7 @@ mod await_event;
 mod blobs;
 mod codec;
 mod conn;
+mod connection_sql;
 mod retention;
 pub(crate) use codec::*;
 

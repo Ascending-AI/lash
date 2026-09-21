@@ -67,7 +67,7 @@ fn now_epoch_ms() -> i64 {
 /// failure: it records no release because no build that stamps has written it.
 pub(crate) fn table_exists(conn: &Connection) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'release_stamp'",
+        crate::connection_sql::SELECT_RELEASE_STAMP_TABLE_EXISTS,
         [],
         |row| row.get(0),
     )?;
