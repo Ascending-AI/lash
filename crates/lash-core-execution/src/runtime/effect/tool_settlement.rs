@@ -167,7 +167,7 @@ pub struct ToolUsageDelta {
     pub provider_attempt: u32,
     /// What the call is known to have spent. Never zero-filled: a provider
     /// attempt reporting no usage contributes no delta at all (§13, ADR 0032).
-    pub usage_probe: TokenUsage,
+    pub usage: TokenUsage,
 }
 
 /// The semantic facts one atomic `ToolAttempt` produced, journaled with it.
