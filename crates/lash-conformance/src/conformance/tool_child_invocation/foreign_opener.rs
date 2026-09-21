@@ -42,10 +42,10 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
         session_b.clone(),
         crate::TurnId::from(format!("{prefix}-mismatch-turn-b")),
     );
-    let opener_a =
-        crate::EffectOpener::for_scope(&scope_a, None).expect("a turn scope derives an opener");
-    let opener_b =
-        crate::EffectOpener::for_scope(&scope_b, None).expect("a turn scope derives an opener");
+    let opener_a = crate::EffectOpener::for_scope(&crate::admit(scope_a.clone()))
+        .expect("a turn scope derives an opener");
+    let opener_b = crate::EffectOpener::for_scope(&crate::admit(scope_b.clone()))
+        .expect("a turn scope derives an opener");
     let group_key_a = format!("{prefix}-mismatch-group-a");
     let group_key_b = format!("{prefix}-mismatch-group-b");
     let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
@@ -119,7 +119,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                         );
                         let scoped = world
                             .host
-                            .scoped(scope.clone())
+                            .scoped(crate::admit(scope.clone()))
                             .expect("the group scope binds");
                         let handle = scoped
                             .controller()
@@ -130,7 +130,11 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                                 &env_ref,
                                 LEAF_DEFERRED,
                                 deferrable_routing(routing_kind, &world.host),
-                                recorded_cancellation_authority(&world.host, &scope).await,
+                                recorded_cancellation_authority(
+                                    &world.host,
+                                    &crate::admit(scope.clone()),
+                                )
+                                .await,
                             ))
                             .await
                             .expect("the group opens under its live opener");
@@ -280,8 +284,12 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
         // The in-memory tier: the gate is the open itself, and a live foreign
         // opener does not satisfy it in either direction.
         let host = world.host;
-        let scoped_a = host.scoped(scope_a.clone()).expect("the A scope binds");
-        let scoped_b = host.scoped(scope_b.clone()).expect("the B scope binds");
+        let scoped_a = host
+            .scoped(crate::admit(scope_a.clone()))
+            .expect("the A scope binds");
+        let scoped_b = host
+            .scoped(crate::admit(scope_b.clone()))
+            .expect("the B scope binds");
         let guard_b = register_opener(
             &host,
             &scope_b,
@@ -297,7 +305,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                 &scope_a,
                 &session_a,
                 &group_key_a,
-                recorded_cancellation_authority(&host, &scope_a).await,
+                recorded_cancellation_authority(&host, &crate::admit(scope_a.clone())).await,
             ))
             .await
             .expect_err("a group whose opener is foreign to the live one refuses to open");
@@ -317,7 +325,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                 &scope_b,
                 &session_b,
                 &group_key_b,
-                recorded_cancellation_authority(&host, &scope_b).await,
+                recorded_cancellation_authority(&host, &crate::admit(scope_b.clone())).await,
             ))
             .await
             .expect_err("the foreign direction refuses the same way");
@@ -337,7 +345,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                 &scope_a,
                 &session_a,
                 &group_key_a,
-                recorded_cancellation_authority(&host, &scope_a).await,
+                recorded_cancellation_authority(&host, &crate::admit(scope_a.clone())).await,
             ))
             .await
             .expect("the A group opens once its opener is live");
@@ -347,7 +355,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                 &scope_b,
                 &session_b,
                 &group_key_b,
-                recorded_cancellation_authority(&host, &scope_b).await,
+                recorded_cancellation_authority(&host, &crate::admit(scope_b.clone())).await,
             ))
             .await
             .expect("the B group opens once its opener is live");

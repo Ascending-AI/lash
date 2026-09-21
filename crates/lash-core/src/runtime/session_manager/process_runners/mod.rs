@@ -136,8 +136,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         // registers nothing, leaving its children accepted rather than run
         // under a context that cannot claim them.
         let opener = crate::facade_support::opener_for_execution_scope(
-            scoped_effect_controller.execution_scope(),
-            scoped_effect_controller.admitted_process(),
+            scoped_effect_controller.admitted_scope(),
         );
         let effect_controller =
             crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped_effect_controller);

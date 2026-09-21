@@ -90,7 +90,7 @@ fn request_with_identity(identity: ToolAttemptEffectIdentity) -> ToolChildReques
         identity,
         ToolChildScope {
             opener: crate::EffectOpener::turn("child-session", "turn"),
-            admitted_scope: ExecutionScope::turn("child-session", "turn"),
+            admitted_scope: crate::AdmittedScope::turn("child-session", "turn"),
             session_id: SessionId::from("child-session"),
             agent_frame_id: FrameNodeId::new("child-frame").expect("a valid frame id"),
         },
@@ -158,7 +158,7 @@ fn lent_with_direct_completions(
 fn child_controller() -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
         Arc::new(crate::NativeRuntimeEffectController::default()),
-        ExecutionScope::turn("child-session", "turn"),
+        crate::AdmittedScope::turn("child-session", "turn"),
     )
     .expect("a valid child scope")
 }
@@ -308,6 +308,44 @@ fn the_child_runs_on_its_own_admitted_controller() {
             .scoped()
             .execution_scope(),
         &ExecutionScope::turn("child-session", "turn")
+    );
+}
+
+/// The claim pin is the recorded `AdmittedScope`, never `enclosing_process`.
+/// A process opener legitimately encloses its own incarnation, so the pair
+/// `opener = P#7, enclosing = P#7` validates — but when the admitted claim is a
+/// turn scope, the controller must stay that turn's controller. The retired
+/// `with_admitted_process` block would have pinned P#7 onto it instead, making
+/// the execution context the claim pin.
+#[test]
+fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
+    let mut request = request();
+    let opener_ref = crate::ProcessRef::new(
+        "worker",
+        crate::ProcessIncarnation::from_registration_sequence(7),
+    );
+    request.scope.opener = crate::EffectOpener::process(opener_ref.clone());
+    request.enclosing_process = Some(opener_ref.clone());
+    request
+        .validate()
+        .expect("a process opener enclosing its own incarnation is a legal request");
+
+    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let tool_children = ToolChildHost::new(
+        &host,
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::default()),
+    );
+    let controller = tool_children
+        .child_controller(&request.scope.admitted_scope)
+        .expect("the admitted pair constructs the child's controller");
+    assert_eq!(
+        controller.execution_scope(),
+        &ExecutionScope::turn("child-session", "turn"),
+        "the controller is the recorded claim's, a turn scope"
+    );
+    assert!(
+        controller.admitted_process().is_none(),
+        "the opener's incarnation never became the claim pin"
     );
 }
 
@@ -516,40 +554,35 @@ fn the_resolver_answers_only_for_tool_children() {
 /// never from the reusable name.
 #[test]
 fn opener_derivation_names_every_admitted_opener_scope() {
-    let turn = ExecutionScope::turn("session", "turn");
+    let turn = crate::AdmittedScope::turn("session", "turn");
     assert_eq!(
-        opener_for_execution_scope(&turn, None),
+        opener_for_execution_scope(&turn),
         Some(crate::EffectOpener::turn("session", "turn"))
     );
-    let drain = ExecutionScope::queue_drain("session", "drain-1");
+    let drain = crate::AdmittedScope::queue_drain("session", "drain-1");
     assert_eq!(
-        opener_for_execution_scope(&drain, None),
+        opener_for_execution_scope(&drain),
         Some(crate::EffectOpener::queue_drain("session", "drain-1"))
     );
     let process_ref = crate::ProcessRef::new(
         "process-1",
         crate::ProcessIncarnation::from_registration_sequence(7),
     );
-    let process = ExecutionScope::process("process-1");
+    let process = crate::AdmittedScope::process(process_ref.clone());
     assert_eq!(
-        opener_for_execution_scope(&process, Some(&process_ref)),
+        opener_for_execution_scope(&process),
         Some(crate::EffectOpener::process(process_ref.clone()))
     );
-    // A process scope without its pinned incarnation — or with a foreign one —
-    // names nothing rather than an opener minted from the reusable name.
-    assert!(opener_for_execution_scope(&process, None).is_none());
-    let foreign = crate::ProcessRef::new(
-        "other",
-        crate::ProcessIncarnation::from_registration_sequence(7),
-    );
-    assert!(opener_for_execution_scope(&process, Some(&foreign)).is_none());
-    for scope in [
-        ExecutionScope::session_delete("session"),
-        ExecutionScope::runtime_operation("op-1"),
+    // The half-admitted shapes — a process scope with no incarnation, or with
+    // another process's — cannot reach the derivation at all: `AdmittedScope`
+    // refuses them at construction, so there is no call site to test.
+    for admitted in [
+        crate::AdmittedScope::session_delete("session"),
+        crate::AdmittedScope::runtime_operation("op-1"),
     ] {
         assert!(
-            opener_for_execution_scope(&scope, None).is_none(),
-            "{scope:?} names no opener"
+            opener_for_execution_scope(&admitted).is_none(),
+            "{admitted:?} names no opener"
         );
     }
 }
@@ -943,8 +976,11 @@ fn durable_child_controller(host: &Arc<dyn EffectHost>) -> ScopedEffectControlle
         .authority_id
         .set(host.turn_control_binding_id())
         .expect("the authority id is set once");
-    ScopedEffectController::shared(controller, ExecutionScope::turn("child-session", "turn"))
-        .expect("a valid child scope")
+    ScopedEffectController::shared(
+        controller,
+        crate::AdmittedScope::turn("child-session", "turn"),
+    )
+    .expect("a valid child scope")
 }
 
 /// A request whose recorded cancellation authority is exactly what `host`
@@ -1301,7 +1337,7 @@ async fn a_nested_retry_sleep_observes_no_host_turn_gate() {
     let recorder = Arc::new(SleepShapeRecorder::default());
     let controller = ScopedEffectController::shared(
         recorder.clone(),
-        ExecutionScope::turn("child-session", "turn"),
+        crate::AdmittedScope::turn("child-session", "turn"),
     )
     .expect("a valid child scope");
     let request = request();

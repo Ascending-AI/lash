@@ -3,10 +3,11 @@ use pretty_assertions::assert_eq;
 use super::*;
 
 /// The process-scope sibling of [`leaf_request`]. `opener_ref` pins the
-/// incarnation the recorded opener names; `enclosing` is the incarnation the
-/// request admits the call inside — `None` only for the malformed-pin probe,
-/// whose child the driver must refuse because the pin and the scope are one
-/// fact (ADR 0099 §1).
+/// incarnation the recorded opener names — inside `admitted_scope`, the one
+/// checked pair — and `enclosing` is the incarnation the request admits the
+/// call inside. `None` only for the malformed probe: a process opener with
+/// no enclosing incarnation, which `ToolChildRequest::validate` refuses
+/// because the opener and its enclosing process are one fact (ADR 0099 §1).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -43,9 +44,13 @@ fn process_leaf_request(
             parent: Some(parent.clone()),
         },
         crate::runtime::effect::ToolChildScope {
-            opener: crate::EffectOpener::for_scope(scope, Some(opener_ref))
-                .expect("a pinned process scope derives an opener"),
-            admitted_scope: scope.clone(),
+            opener: crate::EffectOpener::for_scope(
+                &crate::AdmittedScope::new(scope.clone(), Some(opener_ref.clone()))
+                    .expect("the recorded pin names the claim's own process"),
+            )
+            .expect("a pinned process scope derives an opener"),
+            admitted_scope: crate::AdmittedScope::new(scope.clone(), Some(opener_ref.clone()))
+                .expect("the recorded pin names the claim's own process"),
             session_id: session_id.clone(),
             agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
         },
@@ -64,8 +69,9 @@ fn process_leaf_request(
 /// The incarnation law's group: two deferred leaves — one resolved inside the
 /// crashed world so its settlement orders the crash boundary, one left parked
 /// as the survivor the foreign incarnation must refuse — an orchestrating
-/// child under the recorded pin, and a process-scope child that records no
-/// enclosing incarnation: the malformed probe the driver must refuse.
+/// child under the recorded pin, and a process-opener child that records no
+/// enclosing incarnation: the malformed probe the request's own validation
+/// must refuse.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -125,8 +131,8 @@ fn incarnation_group(
                 ToolChildCompletionRouting::Inline,
                 Some(recorded_ref.clone()),
             ),
-            // The malformed probe: opener and scope agree, but no incarnation
-            // is recorded — the driver's refusal is the journal's own
+            // The malformed probe: a process opener with no enclosing
+            // incarnation recorded — the refusal is the request's own
             // consistency check, not a routing fact.
             child(2, LEAF_PLAIN, ToolChildCompletionRouting::Inline, None),
             child(3, LEAF_DEFERRED, routing, Some(recorded_ref.clone())),
@@ -144,9 +150,9 @@ fn incarnation_group(
 /// One group of three process-scoped children records `process(P)#7` as its
 /// opener: a deferred leaf (the durable survivor), an orchestrating child
 /// (whose durable-parent derivation must name the recorded incarnation),
-/// and a malformed child that records no enclosing incarnation at all —
-/// refused at the authority boundary because the pin and the scope are one
-/// fact.
+/// and a malformed child — a process opener that records no enclosing
+/// incarnation at all, refused at the boundary because the opener and its
+/// enclosing process are one fact.
 ///
 /// On the durable tiers the group journals under `process(P)#7`, the worker
 /// dies, and a live `process(P)#9` proves it cannot drain the survivor. On
@@ -171,10 +177,12 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         process_id.clone(),
         crate::ProcessIncarnation::from_registration_sequence(9),
     );
-    let opener_7 = crate::EffectOpener::for_scope(&scope_p, Some(&recorded_ref))
-        .expect("a pinned process scope derives an opener");
-    let opener_9 = crate::EffectOpener::for_scope(&scope_p, Some(&successor_ref))
-        .expect("a pinned process scope derives an opener");
+    let opener_7 =
+        crate::EffectOpener::for_scope(&crate::AdmittedScope::process(recorded_ref.clone()))
+            .expect("a pinned process scope derives an opener");
+    let opener_9 =
+        crate::EffectOpener::for_scope(&crate::AdmittedScope::process(successor_ref.clone()))
+            .expect("a pinned process scope derives an opener");
     let group_key = format!("{prefix}-incarnation-group");
     let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
     let observation = Arc::new(LawObservation::default());
@@ -233,11 +241,11 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         let error = malformed
             .outcome
             .as_ref()
-            .expect_err("a process-scope child without a recorded incarnation is refused");
+            .expect_err("a process opener without its enclosing incarnation is refused");
         assert_eq!(
             error.code,
             crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-            "the pin and the scope are one fact: {error}"
+            "the opener and its enclosing process are one fact: {error}"
         );
     }
 
@@ -280,7 +288,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                     );
                     let scoped = world
                         .host
-                        .scoped(scope_p.clone())
+                        .scoped(crate::AdmittedScope::process(recorded_ref.clone()))
                         .expect("the process scope binds");
                     let mut handle = scoped
                         .controller()
@@ -291,7 +299,11 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                             &env_ref,
                             &recorded_ref,
                             deferrable_routing(routing_kind, &world.host),
-                            recorded_cancellation_authority(&world.host, &scope_p).await,
+                            recorded_cancellation_authority(
+                                &world.host,
+                                &crate::AdmittedScope::process(recorded_ref.clone()),
+                            )
+                            .await,
                         ))
                         .await
                         .expect("the group opens under the recorded incarnation's opener");
@@ -408,7 +420,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         // `process(P)#9` does not satisfy it; `process(P)#7` does.
         let host = world.host;
         let scoped = host
-            .scoped(scope_p.clone())
+            .scoped(crate::AdmittedScope::process(recorded_ref.clone()))
             .expect("the process scope binds");
         let guard_9 = register_opener(
             &host,
@@ -428,7 +440,11 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                 &env_ref,
                 &recorded_ref,
                 deferrable_routing(fixture.deferrable_routing, &host),
-                recorded_cancellation_authority(&host, &scope_p).await,
+                recorded_cancellation_authority(
+                    &host,
+                    &crate::AdmittedScope::process(recorded_ref.clone()),
+                )
+                .await,
             ))
             .await
             .expect_err("a group whose recorded incarnation is not the live one refuses to open");
@@ -452,7 +468,11 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                 &env_ref,
                 &recorded_ref,
                 deferrable_routing(fixture.deferrable_routing, &host),
-                recorded_cancellation_authority(&host, &scope_p).await,
+                recorded_cancellation_authority(
+                    &host,
+                    &crate::AdmittedScope::process(recorded_ref.clone()),
+                )
+                .await,
             ))
             .await
             .expect("the group opens once its recorded incarnation is live");

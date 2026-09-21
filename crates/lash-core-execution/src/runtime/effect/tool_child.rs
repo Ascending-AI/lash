@@ -112,8 +112,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::tool_dispatch::ToolAttemptEffectIdentity;
 use crate::{
-    EffectOpener, ExecutionScope, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef,
-    ProcessRef, SessionId, ToolExecutionGrant, ToolManifest, ToolRetryPolicy, TurnControlBindingId,
+    AdmittedScope, EffectOpener, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessRef,
+    SessionId, ToolExecutionGrant, ToolManifest, ToolRetryPolicy, TurnControlBindingId,
 };
 
 use super::executor::RuntimeEffectControllerError;
@@ -142,7 +142,15 @@ use super::executor::RuntimeEffectControllerError;
 /// the issuer, a reopen on a second host — or on the same host after its
 /// registry was rebuilt — would prepare a key under an authority that cannot
 /// authenticate it.
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 3;
+///
+/// Version 4 retires the bare claim scope: `scope.admitted_scope` is now an
+/// [`AdmittedScope`], the checked scope/incarnation pair controller
+/// construction takes (FIG-3430, ADR 0099 §1). A v3 journal could pair a
+/// process claim with no pin — or with a pin the scope never agreed to — and
+/// only the driver's `with_admitted_process` block caught it; the checked pair
+/// makes that shape unrepresentable, on the wire as everywhere else, because
+/// decoding runs `AdmittedScope::new` rather than trusting the bytes.
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 4;
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///
@@ -277,9 +285,15 @@ pub struct ToolChildScope {
     /// The scope this child is admitted and claimed under, which a process
     /// opener's child need not share with its opener.
     ///
-    /// Still an [`ExecutionScope`], and correctly so: this is the address the
-    /// journal fences the child's claim on, not an identity.
-    pub admitted_scope: ExecutionScope,
+    /// The checked [`AdmittedScope`] pair, not a bare [`ExecutionScope`]: a
+    /// process claim carries its store-minted incarnation inside the same
+    /// value, so the half-admitted shape — a process scope with no pin, or a
+    /// pin naming another process — cannot be journaled. Decoding re-runs
+    /// `AdmittedScope::new` through the wire helper rather than trusting the
+    /// bytes; this is the pin the child's controller is constructed from,
+    /// never `enclosing_process`.
+    #[serde(with = "admitted_scope_wire")]
+    pub admitted_scope: AdmittedScope,
     /// The session the child's work is attributed to.
     ///
     /// Carried beside the opener rather than derived from it because a
@@ -294,6 +308,48 @@ pub struct ToolChildScope {
     /// holds many frames (ADR 0092), so a recovered child that re-derived a
     /// frame from its session would attribute its work to the wrong one.
     pub agent_frame_id: FrameNodeId,
+}
+
+/// The wire shape of an admitted scope: the bare pair, re-checked at decode.
+///
+/// [`AdmittedScope`] does not implement `Deserialize` on purpose — its only
+/// construction is [`AdmittedScope::new`], which refuses a process scope with
+/// no incarnation, a pin naming another process, or a pin on a non-process
+/// scope. The journal carries the two halves plainly so the durable shape
+/// stays legible, and decoding runs the check again rather than trusting the
+/// bytes: a hand-edited or cross-version journal entry cannot smuggle in the
+/// half-admitted pair the type exists to make unrepresentable.
+mod admitted_scope_wire {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::*;
+
+    /// The serialized pair: the claim address and, for a process claim, the
+    /// incarnation the admission authority bound.
+    #[derive(Serialize, Deserialize)]
+    pub struct AdmittedScopeWire {
+        pub scope: crate::ExecutionScope,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub process: Option<ProcessRef>,
+    }
+
+    pub fn serialize<S: Serializer>(
+        admitted: &AdmittedScope,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        AdmittedScopeWire {
+            scope: admitted.scope().clone(),
+            process: admitted.process_ref().cloned(),
+        }
+        .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<AdmittedScope, D::Error> {
+        let wire = AdmittedScopeWire::deserialize(deserializer)?;
+        AdmittedScope::new(wire.scope, wire.process).map_err(serde::de::Error::custom)
+    }
 }
 
 impl ToolChildScope {
@@ -379,7 +435,14 @@ pub struct ToolChildRequest {
     /// A [`ProcessRef`], not a `ProcessId`, for §1's reason: the enclosing
     /// process a recovered child reports must be the incarnation it was
     /// admitted under, never whatever process currently carries that name.
-    /// `None` for a turn opener, which encloses no process.
+    /// `None` for a non-process opener, which encloses no process — and
+    /// required to *be* the opener's own incarnation for a process opener
+    /// ([`validate`](Self::validate) refuses any other pair).
+    ///
+    /// This is tool execution context only. The child's **claim** pin — the
+    /// incarnation its controller is constructed under — is inside
+    /// [`scope.admitted_scope`](ToolChildScope::admitted_scope), the checked
+    /// pair; nothing here re-pins a claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enclosing_process: Option<ProcessRef>,
     /// The turn-cancellation authority that may cancel this child.
@@ -488,6 +551,35 @@ impl ToolChildRequest {
             ));
         }
         self.scope.validate()?;
+        match (&self.scope.opener, self.enclosing_process.as_ref()) {
+            (EffectOpener::Process { process_ref }, Some(enclosing))
+                if process_ref == enclosing => {}
+            (EffectOpener::Process { process_ref }, enclosing) => {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+                    format!(
+                        "retained tool-child request opens under process incarnation \
+                         `{process_ref}` but records {enclosing} as its enclosing process; \
+                         a process opener's child executes inside the opener's own \
+                         incarnation, so the two are one fact",
+                        enclosing = enclosing
+                            .map(|process_ref| format!("`{process_ref}`"))
+                            .unwrap_or_else(|| "no incarnation".to_string()),
+                    ),
+                ));
+            }
+            (_, Some(enclosing)) => {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+                    format!(
+                        "retained tool-child request opens under `{}` but records enclosing \
+                         process `{enclosing}`; only a process opener encloses a process",
+                        self.scope.opener.render(),
+                    ),
+                ));
+            }
+            (_, None) => {}
+        }
         if self.admission.manifest().id != self.call.tool_id {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildRequestAdmission,
@@ -540,7 +632,7 @@ mod tests {
     fn scope() -> ToolChildScope {
         ToolChildScope {
             opener: EffectOpener::turn("session", "turn"),
-            admitted_scope: ExecutionScope::turn("session", "turn"),
+            admitted_scope: AdmittedScope::turn("session", "turn"),
             session_id: SessionId::from("session"),
             agent_frame_id: frame(),
         }
@@ -576,11 +668,13 @@ mod tests {
     /// the exact failure §3 retains input to prevent.
     #[test]
     fn a_request_round_trips_every_field_through_its_durable_bytes() {
-        let original = request()
-            .with_enclosing_process(process_ref("process-9", 3))
-            .with_cancellation_authority(
-                TurnControlBindingId::new("binding-7").expect("a valid binding id"),
-            );
+        let mut original = request().with_cancellation_authority(
+            TurnControlBindingId::new("binding-7").expect("a valid binding id"),
+        );
+        // A consistent process-opener request: the enclosing incarnation is
+        // the opener's own, which is the only pair `validate` admits.
+        original.scope.opener = EffectOpener::process(process_ref("process-9", 3));
+        original = original.with_enclosing_process(process_ref("process-9", 3));
         let json = serde_json::to_string(&original).expect("a request serializes");
         let decoded: ToolChildRequest = serde_json::from_str(&json).expect("a request decodes");
         assert_eq!(decoded, original);
@@ -712,7 +806,8 @@ mod tests {
     fn the_opener_and_the_admitted_scope_are_retained_separately() {
         let mut request = request();
         request.scope.opener = EffectOpener::process(process_ref("process-1", 4));
-        request.scope.admitted_scope = ExecutionScope::runtime_operation("op-1");
+        request.scope.admitted_scope = AdmittedScope::runtime_operation("op-1");
+        request.enclosing_process = Some(process_ref("process-1", 4));
         let decoded: ToolChildRequest =
             serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
                 .expect("decodes");
@@ -722,7 +817,7 @@ mod tests {
         );
         assert_eq!(
             decoded.scope.admitted_scope,
-            ExecutionScope::runtime_operation("op-1")
+            AdmittedScope::runtime_operation("op-1")
         );
         decoded
             .validate()
@@ -765,6 +860,81 @@ mod tests {
             crossed
                 .validate()
                 .expect_err("a crossed opener session is refused")
+                .code,
+            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
+        );
+    }
+
+    /// The claim pair is checked at decode, not trusted: a journal row that
+    /// pairs a process scope with no incarnation — or with another process's —
+    /// does not decode, because `AdmittedScope::new` is the only construction
+    /// and it refuses the half-admitted shape.
+    #[test]
+    fn a_half_admitted_claim_pair_does_not_decode() {
+        let wire = |process: serde_json::Value| {
+            let mut value = serde_json::to_value(request()).expect("a request serializes");
+            *value
+                .pointer_mut("/scope/admitted_scope")
+                .expect("the wire pair is a nested object") = serde_json::json!({
+                "scope": { "type": "process", "process_id": "worker" },
+                "process": process,
+            });
+            value
+        };
+        assert!(
+            serde_json::from_value::<ToolChildRequest>(wire(serde_json::Value::Null)).is_err(),
+            "a process claim with no incarnation is the half-admitted shape the pair exists to refuse"
+        );
+        let mismatched =
+            serde_json::to_value(process_ref("other-worker", 2)).expect("a process ref serializes");
+        assert!(
+            serde_json::from_value::<ToolChildRequest>(wire(mismatched)).is_err(),
+            "a pin naming another process is refused at decode, not trusted"
+        );
+    }
+
+    /// A process opener's enclosing incarnation is the opener's own — the one
+    /// fact stated twice. A request that pairs `process(P)#7` with enclosing
+    /// `process(P)#9`, or with no enclosing at all, is refused at the boundary
+    /// rather than run under a successor's context.
+    #[test]
+    fn a_process_opener_must_enclose_its_own_incarnation() {
+        let mut request = request();
+        request.scope.opener = EffectOpener::process(process_ref("worker", 7));
+        request.scope.admitted_scope = AdmittedScope::process(process_ref("worker", 7));
+        request.enclosing_process = Some(process_ref("worker", 9));
+        assert_eq!(
+            request
+                .validate()
+                .expect_err("enclosing a different incarnation is refused")
+                .code,
+            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
+        );
+        request.enclosing_process = None;
+        assert_eq!(
+            request
+                .validate()
+                .expect_err("a process opener with no enclosing process is refused")
+                .code,
+            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
+        );
+        request.enclosing_process = Some(process_ref("worker", 7));
+        request
+            .validate()
+            .expect("the opener's own incarnation is the one legal enclosing");
+    }
+
+    /// Symmetrically: a non-process opener encloses no process, so a retained
+    /// `enclosing_process` on a turn or drain opener is a refused
+    /// inconsistency rather than a stray field.
+    #[test]
+    fn a_non_process_opener_records_no_enclosing_process() {
+        let mut request = request();
+        request.enclosing_process = Some(process_ref("worker", 1));
+        assert_eq!(
+            request
+                .validate()
+                .expect_err("a turn opener with an enclosing process is refused")
                 .code,
             crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
         );
@@ -834,8 +1004,11 @@ mod tests {
     #[test]
     fn lineage_rides_the_attempt_identity_and_survives_the_round_trip() {
         let parent = crate::RuntimeInvocation::effect(
-            crate::EffectAddress::new(ExecutionScope::turn("session", "turn"), "parent-effect")
-                .expect("a valid address"),
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("session", "turn"),
+                "parent-effect",
+            )
+            .expect("a valid address"),
             crate::RuntimeAttribution::for_session("session"),
             "parent-effect",
         );

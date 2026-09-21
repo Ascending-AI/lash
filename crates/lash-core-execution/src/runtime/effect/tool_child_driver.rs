@@ -73,8 +73,7 @@ use super::tool_child::ToolChildRequest;
 use super::tool_settlement::{ToolSettlement, ToolUsageLedger};
 use crate::tool_dispatch::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 use crate::{
-    EffectOpener, ExecutionScope, ProcessExecutionEnvStore, ToolCatalog,
-    ToolChildExecutionTraceHook,
+    AdmittedScope, EffectOpener, ProcessExecutionEnvStore, ToolCatalog, ToolChildExecutionTraceHook,
 };
 
 /// The deployment wiring a tool child needs and its request deliberately does
@@ -144,17 +143,20 @@ impl ToolChildHost {
 
     /// The child's own admitted controller (ADR 0099 §2).
     ///
-    /// Built by the host for the child's *own* claim scope, never re-scoped
-    /// from the opener's: an opener's controller carries the opener's
-    /// retirement fence, and a child claimed under a different scope that
-    /// inherited that fence would be refused — or admitted — for reasons that
-    /// have nothing to do with it.
+    /// Built by the host for the child's *own* claim, never re-scoped from
+    /// the opener's: an opener's controller carries the opener's retirement
+    /// fence, and a child claimed under a different scope that inherited that
+    /// fence would be refused — or admitted — for reasons that have nothing
+    /// to do with it. The argument is the request's recorded
+    /// [`AdmittedScope`]: the claim *and* its pin, one checked pair, so a
+    /// process claim reaches the controller with the incarnation it was
+    /// admitted under rather than whatever process carries the name now.
     fn child_controller(
         &self,
-        scope: &ExecutionScope,
+        admitted: &AdmittedScope,
     ) -> Result<ScopedEffectController<'static>, RuntimeEffectControllerError> {
         self.effect_host()?
-            .scoped_static(scope.clone())
+            .scoped_static(admitted.clone())
             .map_err(RuntimeEffectControllerError::from)?
             .ok_or_else(|| {
                 RuntimeEffectControllerError::new(
@@ -399,40 +401,14 @@ pub(crate) async fn run_tool_child(
         )
     })?;
 
+    // The controller is built directly from the request's recorded admitted
+    // pair: the claim scope *and* the incarnation it was admitted under, one
+    // checked value. There is no post-construction pin step — the pair was
+    // checked when the request was decoded (`AdmittedScope::new` is the only
+    // construction), and `enclosing_process` is never it: that field is tool
+    // execution context, which `ToolChildRequest::validate` has already
+    // reconciled with the opener.
     let controller = host.child_controller(&request.scope.admitted_scope)?;
-    // The child's admitted controller is pinned to the recorded process
-    // incarnation *before* any ToolContext is built: an opener or an
-    // orchestrating body that asked the controller for its enclosing process
-    // must get the incarnation the journal admitted, never whatever process
-    // currently carries the name (ADR 0099 §1). A process-scope claim without
-    // a recorded incarnation is an inconsistent pin and is refused the same
-    // way — running it would make a same-name successor's work
-    // indistinguishable from the predecessor's.
-    let controller = match request.enclosing_process.as_ref() {
-        Some(process_ref) => controller
-            .with_admitted_process(process_ref.clone())
-            .map_err(|error| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-                    format!(
-                        "tool child `{}` cannot bind its recorded process incarnation to its \
-                         admitted scope {:?}: {error}",
-                        request.call.call_id, request.scope.admitted_scope
-                    ),
-                )
-            })?,
-        None if matches!(request.scope.admitted_scope, ExecutionScope::Process { .. }) => {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-                format!(
-                    "tool child `{}` claims process scope {:?} but records no enclosing \
-                     incarnation; the pin and the scope are one fact",
-                    request.call.call_id, request.scope.admitted_scope
-                ),
-            ));
-        }
-        None => controller,
-    };
     validate_recorded_authorities(host, &controller, request).await?;
 
     let usage_ledger = ToolUsageLedger::new();
@@ -983,23 +959,19 @@ fn started_processes(
 ///
 /// The derivation is the one owner derivation every durable-work surface uses
 /// ([`EffectOpener::for_scope`], FIG-3417): the scope supplies the identity
-/// for a turn and for a queued drain, while a process scope carries only the
-/// reusable name, so its opener is the **pinned** incarnation the process
-/// runner bound onto the scoped controller
-/// ([`ScopedEffectController::admitted_process`]), never a name resolved
-/// afresh. `for_scope`'s refusals — no pinned incarnation, a foreign pin, an
-/// administrative scope — are `None` here, because a registration site that
-/// cannot name an opener must register nothing rather than mint one.
+/// for a turn and for a queued drain, while a process scope's opener is the
+/// **pinned** incarnation inside the [`AdmittedScope`] — never a name
+/// resolved afresh, because a same-name successor must not rebind work its
+/// predecessor still owns. `for_scope`'s refusals — an administrative scope
+/// names no opener — are `None` here, because a registration site that cannot
+/// name an opener must register nothing rather than mint one.
 ///
 /// Everything that registers a live opener goes through here, so a new scope
 /// arm is a compile error in `for_scope` rather than a silently unregistered
 /// opener.
 #[must_use]
-pub fn opener_for_execution_scope(
-    scope: &ExecutionScope,
-    admitted_process: Option<&crate::ProcessRef>,
-) -> Option<EffectOpener> {
-    EffectOpener::for_scope(scope, admitted_process).ok()
+pub fn opener_for_execution_scope(admitted: &AdmittedScope) -> Option<EffectOpener> {
+    EffectOpener::for_scope(admitted).ok()
 }
 
 #[cfg(test)]

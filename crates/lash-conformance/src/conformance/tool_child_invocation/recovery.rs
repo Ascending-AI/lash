@@ -53,8 +53,8 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     let session_id = crate::SessionId::from(format!("{prefix}-recovery"));
     let turn_id = crate::TurnId::from(format!("{prefix}-recovery-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
-    let opener =
-        crate::EffectOpener::for_scope(&scope, None).expect("a turn scope derives an opener");
+    let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
+        .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-recovery-group");
     let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
 
@@ -70,14 +70,16 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         // live.
         let host = probe_world.host;
         install_child_host(&host, &process_env_store);
-        let scoped = host.scoped(scope.clone()).expect("the group scope binds");
+        let scoped = host
+            .scoped(crate::admit(scope.clone()))
+            .expect("the group scope binds");
         let group = recovery_group(
             &scope,
             &session_id,
             &group_key,
             &env_ref,
             deferrable_routing(fixture.deferrable_routing, &host),
-            recorded_cancellation_authority(&host, &scope).await,
+            recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
         );
         let refusal = scoped
             .controller()
@@ -109,7 +111,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                 &group_key,
                 &env_ref,
                 deferrable_routing(fixture.deferrable_routing, &host),
-                recorded_cancellation_authority(&host, &scope).await,
+                recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
             ))
             .await
             .expect("the identical group opens once the opener is live");
@@ -173,7 +175,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                 );
                 let scoped = world
                     .host
-                    .scoped(scope.clone())
+                    .scoped(crate::admit(scope.clone()))
                     .expect("the group scope binds");
                 let handle = scoped
                     .controller()
@@ -183,7 +185,8 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                         &group_key,
                         &env_ref,
                         deferrable_routing(routing_kind, &world.host),
-                        recorded_cancellation_authority(&world.host, &scope).await,
+                        recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
+                            .await,
                     ))
                     .await
                     .expect("the group opens under the live opener");
@@ -248,7 +251,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     // rank while the opener stays absent.
     let scoped = successor
         .host
-        .scoped(scope.clone())
+        .scoped(crate::admit(scope.clone()))
         .expect("the group scope binds");
     let mut handle = scoped
         .controller()
@@ -258,7 +261,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             &group_key,
             &env_ref,
             deferrable_routing(fixture.deferrable_routing, &successor.host),
-            recorded_cancellation_authority(&successor.host, &scope).await,
+            recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
         ))
         .await
         .expect("a reopen tolerates a child this host cannot run");
@@ -343,7 +346,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     // the rank the drain settled, carrying the out-of-band resolution.
     let scoped = successor
         .host
-        .scoped(scope.clone())
+        .scoped(crate::admit(scope.clone()))
         .expect("the group scope binds");
     let mut handle = scoped
         .controller()
@@ -353,7 +356,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             &group_key,
             &env_ref,
             deferrable_routing(fixture.deferrable_routing, &successor.host),
-            recorded_cancellation_authority(&successor.host, &scope).await,
+            recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
         ))
         .await
         .expect("the successor reopens the drained group");

@@ -114,8 +114,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             return;
         };
         let Some(opener) = crate::facade_support::opener_for_execution_scope(
-            self.scoped_effect_controller.execution_scope(),
-            self.scoped_effect_controller.admitted_process(),
+            self.scoped_effect_controller.admitted_scope(),
         ) else {
             return;
         };

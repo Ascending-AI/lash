@@ -116,8 +116,8 @@ pub async fn tool_children_run_through_the_invocation_driver(
     let session_id = crate::SessionId::from(format!("{prefix}-lane"));
     let turn_id = crate::TurnId::from(format!("{prefix}-lane-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
-    let opener =
-        crate::EffectOpener::for_scope(&scope, None).expect("a turn scope derives an opener");
+    let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
+        .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-lane-group");
     let scenario = scenario(fixture, &session_id, serde_json::json!({"lane": "intents"})).await;
     let host = (fixture.make_world)(ToolChildWorldSpec {
@@ -143,9 +143,11 @@ pub async fn tool_children_run_through_the_invocation_driver(
         &scenario.env_ref,
         &parent,
         deferrable_routing(fixture.deferrable_routing, &host),
-        recorded_cancellation_authority(&host, &scope).await,
+        recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
     );
-    let scoped = host.scoped(scope.clone()).expect("the group scope binds");
+    let scoped = host
+        .scoped(crate::admit(scope.clone()))
+        .expect("the group scope binds");
     let mut handle = scoped
         .controller()
         .open_effect_group(group.clone())

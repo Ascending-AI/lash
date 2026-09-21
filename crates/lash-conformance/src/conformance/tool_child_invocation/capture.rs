@@ -85,8 +85,8 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
     let session_id = crate::SessionId::from(format!("{prefix}-capture"));
     let turn_id = crate::TurnId::from(format!("{prefix}-capture-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
-    let opener =
-        crate::EffectOpener::for_scope(&scope, None).expect("a turn scope derives an opener");
+    let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
+        .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-capture-group");
     let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
 
@@ -132,7 +132,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
                 );
                 let scoped = world
                     .host
-                    .scoped(scope.clone())
+                    .scoped(crate::admit(scope.clone()))
                     .expect("the group scope binds");
                 let mut handle = scoped
                     .controller()
@@ -142,7 +142,8 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
                         &group_key,
                         &env_ref,
                         deferrable_routing(routing_kind, &world.host),
-                        recorded_cancellation_authority(&world.host, &scope).await,
+                        recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
+                            .await,
                     ))
                     .await
                     .expect("the group opens under the live opener");
@@ -259,7 +260,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
     // the restored capture, the pre-crash sibling unchanged.
     let scoped = successor
         .host
-        .scoped(scope.clone())
+        .scoped(crate::admit(scope.clone()))
         .expect("the group scope binds");
     let mut handle = scoped
         .controller()
@@ -269,7 +270,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
             &group_key,
             &env_ref,
             deferrable_routing(fixture.deferrable_routing, &successor.host),
-            recorded_cancellation_authority(&successor.host, &scope).await,
+            recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
         ))
         .await
         .expect("the successor reopens the drained group");

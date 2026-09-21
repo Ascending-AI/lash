@@ -873,7 +873,7 @@ async fn a_reopen_offering_a_retained_key_under_a_different_request_lends_nothin
     let impostor_saw: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
     let refusing = RecordingExecutors::refusing();
     let world = make(spec(CRASH_LEASE_MS, &refusing)).await;
-    let scoped = world.host.scoped(scope).expect("scope");
+    let scoped = world.host.scoped(admit(scope)).expect("scope");
     let mut handle = open_with(
         &scoped,
         impostor_group(scoped.execution_scope(), &key, 2, RUN),

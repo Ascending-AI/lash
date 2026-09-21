@@ -647,13 +647,13 @@ fn law_orchestrating_tool() -> crate::tool_provider::orchestration::Orchestratin
 )]
 fn opener_dispatch(
     host: &Arc<dyn crate::EffectHost>,
-    scope: &crate::ExecutionScope,
+    admitted: &crate::AdmittedScope,
     provider: Arc<dyn crate::ToolProvider>,
     registry: Arc<dyn crate::ProcessRegistry>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
 ) -> Arc<crate::tool_dispatch::ToolDispatchContext<'static>> {
     let controller = host
-        .scoped_static(scope.clone())
+        .scoped_static(admitted.clone())
         .expect("the host lends a scoped controller")
         .expect("this host hands out owned scoped controllers");
     let tool_registry = crate::ToolRegistry::from_tool_provider_with_orchestrating_tools(
@@ -719,9 +719,9 @@ fn child_envelope(
 )]
 async fn recorded_cancellation_authority(
     host: &Arc<dyn crate::EffectHost>,
-    scope: &crate::ExecutionScope,
+    admitted: &crate::AdmittedScope,
 ) -> Option<crate::TurnControlBindingId> {
-    let scoped = host.scoped(scope.clone()).expect("the scope binds");
+    let scoped = host.scoped(admitted.clone()).expect("the scope binds");
     if scoped
         .controller()
         .turn_control_participation()
@@ -765,6 +765,8 @@ fn leaf_request(
     let crate::ExecutionScope::Turn { .. } = scope else {
         unreachable!("the law's children are admitted under a turn scope")
     };
+    let admitted =
+        crate::AdmittedScope::unpinned(scope.clone()).expect("a turn scope admits unpinned");
     let mut request = crate::runtime::effect::ToolChildRequest::new(
         crate::PreparedToolCall::from_parts(
             call_id,
@@ -779,9 +781,9 @@ fn leaf_request(
             parent: Some(parent.clone()),
         },
         crate::runtime::effect::ToolChildScope {
-            opener: crate::EffectOpener::for_scope(scope, None)
+            opener: crate::EffectOpener::for_scope(&admitted)
                 .expect("a turn scope derives an opener"),
-            admitted_scope: scope.clone(),
+            admitted_scope: admitted,
             session_id: session_id.clone(),
             agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
         },
@@ -856,7 +858,12 @@ fn register_opener(
     cooperative: tokio_util::sync::CancellationToken,
 ) -> crate::runtime::effect::LiveOpenerGuard {
     let installed = install_child_host(host, &process_env_store);
-    let dispatch = opener_dispatch(host, scope, provider, registry, process_env_store);
+    // The opener and its admitted scope are one fact: a process opener's
+    // lent controller is scoped under that same incarnation, and a
+    // non-process opener's is unpinned by construction.
+    let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
+        .expect("the opener's scope and incarnation agree");
+    let dispatch = opener_dispatch(host, &admitted, provider, registry, process_env_store);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
     let context = crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(
         &dispatch,
