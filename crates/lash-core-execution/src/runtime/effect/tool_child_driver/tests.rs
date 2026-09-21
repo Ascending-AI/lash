@@ -398,25 +398,48 @@ fn the_resolver_answers_only_for_tool_children() {
     );
 }
 
-/// One function derives a turn-side opener from a scope, exhaustively, so a
+/// One function derives an opener from an admitted scope, exhaustively, so a
 /// scope arm added later is a compile error rather than a silently
-/// unregistered opener (a queued drain runs its whole effect tree under
-/// `ExecutionScope::QueueDrain`).
+/// unregistered opener. The derivation is the bridge's
+/// (`cell_opener_for_scope`, FIG-3394): a turn and a queued drain name their
+/// opener from the scope alone; a process scope names it only through the
+/// pinned incarnation the runner bound, never from the reusable name.
 #[test]
-fn only_a_turn_scope_yields_a_turn_side_opener() {
+fn opener_derivation_names_every_admitted_opener_scope() {
+    let turn = ExecutionScope::turn("session", "turn");
     assert_eq!(
-        opener_for_execution_scope(&ExecutionScope::turn("session", "turn")),
+        opener_for_execution_scope(&turn, None),
         Some(crate::EffectOpener::turn("session", "turn"))
     );
+    let drain = ExecutionScope::queue_drain("session", "drain-1");
+    assert_eq!(
+        opener_for_execution_scope(&drain, None),
+        Some(crate::EffectOpener::queue_drain("session", "drain-1"))
+    );
+    let process_ref = crate::ProcessRef::new(
+        "process-1",
+        crate::ProcessIncarnation::from_registration_sequence(7),
+    );
+    let process = ExecutionScope::process("process-1");
+    assert_eq!(
+        opener_for_execution_scope(&process, Some(&process_ref)),
+        Some(crate::EffectOpener::process(process_ref.clone()))
+    );
+    // A process scope without its pinned incarnation — or with a foreign one —
+    // names nothing rather than an opener minted from the reusable name.
+    assert!(opener_for_execution_scope(&process, None).is_none());
+    let foreign = crate::ProcessRef::new(
+        "other",
+        crate::ProcessIncarnation::from_registration_sequence(7),
+    );
+    assert!(opener_for_execution_scope(&process, Some(&foreign)).is_none());
     for scope in [
-        ExecutionScope::process("process-1"),
-        ExecutionScope::queue_drain("session", "drain-1"),
         ExecutionScope::session_delete("session"),
         ExecutionScope::runtime_operation("op-1"),
     ] {
         assert!(
-            opener_for_execution_scope(&scope).is_none(),
-            "{scope:?} names no turn-side opener"
+            opener_for_execution_scope(&scope, None).is_none(),
+            "{scope:?} names no opener"
         );
     }
 }

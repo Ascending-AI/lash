@@ -703,33 +703,53 @@ fn started_processes(
         .collect()
 }
 
-/// The opener a turn's execution scope names, or `None` when the scope is not
-/// one an opener can be derived from.
+/// The opener an admitted execution scope names, or `None` when the scope is
+/// not one an opener can be derived from.
 ///
-/// **One function**, because a scope grows arms: a queued drain runs its whole
-/// effect tree under [`ExecutionScope::QueueDrain`], and a registration site
-/// that constructed `EffectOpener::turn(..)` by hand would silently register
-/// nothing for it. Everything that registers a turn-side opener goes through
-/// here, and the match is exhaustive so a new scope arm is a compile error
-/// rather than a silently unregistered opener.
+/// **One function**, because a scope grows arms and the derivation must match
+/// the one the host bridges use (`cell_opener_for_scope`, FIG-3394): the scope
+/// supplies the identity for a turn and for a queued drain — a drain runs its
+/// whole effect tree under [`ExecutionScope::QueueDrain`] and is durable and
+/// retry-stable for the same reason a turn is — while a process scope carries
+/// only the reusable name, so its opener is the **pinned** incarnation the
+/// process runner bound onto the scoped controller
+/// ([`ScopedEffectController::admitted_process`]), never a name resolved
+/// afresh. A process scope with no pinned incarnation yields `None` rather
+/// than an opener minted from the name alone, which is exactly the aliasing
+/// §1 exists to refuse.
+///
+/// Everything that registers a live opener goes through here, and the match
+/// is exhaustive so a new scope arm is a compile error rather than a silently
+/// unregistered opener.
 #[must_use]
-pub fn opener_for_execution_scope(scope: &ExecutionScope) -> Option<EffectOpener> {
+pub fn opener_for_execution_scope(
+    scope: &ExecutionScope,
+    admitted_process: Option<&crate::ProcessRef>,
+) -> Option<EffectOpener> {
     match scope {
         ExecutionScope::Turn {
             session_id,
             turn_id,
         } => Some(EffectOpener::turn(session_id.clone(), turn_id.clone())),
-        // A process opener is `Process(ProcessRef)` and carries a store-minted
-        // incarnation that `ExecutionScope::Process` does not have (§1), so a
-        // process opener is registered at the process site from its admitted
-        // incarnation and never derived from a scope.
-        ExecutionScope::Process { .. }
-        // Not openers: a queued drain has no turn identity of its own today, a
-        // session delete opens no tool work, and a runtime operation is not a
-        // session's turn.
-        | ExecutionScope::QueueDrain { .. }
-        | ExecutionScope::SessionDelete { .. }
-        | ExecutionScope::RuntimeOperation { .. } => None,
+        ExecutionScope::QueueDrain {
+            session_id,
+            drain_id,
+        } => Some(EffectOpener::queue_drain(
+            session_id.clone(),
+            drain_id.clone(),
+        )),
+        ExecutionScope::Process { process_id } => match admitted_process {
+            Some(process_ref) if process_ref.process_id == *process_id => {
+                Some(EffectOpener::process(process_ref.clone()))
+            }
+            // No pinned incarnation — or, unreachable by
+            // `with_admitted_process`'s own fence, a foreign one — means this
+            // scope cannot name its opener, so nothing registers.
+            _ => None,
+        },
+        // Not openers: a session delete opens no tool work, and a runtime
+        // operation is not a session's turn.
+        ExecutionScope::SessionDelete { .. } | ExecutionScope::RuntimeOperation { .. } => None,
     }
 }
 
