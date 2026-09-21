@@ -67,6 +67,10 @@
     "verdict": "deliberately-excluded",
     "reason": "ToolIntentSubmissionRecord is component-51 process-protocol state coupled to indexed identity, kind, and payload-hash columns; enroll it with the complete process carrier family."
   },
+  "lash_runtime_effect_group_child.envelope_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque canonical envelope JSON string without deserializing a Rust struct; the runtime decodes it, exactly as it does lash_runtime_effect_replay.envelope_json."
+  },
   "lash_runtime_effect_replay.envelope_json": {
     "verdict": "not-serialized-struct",
     "reason": "The PostgreSQL backend stores and returns the controller-owned opaque JSON string without deserializing a Rust struct."

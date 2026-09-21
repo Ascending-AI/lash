@@ -74,7 +74,7 @@ impl GroupFixture {
         };
         fixture
             .store
-            .open_group(&fixture.record())
+            .open_group(&fixture.record(), &[])
             .await
             .expect("open the group row");
         Some(fixture)
@@ -446,7 +446,7 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
     shrunk.created_at_ms = 9_999;
     let reopened = fixture
         .store
-        .open_group(&shrunk)
+        .open_group(&shrunk, &[])
         .await
         .expect("reopening an existing group is idempotent at the store seam");
     assert_eq!(

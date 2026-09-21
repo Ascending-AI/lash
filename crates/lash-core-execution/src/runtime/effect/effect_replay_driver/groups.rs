@@ -346,7 +346,11 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             journal_identity.session_id().cloned(),
             self.clock.timestamp_ms(),
         );
-        let persisted = self.row_store.open_group(&record).await?;
+        // Retained before the open is acknowledged, in the same transaction as
+        // the group row and ahead of it (ADR 0065 N2, ADR 0099 §3): a persisted
+        // accepted group may never exist without discoverable complete input.
+        let offered = accepted_membership(&group, self.clock.timestamp_ms())?;
+        let persisted = self.row_store.open_group(&record, &offered).await?;
         fence_reopen(&record, &persisted)?;
         let Some((replay_keys, executors)) = prepared else {
             // Already running here. The durable fence above has judged the
@@ -357,6 +361,22 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             return Ok(handle);
         }
 
+        // Dispatch from the *journal's* membership, never from `group`.
+        //
+        // One path rather than a branch on "was this a first open or a reopen".
+        // On a first open the membership just written is the caller's, so
+        // reading it back changes nothing except that what runs is provably
+        // what was durably accepted. On a reopen the caller's children are
+        // ignored entirely, which is ADR 0099's W1: a successor that never saw
+        // the opener's `RuntimeEffectGroup` still dispatches every accepted
+        // child, and a caller that re-presents different children cannot
+        // substitute them. The branch is also not available: SQLite's
+        // `INSERT … ON CONFLICT DO NOTHING` cannot report whether it inserted.
+        let retained = self
+            .row_store
+            .read_group_membership(group.group_key())
+            .await?;
+        let group = reconstruct_group(&group, retained, self.vocabulary())?;
         let dispatched = executors
             .iter()
             .filter(|executor| executor.is_some())
@@ -706,6 +726,81 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         self.reap_if_complete(handle.group_key(), &state).await;
         Ok(())
     }
+}
+
+/// The membership a group offers the journal at open.
+///
+/// The envelope is serialized whole: it is the reconstruction, and copying
+/// fields out of it into columns would be the second-copy defect this table
+/// exists without (see [`AcceptedGroupChild`]).
+fn accepted_membership(
+    group: &RuntimeEffectGroup,
+    created_at_ms: u64,
+) -> Result<Vec<AcceptedGroupChild>, RuntimeEffectControllerError> {
+    let _ = created_at_ms;
+    group
+        .children()
+        .iter()
+        .enumerate()
+        .map(|(position, child)| {
+            Ok(AcceptedGroupChild {
+                position,
+                replay_key: child.invocation.replay_key().to_string(),
+                envelope_json: serde_json::to_string(child).map_err(|error| {
+                    group_shape_error(format!(
+                        "child {position} of durable effect group {} cannot be retained: {error}",
+                        group.group_key()
+                    ))
+                })?,
+                request_version: super::super::TOOL_CHILD_REQUEST_VERSION,
+            })
+        })
+        .collect()
+}
+
+/// Rebuild the group from what the journal retained.
+///
+/// `offered` supplies only the group's header — its invocation, key, wake rule
+/// and disposition, all of which the durable fence has already judged against
+/// the recorded row. Every *child* comes from `retained`.
+///
+/// A membership that disagrees with the recorded arity is corruption, not
+/// contention: the two are written in one transaction, so a group row without
+/// its full membership cannot be produced by any interleaving. It is reported
+/// rather than repaired.
+fn reconstruct_group(
+    offered: &RuntimeEffectGroup,
+    mut retained: Vec<AcceptedGroupChild>,
+    vocabulary: EffectReplayVocabulary,
+) -> Result<RuntimeEffectGroup, RuntimeEffectControllerError> {
+    if retained.len() != offered.children().len() {
+        return Err(vocabulary.error(
+            EffectReplayFailure::CorruptRow,
+            format!(
+                "durable effect group {} records {} children but retained {} accepted \
+                 requests; the group row and its membership are written in one \
+                 transaction, so the two cannot disagree",
+                offered.group_key(),
+                offered.children().len(),
+                retained.len()
+            ),
+        ));
+    }
+    retained.sort_by_key(|child| child.position);
+    let children = retained
+        .into_iter()
+        .map(|child| {
+            serde_json::from_str::<RuntimeEffectEnvelope>(&child.envelope_json)
+                .map_err(|error| vocabulary.decode_error(error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    RuntimeEffectGroup::try_new(
+        offered.invocation().clone(),
+        offered.group_key(),
+        children,
+        offered.wake(),
+        offered.loser_disposition(),
+    )
 }
 
 /// The replay key of each child, in position order.

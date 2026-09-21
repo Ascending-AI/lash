@@ -184,7 +184,7 @@ async fn open_and_claim(
     keys: &[(&str, &str)],
 ) -> Vec<EffectLeaseFence> {
     store
-        .open_group(&group_record())
+        .open_group(&group_record(), &[])
         .await
         .expect("open the group row");
     let mut fences = Vec::new();
@@ -493,7 +493,7 @@ async fn unsettled_children_are_exactly_the_children_without_a_rank() {
 async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered() {
     let store = row_store().await;
     let recorded = store
-        .open_group(&group_record())
+        .open_group(&group_record(), &[])
         .await
         .expect("open the group row");
     assert_eq!(
@@ -507,7 +507,7 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
     shrunk.loser_disposition = lash_core::LoserPolicy::Cancel;
     shrunk.created_at_ms = 9_999;
     let reopened = store
-        .open_group(&shrunk)
+        .open_group(&shrunk, &[])
         .await
         .expect("reopening an existing group is idempotent at the store seam");
     assert_eq!(

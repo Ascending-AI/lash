@@ -22,11 +22,12 @@ use sha2::{Digest, Sha256};
 
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
-    CompletionKeys, EffectClaimDecision, EffectClaimObservation, EffectClaimRequest,
-    EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord, EffectLeaseFence,
-    EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore, EffectReplayVocabulary,
-    EffectRowDefect, EffectRowStatus, EffectTerminal, StoreEffectReplayDriver, StoredEffectRow,
-    StoredGroupSettlement, ToolBatchRedrive, UnsettledGroupChild, decide_effect_claim,
+    AcceptedGroupChild, CompletionKeys, EffectClaimDecision, EffectClaimObservation,
+    EffectClaimRequest, EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord,
+    EffectLeaseFence, EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore,
+    EffectReplayVocabulary, EffectRowDefect, EffectRowStatus, EffectTerminal,
+    StoreEffectReplayDriver, StoredEffectRow, StoredGroupSettlement, ToolBatchRedrive,
+    UnsettledGroupChild, decide_effect_claim,
 };
 
 use lash_core::{GroupExecutors, StoreEffectGroupDrain};
@@ -40,6 +41,7 @@ use std::sync::LazyLock;
 use lash_store_sql::Dialect;
 use lash_store_sql::effect::EffectJournalStatements;
 use lash_store_sql::effect::group::GroupStatements;
+use lash_store_sql::effect::group_child::GroupChildStatements;
 use lash_store_sql::effect::replay::ReplayStatements;
 use lash_store_sql::effect::scope_retirement::ScopeRetirementStatements;
 
@@ -159,6 +161,27 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
+    /// `runtime_effect_group_child` statements only PostgreSQL issues.
+    pub(crate) struct GroupChildPostgresStatements @ "effect_group_child" {
+        /// Retain one accepted child, returning the retained row and nothing
+        /// on a conflict.
+        ///
+        /// The `RETURNING` clause is the fork, for the same reason it is on
+        /// the group insert: it saves the read-back on the insert path, which
+        /// SQLite performs unconditionally. `DO NOTHING` is reopen semantics —
+        /// a reopen re-presents the membership it already accepted.
+        insert_accepted = "INSERT INTO runtime_effect_group_child (
+                group_key, position, replay_key,
+                envelope_json, request_version, created_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (group_key, position) DO NOTHING
+             RETURNING group_key, position, replay_key,
+                       envelope_json, request_version";
+    }
+}
+
+lash_store_sql::statements! {
     /// `effect_scope_retirements` statements only PostgreSQL issues.
     pub(crate) struct ScopeRetirementPostgresStatements @ "effect_scope_retirement" {
         /// Write the permanent fence of scope `?1`, keeping the first stamp.
@@ -197,6 +220,10 @@ pub(crate) struct EffectSql {
     pub(crate) group: GroupStatements,
     /// `runtime_effect_group` statements only PostgreSQL issues.
     pub(crate) group_postgres: GroupPostgresStatements,
+    /// `runtime_effect_group_child` statements both backends issue verbatim.
+    pub(crate) group_child: GroupChildStatements,
+    /// `runtime_effect_group_child` statements only PostgreSQL issues.
+    pub(crate) group_child_postgres: GroupChildPostgresStatements,
     /// `effect_scope_retirements` statements both backends issue verbatim.
     pub(crate) fence: ScopeRetirementStatements,
     /// `effect_scope_retirements` statements only PostgreSQL issues.
@@ -212,6 +239,8 @@ static EFFECT_SQL: LazyLock<EffectSql> = LazyLock::new(|| {
         replay_postgres: ReplayPostgresStatements::render(dialect),
         group: GroupStatements::render(dialect),
         group_postgres: GroupPostgresStatements::render(dialect),
+        group_child: GroupChildStatements::render(dialect),
+        group_child_postgres: GroupChildPostgresStatements::render(dialect),
         fence: ScopeRetirementStatements::render(dialect),
         fence_postgres: ScopeRetirementPostgresStatements::render(dialect),
     }
@@ -653,6 +682,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     async fn open_group(
         &self,
         record: &EffectGroupRecord,
+        membership: &[AcceptedGroupChild],
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
         // One transaction so the retirement fence and the insert are read and
         // written under the scope lock (N4); it still holds no child-row lock,
@@ -661,6 +691,24 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         if fence_session_free_scope(&mut tx, record.session_id.as_ref(), &record.scope_id).await? {
             tx.commit().await.map_err(effect_store_error)?;
             return Err(effect_replay_driver::scope_retired(&record.scope_id));
+        }
+        // Children before the group row, in this transaction (ADR 0065 N2), so
+        // the group row's existence implies its complete membership
+        // (ADR 0099 §3). The returned row is not read: on a first open it is
+        // what was just offered, and on a reopen the conflict path leaves it
+        // empty — either way the membership a caller acts on is the one
+        // `read_group_membership` reports.
+        for child in membership {
+            sqlx::query(effect_sql().group_child_postgres.insert_accepted.sql())
+                .bind(&record.group_key)
+                .bind(child.position as i64)
+                .bind(&child.replay_key)
+                .bind(&child.envelope_json)
+                .bind(i64::from(child.request_version))
+                .bind(record.created_at_ms as i64)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(effect_store_error)?;
         }
         let inserted = sqlx::query(effect_sql().group_postgres.insert_new.sql())
             .bind(&record.group_key)
@@ -687,6 +735,37 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .ok_or_else(|| missing_group_row(&record.group_key))?;
         tx.commit().await.map_err(effect_store_error)?;
         stored_group_record(existing)
+    }
+
+    async fn read_group_membership(
+        &self,
+        group_key: &str,
+    ) -> Result<Vec<AcceptedGroupChild>, RuntimeEffectControllerError> {
+        let rows = sqlx::query(effect_sql().group_child.select_membership.sql())
+            .bind(group_key)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(effect_store_error)?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(AcceptedGroupChild {
+                    position: u64_from_sql(
+                        "RuntimeEffectGroupChild",
+                        "position",
+                        row.try_get::<i64, _>("position")
+                            .map_err(effect_store_error)?,
+                    )? as usize,
+                    replay_key: row.try_get("replay_key").map_err(effect_store_error)?,
+                    envelope_json: row.try_get("envelope_json").map_err(effect_store_error)?,
+                    request_version: u64_from_sql(
+                        "RuntimeEffectGroupChild",
+                        "request_version",
+                        row.try_get::<i64, _>("request_version")
+                            .map_err(effect_store_error)?,
+                    )? as u16,
+                })
+            })
+            .collect()
     }
 
     /// Reads the group row without writing one, so a drain reads the declared

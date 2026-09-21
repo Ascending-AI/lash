@@ -61,7 +61,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The table component 101 lacks: the cancellation affected-input child table
 /// component 102 installed (FIG-3263).
-const POST_FLOOR_TABLES: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
+const POST_FLOOR_TABLES: [&str; 2] = [
+    "lash_turn_cancel_affected_inputs",
+    "lash_runtime_effect_group_child",
+];
 /// The post-floor indexes the fixture must drop by name: the child table's own
 /// guards drop with it, and component 102 added no index over a table the floor
 /// already had.
@@ -81,16 +84,16 @@ const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
 ///
-/// Empty under the component-105 boundary: the retained generation is 104,
-/// whose immediate predecessor 103's arm introduced no relation (104 added
-/// CHECK constraints only), so the component-103 divergent fixture has no
-/// post-stamp artifact to enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 0] = [];
+/// Under the component-107 boundary the retained generation is 106, whose arm
+/// introduces `lash_runtime_effect_group_child` — the accepted membership of an
+/// effect group (ADR 0099 §3). A component-106 catalog therefore diverges from
+/// the current one by exactly that relation, and the refusal must name it.
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_runtime_effect_group_child"];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
 /// reject-and-recreate boundary.
-const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
+const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::DivergentArtifacts;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.

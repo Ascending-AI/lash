@@ -191,7 +191,13 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 105);
+    // The fixture's dump records component 106, so this pins that the binary
+    // under test is *past* it: the refusal the test then asserts exists only
+    // while the two differ. Main is red at 106 (FIG-3414) because the fixture
+    // was regenerated to 106 in the same change that moved the constant there,
+    // which made the "prior" component equal to the current one; the bump to
+    // 107 restores the gap rather than papering over it.
+    assert_eq!(PostgresStorage::schema_version(), 107);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await

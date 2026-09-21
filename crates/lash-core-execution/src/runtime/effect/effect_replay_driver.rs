@@ -106,8 +106,8 @@ use super::group_drain::GroupExecutors;
 /// The durable group shape this port's backends implement, re-exported so a
 /// backend imports the whole effect-journal vocabulary from one place.
 pub use super::group_journal::{
-    EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord, StoredGroupSettlement,
-    UnsettledGroupChild,
+    AcceptedGroupChild, EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord,
+    StoredGroupSettlement, UnsettledGroupChild,
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
@@ -856,7 +856,21 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     async fn open_group(
         &self,
         record: &EffectGroupRecord,
+        membership: &[AcceptedGroupChild],
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError>;
+
+    /// Read back the accepted membership of `group_key`, in child order.
+    ///
+    /// The read half of [`open_group`](Self::open_group)'s membership write,
+    /// and the reason §3's retention is worth anything: a host that reopens a
+    /// journaled group rebuilds its children from this rather than from
+    /// whatever the caller happened to pass. Empty for a group the journal does
+    /// not hold; a recorded group always has complete membership, because the
+    /// two are written in one transaction.
+    async fn read_group_membership(
+        &self,
+        group_key: &str,
+    ) -> Result<Vec<AcceptedGroupChild>, RuntimeEffectControllerError>;
 
     /// Read the group row under `group_key`, or `None` when no group is
     /// recorded there.

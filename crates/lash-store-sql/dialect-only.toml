@@ -297,17 +297,24 @@ attachment_manifest = "crates/lash-store-sql/src/attachment/manifest.rs"
 attachment_condemnations = "crates/lash-store-sql/src/attachment/condemnation.rs"
 
 [families.effect]
-tables = ["runtime_effect_replay", "runtime_effect_group", "effect_scope_retirements"]
+tables = [
+    "runtime_effect_replay",
+    "runtime_effect_group",
+    "runtime_effect_group_child",
+    "effect_scope_retirements",
+]
 statement_prefixes = [
     "effect_journal",
     "effect_replay",
     "effect_group",
+    "effect_group_child",
     "effect_scope_retirement",
 ]
 shared = [
     "crates/lash-store-sql/src/effect.rs",
     "crates/lash-store-sql/src/effect/replay.rs",
     "crates/lash-store-sql/src/effect/group.rs",
+    "crates/lash-store-sql/src/effect/group_child.rs",
     "crates/lash-store-sql/src/effect/scope_retirement.rs",
 ]
 sqlite = [
@@ -330,6 +337,7 @@ schema = [
 [families.effect.table_modules]
 runtime_effect_replay = "crates/lash-store-sql/src/effect/replay.rs"
 runtime_effect_group = "crates/lash-store-sql/src/effect/group.rs"
+runtime_effect_group_child = "crates/lash-store-sql/src/effect/group_child.rs"
 effect_scope_retirements = "crates/lash-store-sql/src/effect/scope_retirement.rs"
 
 [families.process]
@@ -673,6 +681,17 @@ statement = "effect_replay.renew_lease"
 backends = ["sqlite", "postgres"]
 kind = "server clock"
 reason = "Same lease-clock fork as effect_replay.finalize_terminal."
+
+[[dialect_only]]
+statement = "effect_group_child.insert_accepted"
+backends = ["sqlite", "postgres"]
+kind = "RETURNING"
+reason = """
+PostgreSQL returns the retained membership row from the insert, so the durable
+read-back costs a second statement only on the conflict path. SQLite reads it
+back unconditionally. The same fork, for the same reason, as
+effect_group.insert_new: these two inserts run in one transaction.
+"""
 
 [[dialect_only]]
 statement = "effect_group.insert_new"

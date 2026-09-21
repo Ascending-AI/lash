@@ -606,6 +606,20 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_session
 CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
     ON lash_runtime_effect_group(scope_id);
 
+-- One row per accepted child of a group, carrying the request that
+-- reconstructs it (ADR 0099 section 3). Written with the group row in one
+-- transaction, children first (ADR 0065 N2), so a recorded group always has
+-- discoverable complete input. No scope_id: the group row owns that fact.
+CREATE TABLE IF NOT EXISTS lash_runtime_effect_group_child (
+    group_key        TEXT NOT NULL,
+    position         BIGINT NOT NULL,
+    replay_key       TEXT NOT NULL,
+    envelope_json    TEXT NOT NULL,
+    request_version  BIGINT NOT NULL,
+    created_at_ms    BIGINT NOT NULL,
+    PRIMARY KEY (group_key, position)
+);
+
 CREATE TABLE IF NOT EXISTS lash_await_event_meta (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     signing_secret BYTEA NOT NULL,
@@ -783,7 +797,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 106)
+VALUES ('lash-postgres-store', 107)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

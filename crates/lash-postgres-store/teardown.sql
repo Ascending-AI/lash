@@ -88,6 +88,7 @@ DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
 
 DROP TABLE IF EXISTS lash_runtime_effect_replay CASCADE;
 
+DROP TABLE IF EXISTS lash_runtime_effect_group_child CASCADE;
 DROP TABLE IF EXISTS lash_runtime_effect_group CASCADE;
 
 DROP TABLE IF EXISTS lash_await_event_meta CASCADE;

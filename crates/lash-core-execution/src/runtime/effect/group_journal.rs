@@ -138,6 +138,37 @@ impl EffectGroupRecord {
     }
 }
 
+/// One accepted child of a group, retained before the open is acknowledged
+/// (ADR 0099 §3).
+///
+/// This is the row that makes an accepted group *recoverable*.
+/// [`EffectGroupRecord`] carries `children`, a count, which tells a drain how
+/// many children exist and nothing about what any of them is; a child that has
+/// not claimed yet has no journal row at all. §3 requires "a reconstructible
+/// request for every unique child, including unclaimed children", and this is
+/// it: the child's position, its durable identity, and the canonical envelope
+/// that rebuilds it — command, group membership and all.
+///
+/// The envelope is the whole reconstruction. It already carries the child's
+/// `EffectAddress` (its scope and replay key), its lineage, its
+/// `EffectGroupMembership`, and — for a tool child — the
+/// [`ToolChildRequest`](super::ToolChildRequest) that FIG-3408's first part
+/// minted. Nothing is copied out of it into a column except `replay_key`,
+/// which is the lookup key a drain needs without decoding every row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcceptedGroupChild {
+    /// This child's index in the group, and half its primary key. Rank is
+    /// defined over this order, so the membership is read back ordered by it.
+    pub position: usize,
+    /// The child's replay key, its durable identity within the scope.
+    pub replay_key: String,
+    /// The recorded canonical envelope JSON, which rebuilds the child whole.
+    pub envelope_json: String,
+    /// The retained-request format version, refused rather than guessed when a
+    /// build cannot read it.
+    pub request_version: u16,
+}
+
 /// The persisted `wake` and `loser_disposition` column values.
 ///
 /// Both enums are `#[serde(rename_all = "snake_case")]`, and these are the same

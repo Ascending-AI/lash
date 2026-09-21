@@ -93,6 +93,10 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("queued_work_batches", "lash_queued_work_batches"),
     pair("queued_work_items", "lash_queued_work_items"),
     pair("runtime_effect_group", "lash_runtime_effect_group"),
+    pair(
+        "runtime_effect_group_child",
+        "lash_runtime_effect_group_child",
+    ),
     pair("runtime_effect_replay", "lash_runtime_effect_replay"),
     pair("runtime_turn_commits", "lash_runtime_turn_commits"),
     TablePair {

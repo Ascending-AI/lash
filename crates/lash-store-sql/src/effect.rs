@@ -1,10 +1,12 @@
 //! The effect family: the durable runtime-effect journal and its scope fences.
 //!
-//! Three tables — [`replay`], [`group`] and [`scope_retirement`] — plus the two
-//! statements below, which read across the journal and therefore belong to the
-//! family rather than to any one table module.
+//! Four tables — [`replay`], [`group`], [`group_child`] and
+//! [`scope_retirement`] — plus the two statements below, which read across the
+//! journal and therefore belong to the family rather than to any one table
+//! module.
 
 pub mod group;
+pub mod group_child;
 pub mod replay;
 pub mod scope_retirement;
 
