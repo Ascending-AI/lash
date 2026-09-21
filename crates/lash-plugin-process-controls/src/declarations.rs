@@ -271,7 +271,7 @@ pub async fn execute_process_start_tool_call(
             ));
         }
     };
-    let parent = match context.child_process_parent_scope().await {
+    let parent = match context.child_process_parent_scope() {
         Ok(parent) => parent,
         Err(error) => return refuse(error),
     };

@@ -384,3 +384,196 @@ async fn execution_context_without_process_execution_returns_typed_error_from_ap
         "process execution is unavailable outside a durable process execution"
     );
 }
+
+// ---------------------------------------------------------------------------
+// FIG-3417: the lifecycle parent a child start declares comes from ONE shared
+// derivation — the admitted execution scope plus the incarnation the process
+// runner pinned onto it. Nothing on this path re-resolves the reusable process
+// name against the registry.
+// ---------------------------------------------------------------------------
+
+fn registration_for_parent_scope(process_id: &str) -> crate::ProcessRegistration {
+    crate::ProcessRegistration::new(
+        ProcessId::from(process_id),
+        crate::ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        crate::RecoveryContract::ExternallyOwned,
+        crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+    )
+}
+
+fn scoped_context(
+    session_id: &str,
+    scope: crate::ExecutionScope,
+    admitted_process: Option<crate::ProcessRef>,
+) -> RuntimeExecutionContext<'static> {
+    let controller = crate::ScopedEffectController::shared(
+        Arc::new(crate::NativeRuntimeEffectController::default()),
+        scope,
+    )
+    .expect("the test scope validates");
+    let controller = match admitted_process {
+        Some(process_ref) => controller
+            .with_admitted_process(process_ref)
+            .expect("the pin names the scope's process"),
+        None => controller,
+    };
+    crate::testing::TestExecutionContextBuilder::new()
+        .session_id(session_id)
+        .borrowed_effect_controller(controller)
+        .plugin_factories(vec![])
+        .build()
+        .into_runtime()
+}
+
+fn process_event_context(
+    process_id: &ProcessId,
+    registry: Arc<dyn crate::ProcessRegistry>,
+) -> RuntimeExecutionProcessEventContext {
+    RuntimeExecutionProcessEventContext {
+        execution_write_authority: crate::ProcessExecutionWriteAuthority::invocation(
+            process_id.clone(),
+            "test-write-authority",
+        ),
+        process_work: crate::testing::process_work_wiring_for_registry(registry),
+        store: None,
+        session_store_factory: None,
+        queued_work: Arc::new(crate::NoQueuedWork::new()),
+        process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
+        clock: Arc::new(crate::SystemClock),
+    }
+}
+
+/// A child a turn starts takes the turn as its lifecycle parent.
+#[tokio::test]
+async fn a_child_started_from_a_turn_parents_on_the_turn() {
+    let context = scoped_context(
+        "session-1",
+        crate::ExecutionScope::turn("session-1", "turn-7"),
+        None,
+    );
+    assert_eq!(
+        context
+            .child_process_parent_scope()
+            .expect("a turn scope derives a turn parent"),
+        crate::ParentScope::Turn {
+            session_id: SessionId::from("session-1"),
+            turn_id: crate::TurnId::from("turn-7"),
+        },
+    );
+}
+
+/// A process scope nobody bound an admitted incarnation to cannot name a
+/// lifecycle parent — the reusable name is not a fallback. The registry in
+/// this fixture *could* resolve the name, which is what makes the refusal
+/// prove the derivation never asked it.
+#[tokio::test]
+async fn a_process_scope_without_an_admitted_incarnation_cannot_parent_a_child() {
+    let registry: Arc<dyn crate::ProcessRegistry> =
+        Arc::new(crate::TestLocalProcessRegistry::default());
+    let record = registry
+        .register_process(registration_for_parent_scope("worker"))
+        .await
+        .expect("first registration");
+    let context = scoped_context("session-1", crate::ExecutionScope::process("worker"), None)
+        .with_process_execution(
+            &registration_for_parent_scope("worker"),
+            Some(process_event_context(&record.id, Arc::clone(&registry))),
+        );
+    let error = context
+        .child_process_parent_scope()
+        .expect_err("a process scope without its admitted incarnation cannot parent a child");
+    assert!(
+        error.to_string().contains("incarnation"),
+        "unexpected refusal: {error}"
+    );
+}
+
+/// A same-name successor already retained in the registry does not rebind the
+/// pinned parent: a child started by incarnation 1 of `worker` parents on
+/// incarnation 1 even though the registry now holds incarnation 2.
+#[tokio::test]
+async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
+    let registry: Arc<dyn crate::ProcessRegistry> =
+        Arc::new(crate::TestLocalProcessRegistry::default());
+    let retired = registry
+        .register_process(registration_for_parent_scope("worker"))
+        .await
+        .expect("first registration");
+    registry
+        .complete_process(
+            &retired.id,
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("old"),
+            )),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete the first incarnation");
+    registry
+        .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune the retired incarnation");
+    let successor = registry
+        .register_process(registration_for_parent_scope("worker"))
+        .await
+        .expect("same-name successor registration");
+    assert_ne!(
+        successor.incarnation, retired.incarnation,
+        "the fixture must hold a successor incarnation under the same name"
+    );
+    // Recovery validates a retained pair with get_process_ref — and the
+    // superseded incarnation is refused there, not rebound.
+    assert!(
+        registry
+            .get_process_ref(&crate::ProcessRef::new(
+                retired.id.clone(),
+                retired.incarnation,
+            ))
+            .await
+            .is_err(),
+        "get_process_ref must refuse the superseded incarnation"
+    );
+
+    let context = scoped_context(
+        "session-1",
+        crate::ExecutionScope::process("worker"),
+        Some(crate::ProcessRef::new(
+            retired.id.clone(),
+            retired.incarnation,
+        )),
+    )
+    .with_process_execution(
+        &registration_for_parent_scope("worker"),
+        Some(process_event_context(&retired.id, Arc::clone(&registry))),
+    );
+    assert_eq!(
+        context
+            .child_process_parent_scope()
+            .expect("the pinned incarnation is the parent"),
+        crate::ParentScope::Process {
+            process_id: retired.id.clone(),
+            incarnation: retired.incarnation,
+        },
+    );
+}
+
+/// A queued-work drain admits a host lifecycle parent until FIG-3419 lands the
+/// drain-end protocol that lets a drain own durable children — the derivation
+/// must not silently borrow the session's current turn.
+#[tokio::test]
+async fn a_child_started_from_a_queued_drain_parents_on_the_host() {
+    let context = scoped_context(
+        "session-1",
+        crate::ExecutionScope::queue_drain("session-1", "drain-3"),
+        None,
+    );
+    assert_eq!(
+        context
+            .child_process_parent_scope()
+            .expect("a queued drain admits a host parent until FIG-3419"),
+        crate::ParentScope::Host,
+    );
+}

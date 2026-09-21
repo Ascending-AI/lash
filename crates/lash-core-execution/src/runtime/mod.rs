@@ -212,6 +212,7 @@ pub use lash_core_llm::turn_vocabulary::{
     TurnExecutionMetrics, TurnIssue, TurnIssueSeverity,
 };
 
+pub use lash_core_store::effect_opener::EffectOpenerError;
 pub use lash_core_store::runtime_error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
 
 pub use crate::direct_completion_client::DirectCompletionClient;

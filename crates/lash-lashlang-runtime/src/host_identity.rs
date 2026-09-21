@@ -12,104 +12,8 @@
 //! argument instead of a property of whichever host happened to build the
 //! string.
 
-use lash_core::{EffectOpener, ExecutionScope, ProcessRef};
+use lash_core::{EffectOpener, ProcessRef};
 use lashlang::LashlangExecutionCallSite;
-
-/// A scope that names no opener this contract can express.
-///
-/// ADR 0099 §1 knows three openers — a turn, a queued-work drain and a process
-/// incarnation — and `ExecutionScope` has two more kinds, `SessionDelete` and
-/// `RuntimeOperation`, which run no cells at all. These are refusals rather
-/// than extra arms: widening the opener is a contract decision, and inventing
-/// an identity here would hide the site that needed it.
-#[derive(Debug, thiserror::Error)]
-pub enum LashlangOpenerError {
-    /// A scope kind that is not an opener at all.
-    #[error(
-        "lashlang execution has no logical opener: {scope_kind} scope names neither a turn, a queued-work drain nor a process incarnation"
-    )]
-    NotAnOpener {
-        /// The scope kind, for the diagnostic.
-        scope_kind: &'static str,
-    },
-    /// A process scope whose run bound no incarnation.
-    ///
-    /// `ExecutionScope::Process` carries the reusable process *name*, so the
-    /// name alone cannot be the opener: it would alias every earlier
-    /// incarnation's groups, closes and cancellation fences (ADR 0099 §1).
-    /// The process runner binds the admitted incarnation onto the scoped
-    /// effect controller, so this refusal means the execution did not come
-    /// through a process runner at all.
-    #[error(
-        "lashlang execution under process `{process_id}` was not admitted with an incarnation, so it has no logical opener"
-    )]
-    ProcessWithoutIncarnation {
-        /// The reusable process name the scope carried.
-        process_id: String,
-    },
-    /// A process scope carrying an incarnation of some other process.
-    #[error("lashlang execution under process `{process_id}` was admitted as process `{admitted}`")]
-    ProcessMismatch {
-        /// The process the scope names.
-        process_id: String,
-        /// The process the admitted incarnation names.
-        admitted: String,
-    },
-}
-
-/// The opener a cell's scope names, or a refusal.
-///
-/// A queued turn is a real production shape, not an edge one: a turn started
-/// with `drain_id` and no turn id runs its whole effect tree — cells
-/// included — under `ExecutionScope::QueueDrain` (`crates/lash/src/turn.rs`,
-/// `execution_scope`), so a drain is an opener in its own right.
-///
-/// So is a cell under a process scope. A `ProcessInput::SessionTurn` row — the
-/// shape every `agents.spawn` child takes — runs a whole child session turn
-/// under `ExecutionScope::Process`
-/// (`SessionTurnRequest::new_process_backed` requires exactly that scope), and
-/// that turn's cells are opened by the process, not by the child turn: a
-/// worker retry keeps the incarnation and reuses the journal, while a
-/// re-registration is a different opener. The scope alone cannot say which,
-/// which is why `admitted_process` is an argument here: it is the incarnation
-/// the process runner bound onto the scoped controller, and its absence is
-/// refused rather than filled in with the reusable name.
-pub fn cell_opener_for_scope(
-    scope: &ExecutionScope,
-    admitted_process: Option<&ProcessRef>,
-) -> Result<EffectOpener, LashlangOpenerError> {
-    match scope {
-        ExecutionScope::Turn {
-            session_id,
-            turn_id,
-        } => Ok(EffectOpener::turn(session_id.clone(), turn_id.clone())),
-        ExecutionScope::QueueDrain {
-            session_id,
-            drain_id,
-        } => Ok(EffectOpener::queue_drain(
-            session_id.clone(),
-            drain_id.clone(),
-        )),
-        ExecutionScope::Process { process_id } => match admitted_process {
-            Some(process_ref) if process_ref.process_id == *process_id => {
-                Ok(EffectOpener::process(process_ref.clone()))
-            }
-            Some(process_ref) => Err(LashlangOpenerError::ProcessMismatch {
-                process_id: process_id.to_string(),
-                admitted: process_ref.process_id.to_string(),
-            }),
-            None => Err(LashlangOpenerError::ProcessWithoutIncarnation {
-                process_id: process_id.to_string(),
-            }),
-        },
-        ExecutionScope::SessionDelete { .. } => Err(LashlangOpenerError::NotAnOpener {
-            scope_kind: "session-delete",
-        }),
-        ExecutionScope::RuntimeOperation { .. } => Err(LashlangOpenerError::NotAnOpener {
-            scope_kind: "runtime-operation",
-        }),
-    }
-}
 
 /// The identities one Lashlang host mints.
 ///
@@ -220,7 +124,7 @@ impl LashlangHostIdentities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{ProcessId, ProcessIncarnation, SessionId};
+    use lash_core::{EffectOpenerError, ExecutionScope, ProcessId, ProcessIncarnation, SessionId};
     use lashlang::{LashlangExecutionSite, WorkflowExecutionSite};
 
     fn call_site(node_id: &str, occurrence: u64) -> LashlangExecutionCallSite {
@@ -271,7 +175,7 @@ mod tests {
         let admitted = process_ref("process:subagent:call-1", 3);
 
         let opener =
-            cell_opener_for_scope(&scope, Some(&admitted)).expect("a process is an opener");
+            EffectOpener::for_scope(&scope, Some(&admitted)).expect("a process is an opener");
 
         assert_eq!(opener, EffectOpener::process(admitted));
         assert_eq!(
@@ -289,7 +193,7 @@ mod tests {
         let site = call_site("resource_operation:aaaa", 1);
         let identities = |incarnation| {
             LashlangHostIdentities::cell(
-                cell_opener_for_scope(
+                EffectOpener::for_scope(
                     &scope,
                     Some(&process_ref("process:subagent:call-1", incarnation)),
                 )
@@ -318,13 +222,13 @@ mod tests {
     /// every earlier incarnation of that name.
     #[test]
     fn a_process_scope_without_an_admitted_incarnation_is_refused() {
-        let error = cell_opener_for_scope(&ExecutionScope::process("worker"), None)
+        let error = EffectOpener::for_scope(&ExecutionScope::process("worker"), None)
             .expect_err("the reusable name is not an opener");
 
         assert!(
             matches!(
                 &error,
-                LashlangOpenerError::ProcessWithoutIncarnation { process_id } if process_id == "worker"
+                EffectOpenerError::ProcessIncarnationMissing { process_id } if *process_id == "worker"
             ),
             "unexpected refusal: {error}"
         );
@@ -333,7 +237,7 @@ mod tests {
     /// An incarnation of another process cannot open this one's work.
     #[test]
     fn an_admitted_incarnation_of_another_process_is_refused() {
-        let error = cell_opener_for_scope(
+        let error = EffectOpener::for_scope(
             &ExecutionScope::process("worker"),
             Some(&process_ref("indexer", 1)),
         )
@@ -342,8 +246,8 @@ mod tests {
         assert!(
             matches!(
                 &error,
-                LashlangOpenerError::ProcessMismatch { process_id, admitted }
-                    if process_id == "worker" && admitted == "indexer"
+                EffectOpenerError::ProcessPinMismatch { process_id, pinned }
+                    if *process_id == "worker" && *pinned == "indexer"
             ),
             "unexpected refusal: {error}"
         );
@@ -457,7 +361,8 @@ mod tests {
     #[test]
     fn two_cells_of_one_queued_drain_mint_distinct_identities() {
         let scope = ExecutionScope::queue_drain("session-1", "drain-3");
-        let opener = cell_opener_for_scope(&scope, None).expect("a queued-work drain is an opener");
+        let opener =
+            EffectOpener::for_scope(&scope, None).expect("a queued-work drain is an opener");
         assert_eq!(opener, EffectOpener::queue_drain("session-1", "drain-3"));
 
         let site = call_site("resource_operation:aaaa", 1);
@@ -481,7 +386,7 @@ mod tests {
         );
         assert_ne!(
             opener,
-            cell_opener_for_scope(&ExecutionScope::turn("session-1", "drain-3"), None)
+            EffectOpener::for_scope(&ExecutionScope::turn("session-1", "drain-3"), None)
                 .expect("a turn is an opener"),
             "a drain is not a turn that happens to spell its id"
         );
@@ -553,7 +458,7 @@ mod tests {
     fn a_delimiter_bearing_session_id_round_trips() {
         let spawned_session = "session:subagent:lashlang:turn:1:x:1:y";
         let scope = ExecutionScope::turn(spawned_session, "turn-1");
-        let opener = cell_opener_for_scope(&scope, None).expect("a turn is an opener");
+        let opener = EffectOpener::for_scope(&scope, None).expect("a turn is an opener");
 
         assert_eq!(
             opener.session_id().map(SessionId::as_str),
@@ -600,7 +505,7 @@ mod tests {
             "a minted call id embedded in a child process id must be registrable"
         );
 
-        let child_opener = cell_opener_for_scope(
+        let child_opener = EffectOpener::for_scope(
             &ExecutionScope::process(child_process_id.clone()),
             Some(&process_ref(child_process_id.as_str(), 4)),
         )

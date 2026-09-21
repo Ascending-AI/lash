@@ -44,7 +44,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::process_identity::ProcessRef;
-use crate::{SessionId, TurnId};
+use crate::{ProcessId, SessionId, TurnId};
 
 /// The exact logical opener that durable work binds (ADR 0099 §1).
 ///
@@ -235,6 +235,111 @@ impl EffectOpener {
             }
         }
     }
+
+    /// The one owner derivation: the admitted execution scope plus the
+    /// incarnation a process runner pinned onto it, and nothing else.
+    ///
+    /// Every surface that must name the owner of durable work — the lifecycle
+    /// parent a child start declares, the host identities the Lashlang bridges
+    /// mint, the recorded attempt a tool body runs inside — derives through
+    /// here. There is deliberately no registry parameter: `admitted_process`
+    /// is the `ProcessRef` the runner bound at admission time
+    /// (`ScopedEffectController::with_admitted_process`), and resolving the
+    /// reusable name again is exactly the defect ADR 0099 §1 closes — a
+    /// same-name successor must not rebind work its predecessor still owns.
+    /// A recovery path that must validate a *retained* pair uses
+    /// `ProcessQuery::get_process_ref`, which answers the exact
+    /// `(process_id, incarnation)` or refuses it; `resolve_process_ref` — a
+    /// name lookup — is not an owner derivation.
+    ///
+    /// A queued turn is a real production shape, not an edge one: a turn
+    /// started with `drain_id` and no turn id runs its whole effect tree under
+    /// `ExecutionScope::QueueDrain`, so a drain is an opener in its own right.
+    /// And a cell under `ExecutionScope::Process` — the shape every
+    /// `agents.spawn` child takes — is opened by the process incarnation, not
+    /// by any turn inside it: a worker retry keeps the incarnation and reuses
+    /// the journal, while a re-registration is a different opener.
+    ///
+    /// # Errors
+    ///
+    /// `Process` scope with no admitted incarnation, a pinned incarnation that
+    /// names a different process, and the administrative scope kinds
+    /// (`SessionDelete`, `RuntimeOperation`) are refused — widening what an
+    /// opener is is a contract decision, not a fallback.
+    pub fn for_scope(
+        scope: &crate::ExecutionScope,
+        admitted_process: Option<&ProcessRef>,
+    ) -> Result<Self, EffectOpenerError> {
+        match scope {
+            crate::ExecutionScope::Turn {
+                session_id,
+                turn_id,
+            } => Ok(Self::turn(session_id.clone(), turn_id.clone())),
+            crate::ExecutionScope::QueueDrain {
+                session_id,
+                drain_id,
+            } => Ok(Self::queue_drain(session_id.clone(), drain_id.clone())),
+            crate::ExecutionScope::Process { process_id } => match admitted_process {
+                Some(process_ref) if process_ref.process_id == *process_id => {
+                    Ok(Self::process(process_ref.clone()))
+                }
+                Some(process_ref) => Err(EffectOpenerError::ProcessPinMismatch {
+                    process_id: process_id.clone(),
+                    pinned: process_ref.process_id.clone(),
+                }),
+                None => Err(EffectOpenerError::ProcessIncarnationMissing {
+                    process_id: process_id.clone(),
+                }),
+            },
+            crate::ExecutionScope::SessionDelete { .. } => Err(EffectOpenerError::NotAnOpener {
+                scope_kind: "session-delete",
+            }),
+            crate::ExecutionScope::RuntimeOperation { .. } => Err(EffectOpenerError::NotAnOpener {
+                scope_kind: "runtime-operation",
+            }),
+        }
+    }
+}
+
+/// A scope that names no opener this contract can express.
+///
+/// Refusals, not extra arms: widening the opener is a contract decision, and
+/// inventing an identity here would hide the site that needed it.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EffectOpenerError {
+    /// A scope kind that is not an opener at all. `SessionDelete` and
+    /// `RuntimeOperation` run administrative work and own no durable effects.
+    #[error(
+        "{scope_kind} scope names no opener: neither a turn, a queued-work drain nor a process incarnation"
+    )]
+    NotAnOpener {
+        /// The scope kind, for the diagnostic.
+        scope_kind: &'static str,
+    },
+    /// A process scope whose run bound no incarnation.
+    ///
+    /// `ExecutionScope::Process` carries the reusable process *name*, so the
+    /// name alone cannot be the opener: it would alias every earlier
+    /// incarnation's groups, closes and cancellation fences (ADR 0099 §1).
+    /// The process runner binds the admitted incarnation onto the scoped
+    /// effect controller at admission, so this refusal means the execution
+    /// did not come through a process runner — it is not an instruction to
+    /// resolve the name.
+    #[error("process `{process_id}` was not admitted with an incarnation, so it has no opener")]
+    ProcessIncarnationMissing {
+        /// The reusable process name the scope carried.
+        process_id: ProcessId,
+    },
+    /// A process scope carrying an incarnation pinned for another process.
+    #[error(
+        "process `{process_id}` cannot open work as process `{pinned}`: the pinned incarnation must be the scope's own"
+    )]
+    ProcessPinMismatch {
+        /// The process the scope names.
+        process_id: ProcessId,
+        /// The process the pinned incarnation names.
+        pinned: ProcessId,
+    },
 }
 
 #[cfg(test)]
@@ -405,6 +510,79 @@ mod tests {
                 .process_ref()
                 .map(|r| r.incarnation.registration_sequence()),
             Some(1)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // `for_scope`: the one owner derivation — admitted scope plus pinned
+    // `ProcessRef`, with no name resolution.
+    // -----------------------------------------------------------------------
+
+    /// Turn and drain scopes carry their whole owner in the scope itself.
+    #[test]
+    fn a_turn_and_a_drain_scope_derive_their_openers() {
+        assert_eq!(
+            EffectOpener::for_scope(&crate::ExecutionScope::turn("s", "t"), None)
+                .expect("a turn is an opener"),
+            EffectOpener::turn("s", "t")
+        );
+        assert_eq!(
+            EffectOpener::for_scope(&crate::ExecutionScope::queue_drain("s", "d"), None)
+                .expect("a drain is an opener"),
+            EffectOpener::queue_drain("s", "d")
+        );
+    }
+
+    /// A process scope plus its pinned incarnation is a process opener — the
+    /// incarnation is what the derivation adds to the reusable name.
+    #[test]
+    fn a_process_scope_plus_its_pin_is_a_process_opener() {
+        let pin = ProcessRef::new("worker", ProcessIncarnation::from_registration_sequence(3));
+        assert_eq!(
+            EffectOpener::for_scope(&crate::ExecutionScope::process("worker"), Some(&pin))
+                .expect("the pinned incarnation is the opener"),
+            EffectOpener::process(pin)
+        );
+    }
+
+    /// The reusable name alone is never the opener — and nothing resolves it.
+    #[test]
+    fn a_process_scope_without_a_pinned_incarnation_is_refused() {
+        assert_eq!(
+            EffectOpener::for_scope(&crate::ExecutionScope::process("worker"), None),
+            Err(EffectOpenerError::ProcessIncarnationMissing {
+                process_id: ProcessId::from("worker"),
+            })
+        );
+    }
+
+    /// A pin for another process cannot open this one's work.
+    #[test]
+    fn a_process_scope_pinned_to_another_process_is_refused() {
+        let pin = ProcessRef::new("indexer", ProcessIncarnation::from_registration_sequence(1));
+        assert_eq!(
+            EffectOpener::for_scope(&crate::ExecutionScope::process("worker"), Some(&pin)),
+            Err(EffectOpenerError::ProcessPinMismatch {
+                process_id: ProcessId::from("worker"),
+                pinned: ProcessId::from("indexer"),
+            })
+        );
+    }
+
+    /// The administrative scope kinds run no durable effects and own nothing.
+    #[test]
+    fn administrative_scopes_have_no_opener() {
+        assert_eq!(
+            EffectOpener::for_scope(&crate::ExecutionScope::session_delete("s"), None),
+            Err(EffectOpenerError::NotAnOpener {
+                scope_kind: "session-delete",
+            })
+        );
+        assert_eq!(
+            EffectOpener::for_scope(&crate::ExecutionScope::runtime_operation("op"), None),
+            Err(EffectOpenerError::NotAnOpener {
+                scope_kind: "runtime-operation",
+            })
         );
     }
 }
