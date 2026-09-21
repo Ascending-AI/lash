@@ -686,7 +686,7 @@ fn message_tree_marks_active_nodes_without_using_message_identity() {
     let message = text_message("same-message-id", MessageRole::User, "same content");
     let root = graph.append_message(message.clone());
     let inactive = graph.append_message(message.clone());
-    graph = SessionGraph::from_nodes(graph.nodes.clone(), Some(root))
+    graph = SessionGraph::from_shared_nodes(graph.nodes.clone(), Some(root))
         .expect("the selected branch leaf resolves");
     let active = graph.append_message(message);
 
@@ -730,7 +730,7 @@ fn message_tree_orders_siblings_by_graph_position_not_timestamp() {
         )
         .remove(0);
     graph.append_plugin("witness-plugin", serde_json::json!({"separates": true}));
-    graph = SessionGraph::from_nodes(graph.nodes.clone(), Some(parent))
+    graph = SessionGraph::from_shared_nodes(graph.nodes.clone(), Some(parent))
         .expect("reselect the shared parent as leaf");
     let younger_sibling = graph
         .append_node_drafts_at(
@@ -774,16 +774,18 @@ fn active_read_rewrite_preserves_draft_node_id_sequence() {
     let leaf_node_id = graph.leaf_node_id.clone().expect("initial leaf");
     let draft_namespace = format!("unscoped-replacement:{leaf_node_id}");
     let mut nodes = graph.nodes.clone();
-    nodes.extend((0..2).map(|ordinal| SessionNodeRecord {
-        node_id: draft_node_id(&draft_namespace, ordinal),
-        parent_node_id: Some(leaf_node_id.clone()),
-        timestamp: "2026-08-20T00:00:00Z".to_string(),
-        payload: SessionNodePayload::Plugin {
-            plugin_type: "pre-existing-draft".to_string(),
-            body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
-        },
+    nodes.extend((0..2).map(|ordinal| {
+        std::sync::Arc::new(SessionNodeRecord {
+            node_id: draft_node_id(&draft_namespace, ordinal),
+            parent_node_id: Some(leaf_node_id.clone()),
+            timestamp: "2026-08-20T00:00:00Z".to_string(),
+            payload: SessionNodePayload::Plugin {
+                plugin_type: "pre-existing-draft".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
+            },
+        })
     }));
-    graph = SessionGraph::from_nodes(nodes, Some(leaf_node_id))
+    graph = SessionGraph::from_shared_nodes(nodes, Some(leaf_node_id))
         .expect("pre-existing draft branches are structurally valid");
 
     graph
@@ -863,12 +865,13 @@ fn projection_and_replacement_retain_the_same_prefix() {
 
     for (case, messages, expected) in cases {
         let replacement = build_active_read_replacement(
-            graph.nodes.iter(),
+            graph.nodes.iter().map(std::sync::Arc::as_ref),
             graph.append_builder_in_namespace("active-read-prefix-differential-test"),
             &messages,
             "2026-08-20T00:00:00Z".to_string(),
         );
-        let projection = build_active_read_projection(graph.nodes.iter(), &messages);
+        let projection =
+            build_active_read_projection(graph.nodes.iter().map(std::sync::Arc::as_ref), &messages);
         let projection_retained_count = projection
             .active_messages
             .iter()
@@ -1072,4 +1075,244 @@ fn public_read_views_return_missing_frame_errors() {
         }
     );
     assert_eq!(runtime_error, snapshot_error);
+}
+
+#[test]
+fn graph_cow_after_snapshot_copies_pointers_not_records() {
+    let mut graph = SessionGraph::default();
+    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
+    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
+    let snapshot = graph.clone();
+
+    graph.append_message(text_message("m3", MessageRole::User, "three"));
+
+    assert_eq!(snapshot.nodes.len(), 2);
+    assert_eq!(snapshot.leaf_node_id.as_ref(), Some(&second));
+    assert_eq!(graph.nodes.len(), 3);
+    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
+    assert_eq!(graph.nodes[0].node_id, first);
+    assert_eq!(graph.nodes[1].node_id, second);
+}
+
+#[test]
+fn apply_append_after_snapshot_shares_resident_records() {
+    let mut graph = SessionGraph::default();
+    graph.append_message(text_message("m1", MessageRole::User, "one"));
+    let resident_leaf = graph.leaf_node_id.clone().expect("resident leaf");
+    let snapshot = graph.clone();
+
+    graph
+        .apply_append(&GraphAppend::Extend {
+            nodes: vec![SessionNodeRecord {
+                node_id: "appended".to_string().into(),
+                parent_node_id: Some(resident_leaf.clone()),
+                timestamp: "2026-09-12T00:00:00Z".to_string(),
+                payload: SessionNodePayload::Plugin {
+                    plugin_type: "cow-test".to_string(),
+                    body: SharedJsonValue::new(serde_json::json!({"node": "appended"})),
+                },
+            }],
+        })
+        .expect("append after snapshot is valid");
+
+    assert_eq!(snapshot.nodes.len(), 1);
+    assert_eq!(snapshot.leaf_node_id.as_ref(), Some(&resident_leaf));
+    assert_eq!(graph.nodes.len(), 2);
+    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+}
+
+#[test]
+fn remap_node_ids_rewrites_only_mapped_records() {
+    let mut graph = SessionGraph::default();
+    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
+    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
+    let snapshot = graph.clone();
+    // Warm the by_id cache so the remap resolves positions through it.
+    assert!(graph.find_node(first.as_str()).is_some());
+
+    let first_derived = crate::NodeId::from("derived-first".to_string());
+    let second_derived = crate::NodeId::from("derived-second".to_string());
+    graph.remap_node_ids(
+        &crate::SessionId::from("remap-test"),
+        &[
+            (first.clone(), first_derived.clone()),
+            (second.clone(), second_derived.clone()),
+        ],
+    );
+
+    assert_eq!(graph.nodes[0].node_id, first_derived);
+    assert_eq!(graph.nodes[1].node_id, second_derived);
+    // The mapped parent id is rewritten through the same table.
+    assert_eq!(graph.nodes[1].parent_node_id.as_ref(), Some(&first_derived));
+    assert_eq!(graph.leaf_node_id.as_ref(), Some(&second_derived));
+
+    // The snapshot keeps the original records untouched.
+    assert_eq!(snapshot.nodes[0].node_id, first);
+    assert_eq!(snapshot.nodes[1].node_id, second);
+    assert_eq!(snapshot.leaf_node_id.as_ref(), Some(&second));
+    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
+}
+
+#[test]
+fn remap_node_ids_keeps_unmapped_records_shared() {
+    let mut graph = SessionGraph::default();
+    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
+    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
+    let snapshot = graph.clone();
+    assert!(graph.find_node(first.as_str()).is_some());
+
+    let second_derived = crate::NodeId::from("derived-second".to_string());
+    graph.remap_node_ids(
+        &crate::SessionId::from("remap-test"),
+        &[(second.clone(), second_derived.clone())],
+    );
+
+    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
+    // An unmapped parent id is left alone.
+    assert_eq!(graph.nodes[1].parent_node_id.as_ref(), Some(&first));
+    assert_eq!(graph.leaf_node_id.as_ref(), Some(&second_derived));
+}
+
+#[test]
+fn remap_node_ids_rewrites_mapped_parents_on_unmapped_records() {
+    let mut graph = SessionGraph::default();
+    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
+    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
+    graph.append_message(text_message("m3", MessageRole::User, "three"));
+    let snapshot = graph.clone();
+    assert!(graph.find_node(first.as_str()).is_some());
+
+    // Remap only the middle node: the unmapped child must follow its remapped
+    // parent, so its record is unshared even though its own id is untouched.
+    let second_derived = crate::NodeId::from("derived-second".to_string());
+    graph.remap_node_ids(
+        &crate::SessionId::from("remap-test"),
+        &[(second.clone(), second_derived.clone())],
+    );
+
+    assert_eq!(graph.nodes[0].node_id, first);
+    assert_eq!(graph.nodes[1].node_id, second_derived);
+    assert_eq!(
+        graph.nodes[2].parent_node_id.as_ref(),
+        Some(&second_derived)
+    );
+    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
+    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[2], &graph.nodes[2]));
+    // The snapshot keeps the original parent id.
+    assert_eq!(snapshot.nodes[2].parent_node_id.as_ref(), Some(&second));
+}
+
+#[test]
+fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
+    // A loaded graph carries no parent-before-child guarantee: a child can
+    // sit ahead of its parent in the resident vector. Remapping the parent
+    // must still rewrite the earlier child's parent id, on both the warm
+    // cache index path and the cold fallback.
+    for warm_cache in [true, false] {
+        let record = |id: &str, parent: Option<&str>| SessionNodeRecord {
+            node_id: id.to_string().into(),
+            parent_node_id: parent.map(crate::NodeId::from),
+            timestamp: "2026-08-08T00:00:00Z".to_string(),
+            payload: SessionNodePayload::Plugin {
+                plugin_type: "remap-child-before-parent".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"id": id})),
+            },
+        };
+        let mut graph = SessionGraph::from_nodes(
+            vec![record("child", Some("root")), record("root", None)],
+            Some("child".into()),
+        )
+        .expect("child-before-parent order is structurally valid");
+        let snapshot = graph.clone();
+        if warm_cache {
+            assert!(graph.find_node("root").is_some());
+        }
+
+        let derived_root = crate::NodeId::from("derived-root".to_string());
+        graph.remap_node_ids(
+            &crate::SessionId::from("remap-test"),
+            &[("root".into(), derived_root.clone())],
+        );
+
+        assert_eq!(graph.nodes[1].node_id, derived_root);
+        assert_eq!(
+            graph.nodes[0].parent_node_id.as_ref(),
+            Some(&derived_root),
+            "warm_cache={warm_cache}: the earlier child's parent must follow the remap"
+        );
+        assert_eq!(graph.leaf_node_id.as_deref(), Some("child"));
+        // Both ancestors still resolve off the rewritten graph.
+        assert!(graph.find_node("child").is_some());
+        assert!(graph.find_node("derived-root").is_some());
+        graph
+            .validate_resident_integrity()
+            .expect("remapped child-before-parent graph stays valid");
+
+        // The snapshot keeps the original records and parent id untouched.
+        assert_eq!(snapshot.nodes[0].parent_node_id.as_deref(), Some("root"));
+        assert_eq!(snapshot.nodes[1].node_id.as_str(), "root");
+        assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+        assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
+    }
+}
+
+#[test]
+fn apply_realized_node_timestamps_rewrites_only_realized_records() {
+    let mut graph = SessionGraph::default();
+    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
+    graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
+    let snapshot = graph.clone();
+    assert!(graph.find_node(first.as_str()).is_some());
+
+    graph.apply_realized_node_timestamps(&[crate::session_graph::RealizedNodeTimestamp {
+        node_id: first.clone(),
+        timestamp: "2026-09-12T00:00:00Z".to_string(),
+    }]);
+
+    assert_eq!(graph.nodes[0].timestamp, "2026-09-12T00:00:00Z");
+    assert_ne!(graph.nodes[0].timestamp, snapshot.nodes[0].timestamp);
+    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
+}
+
+#[test]
+fn shared_records_serialize_with_the_unchanged_durable_shape() {
+    let node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
+        node_id: node_id.to_string().into(),
+        parent_node_id: parent_node_id.map(Into::into),
+        timestamp: "2026-09-12T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Plugin {
+            plugin_type: "shape-test".to_string(),
+            body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
+        },
+    };
+    let graph = SessionGraph::from_nodes(
+        vec![node("root", None), node("child", Some("root"))],
+        Some("child".to_string().into()),
+    )
+    .expect("fixture graph is valid");
+
+    let encoded = serde_json::to_value(&graph).expect("serialize graph");
+    let nodes = encoded["nodes"].as_array().expect("nodes is an array");
+    assert_eq!(nodes.len(), graph.nodes.len());
+    // `Arc<SessionNodeRecord>` serializes as the record itself: no wrapper and
+    // no key change versus the previous `Vec<SessionNodeRecord>` encoding.
+    for (index, node) in graph.nodes.iter().enumerate() {
+        assert_eq!(
+            &nodes[index],
+            &serde_json::to_value(node.as_ref()).expect("serialize record")
+        );
+    }
+    assert_eq!(encoded["leaf_node_id"], serde_json::json!("child"));
+
+    let decoded: SessionGraph =
+        serde_json::from_str(&serde_json::to_string(&graph).unwrap()).expect("decode graph");
+    assert_eq!(
+        serde_json::to_string(&decoded).unwrap(),
+        serde_json::to_string(&graph).unwrap()
+    );
 }

@@ -1773,7 +1773,7 @@ fn rendered_drift_value(value: &serde_json::Value) -> String {
     rendered
 }
 
-fn assert_graph_payloads(nodes: &[lash_core::SessionNodeRecord]) {
+fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>]) {
     assert_eq!(
         nodes.len(),
         3,

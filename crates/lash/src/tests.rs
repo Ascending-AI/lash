@@ -192,11 +192,13 @@ impl SnapshotStore {
         let leaf_node_id = read.graph.leaf_node_id.clone();
         let mut nodes = read.graph.nodes.clone();
         for node in &mut nodes {
-            if let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut node.payload {
+            if let lash_core::SessionNodePayload::FrameOpen { assignment, .. } =
+                &mut std::sync::Arc::make_mut(node).payload
+            {
                 assignment.policy.provider_id = provider_id.clone();
             }
         }
-        read.graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+        read.graph = lash_core::SessionGraph::from_shared_nodes(nodes, leaf_node_id)
             .expect("snapshot fixture graph is valid");
         read.head_revision += 1;
     }

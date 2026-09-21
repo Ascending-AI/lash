@@ -71,5 +71,7 @@ mod checkpoint_curve;
 pub(crate) use checkpoint_curve::*;
 mod store_hardening;
 pub(crate) use store_hardening::*;
+mod resident_graph_curve;
+use resident_graph_curve::*;
 mod high_traffic;
 use high_traffic::*;

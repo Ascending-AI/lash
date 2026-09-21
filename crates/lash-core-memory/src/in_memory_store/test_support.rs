@@ -319,7 +319,7 @@ impl InMemorySessionStore {
         meta.leaf_node_id = Some(leaf_node_id.clone());
         let mut graph = self.session_graph.lock_recover();
         let nodes = graph.nodes.clone();
-        *graph = crate::SessionGraph::from_nodes(nodes, Some(leaf_node_id))
+        *graph = crate::SessionGraph::from_shared_nodes(nodes, Some(leaf_node_id))
             .expect("forced active leaf must resolve");
     }
 

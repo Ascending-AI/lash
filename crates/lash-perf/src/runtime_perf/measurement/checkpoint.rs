@@ -3,7 +3,7 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 pub(super) fn measure_runtime_perf_phase<T>(
-    name: &'static str,
+    name: &str,
     f: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<(T, (String, RuntimePerfPhaseRunResult))> {
     let before_alloc = allocator_stats();

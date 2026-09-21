@@ -253,6 +253,7 @@ impl TurnGraphEditor {
             .base_graph
             .nodes
             .iter()
+            .map(Arc::as_ref)
             .chain(self.appended_nodes.iter())
             .filter(|node| !self.committed_node_ids.contains(&node.node_id))
             .cloned()
@@ -294,31 +295,18 @@ impl TurnGraphEditor {
                 .first()
                 .and(self.pre_turn_append_leaf.as_ref())
         );
-        let leaf_node_id = self.leaf_node_id();
+        let mut graph = Arc::unwrap_or_clone(self.base_graph);
         if self.appended_nodes.is_empty() {
-            return Arc::try_unwrap(self.base_graph).unwrap_or_else(|graph| graph.as_ref().clone());
+            return graph;
         }
-        match Arc::try_unwrap(self.base_graph) {
-            Ok(mut graph) => {
-                graph
-                    .apply_append(&crate::GraphAppend::Extend {
-                        nodes: self.appended_nodes,
-                    })
-                    .unwrap_or_else(|error| {
-                        panic!("turn graph editor produced an invalid append: {error}")
-                    });
-                graph
-            }
-            Err(base_graph) => {
-                let mut nodes =
-                    Vec::with_capacity(base_graph.nodes.len() + self.appended_nodes.len());
-                nodes.extend(base_graph.nodes.iter().cloned());
-                nodes.extend(self.appended_nodes);
-                // The base graph was validated on construction and the append builder enforces
-                // unique ids plus a continuous parent chain, so this merge preserves integrity.
-                SessionGraph::from_validated_nodes(nodes, leaf_node_id)
-            }
-        }
+        graph
+            .apply_append(&crate::GraphAppend::Extend {
+                nodes: self.appended_nodes,
+            })
+            .unwrap_or_else(|error| {
+                panic!("turn graph editor produced an invalid append: {error}")
+            });
+        graph
     }
 
     fn leaf_node_id(&self) -> Option<NodeId> {

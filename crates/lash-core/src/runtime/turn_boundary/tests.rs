@@ -125,7 +125,7 @@ fn chronological_event_order(graph: &SessionGraph) -> Vec<String> {
 }
 fn stored_graph_with_head_leaf(store: &RecordingStore) -> SessionGraph {
     let graph = store.session_graph.lock_recover().clone();
-    SessionGraph::from_nodes(
+    SessionGraph::from_shared_nodes(
         graph.nodes.clone(),
         store
             .session_head_meta
@@ -144,13 +144,14 @@ fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
     if !graph.nodes.is_empty() {
         let frame_node_id = state.current_frame_node_id.clone().expect("initial frame");
         let mut nodes = state.session_graph.nodes.clone();
-        nodes.extend(graph.nodes.iter().cloned().map(|mut node| {
+        nodes.extend(graph.nodes.iter().map(|node| {
+            let mut node = node.as_ref().clone();
             if node.parent_node_id.is_none() {
                 node.parent_node_id = Some(frame_node_id.to_string().into());
             }
-            node
+            std::sync::Arc::new(node)
         }));
-        state.session_graph = SessionGraph::from_nodes(nodes, graph.leaf_node_id.clone())
+        state.session_graph = SessionGraph::from_shared_nodes(nodes, graph.leaf_node_id.clone())
             .expect("turn-boundary fixture graph is valid");
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     }
@@ -486,6 +487,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         .iter_mut()
         .find(|node| node.node_id == previous_frame_node_id_value)
         .expect("current frame node");
+    let previous = std::sync::Arc::make_mut(previous);
     let crate::SessionNodePayload::FrameOpen {
         protocol_turn_options,
         ..
@@ -496,7 +498,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
     *protocol_turn_options =
         crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "test" }));
     state.protocol_turn_options = protocol_turn_options.clone();
-    state.session_graph = SessionGraph::from_nodes(nodes, leaf_node_id)
+    state.session_graph = SessionGraph::from_shared_nodes(nodes, leaf_node_id)
         .expect("frame-compaction fixture graph is valid");
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     let frame_key = frame_key("frame-compaction");

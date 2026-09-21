@@ -127,6 +127,7 @@ pub(crate) enum RuntimePerfScenario {
     HighTrafficLoadPostgres,
     HighTrafficKneeSqlite,
     HighTrafficKneePostgres,
+    ResidentGraphAppendCurve,
 }
 
 // The harness wiring facts the builders read once per scenario: which
@@ -362,7 +363,7 @@ impl RuntimePerfScenario {
         Self::HighTrafficKneePostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 59] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 60] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -855,8 +856,16 @@ impl RuntimePerfScenario {
             wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
             false
         ),
+        runtime_perf_metadata!(
+            ResidentGraphAppendCurve,
+            "resident_graph_append_curve",
+            Standard,
+            RuntimeScenario,
+            "Measures turn construction, one-node append adoption, id remap, realized-timestamp application, and the isolated record copy-on-write on resident session graphs at sizes 0, 32, 128, and 512 nodes while a pre-turn snapshot is held, below protocol and facade ownership. The COW phase asserts allocated bytes stay flat in resident size.",
+            false
+        ),
     ];
-    pub(crate) const KNOWN: [Self; 59] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 60] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
@@ -1002,7 +1011,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 59] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 60] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -1063,6 +1072,7 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 59] {
         RuntimePerfScenario::METADATA[56].scenario,
         RuntimePerfScenario::METADATA[57].scenario,
         RuntimePerfScenario::METADATA[58].scenario,
+        RuntimePerfScenario::METADATA[59].scenario,
     ]
 }
 

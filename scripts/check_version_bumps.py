@@ -297,8 +297,14 @@ IDENTIFIER_RENAME_BASELINES = {
     #     invalid kind/field pairings the type no longer holds — so
     #     APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4 and
     #     SESSION_NODE_BODY_SCHEMA_VERSION stays 16.
+    #   FIG-3401: `SessionGraphData.nodes` retyped Vec<SessionNodeRecord> ->
+    #     Vec<Arc<SessionNodeRecord>> so snapshot copy-on-write clones node
+    #     pointers instead of whole records. `Arc<T>` serializes as `T`, so
+    #     every persisted node body is byte-identical — the serde-shape
+    #     regression tests pin that — and SESSION_NODE_BODY_SCHEMA_VERSION
+    #     stays 17.
     'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:fbf343e99da3d0f156255adf90c62cf4e9fc594ed436f40f3ac60796e11ec139',
-    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:0e9a3121837a78627f21f536aa9e963f0ab3df9237f76eb2e7e8d3a64f2d352e',
+    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:e5ae0df442e6b6f88ce65b4c4d744caafa8529c00ebffe42df2dd5d90cdfa140',
 
     # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a
     # two-line doc comment and `#[expect(clippy::expect_used, ...)]` under the

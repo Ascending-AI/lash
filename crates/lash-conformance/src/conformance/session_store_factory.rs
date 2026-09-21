@@ -2123,7 +2123,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .session_graph
         .nodes
         .first()
-        .cloned()
+        .map(|node| node.as_ref().clone())
         .expect("initial frame node");
     let frame_node_id = frame.node_id.clone();
     let child_node = |node_id: &str| crate::SessionNodeRecord {

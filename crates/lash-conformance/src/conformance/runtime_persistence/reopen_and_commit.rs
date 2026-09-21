@@ -707,7 +707,9 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
-    state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
+    let graph_data = state.session_graph.data_mut();
+    std::sync::Arc::make_mut(&mut graph_data.nodes[0]).timestamp =
+        "2026-07-26T10:00:00Z".to_string();
     state.set_execution_state_snapshot(Some(vec![7; 1_024].into()));
     let operation = crate::OperationId::turn("root", "provider-turn", "final");
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
@@ -729,7 +731,9 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .await
         .expect("first final commit requires a live session execution lease");
     let mut replay_state = state.clone();
-    replay_state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:09Z".to_string();
+    let replay_graph_data = replay_state.session_graph.data_mut();
+    std::sync::Arc::make_mut(&mut replay_graph_data.nodes[0]).timestamp =
+        "2026-07-26T10:00:09Z".to_string();
     let (replay_commit, _) = RuntimeCommit::persisted_state_for_test(&replay_state, &[])
         .with_operation(operation.clone())
         .expect("derive and stamp replay");

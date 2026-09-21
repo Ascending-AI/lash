@@ -67,7 +67,9 @@ fn intent_fixture() -> RuntimeCommit {
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
-    state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
+    let graph_data = state.session_graph.data_mut();
+    std::sync::Arc::make_mut(&mut graph_data.nodes[0]).timestamp =
+        "2026-07-26T10:00:00Z".to_string();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     let node_id =
         derive_history_node_id(&state.session_id, &operation, 0).expect("derive golden node");
