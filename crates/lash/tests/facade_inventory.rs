@@ -41,6 +41,7 @@ use lash::attachments::AttachmentCreateMeta as _;
 use lash::attachments::AttachmentId as _;
 use lash::attachments::AttachmentRef as _;
 use lash::attachments::MediaType as _;
+use lash::attachments::content_id as _;
 use lash::direct::GenerationOptions as _;
 use lash::direct::GenerationOptions as _;
 use lash::direct::LlmOutputPart as _;
