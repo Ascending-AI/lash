@@ -242,7 +242,7 @@ async fn record_cron_tick_outcome(
     controller: &lash_restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
 ) -> HandlerResult<String> {
     let scoped_effect_controller = controller
-        .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
+        .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "cron-outcome:{}:{scheduled_for}",
             controller.context().key()
         )))

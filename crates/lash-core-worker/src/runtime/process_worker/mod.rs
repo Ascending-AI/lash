@@ -585,6 +585,15 @@ impl DurableProcessWorker {
             "attachment owner must carry the incarnation the authority CAS admitted"
         );
         let admitted_incarnation = admitted.incarnation;
+        // The authority CAS above is the admission: rebind the controller onto
+        // the pair it returned so the incarnation this run carries is always
+        // the admitted one, never whichever record read the caller pinned it
+        // from (ADR 0099 §1).
+        let scoped_effect_controller = scoped_effect_controller
+            .rescope(crate::AdmittedScope::process(
+                crate::ProcessRef::from_record(&admitted),
+            ))
+            .map_err(|err| PluginError::Session(err.to_string()))?;
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
@@ -886,9 +895,14 @@ impl DurableProcessWorker {
                     .runtime_host
                     .control
                     .effect_host
-                    .scoped_static(lash_core::runtime::trigger_delivery_reconcile_scope(
-                        &delivery.process_id,
-                    ))
+                    .scoped_static(
+                        lash_core::AdmittedScope::unpinned(
+                            lash_core::runtime::trigger_delivery_reconcile_scope(
+                                &delivery.process_id,
+                            ),
+                        )
+                        .map_err(|err| PluginError::Session(err.to_string()))?,
+                    )
                     .map_err(|err| PluginError::Session(err.to_string()))?
                 else {
                     return Err(PluginError::Session(
@@ -1265,7 +1279,9 @@ impl DurableProcessWorker {
             .runtime_host
             .control
             .effect_host
-            .scoped_static(crate::ExecutionScope::process(registration.id.clone()))
+            .scoped_static(crate::AdmittedScope::process(
+                crate::ProcessRef::from_record(&current),
+            ))
             .map_err(|err| RecoverFailure::Run(PluginError::Session(err.to_string())))?
             .ok_or_else(|| {
                 RecoverFailure::Run(PluginError::Session(

@@ -39,7 +39,7 @@ use lash_core::plugin::{
 };
 use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
 use lash_core::{
-    AppendSessionNodesRequest, CommitBudget, ExecutionScope, LlmOutputPart, LlmResponse, ModelSpec,
+    AdmittedScope, AppendSessionNodesRequest, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
     PersistedSessionConfig, ProtocolTurnOptions, QueuedWorkBatchingConfig, RuntimeCommit,
     RuntimePersistence, RuntimeSessionState, ScopedEffectController, SessionAppendNode,
     SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
@@ -520,7 +520,7 @@ fn continue_as_response() -> String {
 fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
         Arc::new(NativeRuntimeEffectController::default()),
-        ExecutionScope::turn(
+        AdmittedScope::turn(
             runtime
                 .read_view()
                 .expect("test runtime frame scope resolves")

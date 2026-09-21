@@ -423,9 +423,9 @@ impl<'run> RuntimeExecutionContext<'run> {
     ///
     /// A process-backed session turn — the shape every `agents.spawn` child
     /// takes — runs under `ExecutionScope::Process`, which carries the reusable
-    /// process name and no incarnation. The process runner binds the admitted
-    /// incarnation onto the scoped controller, and this is where an execution
-    /// that must name its opener (ADR 0099 §1) reads it back.
+    /// process name and no incarnation. The admitted scope the controller was
+    /// built with carries the exact pair, and this is where an execution that
+    /// must name its opener (ADR 0099 §1) reads it back.
     pub fn admitted_process(&self) -> Option<crate::ProcessRef> {
         self.dispatch
             .effect_controller
@@ -795,17 +795,15 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// The enclosing durable parent for a code-executor's child start.
     ///
-    /// Derived through the one owner derivation — the admitted scope plus the
-    /// incarnation the process runner pinned onto it — so a same-name
-    /// successor in the registry cannot rebind a child this execution's
-    /// opener still owns (FIG-3417). There is no registry access here by
-    /// design: `resolve_process_ref` is a name lookup, and a name is not an
-    /// owner.
+    /// Derived through the one owner derivation — the admitted scope the
+    /// controller was built with — so a same-name successor in the registry
+    /// cannot rebind a child this execution's opener still owns (FIG-3417).
+    /// There is no registry access here by design: `resolve_process_ref` is a
+    /// name lookup, and a name is not an owner.
     pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, crate::PluginError> {
         let scoped = self.dispatch.effect_controller.scoped();
-        let opener =
-            crate::EffectOpener::for_scope(scoped.execution_scope(), scoped.admitted_process())
-                .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        let opener = crate::EffectOpener::for_scope(scoped.admitted_scope())
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
         Ok(crate::ParentScope::from_owner(&opener))
     }
 
@@ -1030,7 +1028,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         } else {
             let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
                 controller,
-                scoped.execution_scope().clone(),
+                scoped.admitted_scope().clone(),
             )?;
             (
                 proxy

@@ -114,7 +114,7 @@ async fn controller_owned_replay_mismatch_reaches_host_with_structured_summary()
             CancellationToken::new(),
             ScopedEffectController::shared(
                 controller,
-                ExecutionScope::turn("root", "replay-mismatch-controller"),
+                AdmittedScope::turn("root", "replay-mismatch-controller"),
             )
             .expect("replay-mismatch execution scope"),
         )
@@ -149,7 +149,7 @@ async fn proxied_controller_owned_replay_mismatch_aborts_with_structured_summary
     .await;
     let (proxy, requests) = lash_core::runtime::effect::EffectTaskController::scoped(
         controller.as_ref(),
-        ExecutionScope::turn("root", "proxied-replay-mismatch-controller"),
+        AdmittedScope::turn("root", "proxied-replay-mismatch-controller"),
     )
     .expect("proxied replay-mismatch execution scope");
     let controller_task = lash_core::task::spawn({

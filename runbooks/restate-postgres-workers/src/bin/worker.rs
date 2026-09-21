@@ -12,10 +12,7 @@ use lash::durability::DurableProcessWorker;
 use lash::observe::SessionResume;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
 use lash_core::AwaitEventResolver as _;
-use lash_core::{
-    ExecutionScope, ProcessEventAppendRequest, facade_support::TurnOutcome,
-    facade_support::TurnStop,
-};
+use lash_core::{ProcessEventAppendRequest, facade_support::TurnOutcome, facade_support::TurnStop};
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
     LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
@@ -595,7 +592,7 @@ impl AppState {
                 &signal.signal_id,
             ));
         let scoped = controller
-            .scoped_effect_controller(ExecutionScope::runtime_operation(format!(
+            .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(format!(
                 "e2e:{}:{}",
                 request.workflow_id, signal.signal_id
             )))

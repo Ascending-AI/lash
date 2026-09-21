@@ -264,7 +264,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         } else {
             let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
                 self.effect_controller,
-                scoped.execution_scope().clone(),
+                scoped.admitted_scope().clone(),
             )
             .map_err(crate::RuntimeEffectControllerError::from)?;
             (

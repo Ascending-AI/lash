@@ -1,3 +1,4 @@
+use crate::admit;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -214,7 +215,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     .await
     .expect("build public signal-intent conformance runtime");
     let turn_scope = effect_host
-        .scoped(crate::ExecutionScope::turn(&session_id, &turn_id))
+        .scoped(admit(crate::ExecutionScope::turn(&session_id, &turn_id)))
         .expect("scope public signal-intent turn");
     let mut input = crate::TurnInput::text("signal the parked process");
     input.trace_turn_id = Some(turn_id);

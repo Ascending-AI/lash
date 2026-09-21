@@ -807,12 +807,15 @@ pub(crate) async fn run_once_embed(
                     Some(cancel.clone()),
                     async {
                         let effect_host = session.effect_host();
-                        let scoped_effect_controller = effect_host
-                            .scoped(
-                                session
-                                    .turn_scope(format!("runtime-perf-embed-{}", turn_index + 1)),
-                            )
-                            .map_err(anyhow::Error::from)?;
+                        let scoped_effect_controller =
+                            effect_host
+                                .scoped(
+                                    lash_core::AdmittedScope::unpinned(session.turn_scope(
+                                        format!("runtime-perf-embed-{}", turn_index + 1),
+                                    ))
+                                    .map_err(anyhow::Error::from)?,
+                                )
+                                .map_err(anyhow::Error::from)?;
                         session
                             .turn(lash_core::TurnInput::text(benchmark_prompt(
                                 scenario, turn_index,

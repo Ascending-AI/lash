@@ -166,7 +166,7 @@ impl EffectHost for CrashingEffectHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         let inner = self
             .inner
@@ -187,7 +187,7 @@ impl EffectHost for CrashingEffectHost {
     }
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
         let inner = self
             .inner
@@ -633,9 +633,9 @@ fn postgres_public_turn_scope(
     storage: &PostgresStorage,
     signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
 ) -> lash_core::ScopedEffectController<'static> {
-    let scope = ExecutionScope::turn(SESSION, TURN);
+    let scope = lash_core::AdmittedScope::turn(SESSION, TURN);
     let inner: Arc<dyn lash_core::RuntimeEffectController> =
-        Arc::new(storage.runtime_effect_controller(scope.clone()));
+        Arc::new(storage.runtime_effect_controller(scope.scope().clone()));
     lash_core::ScopedEffectController::shared(
         Arc::new(CrossingController {
             inner,
@@ -1035,7 +1035,7 @@ async fn run_fig1293_turn(
     effect_host: &dyn EffectHost,
 ) -> lash_core::facade_support::AssembledTurn {
     let controller = effect_host
-        .scoped(ExecutionScope::turn(
+        .scoped(lash_core::AdmittedScope::turn(
             "fig1293-restate-migrated-tools",
             "fig1293-restate-migrated-turn",
         ))
@@ -1065,7 +1065,7 @@ fn fig1293_cancelling_scope(
     interrupt_after_batch_failure: bool,
     fired: Arc<std::sync::atomic::AtomicBool>,
 ) -> lash_core::ScopedEffectController<'static> {
-    let scope = ExecutionScope::turn(
+    let scope = lash_core::AdmittedScope::turn(
         "fig1293-restate-migrated-tools",
         "fig1293-restate-migrated-turn",
     );
@@ -1918,7 +1918,7 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
     let strict_host = strict_storage.effect_host();
     strict_host.start_replay();
     let strict_controller = strict_host
-        .scoped(ExecutionScope::turn(
+        .scoped(lash_core::AdmittedScope::turn(
             "fig1293-restate-migrated-tools",
             "fig1293-restate-migrated-turn",
         ))
@@ -1949,7 +1949,7 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
 /// Returns how many times each body actually executed.
 async fn run_attempt_with_nested_command(host: &PostgresEffectHost) -> (usize, usize, String) {
     let scoped = host
-        .scoped(ExecutionScope::turn(SESSION, TURN))
+        .scoped(lash_core::AdmittedScope::turn(SESSION, TURN))
         .expect("scoped PostgreSQL effect controller");
     let attempt_body_runs = Arc::new(AtomicUsize::new(0));
     let nested_body_runs = Arc::new(AtomicUsize::new(0));
@@ -2134,7 +2134,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     let registry = Arc::new(first_storage.process_registry());
     let first_host = first_storage.effect_host();
     let first_scoped = first_host
-        .scoped(ExecutionScope::turn(SESSION, TURN))
+        .scoped(lash_core::AdmittedScope::turn(SESSION, TURN))
         .expect("scope first PostgreSQL intent host");
     let first = first_scoped
         .controller()
@@ -2162,7 +2162,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     let second_host = second_storage.effect_host();
     second_host.start_replay();
     let second_scoped = second_host
-        .scoped(ExecutionScope::turn(SESSION, TURN))
+        .scoped(lash_core::AdmittedScope::turn(SESSION, TURN))
         .expect("scope redriving PostgreSQL intent host");
     assert_eq!(
         envelope

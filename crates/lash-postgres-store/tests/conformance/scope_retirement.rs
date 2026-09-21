@@ -34,7 +34,9 @@ async fn postgres_completion_closure(
         .expect("claim PostgreSQL closure lane")
         .acquired()
         .expect("PostgreSQL closure lane is free");
-    let scoped = host.scoped(scope.clone()).expect("scope PostgreSQL owner");
+    let scoped = host
+        .scoped(lash_core::testing::store_fixtures::durable_admission(scope))
+        .expect("scope PostgreSQL owner");
     let binding = host
         .turn_control_binding(&scoped)
         .await

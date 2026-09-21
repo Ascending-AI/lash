@@ -156,7 +156,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     // Before any registration the host does no groups, and says so through the
     // group surface itself rather than through a capability flag (FIG-2266).
     let unwired_view = host
-        .scoped(lash_core::ExecutionScope::runtime_operation(
+        .scoped(lash_core::AdmittedScope::runtime_operation(
             "registration-race",
         ))
         .expect("a scope binds");
@@ -211,7 +211,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     // The two codes are what separates "this deployment does no groups" from
     // "this deployment does groups but has no runner for this child".
     let wired_view = host
-        .scoped(lash_core::ExecutionScope::runtime_operation(
+        .scoped(lash_core::AdmittedScope::runtime_operation(
             "registration-race",
         ))
         .expect("a scope binds");

@@ -2,6 +2,7 @@
 //! processes.
 
 use super::*;
+use lash_core::testing::store_fixtures::durable_admission;
 
 /// FIG-3079: `new Date()`, `Date.now()` and `Math.random()` inside a durable
 /// process body.
@@ -208,7 +209,7 @@ pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reop
         let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::new(ProcessControlToolProvider),
             lash_core::ToolCatalog::default(),
-            lash_core::ScopedEffectController::shared(Arc::new(controller), scope.clone())
+            lash_core::ScopedEffectController::shared(Arc::new(controller), durable_admission(scope))
                 .expect("admit SQLite controller scope"),
             lash_core::testing::exec_code_invocation(
                 session_id,

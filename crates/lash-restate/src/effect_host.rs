@@ -234,20 +234,20 @@ impl EffectHost for RestateEffectHost {
     /// the same admission refusal the durable-journal hosts make at claim time.
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        admitted: lash_core::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate()?;
-        ScopedEffectController::shared(self.fenced_controller(scope.clone()), scope)
+        admitted.scope().validate()?;
+        ScopedEffectController::shared(self.fenced_controller(admitted.scope().clone()), admitted)
     }
 
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        admitted: lash_core::AdmittedScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        scope.validate()?;
+        admitted.scope().validate()?;
         Ok(Some(ScopedEffectController::shared(
-            self.fenced_controller(scope.clone()),
-            scope,
+            self.fenced_controller(admitted.scope().clone()),
+            admitted,
         )?))
     }
 

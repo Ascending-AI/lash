@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::{RuntimeError, RuntimeErrorCode};
+use crate::{AdmittedScope, RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{EffectGroupHandle, GroupSettlement, LoserPolicy, RuntimeEffectGroup};
@@ -70,12 +70,12 @@ pub trait EffectHost: AwaitEventResolver {
     }
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError>;
 
     fn scoped_static(
         &self,
-        _scope: ExecutionScope,
+        _admitted: AdmittedScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         Ok(None)
     }
@@ -97,7 +97,7 @@ pub trait EffectHost: AwaitEventResolver {
                 Ok(TurnControlBinding::host_owned(
                     binding_id,
                     resolver,
-                    self.scoped(scoped.execution_scope().clone())?,
+                    self.scoped(scoped.admitted_scope().clone())?,
                     self.turn_attach(),
                 ))
             }

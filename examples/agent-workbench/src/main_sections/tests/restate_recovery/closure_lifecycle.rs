@@ -1,5 +1,21 @@
 use super::*;
 
+/// Admit a scope this e2e fixture mints directly, standing in for the store
+/// admission step the real worker performs: process scopes pin the fabricated
+/// first-registration incarnation, everything else admits unpinned.
+fn live_restate_admission(scope: &lash::runtime::ExecutionScope) -> lash::runtime::AdmittedScope {
+    match scope {
+        lash::runtime::ExecutionScope::Process { process_id } => {
+            lash::runtime::AdmittedScope::process(lash::process::ProcessRef::new(
+                process_id.clone(),
+                lash::process::ProcessIncarnation::from_registration_sequence(1),
+            ))
+        }
+        _ => lash::runtime::AdmittedScope::unpinned(scope.clone())
+            .expect("a non-process scope admits unpinned"),
+    }
+}
+
 async fn authorize_restate_completion_closure(
     host: &Arc<dyn lash::durability::EffectHost>,
     factory: &lash_sqlite_store::SqliteSessionStoreFactory,
@@ -37,7 +53,7 @@ async fn authorize_restate_completion_closure(
         .acquired()
         .expect("live Restate closure lane is free");
     let scoped = host
-        .scoped(physical_scope.clone())
+        .scoped(live_restate_admission(physical_scope))
         .expect("scope live Restate effect owner");
     let binding = host
         .turn_control_binding(&scoped)
@@ -161,14 +177,14 @@ impl lash::durability::EffectHost for RestateParticipantCrashHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: lash::runtime::ExecutionScope,
+        scope: lash::runtime::AdmittedScope,
     ) -> Result<lash::runtime::ScopedEffectController<'run>, lash::runtime::RuntimeError> {
         self.inner.scoped(scope)
     }
 
     fn scoped_static(
         &self,
-        scope: lash::runtime::ExecutionScope,
+        scope: lash::runtime::AdmittedScope,
     ) -> Result<Option<lash::runtime::ScopedEffectController<'static>>, lash::runtime::RuntimeError>
     {
         self.inner.scoped_static(scope)
@@ -555,7 +571,9 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             .expect("claim late live Restate lane")
             .acquired()
             .expect("late live Restate lane is free");
-        let late_scoped = host.scoped(late_scope.clone()).expect("scope late owner");
+        let late_scoped = host
+            .scoped(live_restate_admission(&late_scope))
+            .expect("scope late owner");
         let late_binding = host
             .turn_control_binding(&late_scoped)
             .await

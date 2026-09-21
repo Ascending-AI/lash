@@ -385,7 +385,10 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         }
     };
     let shared_scope = effect_host
-        .scoped_static(execution_scope)?
+        .scoped_static(
+            lash_core::AdmittedScope::unpinned(execution_scope)
+                .expect("the repeated admin scope is never process"),
+        )?
         .expect("SQLite host supplies the repeated admin scope");
 
     for expected_summary in expected_summaries {
@@ -843,7 +846,7 @@ async fn rolling_history_compaction_accepts_parent_turn_authority() -> Result<()
         .run()
         .await?;
     let parent_scope = effect_host
-        .scoped_static(lash_core::ExecutionScope::turn(
+        .scoped_static(lash_core::AdmittedScope::turn(
             session_id,
             "rolling-history-parent-two",
         ))?
@@ -897,7 +900,7 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let shared_scope = effect_host
-        .scoped_static(lash_core::ExecutionScope::runtime_operation(
+        .scoped_static(lash_core::AdmittedScope::runtime_operation(
             "rolling-history-repeated-compaction",
         ))?
         .expect("SQLite host supplies an owned shared scope");
@@ -1818,7 +1821,7 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
         .run()
         .await?;
     let shared_scope = effect_host
-        .scoped_static(lash_core::ExecutionScope::runtime_operation(
+        .scoped_static(lash_core::AdmittedScope::runtime_operation(
             "rolling-history-commit-failure:admin",
         ))?
         .expect("SQLite host supplies the admin scope");

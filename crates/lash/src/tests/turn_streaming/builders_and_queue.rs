@@ -123,7 +123,10 @@ pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()
     let recorder = Arc::new(RecordingNativeEffectController::default());
     let effect_host = lash_core::facade_support::NativeEffectHost::new(recorder.clone());
     let custom_scope = lash_core::ExecutionScope::runtime_operation("custom-foreground-scope");
-    let scoped_effect_controller = effect_host.scoped(custom_scope.clone())?;
+    let scoped_effect_controller = effect_host.scoped(
+        lash_core::AdmittedScope::unpinned(custom_scope.clone())
+            .expect("a runtime-operation scope admits unpinned"),
+    )?;
     let core = standard_core();
     let session = core.session("custom-effect-scope").open().await?;
 
@@ -147,7 +150,7 @@ pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()
 pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identity() -> Result<()> {
     let recorder = Arc::new(RecordingNativeEffectController::default());
     let effect_host = lash_core::facade_support::NativeEffectHost::new(recorder.clone());
-    let scoped_effect_controller = effect_host.scoped(lash_core::ExecutionScope::turn(
+    let scoped_effect_controller = effect_host.scoped(lash_core::AdmittedScope::turn(
         "mismatched-turn-scope",
         "admitted-turn",
     ))?;
@@ -231,7 +234,7 @@ pub(super) async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallb
 
     let builder_wins_scope = ScopedEffectController::borrowed(
         recorder.as_ref(),
-        lash_core::ExecutionScope::runtime_operation("scope-operation"),
+        lash_core::AdmittedScope::runtime_operation("scope-operation"),
     )?;
     session
         .turn(TurnInput::text("builder wins"))
@@ -242,7 +245,7 @@ pub(super) async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallb
 
     let scope_fallback = ScopedEffectController::borrowed(
         recorder.as_ref(),
-        lash_core::ExecutionScope::turn("turn-id-precedence", "fallback-turn"),
+        lash_core::AdmittedScope::turn("turn-id-precedence", "fallback-turn"),
     )?;
     session
         .turn(TurnInput::text("scope fallback"))

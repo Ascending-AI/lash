@@ -1102,7 +1102,7 @@ pub(super) fn native_process_scope(
 ) -> lash_core::ScopedEffectController<'static> {
     lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::process(process_id.to_string()),
+        durable_admission(&ExecutionScope::process(process_id.to_string())),
     )
     .expect("native process scope")
 }
@@ -1782,7 +1782,9 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
             registration.clone(),
             ProcessExecutionContext::default(),
             first_controller
-                .scoped_effect_controller(ExecutionScope::process("segmented-durable"))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                    "segmented-durable",
+                )))
                 .expect("durable first-segment scope"),
             0,
             None,
@@ -1824,7 +1826,9 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
             registration,
             ProcessExecutionContext::default(),
             successor_controller
-                .scoped_effect_controller(ExecutionScope::process("segmented-durable"))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                    "segmented-durable",
+                )))
                 .expect("durable successor scope"),
             1,
             Some(resumed),

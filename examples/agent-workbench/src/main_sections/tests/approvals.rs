@@ -118,7 +118,7 @@ finish(result);
             .expect("open approval session");
         let turn_scope = lash::durability::EffectHost::scoped_static(
             effect_host.as_ref(),
-            lash::runtime::ExecutionScope::turn("approval-approve", "approval-approve-turn"),
+            lash::runtime::AdmittedScope::turn("approval-approve", "approval-approve-turn"),
         )
         .expect("scope approval turn")
         .expect("durable approval scope");
@@ -259,7 +259,7 @@ finish(result);
             .expect("open approval session");
         let turn_scope = lash::durability::EffectHost::scoped_static(
             effect_host.as_ref(),
-            lash::runtime::ExecutionScope::turn("approval-repair", "approval-repair-turn"),
+            lash::runtime::AdmittedScope::turn("approval-repair", "approval-repair-turn"),
         )
         .expect("scope approval turn")
         .expect("durable approval scope");
@@ -384,7 +384,7 @@ try {
             .expect("open denial session");
         let turn_scope = lash::durability::EffectHost::scoped_static(
             effect_host.as_ref(),
-            lash::runtime::ExecutionScope::turn("approval-deny", "approval-deny-turn"),
+            lash::runtime::AdmittedScope::turn("approval-deny", "approval-deny-turn"),
         )
         .expect("scope denial turn")
         .expect("durable denial scope");
@@ -471,7 +471,7 @@ finish(result.status);
             .expect("open restart session");
         let turn_scope = lash::durability::EffectHost::scoped_static(
             effect_host.as_ref(),
-            lash::runtime::ExecutionScope::turn("approval-restart", "approval-restart-turn"),
+            lash::runtime::AdmittedScope::turn("approval-restart", "approval-restart-turn"),
         )
         .expect("scope restart turn")
         .expect("durable restart scope");
@@ -567,7 +567,8 @@ try {
     let session = core.session(&session_id).open().await.unwrap();
     let scope = lash::durability::EffectHost::scoped_static(
         effect_host.as_ref(),
-        session.turn_scope("async-turn"),
+        lash::runtime::AdmittedScope::unpinned(session.turn_scope("async-turn"))
+            .expect("a turn scope admits unpinned"),
     )
     .unwrap()
     .unwrap();
@@ -613,7 +614,8 @@ try {
     );
     let scope = lash::durability::EffectHost::scoped_static(
         effect_host.as_ref(),
-        session.turn_scope("async-turn"),
+        lash::runtime::AdmittedScope::unpinned(session.turn_scope("async-turn"))
+            .expect("a turn scope admits unpinned"),
     )
     .unwrap()
     .unwrap();

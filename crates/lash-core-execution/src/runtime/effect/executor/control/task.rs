@@ -131,7 +131,7 @@ pub struct EffectTaskController {
 impl EffectTaskController {
     pub fn scoped(
         controller: &dyn RuntimeEffectController,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     ) -> Result<
         (
             ScopedEffectController<'static>,
@@ -142,13 +142,13 @@ impl EffectTaskController {
         let (requests, request_rx) = mpsc::unbounded_channel();
         let proxy = Self {
             requests,
-            scope: scope.clone(),
+            scope: admitted.scope().clone(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
             await_event_authority_binding_id: controller.await_event_authority_binding_id(),
         };
         Ok((
-            ScopedEffectController::shared(Arc::new(proxy), scope)?,
+            ScopedEffectController::shared(Arc::new(proxy), admitted)?,
             request_rx,
         ))
     }

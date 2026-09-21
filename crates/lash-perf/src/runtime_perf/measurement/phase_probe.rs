@@ -646,7 +646,8 @@ async fn run_once_inner(
                     let turn_id = TurnId::from(format!("runtime-perf-scoped-{}", turn_index + 1));
                     let scoped_effect_controller = lash::runtime::ScopedEffectController::borrowed(
                         &effect_controller,
-                        runtime.turn_scope(&turn_id),
+                        lash_core::AdmittedScope::unpinned(runtime.turn_scope(&turn_id))
+                            .map_err(anyhow::Error::from)?,
                     )
                     .map_err(anyhow::Error::from)?;
                     runtime_perf_timed(

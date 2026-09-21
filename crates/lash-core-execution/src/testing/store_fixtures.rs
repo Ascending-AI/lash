@@ -4,7 +4,8 @@ use crate::*;
 pub use lash_core_store::testing::store_fixtures::{
     append_conformance_event_node, bind_conformance_session,
     claim_session_execution_lease_for_test, commit_conformance_state,
-    commit_runtime_state_for_test, durable_turn_address, durable_turn_scope, session_store_request,
+    commit_runtime_state_for_test, durable_admission, durable_turn_address, durable_turn_scope,
+    session_store_request,
 };
 
 /// Authorize and settle the completion gate for a direct store-deferral fixture.

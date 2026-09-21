@@ -246,7 +246,10 @@ pub(super) async fn cancellation_sealed_before_renewal_failure_remains_evidence_
 
     let turn_id = "cancel-before-renewal-failure";
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = native_scope(persisted_state.turn_scope(turn_id));
+    let turn_scope = native_scope(
+        lash_core::AdmittedScope::unpinned(persisted_state.turn_scope(turn_id))
+            .expect("turn scope"),
+    );
     let turn_address =
         lash_core::facade_support::TurnAddress::new(&persisted_state.session_id, turn_id);
     let turn = lash_core::task::spawn(async move {
@@ -1285,7 +1288,7 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
     let turn_id = "child-lifecycle-turn";
     let scoped_effect_controller = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::turn(&handle.session_id, turn_id),
+        lash_core::AdmittedScope::turn(&handle.session_id, turn_id),
     )
     .expect("scoped child turn");
     let request = lash_core::facade_support::SessionTurnRequest::new(
@@ -1367,7 +1370,7 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
     let turn_id = "busy-child-turn";
     let controller = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::turn(&handle.session_id, turn_id),
+        lash_core::AdmittedScope::turn(&handle.session_id, turn_id),
     )
     .expect("child turn controller");
 
@@ -1643,7 +1646,7 @@ pub(super) async fn runtime_can_activate_managed_child_session() {
         },
         lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::ExecutionScope::turn("child", "activated-child-turn"),
+            lash_core::AdmittedScope::turn("child", "activated-child-turn"),
         )
         .expect("scoped activated child turn"),
     )

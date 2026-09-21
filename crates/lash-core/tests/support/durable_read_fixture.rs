@@ -242,16 +242,16 @@ use lash_core::runtime::{
     process_wake_batch_draft, publish_process_execution_env,
 };
 use lash_core::{
-    AttachmentId, AttachmentIntent, AttachmentManifest, AwaitEventKey, AwaitEventWaitIdentity,
-    BoundaryReason, Clock, DeliveryPolicy, EffectHost, ExecResponse, ExecutionScope, LashSchema,
-    LeaseClaimNonce, LeaseOwnerIdentity, MessageOrigin, MessageRole, OperationId, PartKind,
-    PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
-    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
-    ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
-    ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
+    AdmittedScope, AttachmentId, AttachmentIntent, AttachmentManifest, AwaitEventKey,
+    AwaitEventWaitIdentity, BoundaryReason, Clock, DeliveryPolicy, EffectHost, ExecResponse,
+    ExecutionScope, LashSchema, LeaseClaimNonce, LeaseOwnerIdentity, MessageOrigin, MessageRole,
+    OperationId, PartKind, PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState,
+    PluginState, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    ProcessCompletionAuthority, ProcessContinuationStore, ProcessEventAppendRequest,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
+    ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
     ProtocolTurnOptions, RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState,
@@ -878,7 +878,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     let effect_envelope = fixture_effect_envelope();
     handles
         .effects
-        .scoped(ExecutionScope::turn(SESSION_ID, "durable-read-effect-turn"))
+        .scoped(AdmittedScope::turn(SESSION_ID, "durable-read-effect-turn"))
         .expect("scope fixture effect journal")
         .controller()
         .execute_effect(
@@ -1621,7 +1621,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
 
     let replayed_effect = handles
         .effects
-        .scoped(ExecutionScope::turn(SESSION_ID, "durable-read-effect-turn"))
+        .scoped(AdmittedScope::turn(SESSION_ID, "durable-read-effect-turn"))
         .expect("durable fixture drift: scope replayed effect journal")
         .controller()
         .execute_effect(

@@ -331,11 +331,14 @@ impl BenchmarkRuntime {
         let effect_host = session.effect_host();
         let scoped_effect_controller = effect_host
             .scoped(
-                session.turn_scope(
-                    lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-                        .0
-                        .to_string(),
-                ),
+                lash_core::AdmittedScope::unpinned(
+                    session.turn_scope(
+                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
+                            .0
+                            .to_string(),
+                    ),
+                )
+                .map_err(anyhow::Error::from)?,
             )
             .map_err(anyhow::Error::from)?;
         session
@@ -363,7 +366,10 @@ impl BenchmarkRuntime {
         let session = self.session.as_ref().expect("benchmark session");
         let effect_host = session.effect_host();
         let scoped_effect_controller = effect_host
-            .scoped(session.turn_scope(turn_id))
+            .scoped(
+                lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id))
+                    .map_err(anyhow::Error::from)?,
+            )
             .map_err(anyhow::Error::from)?;
         session
             .turn(input)

@@ -435,15 +435,15 @@ where
     /// effects complete under Restate's own journal and need no record.
     pub fn scoped_effect_controller<'run>(
         &'run self,
-        scope: ExecutionScope,
+        admitted: lash_core::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate()?;
+        admitted.scope().validate()?;
         ScopedEffectController::owned(
             Arc::new(scope_recording::ScopeRecordingController {
                 inner: self,
-                scope: scope.clone(),
+                scope: admitted.scope().clone(),
             }),
-            scope,
+            admitted,
         )
     }
 }
@@ -634,9 +634,9 @@ where
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        admitted: lash_core::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        self.scoped_effect_controller(scope)
+        self.scoped_effect_controller(admitted)
     }
 
     async fn prepare_tool_intent(

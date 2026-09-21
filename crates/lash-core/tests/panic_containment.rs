@@ -23,7 +23,7 @@ use lash_core::sansio::{
     WaitingExecState, WaitingLlmState,
 };
 use lash_core::{
-    AwaitEventResolver, CheckpointKind, DriverAction, DriverContextView, ExecutionScope,
+    AdmittedScope, AwaitEventResolver, CheckpointKind, DriverAction, DriverContextView,
     GenerationOptions, HostTurnProtocol, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
     ModelSpec, PluginOptions, ProtocolBuildInput, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
@@ -461,7 +461,7 @@ fn text_response(text: &str) -> LlmResponse {
 fn turn_scope(session_id: &SessionId, turn_id: &TurnId) -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
         Arc::new(NativeRuntimeEffectController::default()),
-        ExecutionScope::turn(session_id, turn_id),
+        AdmittedScope::turn(session_id, turn_id),
     )
     .expect("turn scope")
 }
@@ -471,7 +471,7 @@ fn recording_turn_scope(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> ScopedEffectController<'static> {
-    ScopedEffectController::shared(controller, ExecutionScope::turn(session_id, turn_id))
+    ScopedEffectController::shared(controller, AdmittedScope::turn(session_id, turn_id))
         .expect("recording turn scope")
 }
 

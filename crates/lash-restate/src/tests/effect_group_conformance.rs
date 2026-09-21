@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
+use lash_core::testing::store_fixtures::durable_admission;
 use lash_core::{
     ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy, Resolution, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
@@ -548,7 +549,9 @@ impl ScopeLivenessProbe for ScopeLivenessProbeImpl {
     ) -> HandlerResult<Json<bool>> {
         let controller = crate::RestateRuntimeEffectController::new_for_test(ctx);
         let scoped = controller
-            .scoped_effect_controller(ExecutionScope::runtime_operation(scope_id.clone()))
+            .scoped_effect_controller(durable_admission(&ExecutionScope::runtime_operation(
+                scope_id.clone(),
+            )))
             .map_err(TerminalError::from_error)?;
         let envelope = RuntimeEffectEnvelope::new(
             lash_core::RuntimeEffectInvocation::new(
@@ -656,7 +659,7 @@ async fn cold_reopen_admits_the_registered_process<F, Fut>(
         ),
         RuntimeEffectCommand::AwaitEvent { key },
     );
-    cold.scoped(scope.clone())
+    cold.scoped(durable_admission(&scope))
         .expect("the process scope binds")
         .controller()
         .execute_effect(

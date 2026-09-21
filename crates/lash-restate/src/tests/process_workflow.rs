@@ -290,7 +290,7 @@ pub(super) async fn worker_replacement_mid_child_aborts_parent_without_terminali
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::process(process_id),
+                durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("replacement-aborted child scope"),
             0,
@@ -322,7 +322,7 @@ pub(super) async fn worker_replacement_mid_child_aborts_parent_without_terminali
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::process(process_id),
+                durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("rerun child scope"),
             0,
@@ -363,7 +363,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::process(process_id),
+                durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("first child scope"),
             0,
@@ -386,7 +386,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::ExecutionScope::process(process_id),
+                durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("rerun child scope"),
             0,
@@ -1007,7 +1007,9 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                 ProcessExecutionContext::default()
                     .with_execution_write_authority(execution_authority),
                 controller
-                    .scoped_effect_controller(ExecutionScope::process(&registration.id))
+                    .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                        &registration.id,
+                    )))
                     .expect("segmented child-await scope"),
                 ordinal,
                 input_handover.take(),

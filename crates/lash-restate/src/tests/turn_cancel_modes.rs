@@ -500,7 +500,10 @@ async fn follow_on_pending_tool_uses_physical_turn_cancel_scope_and_replays_in_o
             let controller =
                 RestateRuntimeEffectController::new(context, cancel_mode_authority_id());
             let scoped = controller
-                .scoped_effect_controller(durable_turn_scope(session_id, root_turn_id))
+                .scoped_effect_controller(durable_admission(&durable_turn_scope(
+                    session_id,
+                    root_turn_id,
+                )))
                 .expect("scoped Restate controller");
             first_runtime
                 .stream_turn(
@@ -897,7 +900,9 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
         tokio::spawn(async move {
             let controller = RestateRuntimeEffectController::new_for_test(context);
             let scoped = controller
-                .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
+                .scoped_effect_controller(durable_admission(&durable_turn_scope(
+                    session_id, turn_id,
+                )))
                 .expect("scoped restate controller");
             runtime
                 .stream_turn(

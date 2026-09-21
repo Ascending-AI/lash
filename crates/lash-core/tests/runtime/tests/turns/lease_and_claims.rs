@@ -1010,7 +1010,7 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
         super::effect::controller_effect_host(controller.clone());
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::ExecutionScope::turn("root", "queued-failover-wake"),
+        lash_core::AdmittedScope::turn("root", "queued-failover-wake"),
     )
     .expect("durable queued-turn scope");
     let mut drain = lash_core::task::spawn(async move {
@@ -1086,7 +1086,7 @@ pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_ho
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::ExecutionScope::turn("root", "queued-live-holder"),
+        lash_core::AdmittedScope::turn("root", "queued-live-holder"),
     )
     .expect("durable queued-turn scope");
     let mut drain = lash_core::task::spawn(async move {
@@ -1191,7 +1191,7 @@ pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pen
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::ExecutionScope::turn("root", "queued-cancelled-wait"),
+        lash_core::AdmittedScope::turn("root", "queued-cancelled-wait"),
     )
     .expect("durable queued cancellation scope");
     let cancel = CancellationToken::new();
@@ -1284,7 +1284,7 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::ExecutionScope::turn("root", "queued-frozen-holder"),
+        lash_core::AdmittedScope::turn("root", "queued-frozen-holder"),
     )
     .expect("durable queued-turn scope");
     let error = runtime
@@ -1358,7 +1358,7 @@ pub(super) async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::ExecutionScope::turn("root", "queued-replay-owner"),
+        lash_core::AdmittedScope::turn("root", "queued-replay-owner"),
     )
     .expect("controller-owned replay queued-turn scope");
     let busy_result = runtime
@@ -2221,7 +2221,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
                 CancellationToken::new(),
                 lash_core::ScopedEffectController::shared(
                     Arc::clone(&shared),
-                    lash_core::ExecutionScope::turn("root", turn_id),
+                    lash_core::AdmittedScope::turn("root", turn_id),
                 )
                 .expect("scope the replaced worker"),
             ),
@@ -2250,7 +2250,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
                 CancellationToken::new(),
                 lash_core::ScopedEffectController::shared(
                     Arc::clone(&shared),
-                    lash_core::ExecutionScope::turn("root", turn_id),
+                    lash_core::AdmittedScope::turn("root", turn_id),
                 )
                 .expect("scope the replacement worker"),
             ),
@@ -2292,7 +2292,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
             CancellationToken::new(),
             lash_core::ScopedEffectController::shared(
                 Arc::clone(&shared),
-                lash_core::ExecutionScope::turn("root", "claim-window-late-input-drain"),
+                lash_core::AdmittedScope::turn("root", "claim-window-late-input-drain"),
             )
             .expect("scope the next turn"),
         )),

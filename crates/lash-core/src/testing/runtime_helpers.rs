@@ -51,19 +51,31 @@ pub fn default_state() -> RuntimeSessionState {
     state
 }
 
-pub fn native_scope(scope: crate::ExecutionScope) -> crate::ScopedEffectController<'static> {
+pub fn native_scope(admitted: crate::AdmittedScope) -> crate::ScopedEffectController<'static> {
     crate::ScopedEffectController::shared(
         Arc::new(crate::NativeRuntimeEffectController::default()),
-        scope,
+        admitted,
     )
     .expect("native execution scope")
+}
+
+/// Process-scoped native controller pinned to the incarnation a test
+/// registry's first registration mints (registration sequence 1). Tests that
+/// drive a process runner directly stand in for the worker's admission step.
+pub fn native_process_scope(
+    process_id: impl Into<ProcessId>,
+) -> crate::ScopedEffectController<'static> {
+    native_scope(crate::AdmittedScope::process(crate::ProcessRef::new(
+        process_id,
+        crate::ProcessIncarnation::from_registration_sequence(1),
+    )))
 }
 
 pub fn named_turn_scope(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> crate::ScopedEffectController<'static> {
-    native_scope(crate::ExecutionScope::turn(session_id, turn_id))
+    native_scope(crate::AdmittedScope::turn(session_id, turn_id))
 }
 
 pub trait ReadModelState {

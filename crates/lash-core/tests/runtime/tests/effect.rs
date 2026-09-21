@@ -166,7 +166,7 @@ async fn controller_rejection_fails_turn_explicitly() {
             CancellationToken::new(),
             ScopedEffectController::shared(
                 controller,
-                ExecutionScope::turn("root", "rejecting-controller"),
+                AdmittedScope::turn("root", "rejecting-controller"),
             )
             .expect("rejecting execution scope"),
         )
@@ -205,7 +205,7 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
             CancellationToken::new(),
             ScopedEffectController::shared(
                 controller,
-                ExecutionScope::turn("root", "wrong-outcome-controller"),
+                AdmittedScope::turn("root", "wrong-outcome-controller"),
             )
             .expect("wrong outcome execution scope"),
         )
@@ -229,11 +229,8 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
 async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     let recorder = RecordingEffectController::default();
     assert!(
-        ScopedEffectController::borrowed(
-            &recorder,
-            ExecutionScope::turn("effect-test-session", "")
-        )
-        .is_err()
+        ScopedEffectController::borrowed(&recorder, AdmittedScope::turn("effect-test-session", ""))
+            .is_err()
     );
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
@@ -797,7 +794,7 @@ async fn tool_batch_child_trigger_reaches_the_enclosing_recorded_batch_outcome()
                 CancellationToken::new(),
                 ScopedEffectController::shared(
                     Arc::new(controller.clone()),
-                    ExecutionScope::turn("root", "trigger-batch-tool"),
+                    AdmittedScope::turn("root", "trigger-batch-tool"),
                 )
                 .expect("capturing execution scope"),
             )
@@ -908,7 +905,7 @@ async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appen
                 CancellationToken::new(),
                 ScopedEffectController::shared(
                     Arc::new(controller.clone()),
-                    ExecutionScope::turn("root", "trigger-tool"),
+                    AdmittedScope::turn("root", "trigger-tool"),
                 )
                 .expect("capturing execution scope"),
             )

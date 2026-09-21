@@ -289,7 +289,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     };
     let scoped_controller = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::turn(session_id, "turn-1"),
+        lash_core::AdmittedScope::turn(session_id, "turn-1"),
     )
     .expect("scoped controller");
     let mut runtime = Box::pin(

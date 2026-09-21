@@ -20,11 +20,11 @@ use lash::persistence::{
 };
 use lash::{LashCore, PendingTurnInputCancelOutcome, TurnInput};
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    Resolution, ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    ScopedEffectController, SessionStoreFactory, TurnInputCheckpointBoundary, TurnInputIngress,
-    facade_support::NativeRuntimeEffectController,
+    AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
+    ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeError, ScopedEffectController, SessionStoreFactory,
+    TurnInputCheckpointBoundary, TurnInputIngress, facade_support::NativeRuntimeEffectController,
 };
 use lash_sim::ProviderWireScript;
 use lash_sim::ScriptedLlmHttpTransport;
@@ -197,14 +197,14 @@ impl EffectHost for YieldBeforeCancelWatchController {
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        scope: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
         ScopedEffectController::shared(Arc::new(self.clone()), scope)
     }
 
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        scope: AdmittedScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         Ok(Some(ScopedEffectController::shared(
             Arc::new(self.clone()),

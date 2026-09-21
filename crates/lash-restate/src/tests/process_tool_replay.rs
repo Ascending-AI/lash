@@ -23,7 +23,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
 
     let first_controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let first_scope = first_controller
-        .scoped_effect_controller(ExecutionScope::process(process_id))
+        .scoped_effect_controller(durable_admission(&ExecutionScope::process(process_id)))
         .expect("scope first process execution");
     let first = worker
         .run_process_segment_with_scoped_effect_controller(
@@ -49,7 +49,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     context.start_replay();
     let replay_controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let replay_scope = replay_controller
-        .scoped_effect_controller(ExecutionScope::process(process_id))
+        .scoped_effect_controller(durable_admission(&ExecutionScope::process(process_id)))
         .expect("scope replayed process execution");
     let replayed = worker
         .run_process_segment_with_scoped_effect_controller(

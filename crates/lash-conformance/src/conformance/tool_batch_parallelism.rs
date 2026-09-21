@@ -51,6 +51,7 @@
 //! hardcoded `false`), and its registration lands red-first with the FIG-3397
 //! cutover. There is no expected-failure mechanism here and none may be added.
 
+use crate::admit;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1106,7 +1107,10 @@ async fn drive_turn(
         Some(scoped) => scoped,
         None => world
             .effect_host
-            .scoped(crate::ExecutionScope::turn(&world.session_id, &turn_id))
+            .scoped(admit(crate::ExecutionScope::turn(
+                &world.session_id,
+                &turn_id,
+            )))
             .expect("scope the tool-batch parallelism turn"),
     };
     let mut input = crate::TurnInput::text("run the planned batch");

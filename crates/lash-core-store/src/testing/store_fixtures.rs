@@ -8,6 +8,23 @@ pub fn durable_turn_scope(
     ExecutionScope::turn(session_id, turn_id)
 }
 
+/// Admit a scope a test minted directly, standing in for the admission
+/// authority's answer: non-process scopes admit unpinned, and a process
+/// scope pins the fabricated first-registration incarnation the fixture
+/// fabricates for it.
+pub fn durable_admission(scope: &ExecutionScope) -> crate::admitted_scope::AdmittedScope {
+    match scope {
+        ExecutionScope::Process { process_id } => {
+            crate::admitted_scope::AdmittedScope::process(crate::ProcessRef::new(
+                process_id.clone(),
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            ))
+        }
+        _ => crate::admitted_scope::AdmittedScope::unpinned(scope.clone())
+            .expect("a non-process scope admits unpinned"),
+    }
+}
+
 pub fn durable_turn_address(
     session_id: impl Into<SessionId>,
     turn_id: impl Into<TurnId>,

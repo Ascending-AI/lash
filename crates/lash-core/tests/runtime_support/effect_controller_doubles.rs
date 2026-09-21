@@ -698,7 +698,7 @@ pub fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &TurnId,
 ) -> ScopedEffectController<'a> {
-    ScopedEffectController::borrowed(controller, ExecutionScope::turn("root", turn_id))
+    ScopedEffectController::borrowed(controller, AdmittedScope::turn("root", turn_id))
         .expect("scoped effect controller")
 }
 

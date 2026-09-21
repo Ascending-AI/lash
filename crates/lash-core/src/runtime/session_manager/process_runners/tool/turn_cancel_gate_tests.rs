@@ -172,7 +172,10 @@ async fn execute_process_dispatch(
 ) -> serde_json::Value {
     let scoped = crate::ScopedEffectController::shared(
         Arc::new(crate::NativeRuntimeEffectController::default()),
-        crate::ExecutionScope::process("process-route"),
+        crate::AdmittedScope::process(crate::ProcessRef::new(
+            "process-route",
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )),
     )
     .expect("valid process scope");
     let run_context = ProcessRunContext::builder(services)
@@ -305,7 +308,10 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
     let recorder = Arc::new(AwaitShapeRecorder::default());
     let scoped = crate::ScopedEffectController::shared(
         Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
-        crate::ExecutionScope::process("process-witness"),
+        crate::AdmittedScope::process(crate::ProcessRef::new(
+            "process-witness",
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )),
     )
     .expect("valid process scope");
     let call = crate::PreparedToolCall::identity(
@@ -374,7 +380,10 @@ async fn run_retrying_host_process_tool(
     let recorder = Arc::new(AwaitShapeRecorder::default());
     let scoped = crate::ScopedEffectController::shared(
         Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
-        crate::ExecutionScope::process("process-attribution-witness"),
+        crate::AdmittedScope::process(crate::ProcessRef::new(
+            "process-attribution-witness",
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )),
     )
     .expect("valid process scope");
     let call = crate::PreparedToolCall::identity(

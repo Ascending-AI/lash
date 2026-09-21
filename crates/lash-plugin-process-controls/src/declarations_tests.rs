@@ -49,7 +49,7 @@ fn attempt_context(enclosing_process: Option<&str>) -> lash_core::ToolContext<'s
     // default is `RuntimeOperation`, which names no opener.
     let scoped = lash_core::ScopedEffectController::shared(
         std::sync::Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::turn("test-session", "declaration-turn"),
+        lash_core::AdmittedScope::turn("test-session", "declaration-turn"),
     )
     .expect("the test scope validates");
     lash_core::testing::mock_tool_context()

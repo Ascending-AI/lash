@@ -116,12 +116,14 @@ impl RecordingEffectHost {
 
     fn scoped_for<'run>(
         &self,
-        scope: ExecutionScope,
+        scope: crate::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
-        self.selected_scopes.lock_recover().push(scope.clone());
+        self.selected_scopes
+            .lock_recover()
+            .push(scope.scope().clone());
         ScopedEffectController::shared(
             Arc::new(RecordingEffectHostController {
-                execution_scope: scope.clone(),
+                execution_scope: scope.scope().clone(),
                 records: Arc::clone(&self.records),
             }),
             scope,
@@ -158,14 +160,14 @@ impl EffectHost for RecordingEffectHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        scope: crate::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
         self.scoped_for(scope)
     }
 
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        scope: crate::AdmittedScope,
     ) -> Result<Option<ScopedEffectController<'static>>, crate::RuntimeError> {
         Ok(Some(self.scoped_for(scope)?))
     }
@@ -762,7 +764,9 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
     ];
 
     for (ordinal, scope) in scopes.into_iter().enumerate() {
-        let controller = host.scoped(scope.clone()).expect("retired journal scope");
+        let controller = host
+            .scoped(admit(scope.clone()))
+            .expect("retired journal scope");
         let envelope = exec_code_conformance_envelope(
             &scope,
             &format!("retired-journal-{ordinal}"),
@@ -801,7 +805,9 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
 pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
     let process_id = "retired-journal-process";
     let scope = ExecutionScope::process(process_id);
-    let controller = host.scoped(scope.clone()).expect("retired process scope");
+    let controller = host
+        .scoped(admit(scope.clone()))
+        .expect("retired process scope");
     controller
         .controller()
         .execute_effect(
@@ -846,7 +852,7 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
         (&in_flight_id, "in-flight-op-journal"),
     ] {
         let scope = ExecutionScope::runtime_operation(operation_id.clone());
-        host.scoped(scope.clone())
+        host.scoped(admit(scope.clone()))
             .expect("runtime-operation scope")
             .controller()
             .execute_effect(
@@ -874,7 +880,7 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
 
     let retired_scope = ExecutionScope::runtime_operation(retired_id);
     let admission = host
-        .scoped(retired_scope.clone())
+        .scoped(admit(retired_scope.clone()))
         .expect("retired scope still binds a controller")
         .controller()
         .execute_effect(
@@ -889,7 +895,7 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
 
     let in_flight_scope = ExecutionScope::runtime_operation(in_flight_id);
     let replayed = host
-        .scoped(in_flight_scope.clone())
+        .scoped(admit(in_flight_scope.clone()))
         .expect("in-flight scope")
         .controller()
         .execute_effect(
@@ -987,7 +993,9 @@ where
 )]
 async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
     let scope = ExecutionScope::queue_drain("session-1", "drain-1");
-    let scoped = host.scoped(scope.clone()).expect("queue drain scope");
+    let scoped = host
+        .scoped(admit(scope.clone()))
+        .expect("queue drain scope");
     assert_eq!(
         scoped.execution_scope(),
         &scope,
@@ -997,7 +1005,7 @@ async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
     assert_eq!(scoped.turn_id(), None);
 
     let turn_scope = durable_turn_scope("session-1", "turn-1");
-    let scoped_turn = host.scoped(turn_scope.clone()).expect("turn scope");
+    let scoped_turn = host.scoped(admit(turn_scope.clone())).expect("turn scope");
     assert_eq!(scoped_turn.execution_scope(), &turn_scope);
     assert_eq!(scoped_turn.scope_id(), "turn-1");
     assert_eq!(scoped_turn.turn_id(), Some(&crate::TurnId::from("turn-1")));
@@ -1014,7 +1022,7 @@ async fn effect_host_rejects_missing_scope_ids(host: Arc<dyn EffectHost>) {
     ];
 
     for scope in invalid_scopes {
-        let err = match host.scoped(scope) {
+        let err = match host.scoped(admit(scope)) {
             Ok(_) => panic!("invalid execution scope must be rejected"),
             Err(err) => err,
         };
@@ -1033,7 +1041,7 @@ async fn effect_host_rejects_missing_scope_ids(host: Arc<dyn EffectHost>) {
 async fn effect_host_static_scope_preserves_metadata_when_available(host: Arc<dyn EffectHost>) {
     let scope = ExecutionScope::runtime_operation("static-runtime-op");
     let Some(scoped) = host
-        .scoped_static(scope.clone())
+        .scoped_static(admit(scope.clone()))
         .expect("static scope factory")
     else {
         return;
@@ -1054,8 +1062,8 @@ pub(super) async fn effect_host_local_turn_control_resolves_on_minting_host(
         "local-turn",
     );
     let local = crate::runtime::NativeRuntimeEffectController::default();
-    let local_scoped =
-        ScopedEffectController::borrowed(&local, scope.clone()).expect("local turn-control scope");
+    let local_scoped = ScopedEffectController::borrowed(&local, admit(scope.clone()))
+        .expect("local turn-control scope");
     let binding = host
         .turn_control_binding(&local_scoped)
         .await
@@ -1120,7 +1128,7 @@ mod local_control_conformance_tests {
 
         fn scoped<'run>(
             &'run self,
-            scope: ExecutionScope,
+            scope: crate::AdmittedScope,
         ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
             self.host.scoped(scope)
         }
@@ -1541,7 +1549,7 @@ pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
     let executing_scope = scope.clone();
     let mut executing = crate::task::spawn(async move {
         executing_host
-            .scoped(executing_scope)
+            .scoped(admit(executing_scope))
             .expect("the operation scope binds")
             .controller()
             .execute_effect(envelope, executor)

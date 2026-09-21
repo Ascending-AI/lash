@@ -124,7 +124,9 @@ impl LashlangHostIdentities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{EffectOpenerError, ExecutionScope, ProcessId, ProcessIncarnation, SessionId};
+    use lash_core::{
+        AdmittedScope, AdmittedScopeError, ExecutionScope, ProcessId, ProcessIncarnation, SessionId,
+    };
     use lashlang::{LashlangExecutionSite, WorkflowExecutionSite};
 
     fn call_site(node_id: &str, occurrence: u64) -> LashlangExecutionCallSite {
@@ -171,11 +173,10 @@ mod tests {
     /// own reason.
     #[test]
     fn a_cell_under_a_process_scope_opens_on_the_admitted_incarnation() {
-        let scope = ExecutionScope::process("process:subagent:call-1");
         let admitted = process_ref("process:subagent:call-1", 3);
 
-        let opener =
-            EffectOpener::for_scope(&scope, Some(&admitted)).expect("a process is an opener");
+        let opener = EffectOpener::for_scope(&AdmittedScope::process(admitted.clone()))
+            .expect("a process is an opener");
 
         assert_eq!(opener, EffectOpener::process(admitted));
         assert_eq!(
@@ -189,14 +190,13 @@ mod tests {
     /// a worker retry of the same incarnation mints the same ones.
     #[test]
     fn two_incarnations_of_one_process_backed_cell_mint_distinct_identities() {
-        let scope = ExecutionScope::process("process:subagent:call-1");
         let site = call_site("resource_operation:aaaa", 1);
         let identities = |incarnation| {
             LashlangHostIdentities::cell(
-                EffectOpener::for_scope(
-                    &scope,
-                    Some(&process_ref("process:subagent:call-1", incarnation)),
-                )
+                EffectOpener::for_scope(&AdmittedScope::process(process_ref(
+                    "process:subagent:call-1",
+                    incarnation,
+                )))
                 .expect("a process is an opener"),
                 "cell:1",
             )
@@ -216,19 +216,20 @@ mod tests {
 
     /// The name alone is never the opener.
     ///
-    /// `ExecutionScope::Process` carries the reusable name, and a run that
-    /// reached here without a process runner binding its admitted incarnation
-    /// has no opener to mint under — refused, rather than silently aliasing
-    /// every earlier incarnation of that name.
+    /// `ExecutionScope::Process` carries the reusable name, and the admitted
+    /// scope refuses to admit it without the incarnation — refused at
+    /// admission, rather than silently aliasing every earlier incarnation of
+    /// that name.
     #[test]
     fn a_process_scope_without_an_admitted_incarnation_is_refused() {
-        let error = EffectOpener::for_scope(&ExecutionScope::process("worker"), None)
-            .expect_err("the reusable name is not an opener");
+        let error = AdmittedScope::new(ExecutionScope::process("worker"), None)
+            .expect_err("the reusable name is not admitted");
 
         assert!(
             matches!(
                 &error,
-                EffectOpenerError::ProcessIncarnationMissing { process_id } if *process_id == "worker"
+                AdmittedScopeError::ProcessIncarnationMissing { process_id }
+                    if *process_id == "worker"
             ),
             "unexpected refusal: {error}"
         );
@@ -237,16 +238,16 @@ mod tests {
     /// An incarnation of another process cannot open this one's work.
     #[test]
     fn an_admitted_incarnation_of_another_process_is_refused() {
-        let error = EffectOpener::for_scope(
-            &ExecutionScope::process("worker"),
-            Some(&process_ref("indexer", 1)),
+        let error = AdmittedScope::new(
+            ExecutionScope::process("worker"),
+            Some(process_ref("indexer", 1)),
         )
         .expect_err("the admitted process must be the scope's process");
 
         assert!(
             matches!(
                 &error,
-                EffectOpenerError::ProcessPinMismatch { process_id, pinned }
+                AdmittedScopeError::ProcessPinMismatch { process_id, pinned }
                     if *process_id == "worker" && *pinned == "indexer"
             ),
             "unexpected refusal: {error}"
@@ -361,8 +362,10 @@ mod tests {
     #[test]
     fn two_cells_of_one_queued_drain_mint_distinct_identities() {
         let scope = ExecutionScope::queue_drain("session-1", "drain-3");
-        let opener =
-            EffectOpener::for_scope(&scope, None).expect("a queued-work drain is an opener");
+        let opener = EffectOpener::for_scope(
+            &AdmittedScope::unpinned(scope).expect("a non-process scope admits unpinned"),
+        )
+        .expect("a queued-work drain is an opener");
         assert_eq!(opener, EffectOpener::queue_drain("session-1", "drain-3"));
 
         let site = call_site("resource_operation:aaaa", 1);
@@ -386,8 +389,11 @@ mod tests {
         );
         assert_ne!(
             opener,
-            EffectOpener::for_scope(&ExecutionScope::turn("session-1", "drain-3"), None)
-                .expect("a turn is an opener"),
+            EffectOpener::for_scope(
+                &AdmittedScope::unpinned(ExecutionScope::turn("session-1", "drain-3"))
+                    .expect("a turn admits unpinned"),
+            )
+            .expect("a turn is an opener"),
             "a drain is not a turn that happens to spell its id"
         );
     }
@@ -458,7 +464,10 @@ mod tests {
     fn a_delimiter_bearing_session_id_round_trips() {
         let spawned_session = "session:subagent:lashlang:turn:1:x:1:y";
         let scope = ExecutionScope::turn(spawned_session, "turn-1");
-        let opener = EffectOpener::for_scope(&scope, None).expect("a turn is an opener");
+        let opener = EffectOpener::for_scope(
+            &AdmittedScope::unpinned(scope).expect("a non-process scope admits unpinned"),
+        )
+        .expect("a turn is an opener");
 
         assert_eq!(
             opener.session_id().map(SessionId::as_str),
@@ -505,10 +514,10 @@ mod tests {
             "a minted call id embedded in a child process id must be registrable"
         );
 
-        let child_opener = EffectOpener::for_scope(
-            &ExecutionScope::process(child_process_id.clone()),
-            Some(&process_ref(child_process_id.as_str(), 4)),
-        )
+        let child_opener = EffectOpener::for_scope(&AdmittedScope::process(process_ref(
+            child_process_id.as_str(),
+            4,
+        )))
         .expect("the spawned child process is an opener");
         let grandchild_leaf = LashlangHostIdentities::cell(child_opener, "exec-code:1")
             .leaf("tool:spawn_agent", &site);

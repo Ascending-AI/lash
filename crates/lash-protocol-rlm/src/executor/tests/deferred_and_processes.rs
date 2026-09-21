@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::testing::store_fixtures::durable_admission;
 
 pub(super) struct FailingDeferredJournalController;
 
@@ -683,7 +684,7 @@ async fn run_sqlite_deferred_fault_boundary(
         lash_core::ToolCatalog::default(),
         lash_core::ScopedEffectController::shared(
             Arc::new(FaultingSqliteDeferredController { inner: controller, fault }),
-            scope.clone(),
+            durable_admission(&scope),
         )
         .expect("admit SQLite fault controller scope"),
         lash_core::testing::exec_code_invocation(
@@ -717,7 +718,7 @@ async fn run_sqlite_deferred_fault_boundary(
     let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
         provider,
         lash_core::ToolCatalog::default(),
-        lash_core::ScopedEffectController::shared(Arc::new(reopened), scope)
+        lash_core::ScopedEffectController::shared(Arc::new(reopened), durable_admission(&scope))
             .expect("admit reopened SQLite controller scope"),
         lash_core::testing::exec_code_invocation(
             &session_id, turn_id, 0, 0, "faulting exec", replay_key,
@@ -794,7 +795,7 @@ pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_r
         let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::clone(&provider),
             lash_core::ToolCatalog::default(),
-            lash_core::ScopedEffectController::shared(Arc::new(first_controller), scope.clone())
+            lash_core::ScopedEffectController::shared(Arc::new(first_controller), durable_admission(&scope))
                 .expect("admit SQLite controller scope"),
             lash_core::testing::exec_code_invocation(
                 session_id, turn_id, 0, 0, "registration exec", replay_key,
@@ -823,7 +824,7 @@ pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_r
         let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::clone(&provider),
             lash_core::ToolCatalog::default(),
-            lash_core::ScopedEffectController::shared(Arc::new(reopened), scope)
+            lash_core::ScopedEffectController::shared(Arc::new(reopened), durable_admission(&scope))
                 .expect("admit reopened SQLite controller scope"),
             lash_core::testing::exec_code_invocation(
                 session_id, turn_id, 0, 0, "registration exec", replay_key,
@@ -885,7 +886,7 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
         let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::clone(&provider),
             collision.clone(),
-            lash_core::ScopedEffectController::shared(Arc::clone(&controller), scope.clone())
+            lash_core::ScopedEffectController::shared(Arc::clone(&controller), durable_admission(&scope))
                 .expect("admit SQLite controller scope"),
             invocation.clone(),
         );
@@ -920,7 +921,7 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
         let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             provider,
             lash_core::ToolCatalog::default(),
-            lash_core::ScopedEffectController::shared(Arc::new(reopened), scope)
+            lash_core::ScopedEffectController::shared(Arc::new(reopened), durable_admission(&scope))
                 .expect("admit reopened SQLite controller scope"),
             invocation,
         );
@@ -991,7 +992,7 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
         let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::clone(&provider),
             lash_core::ToolCatalog::default(),
-            lash_core::ScopedEffectController::shared(Arc::new(first_controller), scope.clone())
+            lash_core::ScopedEffectController::shared(Arc::new(first_controller), durable_admission(&scope))
                 .expect("admit SQLite controller scope"),
             lash_core::testing::exec_code_invocation(
                 session_id,
@@ -1033,7 +1034,7 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
             ]),
             lash_core::ScopedEffectController::shared(
                 Arc::new(collision_controller),
-                lash_core::ExecutionScope::turn(session_id, turn_id),
+                durable_admission(&lash_core::ExecutionScope::turn(session_id, turn_id)),
             )
             .expect("admit unrelated collision replay scope"),
             lash_core::testing::exec_code_invocation(
@@ -1092,7 +1093,7 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
         let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             provider,
             changed_catalog,
-            lash_core::ScopedEffectController::shared(Arc::new(replay_controller), scope)
+            lash_core::ScopedEffectController::shared(Arc::new(replay_controller), durable_admission(&scope))
                 .expect("admit reopened SQLite controller scope"),
             lash_core::testing::exec_code_invocation(
                 session_id,
@@ -1155,7 +1156,7 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
         let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::clone(&provider),
             lash_core::ToolCatalog::default(),
-            lash_core::ScopedEffectController::shared(Arc::new(first_controller), scope.clone())
+            lash_core::ScopedEffectController::shared(Arc::new(first_controller), durable_admission(&scope))
                 .expect("admit SQLite controller scope"),
             lash_core::testing::exec_code_invocation(
                 session_id, turn_id, 0, 0, "negative original", replay_key,
@@ -1192,7 +1193,7 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
                 "mystery",
                 "x",
             )]),
-            lash_core::ScopedEffectController::shared(Arc::new(replay_controller), scope)
+            lash_core::ScopedEffectController::shared(Arc::new(replay_controller), durable_admission(&scope))
                 .expect("admit reopened SQLite controller scope"),
             lash_core::testing::exec_code_invocation(
                 session_id, turn_id, 12, 33, "negative renamed", replay_key,

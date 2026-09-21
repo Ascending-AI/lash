@@ -35,6 +35,12 @@ use tokio_util::sync::CancellationToken;
 
 const IN_FLIGHT_OPERATION: &str = "in-flight-runtime-operation";
 
+/// Admit a non-process scope: these tests mint runtime-operation scopes
+/// directly, so this stands in for the facade's admission.
+fn admitted(scope: ExecutionScope) -> lash_core::AdmittedScope {
+    lash_core::AdmittedScope::unpinned(scope).expect("a runtime operation admits unpinned")
+}
+
 /// What a task left behind under its facade-minted scope: the scope's journal
 /// key and the promise it minted there, so the test can prove both existed
 /// before the receipt and are fenced after it.
@@ -413,7 +419,7 @@ async fn plugin_task_scopes_retire_after_their_receipt_and_leave_other_operation
 
     // A runtime operation the facade did not mint: nothing here may touch it.
     let in_flight = ExecutionScope::runtime_operation(IN_FLIGHT_OPERATION);
-    host.scoped(in_flight.clone())
+    host.scoped(admitted(in_flight.clone()))
         .expect("in-flight scope binds")
         .controller()
         .execute_effect(
@@ -702,14 +708,14 @@ impl EffectHost for RetirementFailsHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         self.inner.scoped(scope)
     }
 
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
         self.inner.scoped_static(scope)
     }
@@ -834,7 +840,7 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
     // A runtime operation nobody recorded a receipt for: the sweep has no
     // proof it is unreachable and must leave it alone.
     let in_flight = ExecutionScope::runtime_operation(format!("{gate}-in-flight"));
-    host.scoped(in_flight.clone())
+    host.scoped(admitted(in_flight.clone()))
         .expect("in-flight scope binds")
         .controller()
         .execute_effect(
@@ -1017,7 +1023,7 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
         let ran = Arc::clone(&ran);
         let session_id = session_id.clone();
         async move {
-            host.scoped(scope.clone())
+            host.scoped(admitted(scope.clone()))
                 .expect("the operation scope binds")
                 .controller()
                 .execute_effect(
@@ -1237,7 +1243,7 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
         lash_core::store::FacadePluginOperation::Task,
         "pinned_sweep",
     ));
-    host.scoped(scope.clone())
+    host.scoped(admitted(scope.clone()))
         .expect("scope operation")
         .controller()
         .execute_effect(
@@ -1275,7 +1281,9 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
         }
     }
 
-    let scoped = host.scoped(scope.clone()).expect("scope closure owner");
+    let scoped = host
+        .scoped(admitted(scope.clone()))
+        .expect("scope closure owner");
     let binding = host
         .turn_control_binding(&scoped)
         .await
@@ -1423,14 +1431,14 @@ impl EffectHost for ParticipantCrashHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         self.inner.scoped(scope)
     }
 
     fn scoped_static(
         &self,
-        scope: ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
         self.inner.scoped_static(scope)
     }
@@ -1526,7 +1534,9 @@ async fn authorize_participant_crash_closure(
         .expect("claim participant-crash lease")
         .acquired()
         .expect("participant-crash lease is free");
-    let scoped = host.scoped(scope.clone()).expect("scope participant owner");
+    let scoped = host
+        .scoped(admitted(scope.clone()))
+        .expect("scope participant owner");
     let binding = host
         .turn_control_binding(&scoped)
         .await

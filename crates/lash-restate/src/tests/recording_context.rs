@@ -897,7 +897,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
         };
         let outcomes = lash_core::testing::execute_tool_intents_with_services(
             controller
-                .scoped_effect_controller(scope)
+                .scoped_effect_controller(durable_admission(&scope))
                 .map_err(TerminalError::from_error)?,
             lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry)),
             &SessionId::from(TOOL_INTENT_CORPUS_SESSION),
@@ -2084,7 +2084,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             let process_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
                 let controller = RestateRuntimeEffectController::new_for_test(process_task_context);
                 let scoped_effect_controller = controller
-                    .scoped_effect_controller(ExecutionScope::process(&process_task_id))
+                    .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                        &process_task_id,
+                    )))
                     .map_err(TerminalError::from_error)?;
                 let cancellation = tokio_util::sync::CancellationToken::new();
                 let execution_write_authority =

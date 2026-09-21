@@ -696,9 +696,11 @@ impl DurableNoopEffectHost {
 
     fn scoped_for<'run>(
         &self,
-        scope: lash_core::ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
-        self.selected_scopes.lock_recover().push(scope.clone());
+        self.selected_scopes
+            .lock_recover()
+            .push(scope.scope().clone());
         let controller: Arc<dyn lash_core::RuntimeEffectController> = self.controller.clone();
         lash_core::ScopedEffectController::shared(controller, scope)
     }
@@ -785,14 +787,14 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
 
     fn scoped<'run>(
         &'run self,
-        scope: lash_core::ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         self.scoped_for(scope)
     }
 
     fn scoped_static(
         &self,
-        scope: lash_core::ExecutionScope,
+        scope: lash_core::AdmittedScope,
     ) -> std::result::Result<
         Option<lash_core::ScopedEffectController<'static>>,
         lash_core::RuntimeError,

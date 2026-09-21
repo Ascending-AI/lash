@@ -219,7 +219,7 @@ fn build_turn_ctx_with_graph(
         session_graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::ExecutionScope::turn(session_id, "rolling-history-test-turn"),
+            lash_core::AdmittedScope::turn(session_id, "rolling-history-test-turn"),
         )
         .expect("test scoped effect controller"),
         direct_completions: lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
@@ -270,7 +270,7 @@ fn build_compaction_ctx_with_services(
         session_graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test"),
+            lash_core::AdmittedScope::runtime_operation("rolling-history-compact-test"),
         )
         .expect("test scoped effect controller"),
         direct_completions,
@@ -866,7 +866,7 @@ fn transform_state_ctx_with_services(
         session_graph: graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::ExecutionScope::runtime_operation("rolling-history-recovery-test"),
+            lash_core::AdmittedScope::runtime_operation("rolling-history-recovery-test"),
         )
         .expect("test scoped effect controller"),
         direct_completions: RecordingLlmCompletions::client(&direct),

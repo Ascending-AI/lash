@@ -611,10 +611,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let started = session
         .admin()
         .processes()
-        .start(
-            request.clone(),
-            native_scope(lash_core::ExecutionScope::process(process_id)),
-        )
+        .start(request.clone(), native_process_scope(process_id))
         .await?;
     assert_eq!(
         lash_core::ProcessQuery::get_process(registry.as_ref(), &started.process_id)
@@ -631,7 +628,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .processes()
         .start(
             request,
-            native_scope(lash_core::ExecutionScope::runtime_operation(
+            native_scope(lash_core::AdmittedScope::runtime_operation(
                 "process-observation-events-replay",
             )),
         )
@@ -642,7 +639,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .processes()
         .cancel(
             &ProcessId::from(process_id),
-            native_scope(lash_core::ExecutionScope::process(process_id)),
+            native_process_scope(process_id),
         )
         .await?;
 
@@ -692,7 +689,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")?;
     let scoped_effect_controller = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::ExecutionScope::runtime_operation("trigger:button-press-1"),
+        lash_core::AdmittedScope::runtime_operation("trigger:button-press-1"),
     )?;
     let report = core
         .triggers()
@@ -826,7 +823,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
                 ),
             )
             .with_observers(["host-cancel".to_string()]),
-            native_scope(lash_core::ExecutionScope::process("host-process")),
+            native_process_scope("host-process"),
         )
         .await?;
 
@@ -835,7 +832,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         .processes()
         .cancel(
             &ProcessId::from("host-process"),
-            native_scope(lash_core::ExecutionScope::process("host-process")),
+            native_process_scope("host-process"),
         )
         .await?;
 
@@ -894,7 +891,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }])
                 .with_observers(["host-filter-bypass".to_string()]),
-                native_scope(lash_core::ExecutionScope::process(process_id)),
+                native_process_scope(process_id),
             )
             .await?;
     }
@@ -912,7 +909,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
             "ready",
             "host-filter-signal-id",
             serde_json::json!({"source": "host"}),
-            native_scope(lash_core::ExecutionScope::process("host-filter-signal")),
+            native_process_scope("host-filter-signal"),
         )
         .await?;
     assert!(
@@ -930,7 +927,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .processes()
         .cancel(
             &ProcessId::from("host-filter-cancel"),
-            native_scope(lash_core::ExecutionScope::process("host-filter-cancel")),
+            native_process_scope("host-filter-cancel"),
         )
         .await?;
     assert!(
@@ -991,7 +988,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
                     ),
                 )
                 .with_observers(["host-cancel-all".to_string()]),
-                native_scope(lash_core::ExecutionScope::process(process_id)),
+                native_process_scope(process_id),
             )
             .await?;
     }

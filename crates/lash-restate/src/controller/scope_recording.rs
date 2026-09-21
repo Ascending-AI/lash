@@ -63,13 +63,16 @@ where
     C: RestateControllerContext<'ctx>,
     'ctx: 'run,
 {
-    fn for_scope<'a>(&self, scope: ExecutionScope) -> Arc<dyn lash_core::ScopeBoundController + 'a>
+    fn for_scope<'a>(
+        &self,
+        admitted: lash_core::AdmittedScope,
+    ) -> Arc<dyn lash_core::ScopeBoundController + 'a>
     where
         Self: 'a,
     {
         Arc::new(ScopeRecordingController {
             inner: self.inner,
-            scope,
+            scope: admitted.into_scope(),
         })
     }
 }

@@ -21,7 +21,7 @@ pub enum RuntimeEffectControllerHandle<'run> {
     #[cfg(any(test, feature = "testing"))]
     Shared {
         controller: Arc<dyn RuntimeEffectController>,
-        scope: ExecutionScope,
+        admitted: AdmittedScope,
     },
 }
 
@@ -34,7 +34,7 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
     pub fn shared(controller: Arc<dyn RuntimeEffectController>) -> Self {
         Self::Shared {
             controller,
-            scope: ExecutionScope::runtime_operation("test-runtime-effect-controller"),
+            admitted: AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         }
     }
 
@@ -48,16 +48,17 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
 
     #[expect(
         clippy::expect_used,
-        reason = "the shared handle was built from a valid scope"
+        reason = "the shared handle was built from a valid admitted scope"
     )]
     pub fn scoped(&self) -> ScopedEffectController<'_> {
         match self {
             Self::Borrowed(scoped) => scoped.clone(),
             #[cfg(any(test, feature = "testing"))]
-            Self::Shared { controller, scope } => {
-                ScopedEffectController::shared(Arc::clone(controller), scope.clone())
-                    .expect("runtime effect controller handle carries a valid scope")
-            }
+            Self::Shared {
+                controller,
+                admitted,
+            } => ScopedEffectController::shared(Arc::clone(controller), admitted.clone())
+                .expect("runtime effect controller handle carries a valid scope"),
         }
     }
 
@@ -71,9 +72,12 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
                 .to_static()
                 .map(RuntimeEffectControllerHandle::Borrowed),
             #[cfg(any(test, feature = "testing"))]
-            Self::Shared { controller, scope } => Some(RuntimeEffectControllerHandle::Shared {
+            Self::Shared {
+                controller,
+                admitted,
+            } => Some(RuntimeEffectControllerHandle::Shared {
                 controller: Arc::clone(controller),
-                scope: scope.clone(),
+                admitted: admitted.clone(),
             }),
         }
     }

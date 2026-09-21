@@ -240,7 +240,7 @@ pub(super) async fn emit_button_event(
     let source_key = empty_trigger_source_key(BUTTON_SOURCE_TYPE)?;
     let scoped = ScopedEffectController::shared(
         Arc::new(NativeRuntimeEffectController::default()),
-        ExecutionScope::runtime_operation("e2e-button-trigger"),
+        lash_core::AdmittedScope::runtime_operation("e2e-button-trigger"),
     )?;
     let report = core
         .triggers()

@@ -115,7 +115,7 @@ fn turn_scope<'a>(
 ) -> lash_core::ScopedEffectController<'a> {
     lash_core::ScopedEffectController::borrowed(
         controller,
-        lash_core::ExecutionScope::turn(session_id, turn_id),
+        lash_core::AdmittedScope::turn(session_id, turn_id),
     )
     .expect("turn scope")
 }

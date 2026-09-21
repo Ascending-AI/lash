@@ -198,7 +198,7 @@ impl ProductionToolCell {
     ) -> lash_core::facade_support::AssembledTurn {
         let turn_scope = runtime.export_persistence_state().turn_scope(&self.turn_id);
         let scoped_effect_controller = effect_host
-            .scoped(turn_scope)
+            .scoped(durable_admission(&turn_scope))
             .expect("scope production tool cell");
         runtime
             .stream_turn(

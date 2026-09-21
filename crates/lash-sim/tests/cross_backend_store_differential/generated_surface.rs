@@ -10,13 +10,14 @@ use lash_conformance::{
     StoreContractHandles, StoreContractOp, StoreContractScenario, sample_store_contract_operations,
 };
 use lash_core::{
-    AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectAddress, EffectHost,
-    EffectJournalRetirement, ExecutionScope, MediaType, ProcessExecutionEnvRef, ProcessIdentity,
-    ProcessInput, ProcessOriginator, Resolution, RuntimeAttribution, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, SessionScope,
-    TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding, TriggerOccurrenceRequest,
-    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft, WakeDeliveryDisposition,
-    facade_support::InMemoryAttachmentStore, facade_support::InMemoryTriggerStore,
+    AdmittedScope, AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectAddress,
+    EffectHost, EffectJournalRetirement, ExecutionScope, MediaType, ProcessExecutionEnvRef,
+    ProcessIdentity, ProcessInput, ProcessOriginator, Resolution, RuntimeAttribution,
+    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
+    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
+    WakeDeliveryDisposition, facade_support::InMemoryAttachmentStore,
+    facade_support::InMemoryTriggerStore,
 };
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
 use lash_sqlite_store::{
@@ -543,7 +544,7 @@ impl SurfaceRunner {
                 );
                 let controller = self
                     .effect_host
-                    .scoped(scope)
+                    .scoped(AdmittedScope::unpinned(scope).expect("a turn scope admits unpinned"))
                     .map_err(|error| error.to_string())?;
                 let result = controller
                     .controller()
@@ -558,7 +559,7 @@ impl SurfaceRunner {
                 Ok(())
             }
             SurfaceOperation::ToolIntentBatch => {
-                let scope = ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN);
+                let scope = AdmittedScope::turn(SURFACE_SESSION, SURFACE_TURN);
                 let inner = self
                     .effect_host
                     .scoped_static(scope.clone())
@@ -781,7 +782,10 @@ impl SurfaceRunner {
                     },
                 );
                 self.effect_host
-                    .scoped(scope.clone())
+                    .scoped(
+                        AdmittedScope::unpinned(scope.clone())
+                            .expect("a runtime-operation scope admits unpinned"),
+                    )
                     .map_err(|error| error.to_string())?
                     .controller()
                     .execute_effect(

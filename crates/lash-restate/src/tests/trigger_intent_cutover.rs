@@ -97,7 +97,7 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
         };
         let outcomes = lash_core::testing::execute_tool_intents_with_services_and_trigger_router(
             controller
-                .scoped_effect_controller(scope)
+                .scoped_effect_controller(durable_admission(&scope))
                 .map_err(TerminalError::from_error)?,
             lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry)),
             self.router.clone(),

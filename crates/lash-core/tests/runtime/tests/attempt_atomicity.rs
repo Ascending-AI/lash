@@ -465,7 +465,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
         &sentinel,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped post-cutover sentinel controller");
     let tool = tool_context(scoped, &fixtures);
@@ -519,7 +519,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
         &sentinel,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped provider-routing sentinel controller");
     let provider = Arc::new(PureLeafProbeProvider::new());
@@ -732,7 +732,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
         &sentinel,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped intent sentinel controller");
     let tool = tool_context(scoped, &fixtures);
@@ -829,7 +829,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
         &sentinel,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped overflow sentinel controller");
     let tool = tool_context(scoped, &fixtures);
@@ -996,7 +996,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
     let controller = super::effect::RecordingEffectController::default().with_replay_by_key();
     let scoped = lash_core::ScopedEffectController::borrowed(
         &controller,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped replaying controller");
     let tool = tool_context(scoped, &fixtures);
@@ -1280,7 +1280,7 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
     let first_incarnation_bodies = Arc::clone(&bodies_entered);
     let scoped = lash_core::ScopedEffectController::borrowed(
         &tier,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped ordinal-journaled controller");
     let tool = tool_context(scoped, &fixtures);
@@ -1333,7 +1333,7 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
     let redriven_bodies = Arc::clone(&bodies_entered);
     let redriven_scoped = lash_core::ScopedEffectController::borrowed(
         &tier,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped redrive controller");
     let redriven_tool = tool_context(redriven_scoped, &fixtures);
@@ -1423,7 +1423,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
         &sentinel,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped direct-llm sentinel controller");
     let direct_completions = fixtures
@@ -1518,7 +1518,7 @@ fn raw_client_probe<'run>(
 ) -> lash_core::ToolContext<'run> {
     let scoped = lash_core::ScopedEffectController::borrowed(
         sentinel,
-        lash_core::ExecutionScope::turn(SESSION, TURN),
+        lash_core::AdmittedScope::turn(SESSION, TURN),
     )
     .expect("scoped raw-client sentinel controller");
     tool_context_with_provider(
