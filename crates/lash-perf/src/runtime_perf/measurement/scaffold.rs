@@ -154,8 +154,6 @@ impl RunRecorder {
         Ok((value, span))
     }
 
-    /// Records one named run-level stage span (`build_runtime`,
-    /// `seed_state`, `export_state`, ...).
     pub(crate) fn stage<'a, T, F>(
         &'a mut self,
         name: &'static str,
@@ -313,17 +311,11 @@ impl RunRecorder {
         self.stage_entries.push((name, result));
     }
 
-    /// Pushes a pre-assembled turn — the fabricated counterpart of
-    /// [`RunRecorder::turn`].
     #[cfg(test)]
     pub(crate) fn record_turn(&mut self, turn: RuntimePerfTurnResult) {
         self.turns.push(turn);
     }
 
-    /// Closes the total meter and emits the run tail: `total` covers the
-    /// whole run, run-level `run_turn`/`await_background_work` entries are
-    /// the sum over the recorded turns, and the closing memory reading is
-    /// the last span boundary's.
     pub(crate) fn finish(self, tail: RunTail) -> RuntimePerfRunResult {
         let Self {
             scenario,
@@ -394,7 +386,6 @@ mod tests {
         let result = recorder.finish(RunTail::default());
         assert_eq!(result.turns.len(), 2);
 
-        // Run-level stage sums equal the sum of the turn spans.
         let run_turn = result.stage(stage::RUN_TURN).expect("run_turn folded");
         let expected_ms = round3(
             result

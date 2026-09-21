@@ -251,7 +251,6 @@ async fn deadline_exhaustion_is_a_typed_runtime_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn string_membership_rejects_non_string_needles_without_coercion() {
-    // `finish 1 in "123"`
     let compiled = compile_program(&builders::program(vec![builders::finish(
         builders::binary(builders::num(1.0), BinaryOp::In, builders::string("123")),
     )]));

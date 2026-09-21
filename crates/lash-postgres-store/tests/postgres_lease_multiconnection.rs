@@ -98,8 +98,7 @@ async fn db_now_ms(storage: &PostgresStorage) -> u64 {
     ms.max(0) as u64
 }
 
-/// Count the terminal events persisted for `process_id`. Used to prove exactly
-/// one terminal is ever written despite a fenced host also attempting to
+/// Used to prove exactly one terminal is ever written despite a fenced host also attempting to
 /// complete.
 async fn terminal_event_count(storage: &PostgresStorage, process_id: &ProcessId) -> i64 {
     sqlx::query_scalar(
@@ -116,7 +115,7 @@ async fn terminal_event_count(storage: &PostgresStorage, process_id: &ProcessId)
     .expect("count terminal events")
 }
 
-/// Poll the database clock until it is strictly past `target_ms`. The bound is a
+/// The bound is a
 /// local safety timeout only (so a wedged DB fails fast rather than hanging);
 /// the *fact of expiry* is decided by the DB clock, never the local one.
 async fn wait_until_db_past(storage: &PostgresStorage, target_ms: u64, bound: Duration) {

@@ -1,6 +1,5 @@
-//! Cross-provider response-normalization conformance. Wraps this crate's
-//! (private) Gemini parsers in a `ProviderNormalizer`. Gemini materializes
-//! non-streaming function calls, but it does not expose the streaming
+//! Cross-provider response-normalization conformance.
+//! Gemini materializes non-streaming function calls, but it does not expose the streaming
 //! chunk-merge scenarios in the same shape as SSE-first providers.
 
 use super::*;

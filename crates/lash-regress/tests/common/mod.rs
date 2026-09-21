@@ -1,18 +1,15 @@
 #![allow(clippy::uninlined_format_args)]
 
-/// Test that \p pattern fails to parse with default flags.
 pub fn test_parse_fails(pattern: &str) {
     let res = lash_regress::Regex::new(pattern);
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
 }
 
-/// Test that \p pattern fails to parse with flags.
 pub fn test_parse_fails_flags(pattern: &str, flags: &str) {
     let res = lash_regress::Regex::with_flags(pattern, flags);
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
 }
 
-/// Format a Match by inserting commas between all capture groups.
 fn format_match(r: &lash_regress::Match, input: &str) -> String {
     let mut result = input[r.range()].to_string();
     for cg in r.captures.iter() {
@@ -24,7 +21,6 @@ fn format_match(r: &lash_regress::Match, input: &str) -> String {
     result
 }
 
-/// Encode a string as UTF16.
 pub fn to_utf16(input: &str) -> Vec<u16> {
     input.encode_utf16().collect()
 }
@@ -116,16 +112,13 @@ impl TestCompiledRegex {
         }
     }
 
-    /// Encode a string as UTF16, and match against it as UTF16.
     /// 'start' is given as the byte offset into the UTF8 string.
     #[cfg(feature = "utf16")]
     #[track_caller]
     pub fn match_utf16(&self, input: &str, start: usize) -> Vec<lash_regress::Match> {
-        // convert the input and start to UTF16.
         let u16_start = input[..start].chars().map(char::len_utf16).sum();
         let u16_input = to_utf16(input);
         let mut matches: Vec<_> = self.re.find_from_utf16(&u16_input, u16_start).collect();
-        // Convert any ranges back to UTF8.
         for matc in matches.iter_mut() {
             matc.range = range_from_utf16(&u16_input, matc.range());
             for r in matc.captures.iter_mut().flatten() {
@@ -135,14 +128,12 @@ impl TestCompiledRegex {
         matches
     }
 
-    /// Encode a string as UTF16, and match against it as UCS2.
     #[cfg(feature = "utf16")]
     #[track_caller]
     pub fn match_ucs2(&self, input: &str, start: usize) -> Vec<lash_regress::Match> {
         let u16_start = input[..start].chars().map(char::len_utf16).sum();
         let u16_input = to_utf16(input);
         let mut matches: Vec<_> = self.re.find_from_ucs2(&u16_input, u16_start).collect();
-        // Convert any ranges back to UTF8.
         for matc in matches.iter_mut() {
             matc.range = range_from_utf16(&u16_input, matc.range());
             for r in matc.captures.iter_mut().flatten() {
@@ -209,20 +200,16 @@ impl TestCompiledRegex {
         result
     }
 
-    /// Test that matching against \p input fails.
     #[track_caller]
     pub fn test_fails(&self, input: &str) {
         assert!(self.find(input).is_none(), "Should not have matched")
     }
 
-    /// Test that matching against \p input succeeds.
     #[track_caller]
     pub fn test_succeeds(&self, input: &str) {
         assert!(self.find(input).is_some(), "Should have matched")
     }
 
-    /// Return a list of all non-overlapping total match ranges from a given
-    /// start.
     pub fn match_all_from(&'_ self, input: &'_ str, start: usize) -> Vec<lash_regress::Range> {
         self.matches(input, start)
             .into_iter()
@@ -230,7 +217,6 @@ impl TestCompiledRegex {
             .collect()
     }
 
-    /// Return a list of all non-overlapping matches.
     pub fn match_all<'b>(&self, input: &'b str) -> Vec<&'b str> {
         self.matches(input, 0)
             .into_iter()
@@ -238,7 +224,6 @@ impl TestCompiledRegex {
             .collect()
     }
 
-    /// Collect all matches into a String, separated by commas.
     pub fn run_global_match(&self, input: &str) -> String {
         self.matches(input, 0)
             .into_iter()
@@ -266,7 +251,6 @@ enum Encoding {
 /// Description of how to test a regex.
 #[derive(Debug, Copy, Clone)]
 pub struct TestConfig {
-    // Whether to prefer ASCII forms if the input is ASCII.
     ascii: bool,
 
     // Whether to optimize.
@@ -281,7 +265,6 @@ pub struct TestConfig {
 }
 
 impl TestConfig {
-    /// Whether to use ASCII for this input.
     pub fn use_ascii(&self, s: &str) -> bool {
         self.ascii && s.is_ascii()
     }
@@ -315,8 +298,6 @@ impl TestConfig {
         }
     }
 
-    /// Test that \p pattern and \p flags successfully parses, and matches
-    /// \p input.
     #[track_caller]
     pub fn test_match_succeeds(&self, pattern: &str, flags_str: &str, input: &str) {
         let cr = self.compilef(pattern, flags_str);
@@ -331,7 +312,6 @@ impl TestConfig {
     }
 }
 
-/// Invoke \p F with each test config, in turn.
 pub fn test_with_configs<F>(func: F)
 where
     F: Fn(TestConfig),
@@ -409,7 +389,6 @@ where
     }
 }
 
-/// Invoke `F` with each test config.
 /// Exclude ASCII tests.
 pub fn test_with_configs_no_ascii<F>(func: F)
 where

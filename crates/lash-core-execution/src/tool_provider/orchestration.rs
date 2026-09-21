@@ -58,8 +58,6 @@ impl<'run> OrchestrationContext<'run> {
         self.context.sessions()
     }
 
-    /// Trigger emission for a runtime-owned orchestrating body.
-    ///
     /// Emission reserves and starts deliveries through the effect controller,
     /// which a recorded leaf attempt cannot do: it declares
     /// [`crate::ToolIntent::EmitTrigger`] instead and the intent executor emits
@@ -188,10 +186,9 @@ impl OrchestratingToolDef {
     /// Package an implementation supplied by an owning first-party crate.
     ///
     /// # Safety
-    ///
     /// The caller must be the crate that owns the registered tool contract.
-    /// This is an unsafe capability boundary so ordinary downstream Rust code
-    /// cannot mint an orchestrating registration from a leaf provider. This is
+    /// This is an unsafe capability boundary so ordinary downstream Rust code cannot mint an
+    /// orchestrating registration from a leaf provider.
     /// a provenance convention, not a memory-safety invariant: violating it is
     /// an unsupported capability escalation, but does not by itself cause
     /// undefined behavior.

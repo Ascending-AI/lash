@@ -128,7 +128,6 @@ impl<Input: InputIndexer, Dir: Direction, Bytes: ByteSet> SingleCharMatcher<Inpu
     }
 }
 
-/// Provide a variant for ByteArraySet where we hold it directly.
 /// The arrays are small and so we don't want to indirect through a pointer.
 pub struct MatchByteArraySet<ArraySet: SmallArraySet>(pub ByteArraySet<ArraySet>);
 

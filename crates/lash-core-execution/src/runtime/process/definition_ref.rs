@@ -35,7 +35,6 @@ impl ProcessEngineKind {
         &self.0
     }
 
-    /// Reports whether this engine kind is empty, which no registered engine may be.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -105,8 +104,6 @@ impl PartialEq<ProcessEngineKind> for &str {
 pub struct ProcessDefinitionValue(serde_json::Value);
 
 impl ProcessDefinitionValue {
-    /// Constructs a `ProcessDefinitionValue` for process-engine implementors publishing the
-    /// definition their artifacts store.
     pub fn new(value: serde_json::Value) -> Self {
         Self(value)
     }
@@ -153,7 +150,6 @@ pub enum ProcessSignature {
 }
 
 impl ProcessSignature {
-    /// Constructs a known `ProcessSignature` from its engine-owned encoding.
     pub fn known(encoding: impl Into<serde_json::Value>) -> Self {
         Self::Known {
             encoding: encoding.into(),
@@ -168,7 +164,6 @@ impl ProcessSignature {
         }
     }
 
-    /// Reports whether this signature asserts nothing.
     pub fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown)
     }
@@ -268,8 +263,6 @@ pub struct ProcessDefinitionResolution {
 }
 
 impl ProcessDefinitionResolution {
-    /// Constructs a `ProcessDefinitionResolution` for process-engine implementors answering
-    /// [`ProcessEngine::resolve`](super::engine::ProcessEngine::resolve).
     pub fn new(
         signature: impl Into<ProcessSignature>,
         signals: impl IntoIterator<Item = ProcessEventType>,

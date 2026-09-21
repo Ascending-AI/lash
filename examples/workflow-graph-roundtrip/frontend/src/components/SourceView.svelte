@@ -1,11 +1,11 @@
 <script>
   import { getContext } from 'svelte';
 
-  // The canonical-source pane. In Simplified it is a read-only peek at "what am
-  // I building". In Power it is an editable code panel: edits are debounced and
-  // handed to `onProject` (text→graph); the parent adopts the returned document
-  // and feeds back the new canonical `source`, closing the loop. Parse errors
-  // are shown inline. Read-only (with a note) if the backend has no /project.
+  // The canonical-source pane.
+  // In Simplified it is a read-only peek at "what am I building".
+  // In Power it is an editable code panel: edits are debounced and handed to `onProject`
+  // (text→graph); the parent adopts the returned document and feeds back the new canonical
+  // `source`, closing the loop.
   let { source = '', version, dirty, onProject } = $props();
 
   const mode = getContext('mode');

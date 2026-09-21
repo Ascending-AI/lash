@@ -18,8 +18,6 @@ pub(crate) struct NativeQueuedWorkRunConfig {
     pub(super) process_lifecycle_available: bool,
 }
 
-/// Build the queued-work driver a core would run for its own sessions.
-///
 /// The driver is wired inside the core's port setup, where a test cannot reach
 /// it; this assembles the same config from the same core so a test can drive
 /// one batch directly and read the failure class it produces.

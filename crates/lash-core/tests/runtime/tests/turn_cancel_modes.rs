@@ -85,8 +85,8 @@ fn text_response(text: &str) -> LlmResponse {
     }
 }
 
-/// Provider: call 0 signals `started`, holds until `release`, then answers
-/// with one tool call; call 1 answers with text. Counts calls.
+/// Provider: call 0 signals `started`, holds until `release`, then answers with one tool call;
+/// call 1 answers with text.
 fn gated_tool_calling_provider(
     provider_calls: Arc<AtomicUsize>,
     started: Arc<tokio::sync::Notify>,
@@ -475,14 +475,10 @@ async fn native_takeover_settles_unresolved_cancel_authorization_before_fresh_wo
         ),
     );
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    // Commit admission is a process-global FIFO keyed by session id
-    // (`runtime::commit_admission`), so every test that names its session
-    // `root` -- over three hundred of them in this crate -- shares one lane.
-    // This case queues behind a lease takeover and is the one that observes
-    // the shared lane shedding it as `StoreCommitContended`, which is a
-    // retryable refusal the runtime is right to raise and this test never
-    // meant to exercise. A session id of its own removes the sharing; the
-    // durable assertions below are unchanged.
+    // This case queues behind a lease takeover and is the one that observes the shared lane
+    // shedding it as `StoreCommitContended`, which is a retryable refusal the runtime is right
+    // to raise and this test never meant to exercise.
+    // A session id of its own removes the sharing; the durable assertions below are unchanged.
     let session_id = SessionId::from("native-unresolved-cancel-takeover-session");
     lash_core::testing::store_fixtures::bind_conformance_session(&runtime_store, &session_id).await;
     let mut runtime = TestRuntime::new(transport)

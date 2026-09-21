@@ -56,10 +56,9 @@ pub fn normalized_response_parts(llm_response: &LlmResponse) -> Vec<LlmOutputPar
     visible_response_parts(llm_response.parts.clone())
 }
 
-/// Apply provider phase semantics to response parts. If a Responses-family
-/// provider emits both `commentary` and `final_answer` text, the latter is the
-/// final assistant prose and commentary is retained only in the raw provider
-/// response, not in user-visible prose projection.
+/// If a Responses-family provider emits both `commentary` and `final_answer` text, the latter
+/// is the final assistant prose and commentary is retained only in the raw provider response,
+/// not in user-visible prose projection.
 pub fn visible_response_parts(parts: Vec<LlmOutputPart>) -> Vec<LlmOutputPart> {
     let has_final_answer = parts.iter().any(|part| match part {
         LlmOutputPart::Text {
@@ -112,8 +111,7 @@ pub fn visible_response_text_from_parts(parts: &[LlmOutputPart]) -> String {
     full_text
 }
 
-/// Build a Reasoning `Part` from a reasoning item. `meta` is Some when
-/// the item carries provider replay metadata; None for display-only
+/// `meta` is Some when the item carries provider replay metadata; None for display-only
 /// summaries.
 pub fn reasoning_part(
     asst_id: &str,

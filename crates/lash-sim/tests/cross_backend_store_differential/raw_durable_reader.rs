@@ -13,8 +13,7 @@ impl RawDurableReader {
         }
     }
 
-    /// Decode-free per-backend residue digest. See `residue.rs` for why this
-    /// is separate from [`RawDurableReader::observe`].
+    /// See `residue.rs` for why this is separate from [`RawDurableReader::observe`].
     pub(super) async fn residue_digest(&self) -> ResidueDigest {
         match self {
             Self::InMemory { .. } => in_memory_residue_digest(&self.observe().await),

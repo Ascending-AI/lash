@@ -474,8 +474,6 @@ fn rlm_finalization_prompt(termination: &RlmTermination) -> String {
 }
 
 impl RlmContextProjector {
-    /// Test helper: the history-only messages (no current-iteration tail)
-    /// flattened to their text for substring assertions on the rendered format.
     #[cfg(test)]
     fn format_history(&self, events: &[lash_core::SessionHistoryRecord]) -> String {
         let messages = render_history_messages(&RlmHistoryRenderInput {

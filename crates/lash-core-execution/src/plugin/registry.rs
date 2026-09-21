@@ -3,9 +3,6 @@
 //! plugin crates implement, and the two convenience factories
 //! (`StaticPluginFactory`, `PluginSpecFactory`) + the `SpecPlugin`
 //! glue that walks a spec and wires each field into the registrar.
-//!
-//! Split out of `plugin/mod.rs` for file size; outer path preserved by
-//! `pub use` in `plugin/mod.rs`.
 
 use crate::SessionId;
 use std::sync::Arc;
@@ -54,8 +51,6 @@ pub struct PluginExtensions {
 }
 
 impl PluginExtensions {
-    /// Builds a `PluginExtensions` from contributions data for protocol and process-engine
-    /// implementors while preparing or executing plugin and tool work.
     pub fn from_contributions(
         contributions: impl IntoIterator<Item = PluginExtensionContribution>,
     ) -> Self {
@@ -66,7 +61,6 @@ impl PluginExtensions {
         extensions
     }
 
-    /// Adds one extension payload for protocol implementors composing a shared extension set.
     pub fn insert(&mut self, contribution: PluginExtensionContribution) {
         self.contributions
             .entry(contribution.extension_id)
@@ -130,9 +124,6 @@ impl PluginSpec {
         self
     }
 
-    /// Enable an explicit internal owner-bound process tool definition in this
-    /// host's plugin configuration.
-    ///
     /// This is an **integrator class 3: protocol and process-engine
     /// implementor** seam. Internal definitions execute through
     /// [`crate::InternalProcessToolImplementation`], not the leaf
@@ -142,9 +133,6 @@ impl PluginSpec {
         self
     }
 
-    /// Enable a completed first-party orchestrating tool definition in this
-    /// host's plugin configuration.
-    ///
     /// This is an **integrator class 3: protocol and process-engine
     /// implementor** seam. Use a first-party definition such as
     /// `lash_protocol_standard::standard_batch_orchestrating_tool`; external
@@ -450,9 +438,8 @@ pub struct PluginSessionContext {
 }
 
 impl PluginSessionContext {
-    /// Returns `true` when this context represents a root session, not a
-    /// subagent or internal child. Plugins that should only surface in
-    /// user-facing top-level turns check this in their `build`.
+    /// Plugins that should only surface in user-facing top-level turns check this in their
+    /// `build`.
     pub fn is_root_session(&self) -> bool {
         self.parent_session_id.is_none()
     }
@@ -489,9 +476,6 @@ pub trait SessionPlugin: Send + Sync {
     }
 }
 
-/// Registers a plugin with the runtime and produces a per-session
-/// `SessionPlugin` instance for each new session.
-///
 /// # Cheap-build / stateful-factory contract
 ///
 /// `build(ctx)` **must be cheap**. It runs on the hot path every time
@@ -585,12 +569,10 @@ pub trait PluginFactory: Send + Sync {
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError>;
 }
 
-/// Read-only host context handed to
-/// [`PluginFactory::process_engine_contributions`]. Exposes the built
-/// plugin-host extensions (the same data
-/// [`PluginHost::extensions`](super::PluginHost::extensions) returns), the
-/// runtime trace context, and whether process lifecycle is available on this
-/// deployment (i.e. a process registry is wired).
+/// Exposes the built plugin-host extensions (the same data
+/// [`PluginHost::extensions`](super::PluginHost::extensions) returns), the runtime trace
+/// context, and whether process lifecycle is available on this deployment (i.e. a process
+/// registry is wired).
 ///
 /// Integrator class (ADR 0051): **protocol and process-engine implementors**.
 /// This is the argument of the only method that yields
@@ -604,9 +586,6 @@ pub struct ProcessEngineContributionContext<'a> {
 }
 
 impl<'a> ProcessEngineContributionContext<'a> {
-    /// Constructs a `ProcessEngineContributionContext` for protocol and process-engine implementors
-    /// while implementing `PluginFactory::process_engine_contributions` (process engine
-    /// contributions).
     pub fn new(
         extensions: &'a PluginExtensions,
         trace_context: &'a crate::TraceContext,
@@ -619,14 +598,10 @@ impl<'a> ProcessEngineContributionContext<'a> {
         }
     }
 
-    /// Exposes extensions to protocol and process-engine implementors while implementing
-    /// `PluginFactory::process_engine_contributions` (process engine contributions).
     pub fn extensions(&self) -> &PluginExtensions {
         self.extensions
     }
 
-    /// Exposes trace context to protocol and process-engine implementors while implementing
-    /// `PluginFactory::process_engine_contributions` (process engine contributions).
     pub fn trace_context(&self) -> &crate::TraceContext {
         self.trace_context
     }

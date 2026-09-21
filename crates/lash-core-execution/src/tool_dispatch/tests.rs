@@ -901,8 +901,6 @@ fn test_plugins(provider: Arc<dyn ToolProvider>) -> Arc<PluginSession> {
     .expect("plugin session")
 }
 
-/// Runs a registered orchestrating tool the way session dispatch does.
-///
 /// The test `batch` tool lives in the orchestration lane — a recorded leaf
 /// attempt receives an `AttemptContext` and cannot fan out — so these laws
 /// enter through the same seam the runtime uses instead of the leaf route.

@@ -98,8 +98,6 @@ impl ErrorKind {
         }
     }
 
-    /// Resolves a brand from a name.
-    ///
     /// Every caller reads a compiler-emitted discriminator or a live error
     /// object's own brand, never guest text: `new EffectError(...)` is refused
     /// by the dialect's `new` allowlist, which is where every constructor the
@@ -696,9 +694,6 @@ impl Heap {
         self.commit_object_update(id, object)
     }
 
-    /// Applies JavaScript's object-to-primitive conversion without detaching a
-    /// heap object or recursing through `Value::Ref` unchanged.
-    ///
     /// This is the ECMA-exact conversion: an object with no string of its own
     /// answers `"[object Object]"`. Property keys, `console.log`'s fallback
     /// text and `Map.prototype.toString` all ask for exactly that. The string

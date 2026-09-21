@@ -57,7 +57,6 @@ pub struct BackendContentionOperation {
     pub evidence: Value,
 }
 
-/// Runs the contention report against the configured shared Postgres database.
 pub async fn run_backend_contention_report(
     artifact_root: impl AsRef<Path>,
 ) -> Result<BackendContentionReport, String> {

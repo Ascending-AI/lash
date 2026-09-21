@@ -46,7 +46,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-/// Construct opaque queued-lane holder evidence for cross-crate seam tests.
 #[cfg(any(test, feature = "testing"))]
 pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::QueuedLaneHolder {
     crate::QueuedLaneHolder::new(crate::store::SessionExecutionLease {
@@ -72,7 +71,6 @@ pub fn process_work_wiring_for_registry(
     crate::ProcessWorkWiring::new(watched, port)
 }
 
-/// Construct a real, identity-checked in-memory process environment fixture.
 #[cfg(any(test, feature = "testing"))]
 pub fn process_execution_env_fixture() -> (
     Arc<dyn crate::ProcessExecutionEnvStore>,
@@ -90,9 +88,6 @@ pub fn process_execution_env_fixture() -> (
     (Arc::new(store), env_ref)
 }
 
-/// Publishes `spec` into an existing store and returns the reference a
-/// registration carries.
-///
 /// FIG-2999: a recorded start declares its own execution env, so a fixture
 /// whose `ProcessService` realizes a recorded intent publishes that env the way
 /// the runtime's own start command does instead of leaving the registration
@@ -132,7 +127,6 @@ impl crate::ProcessEngine for FixtureProcessEngine {
     }
 }
 
-/// Construct the engine registry paired with [`process_execution_env_fixture`].
 #[cfg(any(test, feature = "testing"))]
 pub fn process_engine_fixture() -> crate::ProcessEngineRegistry {
     crate::ProcessEngineRegistry::new().with_registration(
@@ -245,17 +239,14 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub total_rows: usize,
     /// Persisted JSON encoding of the session configuration, including prompt.
     pub session_config_bytes: usize,
-    /// Sum of the persisted JSON encoding of each graph node.
     pub graph_delta_bytes: usize,
     /// Named-MessagePack size of the hydrated checkpoint.
     pub checkpoint_bytes: usize,
     /// Raw UTF-8 byte length of the committed attachment ids.
     pub attachment_manifest_bytes: usize,
-    /// Sum of the persisted JSON encoding of each queued-work batch draft.
     pub queue_batch_bytes: usize,
     /// Persisted JSON encoding of the selected Agent Frame identity.
     pub agent_frame_bytes: usize,
-    /// Sum of the persisted JSON encoding of each usage delta.
     pub usage_delta_bytes: usize,
     /// Persisted JSON encoding of the durable turn result stamp.
     pub turn_result_bytes: usize,
@@ -542,8 +533,6 @@ pub fn mock_tool_context_with_execution_binding(
     mock_tool_context().with_tool_execution_binding(binding)
 }
 
-/// Build the sealed leaf-attempt context every recorded tool body receives.
-///
 /// Tool bodies take [`crate::AttemptContext`], never [`crate::ToolContext`], so
 /// this is the context a unit test hands a provider's `execute`.
 pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
@@ -551,8 +540,6 @@ pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
 }
 
 impl<'run> crate::AttemptContext<'run> {
-    /// Test-only projection of a mock tool context, with no reserved
-    /// completion key: a test harness is not the attempt coordinator.
     pub fn __for_testing(
         context: &crate::ToolContext<'run>,
         execution_scope_id: impl Into<String>,
@@ -701,8 +688,6 @@ pub fn code_execution_context_with_tool_provider_and_catalog(
         .into_runtime()
 }
 
-/// Build a code-execution context whose process service, effect controller,
-/// and process-environment store are shared with a real test process worker.
 pub fn code_execution_context_with_process_dependencies(
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
@@ -858,7 +843,6 @@ pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controlle
         .into_runtime()
 }
 
-/// Build the stable invocation installed around an `ExecCode` effect.
 pub fn exec_code_invocation(
     session_id: impl Into<SessionId>,
     turn_id: impl Into<TurnId>,
@@ -1635,7 +1619,6 @@ where
         .await
 }
 
-/// Build an empty `AssembledTurn` whose assistant text is `summary`.
 pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTurn {
     AssembledTurn {
         state: SessionSnapshot {

@@ -117,8 +117,6 @@ pub struct Snapshot {
     pub body_copy_passes: u64,
     pub copied_bytes: u64,
     pub pool_checkout_wait_nanos: Vec<u64>,
-    /// Total SQL statements the instrumented backends executed.
-    ///
     /// Only the count is recorded, not the time: SQLite's profile clock is
     /// quantised to whole milliseconds, so summing its per-statement durations
     /// rounds every sub-millisecond statement to zero and reports a number that
@@ -147,7 +145,6 @@ impl std::fmt::Display for AlreadyInstalled {
 impl std::error::Error for AlreadyInstalled {}
 
 impl Collector {
-    /// Reset and install the one process-global collector.
     pub fn install() -> Result<Self, AlreadyInstalled> {
         COLLECTOR_STATE
             .compare_exchange(INACTIVE, INSTALLING, Ordering::AcqRel, Ordering::Relaxed)
@@ -213,7 +210,6 @@ pub fn record_body_copy(bytes: usize) {
     COPIED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
 }
 
-/// Record one wait for a pooled persistence connection.
 #[inline]
 pub fn record_pool_checkout_wait(elapsed: Duration) {
     if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
@@ -222,7 +218,6 @@ pub fn record_pool_checkout_wait(elapsed: Duration) {
     lock_pool_checkout_waits().push(elapsed.as_nanos().min(u128::from(u64::MAX)) as u64);
 }
 
-/// Record one SQL statement executed by an instrumented store backend.
 #[inline]
 pub fn record_sql_statement(sql: &str) {
     if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {

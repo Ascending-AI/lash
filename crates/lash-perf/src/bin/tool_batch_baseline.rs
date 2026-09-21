@@ -81,7 +81,6 @@ struct Args {
     /// Restate admin URL (backend=restate).
     #[arg(long, env = "RESTATE_ADMIN_URL")]
     restate_admin_url: Option<String>,
-    /// Bind address for the probe endpoint (backend=restate).
     #[arg(long, env = "EG_RESTATE_ENDPOINT_BIND")]
     restate_endpoint_bind: Option<String>,
     /// The URL Restate reaches the probe endpoint on (backend=restate).
@@ -223,8 +222,6 @@ fn emit(out: &std::path::Path, row: &MeasurementRow) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Count rows per table before and after a rep; the delta is what the batch
-/// wrote.
 #[async_trait::async_trait]
 trait JournalCounter {
     async fn count(&self) -> anyhow::Result<BTreeMap<String, i64>>;

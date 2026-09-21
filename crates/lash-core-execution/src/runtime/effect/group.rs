@@ -99,12 +99,10 @@ pub struct EffectGroupMembership {
 /// whose payload is the retained request that reconstructs the child from the
 /// journal alone.
 ///
-/// Construct with [`try_new`](Self::try_new). The fields are readable but not
-/// publicly writable, because every durability claim in ADR 0065 reduces to the
-/// group key, wake rule, and child positions *agreeing* across the group record
-/// and each child's [`EffectGroupMembership`] — and hand-stamped copies make
-/// disagreement both representable and invisible until a production replay
-/// refuses.
+/// The fields are readable but not publicly writable, because every durability claim in ADR
+/// 0065 reduces to the group key, wake rule, and child positions *agreeing* across the group
+/// record and each child's [`EffectGroupMembership`] — and hand-stamped copies make
+/// disagreement both representable and invisible until a production replay refuses.
 #[derive(Clone, Debug)]
 pub struct RuntimeEffectGroup {
     invocation: RuntimeEffectInvocation,
@@ -557,9 +555,6 @@ impl EffectGroupHandle {
         self.consumed
     }
 
-    /// Whether every child's settlement has been consumed, so a further await
-    /// would have no rank to serve.
-    ///
     /// Exhaustion is the caller's arithmetic — it is knowable from the handle
     /// alone without a round trip, which is why the await has no `Option` in its
     /// return type.
@@ -568,8 +563,6 @@ impl EffectGroupHandle {
         self.consumed >= self.children
     }
 
-    /// Records one delivered settlement, for effect-host implementors.
-    ///
     /// Called by `await_next_settlement` on exactly the settlements it returns;
     /// a cancelled or failed await must not advance the cursor.
     ///

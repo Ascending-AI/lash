@@ -12,8 +12,6 @@
 //! `String`, and borrowing conversions (`Deref`, `AsRef`, `Borrow`) so a typed
 //! id still reads as text at store and formatting boundaries without cloning.
 
-/// Defines one transparent string identity newtype.
-///
 /// Every identity gets the same surface deliberately: differing accessor sets
 /// were how the borrowed/cloned drift these types replaced arose in the first
 /// place. The generated `serde` and schema impls delegate to `String`, and each
@@ -201,11 +199,7 @@ string_identity!(
     "process"
 );
 
-string_identity!(
-    /// Store-minted identity of one node in a session graph.
-    NodeId,
-    "session-graph node"
-);
+string_identity!(NodeId, "session-graph node");
 
 string_identity!(
     /// Identity of one queued turn input.

@@ -65,8 +65,6 @@ pub struct PluginOptions {
     pub plugins: BTreeMap<String, serde_json::Value>,
 }
 impl PluginOptions {
-    /// Constructs an empty `PluginOptions` for protocol and process-engine implementors while
-    /// preparing or executing plugin and tool work.
     pub fn empty() -> Self {
         Self::default()
     }
@@ -81,7 +79,6 @@ impl PluginOptions {
         Ok(options)
     }
 
-    /// Inserts one plugin's typed options for protocol implementors composing a shared option map.
     pub fn insert_typed<T>(
         &mut self,
         plugin_id: impl Into<String>,
@@ -95,8 +92,6 @@ impl PluginOptions {
         Ok(())
     }
 
-    /// Decodes one plugin's typed options for protocol and process-engine implementors, returning
-    /// `None` when that plugin supplied no entry.
     pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
     where
         T: DeserializeOwned,

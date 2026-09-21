@@ -131,9 +131,7 @@ fn process_body_facets_carry_node_spans() {
 
 #[test]
 fn unknown_top_level_name_on_line_40_fails_at_link() {
-    // value_1 = 1
-    // ... 38 more assignments ...
-    // finish value_39_typo
+    // 38 more assignments ... finish value_39_typo
     //
     // The renderer needs real spans and TypeScript lowering does not supply
     // them yet (FIG-3065), so the test builds the source text and pins the
@@ -171,7 +169,6 @@ fn unknown_top_level_name_on_line_40_fails_at_link() {
 
 #[test]
 fn live_host_globals_are_known_at_top_level() {
-    // finish { saved: persisted, payload: projected }
     let program = builders::program(vec![builders::finish(builders::record(vec![
         ("saved", builders::var("persisted")),
         ("payload", builders::var("projected")),
@@ -182,7 +179,6 @@ fn live_host_globals_are_known_at_top_level() {
 
 #[test]
 fn module_operation_calls_win_over_colliding_live_globals() {
-    // finish await tools.echo({ value: tools })?
     let program = builders::program(vec![builders::finish(builders::module_call(
         &["tools"],
         "echo",

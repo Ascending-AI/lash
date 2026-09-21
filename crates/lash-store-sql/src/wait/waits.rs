@@ -36,7 +36,6 @@ pub struct WaitRow {
     pub wait_json: String,
     /// Owning session, when the scope has one.
     pub session_id: Option<String>,
-    /// Whether the promise is turn-control machinery.
     pub turn_control: bool,
     /// The resolved terminal, when the promise has settled.
     pub terminal_json: Option<String>,
@@ -83,7 +82,6 @@ crate::statements! {
                )
              ORDER BY key_id";
 
-        /// Delete every promise of session `?1`.
         delete_by_session = "DELETE FROM await_event_waits WHERE session_id = ?1";
 
         /// Delete every promise under the scope whose canonical JSON is `?1`.

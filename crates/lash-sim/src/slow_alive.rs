@@ -42,7 +42,6 @@ use serde_json::{Value, json};
 use crate::backend_contention::{LEASE_SEMANTIC_TTL_MS, LEASE_TTL_MS};
 use crate::clock::SimClock;
 
-/// Store operation a slow-but-alive arm can delay.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SlowAliveOperation {
@@ -90,7 +89,6 @@ struct SlowAliveState {
     observations: Vec<SlowAliveObservation>,
 }
 
-/// Store-operation delay injector on the simulator's virtual clock.
 #[derive(Debug)]
 pub struct StoreOperationDelayInjector {
     clock: Arc<SimClock>,

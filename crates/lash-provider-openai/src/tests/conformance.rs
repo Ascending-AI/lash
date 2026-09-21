@@ -336,9 +336,8 @@ impl ProviderNormalizer for OpenAiNormalizer {
     fn build_next_request(&self, scenario: Scenario, messages: Vec<LlmMessage>) -> Value {
         let provider = OpenAiProvider::new("key");
         let req = request(messages);
-        // Tool-call replay is a Chat Completions obligation here (the
-        // `reasoning_details` detail keyed by call_id); reasoning replay is a
-        // Responses obligation. Build the dialect the fixture belongs to.
+        // Tool-call replay is a Chat Completions obligation here (the `reasoning_details`
+        // detail keyed by call_id); reasoning replay is a Responses obligation.
         if matches!(scenario, Scenario::ToolCallReplayRoundTrip) {
             return chat_provider()
                 .build_chat_request_body(&req, false)

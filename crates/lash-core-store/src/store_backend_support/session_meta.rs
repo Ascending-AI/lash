@@ -263,14 +263,12 @@ pub struct SessionMetaCodec {
 }
 
 impl SessionMetaCodec {
-    /// Construct a codec whose overflow diagnostics name the backend integer type.
     pub const fn new(backend_integer_type: &'static str) -> Self {
         Self {
             backend_integer_type,
         }
     }
 
-    /// Encode public session metadata into backend-neutral stored columns.
     pub fn encode(self, meta: &SessionMeta) -> Result<StoredRelation, StoreError> {
         let mut seen_processes = std::collections::BTreeSet::new();
         let mut pending_observer_intents = Vec::with_capacity(meta.pending_observer_intents.len());
@@ -377,7 +375,6 @@ impl SessionMetaCodec {
         self.decode(stored)
     }
 
-    /// Decode and validate backend-neutral stored columns as public metadata.
     pub fn decode(self, stored: StoredRelation) -> Result<SessionMeta, StoreError> {
         let relation = match stored.relation_kind.as_str() {
             "root" => {
@@ -486,7 +483,6 @@ impl SessionMetaCodec {
         })
     }
 
-    /// Convert a collection index to the backend's signed SQL integer type.
     pub fn write_index(self, value: usize, field: &'static str) -> Result<i64, StoreError> {
         i64::try_from(value).map_err(|_| {
             StoreError::Backend(format!(
@@ -496,7 +492,6 @@ impl SessionMetaCodec {
         })
     }
 
-    /// Validate and convert a signed stored collection index.
     pub fn read_index(self, value: i64, field: &'static str) -> Result<usize, StoreError> {
         usize::try_from(value)
             .map_err(|_| self.corrupt(format!("{field} must be non-negative, got {value}")))

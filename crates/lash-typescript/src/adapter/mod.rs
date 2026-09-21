@@ -26,9 +26,7 @@ use prototype_chain::{
 use rejections::{parser_diagnostic, reject, reject_defect, reject_refusal, source_span};
 pub(crate) use types::{TypeAnnotation, TypeAnnotationField, TypeShape};
 
-/// Maximum source-level statement or expression nesting accepted by the
-/// TypeScript dialect. This is deliberately below the shared AST and 2 MiB
-/// native-stack limits.
+/// This is deliberately below the shared AST and 2 MiB native-stack limits.
 pub const MAX_SOURCE_NESTING_DEPTH: usize = 28;
 
 #[derive(Clone, Debug)]

@@ -467,12 +467,10 @@ pub(crate) async fn put_checkpoint_tx(
     // 2. manifest-root and component blob rows, ascending by content hash;
     // 3. checkpoint-owner edges, graph rows, and session heads.
     //
-    // This transaction bulk-inserts every supplied body in hash order, then
-    // acquires the complete root/component union with one ordered FOR KEY SHARE
-    // query. Concurrent reclaim that wins first is a typed missing-root/component
-    // refusal, never a resurrection or a later foreign-key error. Delete takes
-    // FOR UPDATE on the identical sorted union before severing any owner edge,
-    // graph row, or head.
+    // This transaction bulk-inserts every supplied body in hash order, then acquires the
+    // complete root/component union with one ordered FOR KEY SHARE query.
+    // Concurrent reclaim that wins first is a typed missing-root/component refusal, never a
+    // resurrection or a later foreign-key error.
     let mut acquisition_order = manifest
         .components
         .iter()
@@ -874,9 +872,8 @@ pub(crate) async fn commit_attachment_refs_tx(
     Ok(())
 }
 
-/// Decode one persisted usage disposition. The column is `NOT NULL` and prior
-/// schema components are refused outright, so every value here was written by
-/// this encoding.
+/// The column is `NOT NULL` and prior schema components are refused outright, so every value
+/// here was written by this encoding.
 pub(crate) fn decode_usage_disposition(
     stored: &str,
 ) -> Result<lash_core::LedgerUsageDisposition, StoreError> {

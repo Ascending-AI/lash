@@ -1048,8 +1048,6 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
         }
     };
     let executions = || ran.load(std::sync::atomic::Ordering::SeqCst);
-    // Record the receipt fact the sweep selects on: the operation's receipt
-    // key in the session's commit ledger, as a completed operation leaves it.
     let record_receipt = |scope: &ExecutionScope| {
         let receipt = lash_core::store::plugin_operation_receipt_storage_key(scope)
             .expect("receipt storage key");

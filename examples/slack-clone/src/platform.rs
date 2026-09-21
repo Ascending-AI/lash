@@ -41,7 +41,6 @@ pub struct PlatformConfig {
     pub bot_token: String,
     /// The value stamped into every event envelope's deprecated `token` field.
     pub verification_token: String,
-    /// Handle for the installed app's bot user.
     pub bot_handle: String,
     /// Workspace display name, returned by `auth.test`.
     pub team_name: String,
@@ -56,7 +55,6 @@ pub struct PlatformConfig {
 }
 
 impl PlatformConfig {
-    /// Read configuration from the environment, applying defaults.
     pub fn from_env() -> Result<Self> {
         let addr = std::env::var("SLACK_CLONE_ADDR")
             .unwrap_or_else(|_| "127.0.0.1:3040".to_string())
@@ -165,7 +163,6 @@ pub async fn run(config: PlatformConfig) -> Result<()> {
     Ok(())
 }
 
-/// Resolve on Ctrl-C or SIGTERM.
 async fn shutdown_signal() {
     let interrupt = async {
         let _ = tokio::signal::ctrl_c().await;

@@ -418,9 +418,9 @@ pub(crate) use normalized_item::NormalizedItem;
 /// turn-driving entry points (`stream_turn`,
 /// `stream_turn_with_agent_frames`).
 ///
-/// Construct via [`TurnOptions::new`] and chain `with_*` builders. Event sinks
-/// default to no-op sinks. Execution scope is explicit and required at every
-/// runtime boundary that can execute nondeterministic work.
+/// Event sinks default to no-op sinks.
+/// Execution scope is explicit and required at every runtime boundary that can execute
+/// nondeterministic work.
 pub struct TurnOptions<'a> {
     events: Option<&'a dyn EventSink>,
     turn_events: Option<&'a dyn TurnActivitySink>,

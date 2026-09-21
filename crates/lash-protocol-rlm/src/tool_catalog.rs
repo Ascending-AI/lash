@@ -19,14 +19,10 @@ pub(crate) fn rlm_tool_catalog(
     Ok(ToolCatalogContribution::default())
 }
 
-/// Render every catalog member as a full prompt doc under **this dialect's**
-/// call path. Being a member *is* being presented.
+/// Being a member *is* being presented.
 ///
-/// This used to render every doc under the Lashlang path unconditionally, so a
-/// TypeScript session was handed a tool list it could not call: the typed
-/// declarations in its execution section said one thing and the doc block said
-/// another. Registration already requires the binding on every non-internal
-/// tool, so the dialect's path is always available.
+/// Registration already requires the binding on every non-internal tool, so the dialect's path
+/// is always available.
 #[expect(
     clippy::expect_used,
     reason = "catalog registration validates dialect tool bindings for both dialects, so tool_call_path only errs on an unregistered manifest"
@@ -121,7 +117,6 @@ fn schema_nests(schema: &serde_json::Value, depth: usize) -> bool {
     })
 }
 
-/// Resolve the dialect tokens in one rendered doc row's `description`.
 fn render_doc_field_prose(
     vocabulary: crate::dialect::DialectPromptVocabulary,
     rows: &mut [serde_json::Value],
@@ -142,9 +137,8 @@ fn render_doc_field_prose(
 struct AuthoredProse {
     site: &'static str,
     text: String,
-    /// True when this exact string is one the renderer copies into a doc row and
-    /// therefore token-resolves. A dialect word is a defect either way; a *token*
-    /// is only meaningful where it gets resolved.
+    /// A dialect word is a defect either way; a *token* is only meaningful where it gets
+    /// resolved.
     token_resolved: bool,
 }
 

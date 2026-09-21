@@ -3,9 +3,6 @@ use crate::{AppendRequestIdentity, StoreError};
 
 const RECORD_KIND: &str = "RuntimeCommitReceipt append identity";
 
-/// Decode and validate the SQL columns that carry a runtime-commit receipt
-/// identity.
-///
 /// The columns encode three families. All-NULL is a plain commit. A populated
 /// hash and version with a requested-node count is an append identity. A
 /// populated hash and version with a NULL count is a semantic-boundary

@@ -715,7 +715,6 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         store
             .publish_module_artifact(
                 &lash_core::ArtifactOwner::host("readonly-test"),
-                // finish true
                 &lashlang::ModuleArtifact::from_program({
                     use lashlang::testing::ast_builders as b;
 

@@ -121,8 +121,6 @@ impl LashRuntime {
         self.state.effective_protocol_turn_options()
     }
 
-    /// Record protocol-owned turn options while a session materializes.
-    ///
     /// This is the initialization half of the FIG-2479 contract: protocol
     /// materialization hooks run before the session has a committed head, and
     /// [`Self::configure_protocol_on_materialize`] marks the resulting config
@@ -138,15 +136,9 @@ impl LashRuntime {
         self.state.protocol_turn_options = options;
     }
 
-    /// Run the protocol plugin's materialization hook against this runtime.
-    ///
-    /// Fires the
-    /// [`ProtocolSessionPlugin::configure_runtime_on_materialize`](crate::plugin::ProtocolSessionPlugin::configure_runtime_on_materialize)
-    /// hook, so both the child-create path and the root/builder-open path
-    /// converge on one seam. `plugin_options` are the plugin-keyed options that
-    /// reached this materialization (builder options for root opens, request
-    /// options for child create); `is_root_session` distinguishes root from
-    /// child.
+    /// `plugin_options` are the plugin-keyed options that reached this materialization
+    /// (builder options for root opens, request options for child create); `is_root_session`
+    /// distinguishes root from child.
     pub fn configure_protocol_on_materialize(
         &mut self,
         plugin_options: &crate::PluginOptions,
@@ -588,8 +580,6 @@ impl LashRuntime {
         )
     }
 
-    /// Run the registered compaction provider and commit the resulting
-    /// seed nodes into a fresh Agent Frame.
     pub async fn compact_context(
         &mut self,
         instructions: Option<String>,
@@ -1194,8 +1184,7 @@ impl LashRuntime {
             return Ok(None);
         }
         let host = self.effect_host();
-        // Select the host's controller without executing an effect. The command
-        // commit keeps its claimed batch's existing operation identity.
+        // The command commit keeps its claimed batch's existing operation identity.
         let controller = host.scoped(crate::AdmittedScope::queue_drain(
             &self.state.session_id,
             "session-command",

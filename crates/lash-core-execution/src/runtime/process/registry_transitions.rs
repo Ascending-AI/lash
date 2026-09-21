@@ -440,9 +440,6 @@ pub fn unknown_wake_delivery(delivery_id: &str) -> PluginError {
     PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
 }
 
-/// Parse a persisted `state` label, the inverse of
-/// [`WakeDeliveryState::as_str`].
-///
 /// The labels are durable values, so this is the only reader: an unrecognised
 /// one is a refusal, never a default.
 pub fn wake_delivery_state_from_label(
@@ -460,9 +457,6 @@ pub fn wake_delivery_state_from_label(
     }
 }
 
-/// Parse a persisted `discard_reason` label, the inverse of
-/// [`WakeDiscardReason::as_str`].
-///
 /// `None` stays `None`: a delivery that was never discarded carries no reason.
 /// [`WakeDiscardReason`] is `#[non_exhaustive]`, so this single reader is also
 /// the single place a new reason has to be taught.
@@ -487,17 +481,14 @@ pub fn wake_discard_reason_from_label(
 pub struct WakeDeliveryRow {
     /// `delivery_id`, the structural wake identity.
     pub delivery_id: String,
-    /// `state`.
     pub state_label: String,
     /// `claim_token`, the ownership fence of the current `enqueuing` claim.
     pub claim_token: Option<String>,
-    /// `attempts`.
     pub attempts: i64,
     /// `first_attempt_ms`.
     pub first_attempt_ms: Option<i64>,
     /// `next_attempt_at_ms`.
     pub next_attempt_at_ms: i64,
-    /// `expires_at_ms`.
     pub expires_at_ms: i64,
     /// `discard_reason`.
     pub discard_reason_label: Option<String>,

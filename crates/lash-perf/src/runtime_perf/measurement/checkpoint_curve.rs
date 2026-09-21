@@ -36,9 +36,7 @@ impl CheckpointCurvePoint {
 }
 
 pub(crate) fn checkpoint_curve_points(config: &CheckpointCurveConfig) -> Vec<CheckpointCurvePoint> {
-    // Runtime scenarios accept scalar CLI parameters rather than a Cartesian
-    // sweep. Derive one small, stable three-point curve on each axis around
-    // those configured center values so both axes remain paired in one run.
+    // Runtime scenarios accept scalar CLI parameters rather than a Cartesian sweep.
     let component_targets = [
         config.component_count / CHECKPOINT_CURVE_SCALE,
         config.component_count,

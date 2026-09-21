@@ -30,8 +30,6 @@ pub(super) enum AttemptAuthority<'grant> {
 }
 
 impl<'grant> AttemptAuthority<'grant> {
-    /// Resolves the authority for one prepared attempt.
-    ///
     /// A grant short-circuits the catalog lookup: out-of-catalog execution is
     /// the whole point of a grant, so a grant never has to be a catalog member.
     /// Without a grant, catalog membership is the only admission route, and a
@@ -88,8 +86,6 @@ impl<'grant> AttemptAuthority<'grant> {
         ))
     }
 
-    /// Applies the grant's execution binding to the tool context.
-    ///
     /// Only a grant carries a binding, and it must be applied before the
     /// completion context is cloned so a parking attempt keeps it.
     fn apply_execution_binding<'run>(&self, tool_context: ToolContext<'run>) -> ToolContext<'run> {
@@ -102,9 +98,6 @@ impl<'grant> AttemptAuthority<'grant> {
     }
 }
 
-/// Appends the process event a deferring attempt declared, at the moment the
-/// call parks.
-///
 /// A recorded attempt body cannot append process events — its
 /// [`crate::AttemptContext`] has no route to them — so a tool that must
 /// announce its durable wait declares the event on its
@@ -196,8 +189,6 @@ pub async fn execute_orchestrating_tool<'run>(
     outcome
 }
 
-/// Runs an internal process-body tool without creating a `ToolAttempt` frame.
-///
 /// Unlike authored orchestration, this is the owner-bound activity of the
 /// process itself and may perform host I/O. It is available only to
 /// `ToolActivation::Internal` process inputs, never to model-facing calls.

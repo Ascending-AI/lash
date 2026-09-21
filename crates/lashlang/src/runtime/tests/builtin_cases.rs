@@ -46,7 +46,6 @@ fn finish_validate_email(value: Expr, schema: Expr) -> Program {
 
 #[tokio::test(flavor = "current_thread")]
 async fn arithmetic_and_compare_errors_are_covered() {
-    // `finish 7 - 2`
     assert_eq!(
         exec(finish_binary(
             builders::num(7.0),
@@ -57,7 +56,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         .expect("subtract should succeed"),
         Value::Number(5.0)
     );
-    // `finish 3 * 4`
     assert_eq!(
         exec(finish_binary(
             builders::num(3.0),
@@ -68,7 +66,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         .expect("multiply should succeed"),
         Value::Number(12.0)
     );
-    // `finish 8 / 2`
     assert_eq!(
         exec(finish_binary(
             builders::num(8.0),
@@ -90,7 +87,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         .expect("modulo should succeed"),
         Value::Number(2.0)
     );
-    // `finish 1 != 2`
     assert_eq!(
         exec(finish_binary(
             builders::num(1.0),
@@ -101,7 +97,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         .expect("not equal should succeed"),
         Value::Bool(true)
     );
-    // `finish 1 <= 2`
     assert_eq!(
         exec(finish_binary(
             builders::num(1.0),
@@ -112,7 +107,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         .expect("less-equal should succeed"),
         Value::Bool(true)
     );
-    // `finish 2 > 1`
     assert_eq!(
         exec(finish_binary(
             builders::num(2.0),
@@ -123,7 +117,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         .expect("greater should succeed"),
         Value::Bool(true)
     );
-    // `finish 2 >= 1`
     assert_eq!(
         exec(finish_binary(
             builders::num(2.0),
@@ -135,7 +128,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         Value::Bool(true)
     );
 
-    // `finish [1,2] + [3]`
     let value = exec(finish_binary(
         builders::list(vec![builders::num(1.0), builders::num(2.0)]),
         BinaryOp::Add,
@@ -148,7 +140,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
         Value::List(vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)].into())
     );
 
-    // `finish "a" + "b"`
     let value = exec(finish_binary(
         builders::string("a"),
         BinaryOp::Add,
@@ -158,7 +149,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
     .expect("string add should succeed");
     assert_eq!(value, Value::String("ab".to_string().into()));
 
-    // `finish "a" + 1`
     let value = exec(finish_binary(
         builders::string("a"),
         BinaryOp::Add,
@@ -168,7 +158,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
     .expect("string coercion should succeed");
     assert_eq!(value, Value::String("a1".to_string().into()));
 
-    // `finish 1 + "b"`
     let value = exec(finish_binary(
         builders::num(1.0),
         BinaryOp::Add,
@@ -198,7 +187,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
     .expect("null should coerce for addition");
     assert_eq!(value, Value::Number(2.0));
 
-    // `finish "2" * 3`
     let value = exec(finish_binary(
         builders::string("2"),
         BinaryOp::Multiply,
@@ -208,7 +196,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
     .expect("numeric strings should coerce");
     assert_eq!(value, Value::Number(6.0));
 
-    // `finish "2" < 10`
     let value = exec(finish_binary(
         builders::string("2"),
         BinaryOp::Less,
@@ -218,7 +205,6 @@ async fn arithmetic_and_compare_errors_are_covered() {
     .expect("numeric strings should compare");
     assert_eq!(value, Value::Bool(true));
 
-    // `finish {} + 1`
     let err = exec(finish_binary(
         builders::record(Vec::new()),
         BinaryOp::Add,

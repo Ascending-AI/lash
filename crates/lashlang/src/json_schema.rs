@@ -404,8 +404,6 @@ fn child(path: &str, segment: &str) -> String {
     format!("{path}/{segment}")
 }
 
-/// Whether a non-pointer `$ref` reads as a lash named data type.
-///
 /// Named data types are dotted identifiers (`lash.TriggerRegistration`). A URL
 /// or a relative file reference is a JSON Schema construct lash cannot resolve,
 /// and keeps widening rather than inventing a name the linker would reject.

@@ -30,10 +30,8 @@ pub trait ReleaseStampDeployment: Send + Sync {
     /// law compares against this rather than a literal.
     fn build_release(&self) -> String;
 
-    /// Open the store the way a host would, provisioning it if it is new.
     async fn open(&self) -> Result<(), StoreError>;
 
-    /// Read the deployment's schema status without opening it.
     async fn preflight(&self) -> Result<StoreSchemaStatus, StoreError>;
 
     /// Overwrite the stored release string, leaving the rest of the stamp

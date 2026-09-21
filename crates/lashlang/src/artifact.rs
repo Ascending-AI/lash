@@ -234,7 +234,6 @@ impl ModuleArtifact {
         )
     }
 
-    /// Returns the complete, resolved signature named by one artifact export.
     pub fn process_type(&self, process_name: &str) -> Option<TypeExpr> {
         let process = self.canonical_ir.process(process_name)?;
         let output = process.return_ty.as_ref()?;
@@ -555,7 +554,6 @@ pub trait LashlangArtifactStore: Send + Sync {
         artifact: &ModuleArtifact,
     ) -> Result<(), ArtifactStoreError>;
 
-    /// Add an owner edge to an existing module artifact.
     async fn retain_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,

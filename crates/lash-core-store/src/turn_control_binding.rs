@@ -84,8 +84,6 @@ pub trait StoreTurnCancellationAuthority: std::any::Any + Send + Sync {
 pub struct TurnControlBindingId(String);
 
 impl TurnControlBindingId {
-    /// Validates and wraps a minted binding identity.
-    ///
     /// Refuses only what cannot be an authority at all. The structure above the
     /// separator is the minting function's, not this type's — re-deriving it
     /// here would be a second copy of

@@ -70,9 +70,6 @@ impl Default for CataloguePreviewOptions {
     }
 }
 
-/// Build a catalogue-preview contribution from the projected JSON catalogue
-/// consumed by a `search_tools` implementation.
-///
 /// Each record needs a `name` and a `bindings["typescript.tool"]` value. Extra
 /// fields such as id, description, and compact contract are ignored by the
 /// preview but can still be used by the search index.

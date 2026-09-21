@@ -1429,8 +1429,6 @@ pub(super) async fn restate_process_attach_maps_malformed_ingress_body_to_plugin
     );
 }
 
-/// Records each pushed event's `(event_type, sequence)` in emit order, and
-/// every worker fault the handle reports.
 #[derive(Clone, Default)]
 pub(super) struct RecordingProcessEventSink {
     events: Arc<Mutex<Vec<(String, u64)>>>,

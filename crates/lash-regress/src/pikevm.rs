@@ -67,14 +67,11 @@ fn run_loop<Position: PositionType>(
         // times.
         skip_ok = ld.iters >= lf.min_iters;
 
-        // Check if this iteration was beyond the minimum number of times, and our entry
-        // position is the same as last time (ES6 21.2.2.5.1 note 4).
         // If so, we matched the empty string and we stop.
         if ld.iters > lf.min_iters && ld.entry == s.pos {
             return StateMatch::Fail;
         }
     }
-    // Set up our fields as if we are going to enter the loop.
     ld.entry = s.pos;
     s.ip += 1;
 
@@ -245,7 +242,6 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             end_group: _,
             continuation,
         } => {
-            // Enter into the lookaround's instruction stream.
             s.ip += 1;
             let saved_pos = s.pos;
             let attempt_succeeded =
@@ -266,7 +262,6 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             end_group: _,
             continuation,
         } => {
-            // Enter into the lookaround's instruction stream.
             s.ip += 1;
             let saved_pos = s.pos;
             let attempt_succeeded = MatchAttempter::new(re).try_at_pos(*input, s, Backward::new());
@@ -440,7 +435,6 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
     ) -> Option<Match> {
         let re = self.matcher.re;
 
-        // Check if this is an anchored regex - if so, only try matching at the current position
         if matches!(re.start_pred, StartPredicate::StartAnchored) {
             let mut state = State {
                 pos,

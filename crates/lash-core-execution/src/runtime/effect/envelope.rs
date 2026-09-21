@@ -218,9 +218,8 @@ impl RuntimeEffectEnvelope {
         Self::try_new(invocation, command).expect("valid runtime effect invocation")
     }
 
-    /// Validates and constructs an effect envelope for effect-host implementors. The admitted
-    /// address and descriptive effect label must be valid, and tool attempts and batches must
-    /// carry valid indices and IDs.
+    /// The admitted address and descriptive effect label must be valid, and tool attempts and
+    /// batches must carry valid indices and IDs.
     pub fn try_new(
         invocation: RuntimeEffectInvocation,
         command: RuntimeEffectCommand,
@@ -234,10 +233,6 @@ impl RuntimeEffectEnvelope {
         })
     }
 
-    /// Marks this envelope as child `position` of the group `group_key`, for
-    /// effect-host implementors building a
-    /// [`RuntimeEffectGroup`](super::group::RuntimeEffectGroup).
-    ///
     /// Prefer
     /// [`RuntimeEffectGroup::try_new`](super::group::RuntimeEffectGroup::try_new),
     /// which stamps every child from its own index and checks agreement; reach
@@ -346,10 +341,13 @@ fn validate_effect_command(
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SleepSpec {
-    /// Sleep for `duration_ms` from the claim instant.
-    For { duration_ms: u64 },
+    For {
+        duration_ms: u64,
+    },
     /// Sleep until the wall-clock instant `deadline_ms`.
-    Until { deadline_ms: u64 },
+    Until {
+        deadline_ms: u64,
+    },
 }
 
 /// Serializable command emitted at Lash's nondeterministic runtime boundary.
@@ -450,8 +448,6 @@ impl RuntimeEffectCommand {
         }
     }
 
-    /// Exposes kind to store, effect-host, and protocol implementors while materializing,
-    /// executing, or persisting a session turn.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,

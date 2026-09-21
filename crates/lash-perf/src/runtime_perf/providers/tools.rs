@@ -92,8 +92,6 @@ impl BenchmarkToolCatalogObserver {
         });
     }
 
-    /// Count one session-catalog composition for the armed variant.
-    ///
     /// Counting only. This used to also open and immediately close a
     /// `tool_catalog.<variant>.session_catalog_composition` phase span, which
     /// budgeted the profiler rather than the catalog: no catalog work happens
@@ -300,8 +298,6 @@ fn done_without_intents(result: ToolOutcome) -> ToolAttemptOutcome {
     }
 }
 
-/// Commit the send receipt and declare the `mail.received` emission it owes.
-///
 /// The emission is a journaled trigger occurrence, so it cannot run inside the
 /// recorded attempt body: it is declared here and executed by the intent
 /// executor once the attempt commits. This site opens the occurrence-to-delivery

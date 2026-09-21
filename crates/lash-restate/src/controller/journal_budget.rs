@@ -115,8 +115,7 @@ pub(crate) enum JournaledBudgetVerdict {
     GaveUpOverBudget { budget: u64 },
 }
 
-/// Decide, from the envelope and the budget in force right now, whether an
-/// eagerly-executed effect may run. Journal the result before acting on it.
+/// Journal the result before acting on it.
 pub(super) fn budget_verdict(
     effect: &str,
     payload_budget: Option<u64>,

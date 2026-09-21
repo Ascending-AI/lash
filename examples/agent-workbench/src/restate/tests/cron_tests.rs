@@ -1926,7 +1926,6 @@ async fn cron_registration_disposition_ignores_record_order() {
     .await;
     let session_id = state.current_session_id();
 
-    // Records sort by subscription key: the disabled record is first here.
     let source_key = "cron-source:fig1071-order-disabled-first";
     let disabled_first = register_cron_test_subscription_record(
         trigger_store.as_ref(),

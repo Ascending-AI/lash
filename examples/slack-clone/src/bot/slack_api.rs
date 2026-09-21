@@ -53,8 +53,8 @@ pub struct SlackApi {
 }
 
 impl SlackApi {
-    /// Build a client. `base_url` is the API origin (`https://slack.com` for
-    /// real Slack), `token` the bot token sent as `Authorization: Bearer …`.
+    /// `base_url` is the API origin (`https://slack.com` for real Slack), `token` the bot
+    /// token sent as `Authorization: Bearer …`.
     pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Result<Self> {
         Ok(Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
@@ -374,9 +374,6 @@ pub fn find_reply_for_event(
         .map(|message| message.ts.clone())
 }
 
-/// Walk every page at or after `message_ts` looking for this bot's reply to
-/// `event_id`.
-///
 /// Follows the pagination cursor to exhaustion within the `ts` window, so the
 /// answer does not depend on how busy the channel has been since.
 pub async fn find_posted_reply(

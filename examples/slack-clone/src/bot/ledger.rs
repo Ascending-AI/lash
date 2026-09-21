@@ -105,19 +105,18 @@ pub enum Stage {
     /// The turn is committed and a reply is owed, with its text in `detail`.
     /// Not terminal.
     ReplyPending,
-    /// Ambient context folded into the channel session. Terminal.
+    /// Ambient context folded into the channel session.
     Folded,
-    /// Reply posted; `reply_ts` names it. Terminal.
+    /// Reply posted; `reply_ts` names it.
     Replied,
     /// A turn reached a terminal provider failure. Terminal, with the typed
     /// failure in [`EventRecord::provider_failure`].
     ProviderError,
-    /// Deliberately not acted on. Terminal.
+    /// Deliberately not acted on.
     Ignored,
 }
 
 impl Stage {
-    /// Whether the event needs no further work.
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
@@ -202,11 +201,9 @@ impl EventReason {
 /// How an advance writes the nullable detail column.
 #[derive(Debug)]
 pub enum DetailWrite {
-    /// Leave the existing detail unchanged.
     Keep,
     /// Replace the existing detail with this value.
     Set(String),
-    /// Set the existing detail to SQL `NULL`.
     Clear,
 }
 
@@ -377,7 +374,6 @@ impl EventLedger {
             .await
     }
 
-    /// Record the exact channel boundary preceding a folded top-level admission.
     pub async fn record_admission_node(&self, event_id: String, node_id: String) -> Result<()> {
         self.database
             .call(move |connection| {
@@ -584,7 +580,6 @@ impl EventLedger {
             .await
     }
 
-    /// Read one row.
     pub async fn get(&self, event_id: String) -> Result<Option<EventRecord>> {
         self.database
             .call(move |connection| read(connection, &event_id))

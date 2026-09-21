@@ -10,8 +10,6 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only SQLite issues.
     pub(crate) struct PendingInputSqliteStatements @ "pending_turn_input" {
-        /// Enqueue input `?1` for session `?2`.
-        ///
         /// `enqueue_seq` is this table's `INTEGER PRIMARY KEY AUTOINCREMENT` on
         /// SQLite and is never bound; PostgreSQL draws it from the column's
         /// sequence first so its upsert path knows the value.

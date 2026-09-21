@@ -10,8 +10,6 @@
 /// a host, so neither alias may gate this dispatch (FIG-3079).
 pub use lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE;
 
-/// Resolves the TypeScript dialect's nondeterministic standard-library calls.
-///
 /// This is invoked only while resolving a VM `ResourceOperation` ability. That
 /// suspension is the journal boundary: the sampled value is committed as the
 /// ability outcome and replay never samples the clock or RNG again.

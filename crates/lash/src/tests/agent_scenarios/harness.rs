@@ -33,9 +33,8 @@ pub(super) struct AgentScenario {
     pub(super) expected_final_value: Option<serde_json::Value>,
     pub(super) tool_provider: Option<Arc<dyn ToolProvider>>,
     pub(super) install_subagents: bool,
-    /// Installs the process-controls plugin alone. The `processes` module is
-    /// catalogue presence, not an ability bit (ADR 0095), so any scenario whose
-    /// scripted program authors `processes.*` must install this factory or the
+    /// The `processes` module is catalogue presence, not an ability bit (ADR 0095), so any
+    /// scenario whose scripted program authors `processes.*` must install this factory or the
     /// cell is refused with "unknown module `processes`".
     pub(super) install_process_controls: bool,
     pub(super) install_process_composition: bool,

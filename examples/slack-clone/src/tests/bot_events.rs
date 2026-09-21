@@ -803,8 +803,6 @@ async fn the_child_prompt_names_its_thread_root_among_the_inherited_prefix() {
     );
 }
 
-/// Whether every occurrence of `label` in the request's text starts a line.
-///
 /// Queued text inputs concatenate into one user message with no separator, so a
 /// label is only readable as a label when nothing precedes it on its line. The
 /// request is inspected as JSON because that is how the scripted provider

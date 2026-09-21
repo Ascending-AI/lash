@@ -64,8 +64,6 @@ crate::statements! {
                AND phase = 'condemned'
                AND write_token IS NULL";
 
-        /// Drop attempt `?2`'s claim on `?1`, leaving the condemnation itself
-        /// standing for the next writer or sweeper.
         clear_write_claim = "UPDATE attachment_condemnations
              SET write_token = NULL, write_session_id = NULL
              WHERE attachment_id = ?1 AND write_token = ?2";
@@ -101,9 +99,8 @@ crate::statements! {
         delete_unclaimed_condemned = "DELETE FROM attachment_condemnations
              WHERE attachment_id = ?1 AND phase = 'condemned' AND write_token IS NULL";
 
-        /// Return an abandoned sweep's un-tokened condemnation of `?1` to
-        /// `Free`. A stale sweep cannot clear a restoring writer's token,
-        /// which is why the token predicate rides on the `condemned` arm only.
+        /// A stale sweep cannot clear a restoring writer's token, which is why the token
+        /// predicate rides on the `condemned` arm only.
         delete_sweep_owned = "DELETE FROM attachment_condemnations
              WHERE attachment_id = ?1
                AND (phase = 'deleting'

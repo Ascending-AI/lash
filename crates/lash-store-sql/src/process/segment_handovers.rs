@@ -47,13 +47,9 @@ crate::statements! {
                  WHERE process_id = ?1
                  ORDER BY segment_ordinal DESC LIMIT 1";
 
-        /// Drop every handover of process `?1` older than the one before `?2`:
-        /// a segment keeps its immediate predecessor so a crashed handover can
-        /// be re-applied.
         delete_superseded = "DELETE FROM process_segment_handovers
                  WHERE process_id = ?1 AND segment_ordinal < ?2 - 1";
 
-        /// Drop every handover of process `?1`.
         delete_by_process = "DELETE FROM process_segment_handovers WHERE process_id = ?1";
     }
 }

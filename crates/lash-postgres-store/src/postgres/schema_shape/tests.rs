@@ -209,8 +209,6 @@ async fn provision_scratch_schema(database_url: &str) -> (sqlx::PgConnection, St
     (connection, scratch, shape)
 }
 
-/// Reads the live shape of everything the DDL artifact created in `scratch`.
-///
 /// The table list comes from the catalog, not from the committed expectation, so
 /// the artifact generator cannot bootstrap itself off a stale artifact — a table
 /// added to `schema.sql` but absent from `schema-shape.txt` shows up as drift.

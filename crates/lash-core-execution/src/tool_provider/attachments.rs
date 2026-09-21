@@ -8,8 +8,6 @@ pub struct ToolAttachmentClient {
 }
 
 impl ToolAttachmentClient {
-    /// Store one attachment through the session-bound attachment service.
-    ///
     /// # Integrator class
     ///
     /// Tool implementors use this capability to publish attachment bytes and

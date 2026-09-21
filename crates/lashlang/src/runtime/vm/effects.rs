@@ -306,9 +306,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    /// Runs the aggregate's leaves as one host batch. Returns each leaf's value
-    /// in leaf order, or the rejection the batch reports (first settled for
-    /// `Promise.all`, first written otherwise).
+    /// Returns each leaf's value in leaf order, or the rejection the batch reports (first
+    /// settled for `Promise.all`, first written otherwise).
     async fn settle_tool_leaves(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
@@ -360,10 +359,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         )
     }
 
-    /// Starts every call an awaited list comprehension collected as one host
-    /// batch: the comprehension left `(receiver, args...)` tuples in a list on
-    /// the stack, one per accepted element, all sharing the compiled leaf's
-    /// operation and `?`. An empty comprehension never reaches the host.
+    /// An empty comprehension never reaches the host.
     async fn resolve_resource_operation_list_batch(
         &mut self,
         batch: usize,
@@ -423,10 +419,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    /// Runs one host batch and validates the reply: a batch result of the
-    /// right arity that clears the value-entry guard, together with the order
-    /// leaf rejections are selected in. Any refusal fails every leaf's
-    /// execution node before it is returned.
+    /// Any refusal fails every leaf's execution node before it is returned.
     async fn perform_resource_operation_batch(
         &mut self,
         operations: Vec<ResourceOperation>,

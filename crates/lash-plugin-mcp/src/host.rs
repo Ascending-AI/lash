@@ -64,7 +64,6 @@ impl McpRequestContext {
     }
 }
 
-/// Inputs for one server-to-client sampling request.
 pub struct McpSamplingRequest<'a> {
     /// Protocol request payload.
     pub params: &'a CreateMessageRequestParams,
@@ -72,7 +71,6 @@ pub struct McpSamplingRequest<'a> {
     pub context: &'a McpRequestContext,
 }
 
-/// Inputs for one server-to-client elicitation request.
 pub struct McpElicitationRequest<'a> {
     /// Protocol request payload.
     pub params: &'a CreateElicitationRequestParams,
@@ -82,8 +80,6 @@ pub struct McpElicitationRequest<'a> {
 }
 
 impl McpElicitationRequest<'_> {
-    /// Validate an answer before returning it from the host handler.
-    ///
     /// Lash repeats this validation at the wire boundary. Calling it here
     /// gives an interactive host a typed error it can use to re-prompt rather
     /// than returning a malformed answer to Lash.
@@ -94,7 +90,6 @@ impl McpElicitationRequest<'_> {
         validate_elicitation_response(self.params, response, self.validator)
     }
 
-    /// Construct and validate an accepted form response.
     pub fn accept(
         &self,
         content: Value,
@@ -106,7 +101,6 @@ impl McpElicitationRequest<'_> {
     }
 }
 
-/// Inputs for one server-to-client roots request.
 pub struct McpRootsRequest<'a> {
     /// Sealed request context supplied by Lash.
     pub context: &'a McpRequestContext,
@@ -128,7 +122,6 @@ impl McpNotificationContext {
     }
 }
 
-/// Inputs for a URL-elicitation completion notification.
 pub struct McpUrlElicitationComplete<'a> {
     /// Identifier from the original URL elicitation request.
     pub elicitation_id: &'a str,
@@ -169,7 +162,6 @@ impl McpElicitationValidationError {
 /// Host-owned MCP sampling policy and execution.
 #[async_trait]
 pub trait McpSamplingHandler: Send + Sync + 'static {
-    /// Handle one server-to-client `sampling/createMessage` request.
     async fn create_message(
         &self,
         request: McpSamplingRequest<'_>,
@@ -188,7 +180,6 @@ pub trait McpElicitationHandler: Send + Sync + 'static {
     /// [`url_elicitation_complete`](Self::url_elicitation_complete).
     fn capability(&self) -> ElicitationCapability;
 
-    /// Handle one server-to-client `elicitation/create` request.
     async fn create_elicitation(
         &self,
         request: McpElicitationRequest<'_>,
@@ -201,7 +192,6 @@ pub trait McpElicitationHandler: Send + Sync + 'static {
 /// Host-owned workspace roots visible to MCP servers.
 #[async_trait]
 pub trait McpRootsProvider: Send + Sync + 'static {
-    /// Return the current roots for one connected server.
     async fn list_roots(&self, request: McpRootsRequest<'_>) -> Result<Vec<Root>, ErrorData>;
 }
 

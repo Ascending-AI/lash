@@ -33,11 +33,11 @@
 //!
 //! # What it will not do
 //!
-//! It reads. It never marks, migrates, condemns or deletes; disposal stays with
-//! the operator and the published drain/recreate procedures, and reclaiming
-//! space belongs to garbage collection rather than here. It is built on the
-//! read-only handles a backend constructs from raw connection configuration,
-//! never on a wired store, because constructing a store is itself the
+//! It never marks, migrates, condemns or deletes; disposal stays with the operator and the
+//! published drain/recreate procedures, and reclaiming space belongs to garbage collection
+//! rather than here.
+//! It is built on the read-only handles a backend constructs from raw connection
+//! configuration, never on a wired store, because constructing a store is itself the
 //! side-effectful act this exists to precede.
 //!
 //! # What it did not read
@@ -442,8 +442,6 @@ impl Walk {
         rows
     }
 
-    /// Whether any surface carrying this format was actually walked.
-    ///
     /// The distinction the report exists to preserve: a format with zero found
     /// items is `empty` when somebody looked and `not scanned` when nobody did,
     /// and only the first of those means a drain is unnecessary.

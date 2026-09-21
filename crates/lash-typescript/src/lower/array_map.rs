@@ -165,8 +165,6 @@ struct SettleReturns;
 impl ExprFolder for SettleReturns {
     fn fold_expr(&mut self, expr: LashExpr) -> LashExpr {
         match expr {
-            // Returns in a nested function belong to that function, not the
-            // async-map callback being settlement-wrapped.
             LashExpr::Function(_) => expr,
             LashExpr::Return(value) => {
                 LashExpr::Return(Box::new(settled_fulfilled(self.fold_expr(*value))))

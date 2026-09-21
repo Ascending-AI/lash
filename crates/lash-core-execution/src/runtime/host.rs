@@ -215,8 +215,6 @@ impl RuntimeHostConfig {
         self
     }
 
-    /// Configure the maximum bytes accepted by one attachment put.
-    ///
     /// `None` is the default and preserves unbounded attachment puts. A
     /// configured limit is independent from the runtime commit budget and is
     /// enforced before the attachment backend is called.
@@ -303,21 +301,18 @@ impl RuntimeHostConfig {
         self
     }
 
-    /// Select when process wakes may enter a target session. This remains
+    /// This remains
     /// independent from the wake merge key and all batching safety gates.
     pub fn with_process_wake_delivery_policy(mut self, policy: crate::DeliveryPolicy) -> Self {
         self.control.process_wake_delivery_policy = policy;
         self
     }
 
-    /// Set the per-runtime registry admission cap for managed child turns.
     pub fn with_managed_turn_concurrency_limit(mut self, limit: std::num::NonZeroUsize) -> Self {
         self.control.managed_turn_concurrency_limit = limit;
         self
     }
 
-    /// Set the attempt bound stamped onto children a script engine starts.
-    ///
     /// The bound is resolved when an execution segment begins and recorded on
     /// each child it registers, so a change takes effect for children started
     /// after it and never for one already on the registry.
@@ -401,7 +396,6 @@ impl ProcessRuntimeHost {
         }
     }
 
-    /// Return the watched process registry installed on this host.
     pub fn process_registry(&self) -> &Arc<dyn ProcessRegistry> {
         self.wiring.registry()
     }
@@ -411,7 +405,6 @@ impl ProcessRuntimeHost {
         &self.queued_work
     }
 
-    /// Return the process-work port bound to this host's registry.
     pub fn process_work(&self) -> &Arc<dyn ProcessWorkSubstrate> {
         self.wiring.port()
     }
@@ -497,7 +490,6 @@ impl RuntimeWork {
         Self::Processes { wiring, queued }
     }
 
-    /// Enter the registry-only state, replacing whatever work state was there.
     pub fn with_process_registry(self, registry: Arc<dyn ProcessRegistry>) -> Self {
         let queued = Arc::clone(self.queued_arc());
         Self::RegistryOnly { registry, queued }

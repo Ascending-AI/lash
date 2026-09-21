@@ -114,10 +114,10 @@ pub struct DurableProcessWorkerConfig {
     process_work: WorkerProcessWork,
     queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     pub turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot,
-    /// Maximum processes this worker executes natively at once. A run holds its
-    /// slot while doing its own work and releases it while parked on work that
-    /// another process or external owner must complete. This is a per-worker
-    /// bound: two workers sharing one registry may execute twice this many.
+    /// A run holds its slot while doing its own work and releases it while parked on work that
+    /// another process or external owner must complete.
+    /// This is a per-worker bound: two workers sharing one registry may execute twice this
+    /// many.
     process_execution_concurrency: ProcessExecutionConcurrency,
     worker_slot_supplier: Option<Arc<dyn super::WorkerSlotSupplier>>,
     /// Required host owner identity this worker derives per-recovery lease owners from.
@@ -186,8 +186,6 @@ impl DurableProcessWorkerConfig {
         }
     }
 
-    /// Set the maximum processes this worker executes natively at once.
-    ///
     /// The minimum is one. The maximum is Tokio's semaphore limit. The bound
     /// applies independently to each worker, not globally to a shared registry.
     pub fn with_process_execution_concurrency(
@@ -211,7 +209,6 @@ impl DurableProcessWorkerConfig {
         self
     }
 
-    /// Report this worker's [`ProcessWorkerFault`]s to `sink`.
     pub fn with_process_event_sink(mut self, sink: Arc<dyn crate::ProcessEventSink>) -> Self {
         self.process_event_sink = Some(sink);
         self
@@ -482,10 +479,9 @@ impl DurableProcessWorker {
             .expect("native substrate config was validated when the worker was built")
     }
 
-    /// Run exactly one engine segment. Durable substrates use this method so a
-    /// non-terminal boundary can end the current substrate invocation; the
-    /// native worker's lease-fenced drive loops over segment boundaries
-    /// internally.
+    /// Durable substrates use this method so a non-terminal boundary can end the current
+    /// substrate invocation; the native worker's lease-fenced drive loops over segment
+    /// boundaries internally.
     pub async fn run_process_segment_with_scoped_effect_controller(
         &self,
         registration: ProcessRegistration,
@@ -708,10 +704,8 @@ impl DurableProcessWorker {
     pub async fn drive_pending_processes(&self) -> Result<ProcessAdmissionReport, PluginError> {
         self.redrive_missing_turn_parent_end_rows().await?;
         self.drive_pending_parent_end_plans().await?;
-        // Trigger-delivery reconcile can re-enter the work driver, and rows it
-        // admits are this call's admissions. Absorbing its report keeps the
-        // outer call from reporting its own just-admitted rows as somebody
-        // else's `Busy` when the scan below sees them already scheduled.
+        // Absorbing its report keeps the outer call from reporting its own just-admitted rows
+        // as somebody else's `Busy` when the scan below sees them already scheduled.
         let nested = self.reconcile_trigger_deliveries().await?;
         let available = std::num::NonZeroUsize::new(
             self.execution_scheduler
@@ -1069,7 +1063,6 @@ impl DurableProcessWorker {
                     })
                 } else {
                     // No authorization: elapsed time alone never terminalizes.
-                    // Leave the row non-terminal.
                     None
                 };
                 match evidence {

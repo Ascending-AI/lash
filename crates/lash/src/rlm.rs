@@ -2,7 +2,6 @@ use crate::support::{EmbedError, ProtocolTurnOptions, Result, SessionError, Turn
 use lash_core::facade_support::ProtocolTurnOptionsFacadeOps;
 
 #[cfg(feature = "rlm")]
-/// Adds RLM-specific completion constraints to turn builders.
 pub trait RlmTurnBuilderExt: Sized {
     /// Requires the RLM turn to finish through the finish tool.
     fn require_finish(self) -> Result<Self>;
@@ -126,9 +125,6 @@ pub trait RlmSessionExt {
         &self,
     ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError>;
 
-    /// Write every fact the request states that the session has not recorded,
-    /// and return the resulting config.
-    ///
     /// Restating a fact the session already recorded is a no-op, so this is
     /// safe to call on every open. Stating a *different* value is refused with
     /// [`RlmSessionConfigError::Conflict`] — the write never lands and the

@@ -1,7 +1,5 @@
 use super::*;
 
-/// Records every host ability a comprehension-await program performs: one
-/// entry per batch (its operations, in order) and a count of single calls.
 #[derive(Default)]
 struct ComprehensionBatchHost {
     batches: Mutex<Vec<Vec<String>>>,
@@ -149,8 +147,6 @@ impl ExecutionHost for AggregateProcessHost {
     }
 }
 
-/// Builds the module every case in this file links against.
-///
 /// `echo` is the process the aggregate cases start; the module operations are
 /// the leaves they settle. Callers pass the top-level expressions, so the
 /// declaration list stays in one place.

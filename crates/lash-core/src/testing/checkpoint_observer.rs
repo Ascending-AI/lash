@@ -98,7 +98,6 @@ pub struct CheckpointWriteEvent {
     pub components: Vec<CheckpointComponentWrite>,
     /// Submitted rows plus the accepted raw/read projections observed after the
     /// commit. Simulation checkers fold these values without calling store or
-    /// read-model implementation code.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<CheckpointStateWrite>,
 }
@@ -295,10 +294,9 @@ impl CheckpointWriteCollector {
     }
 }
 
-/// Test-support store factory decorator. It preserves the backend contract
-/// exactly and adds observation only after a real commit succeeds, which is what
-/// makes the resulting durable-write transcript lines real facts rather than
-/// harness-constructed ones.
+/// It preserves the backend contract exactly and adds observation only after a real commit
+/// succeeds, which is what makes the resulting durable-write transcript lines real facts
+/// rather than harness-constructed ones.
 pub struct ObservedSessionStoreFactory {
     inner: Arc<dyn SessionStoreFactory>,
     collector: CheckpointWriteCollector,
@@ -545,7 +543,6 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
         state: Some(CheckpointStateWrite {
             // The observation keeps the pre-enum `GraphAppend` wire shape:
             // checkers fold appended node rows plus the leaf the commit
-            // publishes, which for `PreserveHead` is the resident base leaf.
             submitted_graph_append: serde_json::json!({
                 "nodes": commit.graph.nodes(),
                 "leaf_node_id": commit

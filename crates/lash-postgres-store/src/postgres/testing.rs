@@ -45,8 +45,6 @@ pub struct IsolatedDatabase {
 }
 
 impl IsolatedDatabase {
-    /// Creates a uniquely named database beside the one `base_url` points at.
-    ///
     /// # Panics
     ///
     /// Panics when the base URL cannot be parsed or the database cannot be

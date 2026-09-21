@@ -148,7 +148,6 @@ def check(root: Path) -> list[str]:
 
     errors: list[str] = []
 
-    # Forward: every catalogue row names a law on the macro-support surface.
     for label, laws in (("shared catalogue", shared), ("plain-only", plain), ("reopen-only", reopen)):
         for name in laws:
             if name not in candidates:

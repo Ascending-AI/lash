@@ -12,7 +12,6 @@ pub trait CharProperties {
     fn fold(c: Self::Element, unicode: bool) -> Self::Element;
 
     /// \return whether this is a word char.
-    /// ES9 21.2.2.6.2.
     fn is_word_char(c: Self::Element) -> bool {
         let c = c.as_u32();
         'a' as u32 <= c && c <= 'z' as u32
@@ -27,7 +26,6 @@ pub trait CharProperties {
         Self::is_word_char(c) || nonascii_folds_to_ascii_word_char(c.as_u32())
     }
 
-    /// ES9 11.3
     fn is_line_terminator(c: Self::Element) -> bool {
         matches!(c.as_u32(), 0x000A | 0x000D | 0x2028 | 0x2029)
     }
@@ -79,7 +77,6 @@ impl CharProperties for Utf16CharProperties {
     }
 }
 
-/// Check whether the \p orig_range within \p cursor matches position \p pos.
 pub fn backref<Input: InputIndexer, Dir: Direction>(
     input: &Input,
     dir: Dir,

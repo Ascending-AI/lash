@@ -66,7 +66,6 @@ impl WorkflowGraph {
             })
     }
 
-    /// Iterates over every node, including nodes in nested containers and processes.
     pub fn nodes(&self) -> impl Iterator<Item = &WorkflowNode> {
         let mut nodes = Vec::new();
         collect_subgraph_nodes(&self.main, &mut nodes);
@@ -244,7 +243,6 @@ pub enum WorkflowContainer {
 }
 
 impl WorkflowContainer {
-    /// Iterates over this container's named child subgraphs in source order.
     pub fn child_subgraphs(&self) -> impl Iterator<Item = (&'static str, &WorkflowSubgraph)> {
         let children = match self {
             Self::If {
@@ -263,7 +261,6 @@ impl WorkflowContainer {
         children.into_iter().flatten()
     }
 
-    /// Iterates mutably over this container's named child subgraphs in source order.
     pub fn child_subgraphs_mut(
         &mut self,
     ) -> impl Iterator<Item = (&'static str, &mut WorkflowSubgraph)> {
@@ -324,8 +321,6 @@ impl WorkflowNodeId {
     }
 }
 
-/// Resolve a runtime execution site to the workflow node that owns it.
-///
 /// This keeps runtime events unchanged: the host joins an observed site to the
 /// graph using the source-level entry/path descriptor carried by the site.
 pub fn node_id_for_execution_site(

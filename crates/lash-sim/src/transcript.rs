@@ -15,8 +15,6 @@ use crate::trace::SimulationTrace;
 const SIMULATION_REVIEW_BUDGET_LINES: usize = 4096;
 
 impl SimulationTrace {
-    /// Render the completed run as a behavior transcript.
-    ///
     /// The projection intentionally omits provider-wire `ProviderEvent`
     /// fragments; those remain in `SimulationTrace::events`. Durable-write lines
     /// cover commits made through observed session-store factories. Lash-core's
@@ -26,9 +24,8 @@ impl SimulationTrace {
         build(self, None).render()
     }
 
-    /// Render one raw simulator session with the same stable aliases used by the
-    /// whole-run transcript. The provider-wire and process-worker exclusions
-    /// documented on [`SimulationTrace::render_transcript`] also apply.
+    /// The provider-wire and process-worker exclusions documented on
+    /// [`SimulationTrace::render_transcript`] also apply.
     pub fn render_session_transcript(&self, session_id: &SessionId) -> String {
         build(self, Some(session_id)).render()
     }

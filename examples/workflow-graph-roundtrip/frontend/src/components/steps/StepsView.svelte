@@ -159,8 +159,7 @@
     padding: 0 2px 8px;
     margin-bottom: 2px;
   }
-  /* The card flow: a vertical stack; AddStepButton draws the rail segments that
-     connect one card to the next. */
+  /* The card flow: a vertical stack; AddStepButton draws the rail segments that */
   .flow {
     display: flex;
     flex-direction: column;

@@ -62,9 +62,6 @@ pub struct SessionLeaseHolder {
     pub expires_at_epoch_ms: u64,
 }
 
-/// Whether the lane's renewals were current at
-/// [`observed_at_epoch_ms`](SessionLeaseDiagnostics::observed_at_epoch_ms).
-///
 /// Derived from the row, not stored on it: the raw facts on
 /// [`SessionLeaseHolder`] remain the evidence. Like everything else here it is a
 /// reading, not a verdict: `Lapsed` says renewals stopped, not that the turn
@@ -137,14 +134,13 @@ impl LashCore {
     /// unheld ([`SessionLeaseRenewal::Unheld`](crate::persistence::SessionLeaseRenewal::Unheld)).
     ///
     /// **Diagnostics only.** The returned
-    /// [`SessionLeaseDiagnostics`](crate::persistence::SessionLeaseDiagnostics)
-    /// is a snapshot, stale by design, and can be superseded the moment it is
-    /// read. The commit compare-and-set is the only authority on who may publish
-    /// (ADR 0029); never gate host behavior on this read. In particular a lost or
-    /// lapsed lease does not mean the turn failed, because the displaced holder
-    /// may still commit, so this is never grounds to kill a turn or fabricate a
-    /// terminal state. Read it alongside the `session_execution_lease.*` trace
-    /// events, which are what order a takeover and report a rejected commit.
+    /// [`SessionLeaseDiagnostics`](crate::persistence::SessionLeaseDiagnostics) is a snapshot,
+    /// stale by design, and can be superseded the moment it is read.
+    /// The commit compare-and-set is the only authority on who may publish (ADR 0029); never
+    /// gate host behavior on this read.
+    /// In particular a lost or lapsed lease does not mean the turn failed, because the
+    /// displaced holder may still commit, so this is never grounds to kill a turn or fabricate
+    /// a terminal state.
     ///
     /// This read never claims, renews, or releases the lane, so running it
     /// against a healthy session is safe.

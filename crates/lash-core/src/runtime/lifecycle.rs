@@ -344,7 +344,6 @@ impl LashRuntime {
         })
     }
 
-    /// Build a runtime for an embedded host with no background worker support.
     pub async fn from_embedded_state(
         policy: SessionPolicy,
         host: EmbeddedRuntimeHost,
@@ -363,7 +362,6 @@ impl LashRuntime {
         .await
     }
 
-    /// Build a runtime for a host that supports background plugin work.
     pub async fn from_background_state(
         policy: SessionPolicy,
         host: ProcessRuntimeHost,
@@ -382,7 +380,6 @@ impl LashRuntime {
         .await
     }
 
-    /// Build a runtime for an embedded host with persistent store support.
     pub async fn from_persistent_embedded_state(
         policy: SessionPolicy,
         host: EmbeddedRuntimeHost,
@@ -408,7 +405,6 @@ impl LashRuntime {
         .await
     }
 
-    /// Build a runtime for a background-capable host with persistent store support.
     pub async fn from_persistent_background_state(
         policy: SessionPolicy,
         host: ProcessRuntimeHost,
@@ -533,8 +529,6 @@ impl LashRuntime {
         .await
     }
 
-    /// Build from an environment while applying create-time plugin options to
-    /// the session-scoped plugin factories.
     pub async fn from_environment_with_plugin_options(
         env: &RuntimeEnvironment,
         policy: SessionPolicy,

@@ -50,13 +50,10 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     fn options(&self) -> ProviderOptions;
     fn set_options(&mut self, options: ProviderOptions);
 
-    /// Emit the provider-specific JSON body a host persists for this
-    /// provider. The object must NOT contain a `type` field — a host that
-    /// tags the record with its provider kind layers that on top.
+    /// The object must NOT contain a `type` field — a host that tags the record with its
+    /// provider kind layers that on top.
     fn serialize_config(&self) -> serde_json::Value;
 
-    /// Execute one request.
-    ///
     /// Implementations must apply [`LlmRequest::reasoning_retention_safe_for`] for their
     /// exact [`Provider::route_identity`] before serializing any raw wire body.
     /// `ProviderHandle` applies the semantic gate too; this raw-trait

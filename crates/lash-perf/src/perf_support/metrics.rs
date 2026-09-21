@@ -71,8 +71,6 @@ pub fn percentile_summary(mut values: Vec<f64>) -> PercentileMetricSummary {
     }
 }
 
-/// Returns a linearly interpolated percentile from sorted samples.
-///
 /// The percentile rank is the zero-based index `p * (n - 1)`. A fractional
 /// rank is interpolated between its two neighboring samples. Empty input
 /// returns zero, one sample returns that sample, and two samples interpolate

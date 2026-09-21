@@ -20,7 +20,6 @@ crate::statements! {
              (session_id, ancestor_session_id, fork_node_id, fork_generation)
              VALUES (?1, ?2, ?3, ?4)";
 
-        /// Drop session `?1`'s inherited ancestry at delete time.
         delete_by_session = "DELETE FROM fork_lineage WHERE session_id = ?1";
     }
 }

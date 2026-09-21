@@ -922,10 +922,6 @@ impl RuntimeTurnDriver<'_> {
     }
 
     /// Shared visible-assistant-text path for streamed text.
-    ///
-    /// Sets the `text_streamed` flag, runs the chunk through plugin stream
-    /// transforms (forwarding any reasoning deltas + abort request), logs the
-    /// event, and emits the visible prose deltas inside `block`.
     async fn emit_visible_assistant_text(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
@@ -992,9 +988,6 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
-    /// Publishes plugin-emitted reasoning deltas as one runtime-minted block
-    /// per transformed chunk.
-    ///
     /// These blocks have no provider identity — they are host observations
     /// minted inside the runtime, so they get deterministic
     /// `plugin-reasoning:{iteration}:{n}` ids and ordinals above every
@@ -1435,13 +1428,12 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
-    /// Wait briefly for provider events emitted after a protocol-owned abort.
-    /// `AttemptReset` is a hard boundary: the completed response belongs to
-    /// the accepted attempt and must not be cleared by a provider retry that
-    /// raced with cancellation. If the deadline wins, an uncooperative
-    /// provider's late usage is unavailable for this attempt and the sealed
-    /// record says so (`AttemptUsageDisposition::UnreportedAfterAbort`). The
-    /// deadline is the host's `abort_drain_grace` lever, not a literal.
+    /// `AttemptReset` is a hard boundary: the completed response belongs to the accepted
+    /// attempt and must not be cleared by a provider retry that raced with cancellation.
+    /// If the deadline wins, an uncooperative provider's late usage is unavailable for this
+    /// attempt and the sealed record says so
+    /// (`AttemptUsageDisposition::UnreportedAfterAbort`).
+    /// The deadline is the host's `abort_drain_grace` lever, not a literal.
     async fn collect_trailing_stream_events_before_abort<T>(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,

@@ -101,8 +101,6 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
 
-    // Register, append one non-terminal event, and complete — all through
-    // the composition's decorated registry handle, the same one the sink watches.
     // It is also the registry installed in the core.
     watched
         .register_process(

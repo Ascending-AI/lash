@@ -119,8 +119,6 @@ pub trait SessionLifecycleService: Send + Sync {
         ))
     }
 
-    /// Run one turn on a managed session.
-    ///
     /// A managed turn id must be unique across every managed turn running in
     /// this process, not merely within its session: registering an id that is
     /// already running is rejected with
@@ -271,8 +269,6 @@ pub struct SessionTurnRequest<'run> {
 }
 
 impl<'run> SessionTurnRequest<'run> {
-    /// Build a managed-turn request.
-    ///
     /// `turn_id` is the turn's stable durable identity and must be unique across
     /// every managed turn running in this process — process ids and other
     /// already-unique handles are the intended sources. Reusing an id that is

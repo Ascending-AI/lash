@@ -17,16 +17,12 @@
 //! main database file's bytes. A probe that writes the thing it was asked about
 //! has answered a different question.
 //!
-//! **Why it never decodes.** Every payload here is returned as bytes or text and
-//! never parsed into the type it represents. Whether a stored payload opens
-//! under *this* build is one build-wide question that belongs with the format
-//! manifest; a backend answering it locally would be a second place for the
-//! answer to drift, and — worse — a preflight that decoded would fail on exactly
-//! the deployments it exists to describe. The one place this module looks
-//! *inside* bytes is the checkpoint manifest, and even there it reads a single
-//! blob reference out of a schemaless [`serde_json::Value`] rather than calling
-//! the crate's validating decoder, precisely so a manifest written by another
-//! build is walked past rather than raised as an error.
+//! **Why it never decodes.** Every payload here is returned as bytes or text and never parsed
+//! into the type it represents.
+//! The one place this module looks *inside* bytes is the checkpoint manifest, and even there
+//! it reads a single blob reference out of a schemaless [`serde_json::Value`] rather than
+//! calling the crate's validating decoder, precisely so a manifest written by another build is
+//! walked past rather than raised as an error.
 //!
 //! The framing a walk *does* unwrap is storage bookkeeping rather than durable
 //! format: the [`StoredBlobEnvelope`](crate::StoredBlobEnvelope) wrapper and its
@@ -58,8 +54,6 @@ use rusqlite::{Connection, params};
 use super::SqliteStorePreflight;
 use crate::conn::SqliteConnection;
 
-/// Read one page of one surface off the deployment's read-only connections.
-///
 /// Never returns `Err`: every failure this path can reach is attributable to a
 /// database (reported as [`ScanCoverage::NotScanned`]) or to an item (reported
 /// as [`DurablePayload::Missing`]). The `Result` is kept because the trait's
@@ -106,9 +100,8 @@ pub(super) async fn scan_durable(
         return Ok(scanned(Vec::new(), None));
     }
 
-    // Read-only or not at all — see the module documentation. A failed
-    // read-only open is a database nobody could read, never a reason to reach
-    // for a connection that can write.
+    // A failed read-only open is a database nobody could read, never a reason to reach for a
+    // connection that can write.
     let conn = match SqliteConnection::open_readonly(path).await {
         Ok(conn) => conn,
         Err(error) => return Ok(not_scanned(error.to_string())),
@@ -453,9 +446,6 @@ fn read_session_execution_state(
     Ok((items, next_cursor(last, scanned_rows, limit)))
 }
 
-/// Read the blob reference the manifest records for the execution-state
-/// component, without deciding whether the manifest is one this build accepts.
-///
 /// Deliberately *not* the crate's `decode_checkpoint`: that helper validates the
 /// record's schema version and errors on drift, which is correct for a load path
 /// and exactly wrong here. A preflight that refused to describe a checkpoint

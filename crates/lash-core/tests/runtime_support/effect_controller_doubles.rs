@@ -553,9 +553,8 @@ impl RecordingEffectController {
         self
     }
 
-    /// Route queued-lane acquisition through the engine-paced wait policy.
-    /// Deliberately separate from controller-owned replay, so tests hold the
-    /// two behaviors apart exactly as the product does.
+    /// Deliberately separate from controller-owned replay, so tests hold the two behaviors
+    /// apart exactly as the product does.
     pub fn with_engine_paced_lane(mut self) -> Self {
         self.engine_paced_lane = true;
         self

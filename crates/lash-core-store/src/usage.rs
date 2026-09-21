@@ -215,8 +215,7 @@ impl LedgerUsageDisposition {
         matches!(self, Self::Reported)
     }
 
-    /// Reject a row that cannot describe real accounting. Store reads call this
-    /// before admitting a persisted disposition.
+    /// Reject a row that cannot describe real accounting.
     pub fn validate(&self) -> Result<(), UsageDispositionError> {
         let Self::Unreported { attempts } = self else {
             return Ok(());
@@ -245,9 +244,8 @@ impl LedgerUsageDisposition {
         Ok(())
     }
 
-    /// Whether a row carrying `self` may absorb a row carrying `other`.
-    /// Reported and unreported rows accumulate with their own kind;
-    /// reconciled corrections stay one row per attempt.
+    /// Reported and unreported rows accumulate with their own kind; reconciled corrections
+    /// stay one row per attempt.
     pub fn accumulates_with(&self, other: &Self) -> bool {
         matches!(
             (self, other),

@@ -119,7 +119,6 @@ impl AwaitEventEntry {
     }
 }
 
-/// Counts one parked waiter on an entry for as long as it is parked.
 struct ParkedWaiter {
     shard: AwaitEventRegistryShard,
     key_id: String,
@@ -360,8 +359,7 @@ impl AwaitEventRegistry {
         self.derive_key(scope, wait)
     }
 
-    /// Whether `scope` carries an in-process retirement tombstone. Session
-    /// scopes never do: they are fenced per session shard by revocation.
+    /// Session scopes never do: they are fenced per session shard by revocation.
     pub fn scope_is_retired(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
         if scope.session_id().is_some() {
             return Ok(false);

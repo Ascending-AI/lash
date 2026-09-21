@@ -902,8 +902,6 @@ pub(crate) enum TurnAttempt {
     Failed,
 }
 
-/// Run a chat turn, and keep the board playable if it ends owing a move.
-///
 /// An agent can finish a turn without ever calling `board.play`. `play()` is
 /// the only place the board's `turn` flips back to `X`, and the UI disables
 /// every cell while `turn != "X"`, so an unguarded zero-move turn wedges the

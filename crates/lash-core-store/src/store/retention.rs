@@ -91,10 +91,6 @@ pub fn mint_facade_operation_id(
     format!("{session_id}:{}:{name}:{}", operation.tag(), activity.0)
 }
 
-/// Whether `operation_id` is a runtime-operation id the facade minted through
-/// [`mint_facade_operation_id`]: a `plugin_command` or `plugin_task` segment
-/// followed by a non-empty name and a trailing hyphenated-UUID activity id.
-///
 /// The sweep's eligibility predicate: caller-supplied ids — a stable request
 /// id a host retries after a lost response, or any id without the trailing
 /// activity segment — answer `false` and are retired only by their owner's

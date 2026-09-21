@@ -623,13 +623,13 @@ impl ProjectedValue {
         }
     }
 
-    /// Wrap a derived value as a `ProjectedValue` carrying a path-extended name
-    /// (e.g. `parent.field`). Pass-through if the inner value is already a
-    /// `Value::Projected` so we never double-wrap. Used by field/index access on
-    /// projected sources to keep "this came from a projected source" alive
-    /// across path expressions; non-path operations (binary ops, builtins,
-    /// formatters) auto-strip via their existing materialise-and-evaluate code
-    /// paths and so naturally lose the wrapper.
+    /// `parent.field`).
+    /// Pass-through if the inner value is already a `Value::Projected` so we never
+    /// double-wrap.
+    /// Used by field/index access on projected sources to keep "this came from a projected
+    /// source" alive across path expressions; non-path operations (binary ops, builtins,
+    /// formatters) auto-strip via their existing materialise-and-evaluate code paths and so
+    /// naturally lose the wrapper.
     pub fn propagate_field(parent_name: &str, field: &str, inner: Value) -> Value {
         match inner {
             Value::Projected(_) => inner,
@@ -726,8 +726,7 @@ impl ProjectedValue {
         }
     }
 
-    /// Reads a field of a projected source. `None` carries the same meaning as
-    /// in [`Self::get_index`].
+    /// `None` carries the same meaning as in [`Self::get_index`].
     pub(crate) async fn get_field(&self, field: &Name) -> Result<Option<Value>, RuntimeError> {
         self.refuse_if_unavailable()?;
         match &self.kind {

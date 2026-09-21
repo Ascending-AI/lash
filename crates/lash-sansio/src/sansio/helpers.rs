@@ -12,14 +12,9 @@ fn token_usage_from_llm_usage(usage: &crate::llm::types::LlmUsage) -> TokenUsage
 
 /// Ingress seam for a provider's raw usage counters.
 ///
-/// Everything downstream aggregates these counters on the assumption that they
-/// sum in range: the context-window refinement below, the checked cumulative
-/// merge in `record_llm_usage`, the durable turn commit, and host-side bare
-/// sums such as `LlmUsage::total`. Validate both aggregations once here, with a
-/// typed error, so no consumer performs unchecked arithmetic on provider input.
-///
-/// Returns the kernel's usage value together with the validated prompt-side
-/// subtotal.
+/// Everything downstream aggregates these counters on the assumption that they sum in range:
+/// the context-window refinement below, the checked cumulative merge in `record_llm_usage`,
+/// the durable turn commit, and host-side bare sums such as `LlmUsage::total`.
 pub(super) fn checked_turn_usage_from_llm_usage(
     usage: &crate::llm::types::LlmUsage,
 ) -> Result<(TokenUsage, i64), TokenUsageOverflow> {

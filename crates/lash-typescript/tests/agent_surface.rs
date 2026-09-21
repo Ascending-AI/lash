@@ -1093,8 +1093,6 @@ impl ExecutionHost for RejectingToolHost {
     }
 }
 
-/// Runs a cell whose awaited tool call fails and finishes `probe`, evaluated
-/// with the caught rejection bound to `error`.
 fn caught_rejection(probe: &str) -> Value {
     let environment = two_leaf_web_environment();
     let source = format!(

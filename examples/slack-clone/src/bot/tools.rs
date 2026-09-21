@@ -209,7 +209,6 @@ fn into_result<T: Serialize>(output: &T) -> ToolOutcome {
     }
 }
 
-/// Build the bot's tool provider.
 pub fn workspace_tools(api: Arc<SlackApi>) -> Arc<dyn ToolProvider> {
     let definitions = vec![
         ToolDefinition::typed::<ListChannelsArgs, ListChannelsOutput>(

@@ -305,7 +305,6 @@ fn capture_bytes(capture: &Capture, attempt: usize, bytes: &[u8]) {
         .entry(attempt)
         .or_default()
         .extend_from_slice(bytes);
-    // Log only this chunk: accumulation and the final dump are linear in body size.
     let value = json!({"chunk_text":String::from_utf8_lossy(bytes),"bytes_received":bytes.len()});
     tracing::debug!(target:"toolbench",parent:&capture.span(),attempt,body=%capture.redact(value),"HTTP wire response bytes");
 }

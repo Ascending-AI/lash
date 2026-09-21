@@ -82,7 +82,6 @@ impl Drop for WakeDeliveryDriverLifetime {
 }
 
 impl WakeDeliveryDriver {
-    /// Start the autonomous startup scan and bounded polling loop.
     #[expect(
         clippy::expect_used,
         reason = "the default work cadence policy is valid"
@@ -142,15 +141,14 @@ impl WakeDeliveryDriver {
         self.inner.notify.notify_one();
     }
 
-    /// Stop the autonomous loop and wait until it has released its store
-    /// handles. The runtime calls this during teardown.
+    /// The runtime calls this during teardown.
     pub async fn shutdown(&self) {
         self.lifetime.shutdown.cancel();
         self.lifetime.tasks.close();
         self.lifetime.tasks.wait().await;
     }
 
-    /// Request shutdown without waiting. Used by synchronous runtime teardown.
+    /// Request shutdown without waiting.
     pub fn request_shutdown(&self) {
         self.lifetime.shutdown.cancel();
         self.lifetime.tasks.close();
@@ -173,8 +171,7 @@ impl WakeDeliveryDriver {
         .await
     }
 
-    /// One bounded, idempotent delivery pass. This is also used as the
-    /// post-append nudge path before a long-lived host driver is available.
+    /// One bounded, idempotent delivery pass.
     pub async fn drive_pending_once(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,

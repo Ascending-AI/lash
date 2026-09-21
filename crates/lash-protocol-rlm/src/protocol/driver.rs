@@ -57,9 +57,8 @@ impl RlmDriver {
     /// A driver on TypeScript, because it is the only language a session can be
     /// served (ADR 0096).
     ///
-    /// This used to answer with the retired surface. With the dialect selector
-    /// gone, a default that still named lashlang would be the compatibility
-    /// reader this cutover exists to remove.
+    /// With the dialect selector gone, a default that still named lashlang would be the
+    /// compatibility reader this cutover exists to remove.
     pub fn new() -> Self {
         Self {
             dialect: Arc::new(crate::dialect::TypescriptDialect::prompt_only(
@@ -763,9 +762,6 @@ pub fn project_conformance_messages_through_rlm_history(
         .collect()
 }
 
-/// Whether the attempt that is being continued past left a successful
-/// execution committed to the turn.
-///
 /// This is the reset condition for the no-progress budget, and it is
 /// deliberately narrower than "appended something": an attempt whose cell only
 /// raised commits a trajectory entry carrying that error, and a model that
@@ -1124,7 +1120,6 @@ fn diagnostic_event(phase: &str, payload: Value) -> SessionHistoryRecord {
     )))
 }
 
-/// The counts for an attempt whose reply carried no executable cell.
 fn prose_only_counts<'a>(
     language_id: &'a str,
     assistant_text: &str,
@@ -1134,8 +1129,7 @@ fn prose_only_counts<'a>(
     ExtractionCounts::prose(language_id, chars, chars, reasoning_chars(reasoning))
 }
 
-/// The counts for an attempt whose reply carried a cell. `full_text_chars`
-/// covers the fences the cell arrived in, so it exceeds `prose + code`.
+/// `full_text_chars` covers the fences the cell arrived in, so it exceeds `prose + code`.
 fn cell_counts<'a>(
     language_id: &'a str,
     assistant_text: &str,

@@ -144,9 +144,6 @@ fn emit(checkpoint: Value) {
 // Trace capture
 // ---------------------------------------------------------------------------
 
-/// Collects the `session_execution_lease.*` trace events an operator is told to
-/// read, in emission order, with every structured field.
-///
 /// This is the runbook's copy of the log an operator would grep. Order is not the
 /// evidence: `taken_over` comes from the winner's claim, so in the flagship case
 /// it is the *only* lease event, the dead holder having emitted nothing. What
@@ -186,9 +183,8 @@ impl LeaseTraceCapture {
             .collect()
     }
 
-    /// Wait until `event` has been emitted, or fail the phase. Polling the
-    /// captured timeline is how this harness gates on an asynchronous renewal
-    /// loop instead of sleeping a fixed budget and hoping.
+    /// Polling the captured timeline is how this harness gates on an asynchronous renewal loop
+    /// instead of sleeping a fixed budget and hoping.
     async fn await_event(&self, event: &str, timeout: Duration) -> Result<Value> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
@@ -650,8 +646,6 @@ async fn lease_takeover(
         .map_err(anyhow::Error::msg)?;
     drop(seed_session);
 
-    // Leave the row held by a worker that is gone: TTL zero, claimed straight
-    // through the store, so there is no guard and no renewal loop behind it.
     let store = backend.store(&session_id).await?;
     let abandoned = store
         .try_claim_session_execution_lease(&session_id, &abandoned_by, "lease-takeover-executor", 0)
@@ -1022,20 +1016,16 @@ async fn direct_turn_recovery(
         .map_err(anyhow::Error::msg)
         .context("read the session's pending inputs while the direct drive is parked")?;
 
-    // Kill the worker: abort the future mid-drive and drop the core behind it.
-    // No abandonment and no cancellation runs; the guard drop does still spawn a
-    // token-scoped best-effort release, which is why the lane is re-staged below.
+    // No abandonment and no cancellation runs; the guard drop does still spawn a token-scoped
+    // best-effort release, which is why the lane is re-staged below.
     abandoned.abort();
     let _ = abandoned.await;
     drop(dead);
     drop(provider);
 
-    // Leave the row held by a worker that is gone, exactly as Phase 2 does:
-    // claimed straight through the store at TTL zero, so there is no guard and
-    // no renewal loop behind it. Retried, because the in-process drop release is
-    // asynchronous and the dying lease can still be live for the rest of its
-    // term; a release that lands after this claim is scoped to the older token
-    // and leaves this one untouched.
+    // Retried, because the in-process drop release is asynchronous and the dying lease can
+    // still be live for the rest of its term; a release that lands after this claim is scoped
+    // to the older token and leaves this one untouched.
     let abandoned_lease = stage_abandoned_lane(store.as_ref(), &session_id, &abandoned_by).await?;
     capture.reset();
 

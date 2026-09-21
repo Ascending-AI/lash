@@ -20,7 +20,6 @@ pub enum StoreRecoveryLeaseTiming {
 }
 
 impl StoreRecoveryLeaseTiming {
-    /// Construct controlled timing from an injected-clock advancement hook.
     pub fn controlled(advance: impl Fn(u64) + Send + Sync + 'static) -> Self {
         Self::Controlled(std::sync::Arc::new(advance))
     }

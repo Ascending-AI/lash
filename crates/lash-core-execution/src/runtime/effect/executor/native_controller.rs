@@ -292,8 +292,6 @@ impl NativeRuntimeEffectController {
         }
     }
 
-    /// Register the resolver that says what code runs a grouped child, once.
-    ///
     /// Until this is called the controller refuses all three group methods with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
     /// because the `'static` executors a child needs in order to outlive its
@@ -437,8 +435,7 @@ struct NativeEffectGroup {
     /// A host that skipped failed settlements for `FirstSuccess` would make the
     /// losers' outcomes unreachable through the only method that reports them.
     wake: GroupWakePolicy,
-    /// The disposition declared at open, which a crash-drain would apply. Close
-    /// resolves against the *effective* disposition below, which starts here.
+    /// The disposition declared at open, which a crash-drain would apply.
     declared: LoserPolicy,
     /// Fired by a close that resolves to [`LoserPolicy::Cancel`]. Children
     /// select on their own child token, so cancelling the group cancels exactly
@@ -517,8 +514,6 @@ impl NativeEffectGroup {
 }
 
 impl NativeEffectGroups {
-    /// Registers this tier's envelope→executor resolver, once.
-    ///
     /// [`OnceLock::set`] is the arbiter rather than a preceding `get`: a
     /// get-then-set pair leaves a window in which two threads both read `None`
     /// and both believe they registered, and the loser's resolver would be
@@ -572,8 +567,6 @@ impl NativeEffectGroups {
         })
     }
 
-    /// Resolves every child before anything is recorded, refusing the group if
-    /// this host has no runner for one of them.
     fn resolve_children(
         executors: &Arc<dyn GroupExecutors>,
         group: &RuntimeEffectGroup,
@@ -597,8 +590,6 @@ impl NativeEffectGroups {
             .collect()
     }
 
-    /// Opens — or reopens — a group, dispatching one host-owned task per child.
-    ///
     /// Every child is resolved through the registered [`GroupExecutors`] on the
     /// **first-open path**, before the group is recorded here and before any
     /// child is dispatched, and a child this host has no runner for refuses the
@@ -639,8 +630,6 @@ impl NativeEffectGroups {
         Ok(handle)
     }
 
-    /// Spawns each child on a host-owned task.
-    ///
     /// The task set is the host's, not the caller's: this is the structural break
     /// the contract exists for. A batch that owns its leaf futures inside the
     /// caller's future drops the losers when the caller is dropped, which is
@@ -670,8 +659,6 @@ impl NativeEffectGroups {
         }
     }
 
-    /// Records one child's settlement, allocating its sequence at that moment.
-    ///
     /// A position that already holds a settlement keeps it. That is what makes a
     /// close-time cancellation terminal and a child's own late completion resolve
     /// to one terminal rather than two ranks for one child.
@@ -820,8 +807,6 @@ impl NativeEffectGroups {
             .ok_or_else(|| closed_group_error(group_key))
     }
 
-    /// Drops a group once it is *both* closed and complete.
-    ///
     /// Completion alone is not enough, because `RunToCompletion` losers keep
     /// settling after the caller is gone and their settlements are the thing this
     /// state exists to record; a close alone is not enough for the same reason.

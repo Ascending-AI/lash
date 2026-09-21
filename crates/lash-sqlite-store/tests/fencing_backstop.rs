@@ -266,11 +266,9 @@ async fn a_renewal_the_verdict_refuses_never_reaches_the_write() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn renewing_a_lapsed_lease_is_refused_as_expired_not_renewed() {
-    // The renewal statement's five-column predicate names owner, executor and
-    // lease token and says nothing about expiry, so this answer exists only
-    // because the shared verdict compares `expires_at` against the `now` the
-    // store sampled. Remove the verdict call and a lapsed holder renews itself
-    // back to life; that is the whole point of deciding in one place.
+    // The renewal statement's five-column predicate names owner, executor and lease token and
+    // says nothing about expiry, so this answer exists only because the shared verdict
+    // compares `expires_at` against the `now` the store sampled.
     let dir = tempfile::tempdir().expect("lapsed renewal tempdir");
     let path = dir.path().join("lapsed-renewal.db");
     let store = Store::open(&path).await.expect("open lapsed renewal store");

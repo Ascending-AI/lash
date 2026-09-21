@@ -32,8 +32,6 @@ pub enum TurnBudget {
 }
 
 impl TurnBudget {
-    /// Construct a finite per-turn iteration budget.
-    ///
     /// # Panics
     ///
     /// Panics when `max_turns` is zero. In a const context, a literal zero is
@@ -87,8 +85,6 @@ impl NoProgressBudget {
     /// 1,223-call stall into twelve calls.
     pub const DEFAULT_MAX_ATTEMPTS: usize = 12;
 
-    /// Construct a finite bound on consecutive unproductive attempts.
-    ///
     /// # Panics
     ///
     /// Panics when `max_attempts` is zero — a turn must always be allowed at
@@ -111,7 +107,6 @@ impl NoProgressBudget {
         }
     }
 
-    /// Whether `attempts` consecutive unproductive attempts exhaust the bound.
     pub fn is_exhausted_by(self, attempts: usize) -> bool {
         self.max_attempts()
             .is_some_and(|max_attempts| attempts >= max_attempts)
@@ -329,9 +324,6 @@ impl TokenUsage {
         Ok(merged)
     }
 
-    /// Returns a new usage value with every counter clamped on overflow, and
-    /// whether any counter clamped.
-    ///
     /// The `(value, saturated)` pair is the reportable counterpart of
     /// [`Self::checked_add`]: writes that must not lie use the checked seam,
     /// while reads that must not fail use this one and propagate the flag.

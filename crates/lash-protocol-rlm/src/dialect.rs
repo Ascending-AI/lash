@@ -82,8 +82,6 @@ pub(crate) struct DialectSession {
 }
 
 impl DialectSession {
-    /// Opens a session whose execution state is seeded from the language id.
-    ///
     /// The id is durability identity: it is written into persisted state that a
     /// later process reads back, which is why it stays a named constant rather
     /// than a spelling each call site repeats.
@@ -299,7 +297,6 @@ pub(crate) const TOOL_PROSE_TOKENS: &[ToolProseToken] =
     })];
 
 impl DialectPromptVocabulary {
-    /// Resolve every [`TOOL_PROSE_TOKENS`] token in one authored prose string.
     pub(crate) fn render_tool_prose(&self, text: &str) -> String {
         let mut text = text.to_string();
         for (token, resolve) in TOOL_PROSE_TOKENS {

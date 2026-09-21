@@ -105,7 +105,7 @@ impl SseBuffer {
             let (line, rest) = remaining.split_at(pos + 1);
             self.extend_pending(line)?;
             let mut line_bytes = std::mem::take(&mut self.pending);
-            line_bytes.pop(); // drop the trailing '\n'
+            line_bytes.pop();
             if line_bytes.last() == Some(&b'\r') {
                 line_bytes.pop();
             }

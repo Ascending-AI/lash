@@ -8,8 +8,7 @@ pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmTimeouts {
     pub request_timeout: Option<Duration>,
-    /// Maximum wait for a streaming response to start. The whole-request
-    /// timeout still wins when it is shorter.
+    /// The whole-request timeout still wins when it is shorter.
     pub response_start_timeout: Duration,
     pub chunk_timeout: Duration,
 }

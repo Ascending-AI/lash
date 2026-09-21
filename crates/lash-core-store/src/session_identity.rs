@@ -223,8 +223,6 @@ impl AgentFrameAssignment {
         }
     }
 
-    /// Builds a `AgentFrameAssignment` from policy data for store, effect-host, and protocol
-    /// implementors while materializing, executing, or persisting a session turn.
     pub fn from_policy(policy: SessionPolicy) -> Self {
         Self {
             policy,
@@ -326,11 +324,9 @@ pub enum SessionRelation {
 }
 /// Durable lineage identity of a [`SessionRelation`].
 ///
-/// This is the part of a relation that session admission compares on a rebind:
-/// the relation kind plus the session ids it names. Causal provenance
-/// (`caused_by`) and observer inheritance are deliberately excluded — they
-/// record *why* and *how* a session was created, not what it descends from,
-/// and a legitimate reopen of an existing child carries neither.
+/// Causal provenance (`caused_by`) and observer inheritance are deliberately excluded — they
+/// record *why* and *how* a session was created, not what it descends from, and a legitimate
+/// reopen of an existing child carries neither.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum SessionLineage {
     #[default]
@@ -378,8 +374,6 @@ impl SessionLineage {
         }
     }
 
-    /// Whether a rebind declaring `requested` conflicts with `self` as recorded.
-    ///
     /// [`SessionLineage::Root`] is the default a binding carries when the caller
     /// declares no lineage — every resume, park and plain reopen path admits
     /// with it — so it is read as "no claim" and never conflicts. Any other
@@ -394,8 +388,6 @@ impl SessionLineage {
     }
 }
 impl SessionRelation {
-    /// Exposes the parent session ID to store implementors for child and fork relations, returning
-    /// `None` for a root session.
     pub fn parent_session_id(&self) -> Option<&str> {
         match self {
             Self::Root => None,
@@ -455,7 +447,6 @@ impl Default for SessionToolAccess {
     }
 }
 impl SessionToolAccess {
-    /// Selects the host registry's captured resident tool definitions.
     pub fn ambient() -> Self {
         Self {
             resident: SessionResidentToolAccess::Ambient,
@@ -463,7 +454,6 @@ impl SessionToolAccess {
         }
     }
 
-    /// Selects exactly the supplied complete resident definitions.
     pub fn restricted(
         tools: impl IntoIterator<Item = ToolDefinition>,
     ) -> Result<Self, SessionToolAccessError> {
@@ -491,7 +481,6 @@ impl SessionToolAccess {
         self.insert_hidden_tool(name.into(), self.hidden_tools.len())
     }
 
-    /// Returns the explicit restricted definitions, or `None` for ambient access.
     pub fn restricted_tools(&self) -> Option<&[ToolDefinition]> {
         match &self.resident {
             SessionResidentToolAccess::Ambient => None,
@@ -499,7 +488,6 @@ impl SessionToolAccess {
         }
     }
 
-    /// Returns the exact names hidden after resident membership is selected.
     pub fn hidden_tools(&self) -> &BTreeSet<String> {
         &self.hidden_tools
     }
@@ -715,8 +703,6 @@ pub struct SessionStoreCreateRequest {
     pub policy: SessionPolicy,
 }
 impl SessionStoreCreateRequest {
-    /// Exposes the parent session ID to session-store factories for child and fork relations,
-    /// returning `None` for a root session.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.relation.parent_session_id()
     }

@@ -160,8 +160,6 @@ impl Heap {
         deepest
     }
 
-    /// Checks that the persisted heap is a reachable acyclic graph.
-    ///
     /// This is the one validator for the durable heap invariant, and it runs in
     /// release builds at every durable boundary: snapshot decode and encode, and
     /// continuation decode, resume and encode. Multiple roots and members may

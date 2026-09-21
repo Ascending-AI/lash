@@ -61,7 +61,6 @@ fn await_handles_program(handles: Expr) -> Program {
     )
 }
 
-/// `finish 7`
 fn finish_seven() -> Program {
     builders::program(vec![builders::finish(builders::num(7.0))])
 }
@@ -1456,7 +1455,6 @@ async fn field_access_on_projected_record_returns_projected() {
         serde_json::json!({ "prompt": "hello", "depth": 3 }),
     );
     let (value, _) = exec_with_projected(
-        // finish input.prompt
         builders::program(vec![builders::finish(builders::field(
             builders::var("input"),
             "prompt",
@@ -1496,7 +1494,6 @@ async fn index_on_projected_list_returns_projected() {
     let projected =
         projected_record_bindings("items", serde_json::json!(["alpha", "beta", "gamma"]));
     let (value, _) = exec_with_projected(
-        // finish items[1]
         builders::program(vec![builders::finish(builders::index(
             builders::var("items"),
             builders::num(1.0),
@@ -1515,7 +1512,6 @@ async fn index_on_projected_list_returns_projected() {
 async fn computation_strips_projection() {
     let projected = projected_record_bindings("input", serde_json::json!({ "n": 7 }));
     let (value, _) = exec_with_projected(
-        // finish input.n + 1
         builders::program(vec![builders::finish(builders::binary(
             builders::field(builders::var("input"), "n"),
             crate::ast::BinaryOp::Add,

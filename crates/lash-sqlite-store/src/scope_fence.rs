@@ -138,7 +138,6 @@ lash_store_sql::statements! {
              WHERE artifact_cleanup_completed = 0
              ORDER BY scope_id";
 
-        /// Record that scope `?1`'s artifact cleanup has run.
         complete_artifact_cleanup = "UPDATE effect_scope_retirements
              SET artifact_cleanup_completed = 1
              WHERE scope_id = ?1";

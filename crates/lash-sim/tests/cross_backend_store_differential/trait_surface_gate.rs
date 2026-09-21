@@ -249,7 +249,6 @@ fn declared_method_name(line: &str) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
-/// True when some harness source calls `method` on a store handle.
 fn harness_drives(method: &str) -> bool {
     let call = format!(".{method}(");
     HARNESS_SOURCES.iter().any(|source| source.contains(&call))

@@ -100,13 +100,11 @@ impl Vocabulary {
     /// startup naming the term rather than reaching a database.
     pub const EMPTY: Self = Self { terms: &[] };
 
-    /// Register the terms a dialect may expand.
     #[must_use]
     pub const fn new(terms: &'static [VocabularyTerm]) -> Self {
         Self { terms }
     }
 
-    /// Whether this vocabulary supplies nothing.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.terms.is_empty()
@@ -180,7 +178,6 @@ pub struct TableLayout {
 }
 
 impl TableLayout {
-    /// Declare where each database's tables live, in resolution order.
     #[must_use]
     pub const fn new(schemas: &'static [SchemaTables]) -> Self {
         Self { schemas }
@@ -206,7 +203,6 @@ impl TableLayout {
 /// How a backend spells a bound parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Placeholder {
-    /// `?1`, `?2`, … — rusqlite.
     Question,
     /// `$1`, `$2`, … — sqlx/PostgreSQL.
     Dollar,
@@ -416,8 +412,6 @@ impl fmt::Display for RenderError {
 
 impl std::error::Error for RenderError {}
 
-/// Render `neutral` into `dialect`'s exact text.
-///
 /// `tables` is the set of table names that may appear; every occurrence of one
 /// as a whole token is rewritten, and a table position naming anything else is
 /// refused. A dialect carrying a [`TableLayout`] resolves each of those names
@@ -434,9 +428,6 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
     let bytes = neutral.as_bytes();
     let mut out = String::with_capacity(neutral.len() + 16);
     let mut index = 0usize;
-    // Set by FROM/INTO/UPDATE/JOIN; the next token has to be a table this
-    // crate owns (or, after FROM, a parenthesised subquery or a table-valued
-    // function).
     let mut expect_table: Option<TablePosition> = None;
     // Relation names the statement binds for itself: the `scope` of
     // `WITH scope AS (…)`. They are not tables, they carry no prefix and no
@@ -598,8 +589,6 @@ enum TablePosition {
     Other,
 }
 
-/// Whether `word` opens a table position, given the identifier before it.
-///
 /// `previous` decides the three cases where the keyword is not a statement
 /// head: an upsert's `ON CONFLICT … DO UPDATE SET`, whose table is the one the
 /// insert already named; a locking clause's `FOR UPDATE`, which is followed by
@@ -721,10 +710,7 @@ fn followed_by_open_paren(text: &str, from: usize) -> bool {
         .starts_with('(')
 }
 
-/// Whether the identifier that ends at `from` is followed by `AS (` — the one
-/// shape that binds a relation name inside a statement: `WITH scope AS (…)`,
-/// and a derived table's `) AS scope`. A column alias (`COUNT(*) AS n,`) is not
-/// followed by a parenthesis, so it never registers.
+/// A column alias (`COUNT(*) AS n,`) is not followed by a parenthesis, so it never registers.
 fn followed_by_as_open_paren(text: &str, from: usize) -> bool {
     let rest = text[from..].trim_start_matches(|character: char| character.is_ascii_whitespace());
     let Some(after_as) = rest.get(..2) else {

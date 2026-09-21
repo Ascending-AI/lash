@@ -2195,8 +2195,8 @@ derive_mutation_jobs() {{
         ):
             self.assertIn(helper, definition)
 
-        # Walk the script in order. A conformance command is only covered by a
-        # helper build that runs inside the same function.
+        # A conformance command is only covered by a helper build that runs inside the same
+        # function.
         built = False
         conformance_commands = 0
         for line in gate.splitlines():
@@ -2234,9 +2234,7 @@ derive_mutation_jobs() {{
         # The instrumentation environment is evaluated in a subshell, so it
         # reaches the helper build and nothing else.
         self.assertLess(coverage.index('eval "$llvm_cov_env"'), build_at)
-        # And the build runs before the coverage test run it is for. Compare
-        # against the command, not the prose: the comment above the build says
-        # `--tests` too.
+        # And the build runs before the coverage test run it is for.
         test_run_at = next(
             index
             for index, line in enumerate(coverage.splitlines())
@@ -2765,12 +2763,10 @@ derive_mutation_jobs() {{
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
         self.assertIn("--no-fail-fast", workspace_tests)
 
-        # check is the API seal lane, nothing else: the workspace compile
-        # proof rides the Lint job's `//:workspace_clippy` aggregate. Gates
-        # that neither warm nor consume the seal cache are
-        # sibling jobs, not serial steps behind twelve minutes of compilation.
-        # Doctests were removed from the repository by ruling (2026-09-13), so
-        # no half of this job runs them on either trust path.
+        # Gates that neither warm nor consume the seal cache are sibling jobs, not serial steps
+        # behind twelve minutes of compilation.
+        # Doctests were removed from the repository by ruling (2026-09-13), so no half of this
+        # job runs them on either trust path.
         check_job = workflow_job_block(workflow, "check")
         self.assertNotIn("cargo check --workspace --all-targets --locked", check_job)
         self.assertNotIn("--doc ", check_job)

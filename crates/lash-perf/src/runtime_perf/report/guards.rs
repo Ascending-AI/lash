@@ -12,15 +12,12 @@ use crate::runtime_perf::measurement::stage;
 
 /// Which guard classes are allowed to fail the process.
 ///
-/// This used to be a `(enforce_budgets, enforce_inventory)` bool pair: four
-/// combinations for three meanings, collapsed at the call site by
-/// `enforce_inventory && !enforce_budgets`. `(true, true)` silently meant
-/// "enforce everything", so `--runtime-perf-enforce-inventory` was a no-op
-/// whenever `--runtime-perf-enforce-budgets` was also passed, and no help text
-/// said so. Three modes, one value.
+/// `(true, true)` silently meant "enforce everything", so `--runtime-perf-enforce-inventory`
+/// was a no-op whenever `--runtime-perf-enforce-budgets` was also passed, and no help text
+/// said so.
+/// Three modes, one value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BudgetEnforcement {
-    /// Report everything, fail on nothing.
     #[default]
     None,
     /// Fail only on the machine-independent inventory class. Duration and
@@ -150,8 +147,7 @@ pub(super) fn enforcement_failures(
         .collect()
 }
 
-/// Whether a failed guard result is allowed to fail the process. Advisory
-/// (wall-clock) results never are; the enforcement mode decides the rest.
+/// Advisory (wall-clock) results never are; the enforcement mode decides the rest.
 pub(super) fn gates_run(result: &RuntimePerfBudgetResult, enforcement: BudgetEnforcement) -> bool {
     if result.passed || result.class.is_advisory() {
         return false;

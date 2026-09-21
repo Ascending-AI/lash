@@ -451,15 +451,13 @@ impl LiveConformanceHarness {
         );
     }
 
-    /// The crash cut between a registry's commit and its post-commit index
-    /// reinstate (FIG-2499 fix round 3, ruling 2): the index is revoked, the
-    /// registration is committed with no host bound, everything is dropped,
-    /// and a cold registry plus host are opened and bound. The first effect
-    /// under the process is admitted with no explicit re-registration: the
+    /// The crash cut between a registry's commit and its post-commit index reinstate (FIG-2499
+    /// fix round 3, ruling 2): the index is revoked, the registration is committed with no
+    /// host bound, everything is dropped, and a cold registry plus host are opened and bound.
+    /// The first effect under the process is admitted with no explicit re-registration: the
     /// host reads through the revoked index to the registry it is bound to.
-    /// Runs over a SQLite-backed registry always and over a PostgreSQL-backed
-    /// one when `LASH_POSTGRES_DATABASE_URL` names a server. Returns the
-    /// number of registries witnessed.
+    /// Runs over a SQLite-backed registry always and over a PostgreSQL-backed one when
+    /// `LASH_POSTGRES_DATABASE_URL` names a server.
     pub(super) async fn run_cold_reopen_witnesses(&self) -> usize {
         let dir = tempfile::tempdir().expect("tempdir");
         let registry_path = dir.path().join("registry.db");

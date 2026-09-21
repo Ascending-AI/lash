@@ -39,8 +39,6 @@ crate::statements! {
         /// whether it is still owed.
         select_state = "SELECT state FROM process_wake_deliveries WHERE delivery_id = ?1";
 
-        /// Return every claim whose attempt window has lapsed at `?1` to the
-        /// pending pool.
         reclaim_lapsed_claims = "UPDATE process_wake_deliveries
                          SET {{pending_wake_delivery_state(state)}}, claim_token = NULL
                          WHERE {{enqueuing_wake_delivery_state(state)}} AND next_attempt_at_ms <= ?1";

@@ -1,8 +1,6 @@
 use crate::LashCore;
 use std::sync::Arc;
 
-/// Read-only projection of the tool composition configured on a [`LashCore`].
-///
 /// The view delegates to the same internal registry implementation used by
 /// runtime sessions. It does not accept providers and cannot mutate catalog
 /// membership.

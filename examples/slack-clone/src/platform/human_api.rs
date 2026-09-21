@@ -48,7 +48,6 @@ pub async fn healthz(
     })))
 }
 
-/// Register the app's Events API request URL.
 #[derive(Debug, Deserialize)]
 pub struct RegisterAppRequest {
     pub request_url: String,
@@ -159,7 +158,6 @@ pub async fn bootstrap(
     })))
 }
 
-/// Create a channel.
 #[derive(Debug, Deserialize)]
 pub struct CreateChannelRequest {
     pub name: String,

@@ -191,11 +191,9 @@ struct PlantedJsonOverflows {
 
 /// Replace every out-of-range JSON number with a signed marker object.
 ///
-/// Returns `None` when the source has no such number, so an ordinary syntax
-/// error keeps its original diagnostic. Copying is by string slice: an earlier
-/// version pushed raw bytes as `char`, which reinterpreted every UTF-8
-/// continuation byte as Latin-1 and mojibaked every non-ASCII character in any
-/// document that happened to contain one overflowing number.
+/// Copying is by string slice: an earlier version pushed raw bytes as `char`, which
+/// reinterpreted every UTF-8 continuation byte as Latin-1 and mojibaked every non-ASCII
+/// character in any document that happened to contain one overflowing number.
 fn rewrite_overflowing_json_numbers(source: &str) -> Option<PlantedJsonOverflows> {
     let marker = json_overflow_marker(source);
     let bytes = source.as_bytes();

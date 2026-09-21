@@ -44,7 +44,6 @@ const HISTORY_NODE_IDENTITY_DOMAIN: &str = "lash.history-node";
 /// precedence cannot drift between implementations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeCommitReceiptDecision {
-    /// Return the stored first-attempt result without applying the attempted commit.
     Replay,
     /// The append operation id was reused for different semantic request content.
     AppendIdentityConflict,
@@ -62,8 +61,6 @@ pub enum RuntimeCommitReceiptDecision {
     },
 }
 
-/// Decide how an existing runtime commit receipt applies to one attempted commit.
-///
 /// Exact commit hashes retain legacy replay precedence only after any
 /// comparable append identity agrees. When both exact-hash receipts carry a
 /// requested-node count, the count must agree. Otherwise,
@@ -1305,8 +1302,6 @@ mod append_request_identity_tests {
 }
 
 impl OperationId {
-    /// Constructs a `OperationId` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
     pub fn new(scope: crate::ExecutionScope, key: impl Into<String>) -> Self {
         Self {
             scope,
@@ -1337,8 +1332,6 @@ impl OperationId {
         })
     }
 
-    /// Exposes turn id to store, effect-host, and protocol implementors while materializing,
-    /// executing, or persisting a session turn. Returns `None` when no turn id is present.
     pub fn turn_id(&self) -> Option<&TurnId> {
         self.scope.turn_id()
     }

@@ -121,7 +121,6 @@ crate::statements! {
         /// The durable session-state version marker of `?1`.
         select_state_version = "SELECT session_state_version FROM session_meta WHERE session_id = ?1";
 
-        /// Record that `?1` committed at `?2`.
         touch_last_commit = "UPDATE session_meta SET last_commit_at_ms = ?2 WHERE session_id = ?1";
 
         /// Stamp `?1`'s session-state version marker to `?2`.
@@ -132,7 +131,6 @@ crate::statements! {
         /// between the backends unnoticed.
         set_state_version = "UPDATE session_meta SET session_state_version = ?2 WHERE session_id = ?1";
 
-        /// Drop session `?1`'s identity row at delete time.
         delete_by_session = "DELETE FROM session_meta WHERE session_id = ?1";
     }
 }

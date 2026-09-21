@@ -111,8 +111,7 @@ mod release_state {
     /// Release was requested (renewal stopped) but the backend has not
     /// acknowledged it yet. Still retryable.
     pub(super) const RELEASING: u8 = 1;
-    /// The backend acknowledged the release, or the commit that carried it
-    /// succeeded. Terminal.
+    /// The backend acknowledged the release, or the commit that carried it succeeded.
     pub(super) const RELEASED: u8 = 2;
 }
 
@@ -200,9 +199,6 @@ impl BorrowedLaneAuthority {
 }
 
 impl SessionExecutionLeaseGuard {
-    /// Test-only shorthand for
-    /// [`try_acquire_for_executor`](Self::try_acquire_for_executor).
-    ///
     /// The executor stays a required parameter here too: it is identity, and a
     /// minted-per-call default would silently make every acquisition a distinct
     /// claimant, which is precisely the distinction these tests exercise.
@@ -271,8 +267,6 @@ impl SessionExecutionLeaseGuard {
         Ok(SessionExecutionLeaseGuardAcquisition::Acquired(guard))
     }
 
-    /// Report the claim, then start renewing it.
-    ///
     /// `taken_over` is emitted here, by the winner, because this is the only
     /// moment the displaced holder is known to be the one this claim actually
     /// displaced, and the only party guaranteed alive to say so.
@@ -1232,7 +1226,6 @@ mod tests {
         .expect("claim lease")
         .expect("lease acquired");
 
-        // Wait for the renewal task to observe the transient failure.
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while store.session_execution_lease_renewal_count() == 0 {
                 tokio::task::yield_now().await;

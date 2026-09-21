@@ -89,9 +89,8 @@ impl CronJobSyncSurface for IngressCronJobSyncSurface {
     }
 }
 
-/// Completes the cron half of one committed trigger enable/disable mutation
-/// before its HTTP route may return success. The pre-mutation record keeps a
-/// disabled job cancellable even when this process did not originally arm it.
+/// The pre-mutation record keeps a disabled job cancellable even when this process did not
+/// originally arm it.
 pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
     state: &AppState,
     session_id: &SessionId,

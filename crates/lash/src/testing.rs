@@ -1,6 +1,3 @@
-//! Test helpers for embedders. Enable with `lash = { ..., features = ["testing"] }`
-//! to script model responses in integration tests without a live provider.
-
 // Test-support module: these helpers run inside a test and a broken fixture
 // assumption must abort it loudly rather than be reshaped into a runtime error
 // the test under way would then report as a runtime defect. Clippy's
@@ -15,7 +12,6 @@ pub use lash_core::TestLocalProcessRegistry;
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;
-/// Runs one tool call with mock contexts for focused provider tests.
 pub use lash_core::testing::run_tool;
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
@@ -84,9 +80,6 @@ pub mod conformance {
         use futures_util::StreamExt as _;
         use lash_lashlang_runtime::{LashlangArtifactStore, ToolDefinitionBindingExt};
 
-        /// Stores + registry for one run of the
-        /// [`runtime_rebuild_and_worker_recovery`] suite.
-        ///
         /// `build_core` receives a builder pre-loaded with the mode, provider, model,
         /// plugins, and `process_registry`, and must wire the stores (and, for a
         /// durable store factory, an effect controller) and `build()`. `process_registry`
@@ -206,7 +199,6 @@ finish("registered");
             crate::rlm::LashlangAbilities::default().with_sleep()
         }
 
-        /// Installs the trigger abilities used by the rebuild conformance program.
         struct TriggerResourcePluginFactory;
 
         impl PluginFactory for TriggerResourcePluginFactory {

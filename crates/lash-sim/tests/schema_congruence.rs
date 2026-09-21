@@ -362,8 +362,6 @@ fn sqlite_table_nullability(source: &str, table: &str) -> BTreeMap<String, bool>
     nullable
 }
 
-/// Maps each column of a Postgres table to `true` when the published shape
-/// marks it `nullable`.
 fn postgres_table_nullability(source: &str, table: &str) -> BTreeMap<String, bool> {
     let declaration = format!("table {table}\n");
     source
@@ -649,10 +647,9 @@ fn validate_registry(sqlite_source: &str, postgres_source: &str) -> Result<(), S
     }
 }
 
-/// Compares nullability on every column a paired row shares across the two
-/// backends. Each mismatch must be declared in `NULLABILITY_DIVERGENCES` with
-/// the correct direction and a reason; a declaration whose columns no longer
-/// disagree is itself a failure, so the list cannot go stale.
+/// Each mismatch must be declared in `NULLABILITY_DIVERGENCES` with the correct direction and
+/// a reason; a declaration whose columns no longer disagree is itself a failure, so the list
+/// cannot go stale.
 fn validate_nullability(
     sqlite_source: &str,
     postgres_source: &str,

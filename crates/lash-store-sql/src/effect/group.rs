@@ -25,8 +25,6 @@ crate::statements! {
              FROM runtime_effect_group
              WHERE group_key = ?1";
 
-        /// Allocate the next settlement rank in group `?1` and report it.
-        ///
         /// A single-row `UPDATE … SET next_seq = next_seq + 1` takes the row's
         /// lock, so there is no lost update under `READ COMMITTED` and none
         /// under `BEGIN IMMEDIATE`.
@@ -35,10 +33,8 @@ crate::statements! {
              WHERE group_key = ?1
              RETURNING next_seq";
 
-        /// Delete every group of session `?1`.
         delete_by_session = "DELETE FROM runtime_effect_group WHERE session_id = ?1";
 
-        /// Delete every group of scope `?1`.
         delete_by_scope = "DELETE FROM runtime_effect_group WHERE scope_id = ?1";
     }
 }

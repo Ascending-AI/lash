@@ -672,14 +672,6 @@ fn linked_module_accepts_button_trigger_source_constructor() {
     //   yield { kind: "button_pressed", button: event.button, message: event.message }
     //   finish true
     // }
-    //
-    // handle = await triggers.register({
-    //   source: ui.button.pressed({}),
-    //   target: on_button,
-    //   inputs: { event: trigger.event },
-    //   name: "button watcher"
-    // })?
-    // finish handle
     let program = builders::module(
         vec![builders::process(
             "on_button",

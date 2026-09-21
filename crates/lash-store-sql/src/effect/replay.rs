@@ -91,10 +91,8 @@ crate::statements! {
              ORDER BY settlement_seq
              LIMIT 1 OFFSET ?2";
 
-        /// Delete every row of session `?1`.
         delete_by_session = "DELETE FROM runtime_effect_replay WHERE session_id = ?1";
 
-        /// Delete every row of scope `?1`.
         delete_by_scope = "DELETE FROM runtime_effect_replay WHERE scope_id = ?1";
     }
 }

@@ -39,9 +39,6 @@ pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
     }]
 }
 
-/// Whether this connection may write the stamp at all
-/// (`host_provisioned_mode_needs_no_ddl_privilege`).
-///
 /// A reader that cannot write records no release and the store reports the
 /// absence, which is the honest answer — it did not write these bytes. Why the
 /// privilege is asked for rather than discovered is on the statement.
@@ -81,8 +78,6 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
     Ok(())
 }
 
-/// Read the stamp from a pool, without opening the store.
-///
 /// A database with no `lash_release_stamp` relation is
 /// [`StoreReleaseState::Unstamped`]: it records no writing release because no
 /// build that stamps has written it. A read that fails for any other reason is

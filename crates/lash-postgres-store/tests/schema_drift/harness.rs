@@ -20,8 +20,6 @@ pub struct ScratchSchema {
 }
 
 impl ScratchSchema {
-    /// Creates the schema and provisions it exactly as a host would: by applying
-    /// [`PostgresStorage::schema_ddl`], not by letting lash open into it.
     pub async fn provision(database_url: &str) -> Self {
         let name = format!("lash_drift_{}", uuid::Uuid::new_v4().simple());
         let mut admin = PgConnection::connect(database_url)
@@ -62,7 +60,6 @@ impl ScratchSchema {
         }
     }
 
-    /// Runs host DDL or DML against the scratch schema.
     pub async fn apply(&self, statements: &str) {
         sqlx::raw_sql(statements)
             .execute(&self.pool)
@@ -87,8 +84,7 @@ impl ScratchSchema {
         .await
     }
 
-    /// Drops the schema. Called explicitly so a failing assertion leaves the
-    /// schema behind for inspection.
+    /// Called explicitly so a failing assertion leaves the schema behind for inspection.
     pub async fn cleanup(self) {
         let name = self.name;
         self.pool.close().await;
@@ -117,7 +113,6 @@ pub async fn postgres_server_version_num() -> i32 {
         .expect("server_version_num is numeric")
 }
 
-/// Builds a pool whose connections use an explicit `search_path`.
 pub async fn pool_with_search_path(database_url: &str, search_path: &str) -> PgPool {
     let search_path = search_path.to_string();
     PgPoolOptions::new()

@@ -71,7 +71,6 @@ pub enum ProcessTransition {
     RecordCallerDeparture,
     /// Enter a durable wait state.
     EnterWait(WaitState),
-    /// Clear the process's current wait state.
     ClearWait,
 }
 
@@ -189,8 +188,8 @@ pub fn prepare_process_transition(
     let append = match transition {
         ProcessTransition::SetExternalRef(external_ref) => {
             // Mirrors the fold's compare-and-set: a write that cannot displace
-            // the recorded owner is an idempotent no-op, not an append, so a
-            // resubmitting sweep never rewrites a row it coalesced onto. Only
+            // the recorded owner is an idempotent no-op, not an append, so a resubmitting
+            // sweep never rewrites a row it coalesced onto.
             // a competing backend still reaches the fold's refusal.
             match record.external_ref.as_ref() {
                 // Nothing recorded yet: this writer names the owner.

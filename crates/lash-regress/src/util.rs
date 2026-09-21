@@ -158,7 +158,6 @@ pub fn utf8_first_byte(cp: u32) -> u8 {
     }
 }
 
-/// Add all of the first bytes of a code point interval to a byte bitmap.
 pub fn add_utf8_first_bytes_to_bitmap(interval: Interval, bitmap: &mut ByteBitmap) {
     // Note this is an inclusive interval.
     let Interval { first, last } = interval;
@@ -214,7 +213,6 @@ const fn mask_shift(b: u8, mask: u8, shift: u8) -> u32 {
     (masked as u32) << (shift as u32)
 }
 
-// Number of significant bits in a utf8 continuation byte.
 const UTF8_CONT_SIGBITS: u8 = 6;
 
 /// \return true if \p b is a UTF8 continutation byte.
@@ -223,7 +221,6 @@ pub fn is_utf8_continuation(b: u8) -> bool {
     (b & 0b1100_0000) == 0b1000_0000
 }
 
-// Construct a code point from a list of bytes.
 #[inline(always)]
 pub fn utf8_w2(b0: u8, b1: u8) -> u32 {
     debug_assert!(!is_utf8_continuation(b0) && is_utf8_continuation(b1));

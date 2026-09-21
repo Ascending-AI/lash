@@ -165,8 +165,8 @@ pub struct WorkloadExpectations {
 }
 
 impl WorkloadExpectations {
-    /// Declare the observations explicitly. Callers that derive them from a
-    /// generated workload use [`crate::generator::GeneratedWorkload::expectations`].
+    /// Callers that derive them from a generated workload use
+    /// [`crate::generator::GeneratedWorkload::expectations`].
     pub fn new(
         sessions: Vec<String>,
         provider_turn_count: usize,
@@ -391,8 +391,7 @@ pub struct OracleCensus {
 }
 
 impl OracleCensus {
-    /// Record one evaluated verdict. Its status, observation class and
-    /// scenario partition all come from the verdict itself.
+    /// Its status, observation class and scenario partition all come from the verdict itself.
     pub fn record(&mut self, verdict: &OracleVerdict) {
         self.record_unverdicted(&verdict.oracle_id, verdict.status.clone());
     }

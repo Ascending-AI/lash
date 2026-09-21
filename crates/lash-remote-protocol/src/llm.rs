@@ -121,7 +121,6 @@ impl RemoteLlmRequest {
             .collect()
     }
 
-    /// Encodes one request inside the shared remote-protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
     }

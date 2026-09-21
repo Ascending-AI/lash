@@ -377,8 +377,6 @@ lash_store_sql::statements! {
                     OR p.updated_at_ms >= ?3)
              ORDER BY p.process_id";
 
-        /// Whether `?2` is registered, and whether session `?1` observes it.
-        ///
         /// One statement rather than two: under `READ COMMITTED` a
         /// registration could land between two reads, and the pair is what
         /// decides whether an observer question is refused as unknown or
@@ -471,9 +469,7 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `process_observers` statements only PostgreSQL issues.
     pub(crate) struct ObserverPostgresStatements @ "process_observer" {
-        /// Record that session `?1` observes incarnation `?2` / `?3`, keeping
-        /// an existing row. `ON CONFLICT DO NOTHING` is PostgreSQL's spelling
-        /// of SQLite's `INSERT OR IGNORE`.
+        /// `ON CONFLICT DO NOTHING` is PostgreSQL's spelling of SQLite's `INSERT OR IGNORE`.
         insert_if_absent = "INSERT INTO process_observers (session_id, process_id, process_incarnation)
              VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING";
 
@@ -660,9 +656,8 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `process_wake_deliveries` statements only PostgreSQL issues.
     pub(crate) struct WakeDeliveryPostgresStatements @ "process_wake_delivery" {
-        /// Record a pending wake, keeping an existing row. `ON CONFLICT
-        /// (delivery_id) DO NOTHING` is PostgreSQL's spelling of SQLite's
-        /// `INSERT OR IGNORE`.
+        /// `ON CONFLICT (delivery_id) DO NOTHING` is PostgreSQL's spelling of SQLite's `INSERT
+        /// OR IGNORE`.
         insert_pending = "INSERT INTO process_wake_deliveries (
             delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
             claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,

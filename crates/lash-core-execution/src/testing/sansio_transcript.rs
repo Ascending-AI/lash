@@ -31,8 +31,6 @@ use crate::{SessionStreamEvent, TurnFinish, TurnOutcome, TurnStop};
 /// [`super::behavior_transcript::DURABLE_WRITE_EVENTS`].
 pub const CHECKPOINT_REQUEST_EVENT: &str = "checkpoint.request";
 
-/// Record every reviewable line for one drained batch of effects.
-///
 /// Call once per drain, in drain order, so the transcript's line order is the
 /// machine's effect order.
 pub fn record_effects<M: TurnProtocol>(

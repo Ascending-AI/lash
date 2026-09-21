@@ -64,10 +64,9 @@ pub(super) async fn prune_terminal_processes(
             })
             .await
             .map_err(process_sqlite_error)?;
-        // Delete process-owned session stores first. If this fails, the
-        // terminal process row remains and the prune leaks conservatively;
-        // the final transaction below revalidates eligibility before it
-        // removes any process row.
+        // If this fails, the terminal process row remains and the prune leaks conservatively;
+        // the final transaction below revalidates eligibility before it removes any process
+        // row.
         for process_id in prunable {
             for session_id in facade_support::process_runtime_session_ids(&process_id) {
                 delete_session_from_catalog(root, &session_id, SqliteConnectionPolicy::default())

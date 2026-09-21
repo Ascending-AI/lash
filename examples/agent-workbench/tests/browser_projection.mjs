@@ -2712,11 +2712,7 @@ test("a late snapshot replaces the streams' rows without erasing newer ones", ()
   }
 });
 
-/* The red banner Sam saw flash on every send: `/api/state` answered, but the
-   observation stream had already moved past it, so the shell marked the
-   snapshot channel *unreachable* and painted "reconnecting" until the retry
-   landed. Staleness is ordering, not unreachability — a server that answered
-   is reachable, and only the bounded retry ladder should run. */
+/* The red banner Sam saw flash on every send: `/api/state` answered, but the observation stream had already moved past it, so the shell marked the snapshot channel *unreachable* and painted "reconnecting" until the retry Staleness is ordering, not unreachability — a server that answered is reachable, and only the bounded retry ladder should run. */
 test("a snapshot overtaken by live observations is not an outage", async () => {
   let resolveSnapshot;
   let failNextFetch = false;

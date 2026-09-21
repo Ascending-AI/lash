@@ -2,9 +2,7 @@
 //! test and the independently-derived reference model.
 use super::*;
 
-/// Render the differing record fields so a model disagreement names the field,
-/// not just the record. Falls back to whole-record `Debug` when either side
-/// cannot be serialized.
+/// Falls back to whole-record `Debug` when either side cannot be serialized.
 fn record_field_diff(expected: &ProcessRecord, actual: &ProcessRecord) -> String {
     let (
         Ok(serde_json::Value::Object(expected_fields)),

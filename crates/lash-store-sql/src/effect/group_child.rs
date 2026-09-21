@@ -60,14 +60,11 @@ crate::statements! {
              WHERE group_key = ?1
              ORDER BY position";
 
-        /// Delete every accepted child of session `?1`.
         delete_by_session = "DELETE FROM runtime_effect_group_child
              WHERE group_key IN (
                  SELECT group_key FROM runtime_effect_group WHERE session_id = ?1
              )";
 
-        /// Delete every accepted child of scope `?1`.
-        ///
         /// Reached through the group row for the same reason the table carries
         /// no `scope_id`: one owner of that fact. Group-atomic retirement
         /// (ADR 0065 N3) runs this in the transaction that deletes the groups.

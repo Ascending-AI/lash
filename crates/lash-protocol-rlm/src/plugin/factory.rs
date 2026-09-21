@@ -77,9 +77,9 @@ pub struct RlmProtocolPluginFactory {
 }
 
 impl RlmProtocolPluginFactory {
-    /// Construct the factory. The Lashlang artifact store is a required argument:
-    /// there is no valid RLM deployment without one, so the previously build-time
-    /// "missing artifact store" error is now unrepresentable.
+    /// The Lashlang artifact store is a required argument: there is no valid RLM deployment
+    /// without one, so the previously build-time "missing artifact store" error is now
+    /// unrepresentable.
     pub fn new(
         config: RlmProtocolPluginConfig,
         artifact_store: Arc<dyn LashlangArtifactStore>,
@@ -203,8 +203,6 @@ impl RlmProtocolPluginFactory {
         })
     }
 
-    /// Build the compile-time Lashlang surface over a host-built plugin host.
-    ///
     /// Operation over the factory and a plugin host: the caller supplies a plugin
     /// host containing this protocol factory plus any tool plugins to resolve,
     /// and whether process lifecycle is available.
@@ -415,7 +413,6 @@ impl LashlangModuleCompileRequest {
     }
 }
 
-/// Output of [`RlmProtocolPluginFactory::lashlang_compile_surface`].
 pub struct LashlangCompileSurface {
     pub host_environment: LashlangHostEnvironment,
     pub tool_catalog: Arc<lash_core::ToolCatalog>,
@@ -460,8 +457,6 @@ mod label_annotation_tests {
             .build()
     }
 
-    /// Run a host config through the plugin's config transformation the way a
-    /// session build does, and return the host environment it produces.
     fn rendered_surface(config: RlmProtocolPluginConfig) -> lashlang::LashlangHostEnvironment {
         let config = rlm_protocol_config(config, false);
         rlm_lashlang_surface(&config, false)

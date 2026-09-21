@@ -172,9 +172,6 @@ fn budgeted_bytes_per_iter(scenario: &str, mode: &str) -> f64 {
         })
 }
 
-/// Runs `compiled` `iterations` times from a fresh state and returns allocated
-/// bytes per iteration.
-///
 /// This is the `compiled_execute` shape the corpus budgets: compile once, then
 /// pay only for execution. One unmeasured warm-up run absorbs the one-time
 /// allocations a first execution makes.

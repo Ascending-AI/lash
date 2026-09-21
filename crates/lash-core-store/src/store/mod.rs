@@ -167,7 +167,6 @@ pub struct SessionBinding {
 }
 
 impl SessionBinding {
-    /// Builds a root binding for store implementors.
     pub fn root(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
@@ -213,7 +212,6 @@ pub fn validate_session_id(session_id: &SessionId) -> Result<(), StoreError> {
 pub struct BlobRef(pub String);
 
 impl BlobRef {
-    /// Derives the current versioned BLAKE3 content address for a blob body.
     pub fn for_content(content: &[u8]) -> Self {
         Self(crate::stable_hash::blake3_hex("lash-blob/v2", content))
     }
@@ -289,8 +287,6 @@ pub struct SessionHeadMeta {
 }
 
 impl SessionHeadMeta {
-    /// Combine the JSON payload with all dedicated-column values.
-    ///
     /// The session's identity is owned by the row key the caller bound the
     /// query to, never by the payload: `session_id` is taken from
     /// `session_id` and the payload's copy is a checked redundancy. A payload
@@ -883,8 +879,6 @@ impl RuntimeCommit {
     }
 }
 
-/// Build the exact identity-bearing append commit used by the runtime.
-///
 /// The perf harness needs this test-gated seam to isolate receipt derivation
 /// and real backend publication without adding timing hooks to production. It
 /// deliberately stops before the host-owned parts of the production sequence:
@@ -994,7 +988,7 @@ impl Default for SessionHeadPayload {
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
-    /// Read the marker without guarded payload decode. Legacy absent markers mean zero.
+    /// Legacy absent markers mean zero.
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         Ok(OLDEST_SUPPORTED_SESSION_STATE_VERSION)
     }

@@ -621,8 +621,6 @@ fn start_request(process_id: &ProcessId) -> lash_core::ProcessStartRequest {
     )
 }
 
-/// Registers a trigger subscription on the core's store and returns the
-/// process id the router will hand the delivery of `occurrence`.
 async fn trigger_delivery_process_id(
     store: &dyn lash_core::TriggerStore,
     occurrence: &lash_core::TriggerOccurrenceRequest,

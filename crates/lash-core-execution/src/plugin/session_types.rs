@@ -45,9 +45,6 @@ pub enum SessionPluginSource {
 /// [`PluginError::SessionInitTooLarge`] rather than truncated.
 pub const SESSION_PLUGIN_INIT_MAX_BYTES: usize = 8 * 1024 * 1024;
 
-/// Spawn-time capture of everything a forked peer session needs to initialize
-/// without ever reading the live parent.
-///
 /// The spawn site records exactly what the parent's [`PluginSession`]
 /// used to read when forking: the parent's plugin state, its tool-catalog
 /// overlay, and the
@@ -216,18 +213,15 @@ pub struct SessionCreateRequest {
     /// creation time. Each plugin decodes only the entry keyed by its id.
     #[serde(default)]
     pub plugin_options: PluginOptions,
-    /// Spawn-time capture of the spawning session's plugin state, tool-catalog
-    /// overlay, and exported tool state. Required when `plugin_source` is
-    /// [`SessionPluginSource::ParentFork`]; ignored otherwise. Materialization
-    /// initializes the peer from this payload alone and never reads a live
+    /// Required when `plugin_source` is [`SessionPluginSource::ParentFork`]; ignored
+    /// otherwise.
+    /// Materialization initializes the peer from this payload alone and never reads a live
     /// parent session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_init: Option<SessionPluginInit>,
 }
 
 impl SessionCreateRequest {
-    /// Builds a root-session request with a fresh UUID for protocol implementors materializing a
-    /// new independent session.
     pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
         Self {
             session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
@@ -245,8 +239,6 @@ impl SessionCreateRequest {
         }
     }
 
-    /// Builds a child-session request with a fresh UUID and inherited policy selection for protocol
-    /// implementors materializing nested work.
     pub fn child_session(
         parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
@@ -271,8 +263,6 @@ impl SessionCreateRequest {
         }
     }
 
-    /// Builds a child-session request with an explicit policy for protocol
-    /// and process-engine implementors materializing nested work.
     pub fn child(
         parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
@@ -298,22 +288,16 @@ impl SessionCreateRequest {
         }
     }
 
-    /// Sets the plugin source carried by a `SessionCreateRequest` for protocol and process-engine
-    /// implementors while preparing or executing plugin and tool work.
     pub fn with_plugin_source(mut self, plugin_source: SessionPluginSource) -> Self {
         self.plugin_source = plugin_source;
         self
     }
 
-    /// Sets the session id carried by a `SessionCreateRequest` for store, effect-host, and protocol
-    /// implementors while materializing, executing, or persisting a session turn.
     pub fn with_session_id(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
 
-    /// Sets the initial nodes carried by a `SessionCreateRequest` for store, effect-host, and
-    /// protocol implementors while materializing, executing, or persisting a session turn.
     pub fn with_initial_nodes(mut self, initial_nodes: Vec<SessionAppendNode>) -> Self {
         self.initial_nodes = initial_nodes;
         self
@@ -329,22 +313,16 @@ impl SessionCreateRequest {
         self
     }
 
-    /// Sets the tool access carried by a `SessionCreateRequest` for protocol and process-engine
-    /// implementors while preparing or executing plugin and tool work.
     pub fn with_tool_access(mut self, tool_access: SessionToolAccess) -> Self {
         self.tool_access = tool_access;
         self
     }
 
-    /// Sets the subagent context carried by a `SessionCreateRequest` for store, effect-host, and
-    /// protocol implementors while materializing, executing, or persisting a session turn.
     pub fn with_subagent_context(mut self, subagent: SubagentSessionContext) -> Self {
         self.subagent = Some(subagent);
         self
     }
 
-    /// Records causal provenance for protocol and process-engine implementors when the request is a
-    /// child; root requests remain unchanged.
     pub fn with_caused_by(mut self, caused_by: crate::CausalRef) -> Self {
         if let SessionRelation::Child {
             caused_by: cause, ..
@@ -355,16 +333,11 @@ impl SessionCreateRequest {
         self
     }
 
-    /// Sets the context overlay carried by a `SessionCreateRequest` for store, effect-host, and
-    /// protocol implementors while materializing, executing, or persisting a session turn.
     pub fn with_context_overlay(mut self, context_overlay: SessionContextOverlay) -> Self {
         self.context_overlay = context_overlay;
         self
     }
 
-    /// Attaches the spawn-time plugin init capture carried by a
-    /// `SessionCreateRequest` for store and process-engine implementors while
-    /// preparing or materializing a forked session.
     pub fn with_plugin_init(mut self, plugin_init: SessionPluginInit) -> Self {
         self.plugin_init = Some(plugin_init);
         self

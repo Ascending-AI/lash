@@ -36,20 +36,17 @@ impl Interval {
         }
     }
 
-    /// Return whether self is before rhs.
     fn is_before(self, other: Interval) -> bool {
         self.last < other.first
     }
 
-    /// Return whether self is strictly before rhs.
-    /// "Strictly" here means there is at least one value after the end of self,
-    /// and before the start of rhs. Overlapping *or abutting* intervals are
-    /// not considered strictly before.
+    /// "Strictly" here means there is at least one value after the end of self, and before the
+    /// start of rhs.
+    /// Overlapping *or abutting* intervals are not considered strictly before.
     fn is_strictly_before(self, rhs: Interval) -> bool {
         self.last + 1 < rhs.first
     }
 
-    /// Compare two intervals.
     /// Overlapping *or abutting* intervals are considered equal.
     fn mergecmp(self, rhs: Interval) -> cmp::Ordering {
         if self.is_strictly_before(rhs) {
@@ -61,29 +58,24 @@ impl Interval {
         }
     }
 
-    /// Return whether self is mergeable with rhs.
     fn mergeable(self, rhs: Interval) -> bool {
         self.mergecmp(rhs) == Ordering::Equal
     }
 
-    /// Return whether self contains a code point \p cp.
     pub fn contains(self, cp: CodePoint) -> bool {
         self.first <= cp && cp <= self.last
     }
 
-    /// Return whether self overlaps 'other'.
     /// Overlaps means that we share at least one code point with 'other'.
     pub fn overlaps(self, other: Interval) -> bool {
         !self.is_before(other) && !other.is_before(self)
     }
 
-    /// Return the interval of codepoints.
     pub fn codepoints(self) -> core::ops::Range<u32> {
         debug_assert!(self.last + 1 > self.last, "Overflow");
         self.first..(self.last + 1)
     }
 
-    /// Return the number of contained code points.
     pub fn count_codepoints(self) -> usize {
         (self.last - self.first + 1) as usize
     }
@@ -117,12 +109,10 @@ impl CodePointSet {
         self.ivs.clear();
     }
 
-    // Return true if the set is empty.
     pub(crate) fn is_empty(&self) -> bool {
         self.ivs.is_empty()
     }
 
-    // Return true if we contain all code points.
     pub(crate) fn contains_all_codepoints(&self) -> bool {
         self.ivs.len() == 1 && self.ivs[0] == Interval::new(0, CODE_POINT_MAX)
     }
@@ -144,21 +134,16 @@ impl CodePointSet {
         }
     }
 
-    /// Construct from sorted, disjoint intervals. Note these are not allowed to
-    /// even abut.
+    /// Note these are not allowed to even abut.
     pub fn from_sorted_disjoint_intervals(ivs: Vec<Interval>) -> CodePointSet {
         let res = CodePointSet { ivs };
         res.assert_is_well_formed();
         res
     }
 
-    /// Add an interval of code points to the set.
     pub fn add(&mut self, new_iv: Interval) {
-        // Find the mergeable subarray, that is, the range of intervals that intersect
-        // or abut new_iv.
         let mergeable = self.ivs.equal_range_by(|iv| iv.mergecmp(new_iv));
 
-        // Check our work.
         if cfg!(debug_assertions) {
             debug_assert!(new_iv.first <= new_iv.last);
             for (idx, iv) in self.ivs.iter().enumerate() {
@@ -172,10 +157,8 @@ impl CodePointSet {
             }
         }
 
-        // Merge all the overlapping intervals (possibly none), and then replace the
-        // range. Tests show that drain(), which modifies the vector, is not effectively
-        // optimized, so try to avoid it in the cases of a new entry or replacing an existing
-        // entry.
+        // Tests show that drain(), which modifies the vector, is not effectively optimized, so
+        // try to avoid it in the cases of a new entry or replacing an existing entry.
         match mergeable.end - mergeable.start {
             0 => {
                 // New entry.
@@ -201,7 +184,6 @@ impl CodePointSet {
         self.assert_is_well_formed();
     }
 
-    /// Add a single code point to the set.
     #[inline]
     pub fn add_one(&mut self, cp: CodePoint) {
         self.add(Interval {
@@ -210,7 +192,6 @@ impl CodePointSet {
         })
     }
 
-    /// Add another code point set.
     pub fn add_set(&mut self, mut rhs: CodePointSet) {
         // Prefer to add to the set with more intervals.
         if self.ivs.len() < rhs.ivs.len() {
@@ -268,8 +249,6 @@ impl CodePointSet {
         CodePointSet::from_sorted_disjoint_intervals(inverted_ivs)
     }
 
-    /// Remove the the given intervals from the set.
-    ///
     /// Invariants: The intervals must be sorted and disjoint.
     pub(crate) fn remove(&mut self, intervals: &[Interval]) {
         let mut result = Vec::new();

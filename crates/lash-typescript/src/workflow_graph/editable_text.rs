@@ -72,8 +72,6 @@ pub(super) fn workflow_clause(
     }
 }
 
-/// Parse one fragment of TypeScript with the node's visible bindings in scope.
-///
 /// Returns the parsed program and the number of leading statements the wrapper
 /// itself contributed, which the caller skips.
 pub(super) fn parse_typescript_fragment(
@@ -142,8 +140,6 @@ pub(super) fn opaque_wrapper_run_body(program: &Program) -> Option<&Expr> {
     super::printer::process_literal_run_body(literal)
 }
 
-/// Parse one editable TypeScript expression fragment with `globals` in scope.
-///
 /// This is the lens's public fragment door: hosts that let a person retype a
 /// node's expression parse the result through the dialect's own front-end, in
 /// expression position, rather than carrying a second grammar. The text is
@@ -157,9 +153,6 @@ pub fn parse_typescript_expression(
     expression_fragment(text, globals, processes).map_err(TypeScriptFragmentError)
 }
 
-/// Parse one editable expression fragment, reading an `async` arrow as the
-/// process literal it is.
-///
 /// Both expression doors — the public fragment door and the node-field door —
 /// go through here, so a host that re-parses and re-prints a node's text gets
 /// the same expression the renderer would. Parenthesising an `async` arrow
@@ -202,8 +195,6 @@ fn expression_fragment(
     }
 }
 
-/// Parse one editable TypeScript assignment target such as `total`,
-/// `state.count` or `rows[0]`, with `globals` in scope.
 pub fn parse_typescript_assign_target(
     text: &str,
     globals: &BTreeSet<String>,
@@ -222,9 +213,6 @@ pub fn parse_typescript_assign_target(
         .ok_or_else(|| TypeScriptFragmentError("expected an assignment target".to_string()))
 }
 
-/// Parse one editable TypeScript statement that only a process body accepts,
-/// such as the `return` that ends a process.
-///
 /// The text is reparsed inside a generated process-arrow wrapper, with
 /// `globals` re-declared in the run body so an edited reassignment still
 /// parses, and the wrapper's single statement is returned. The wrapper name
@@ -291,7 +279,6 @@ pub(super) fn parse_expression_field(
 /// The throwaway binding an `async` arrow field is parsed under.
 const PROCESS_LITERAL_BINDING: &str = "__workflow_process_literal";
 
-/// Whether an expression field is an `async` arrow, and so a process literal.
 fn is_async_arrow_text(text: &str) -> bool {
     let rest = text.trim_start();
     rest.strip_prefix("async")
@@ -308,8 +295,6 @@ fn single_expression(main: Expr) -> Option<Expr> {
     }
 }
 
-/// Parse an assignment target such as `total`, `state.count` or `rows[0]`.
-///
 /// The dialect has no production for a bare target, so the text is parsed as
 /// the member expression it is and converted; that keeps one grammar in play
 /// rather than a second hand-written path parser.

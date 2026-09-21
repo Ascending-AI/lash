@@ -1,5 +1,3 @@
-//! Trigger envelopes: occurrence emission, subscriptions, and registrations.
-
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;

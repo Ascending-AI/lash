@@ -66,13 +66,11 @@ impl RemoteTurnInput {
         }
     }
 
-    /// Encodes standalone turn input inside the shared protocol envelope.
     /// Nested turn input remains a bare body.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
     }
 
-    /// Decodes standalone turn input from the shared protocol envelope.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
         let input = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
         input.validate()?;
@@ -110,12 +108,10 @@ pub struct RemoteTurnRequest {
 }
 
 impl RemoteTurnRequest {
-    /// Encodes one turn request inside the shared remote-protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
     }
 
-    /// Decodes one turn request from the shared remote-protocol envelope.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
         let request = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
         request.validate()?;

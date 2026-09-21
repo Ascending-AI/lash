@@ -169,9 +169,8 @@ fn test_child_max_attempts() -> std::num::NonZeroU32 {
     std::num::NonZeroU32::new(5).expect("test attempt bound is non-zero")
 }
 
-/// Test-only read seam for malformed-artifact rejection. Production stores
-/// correctly refuse malformed publications, so the runtime oracle must inject
-/// corruption at the read boundary it is responsible for validating.
+/// Production stores correctly refuse malformed publications, so the runtime oracle must
+/// inject corruption at the read boundary it is responsible for validating.
 struct ForgedReadArtifactStore {
     inner: Arc<dyn LashlangArtifactStore>,
     forged: Arc<lashlang::ModuleArtifact>,

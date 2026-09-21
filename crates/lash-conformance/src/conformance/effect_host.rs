@@ -92,8 +92,6 @@ impl RuntimeEffectController for RecordingEffectHostController {
     }
 }
 
-/// Test fixture that records every selected [`ExecutionScope`] and every effect
-/// envelope executed through the returned scoped controller.
 #[derive(Clone, Default)]
 pub struct RecordingEffectHost {
     selected_scopes: Arc<Mutex<Vec<ExecutionScope>>>,
@@ -181,8 +179,6 @@ impl EffectHost for RecordingEffectHost {
     }
 }
 
-/// Run the generic [`EffectHost`] scope-factory conformance suite.
-///
 /// This suite checks the deployment-level contract: execution scopes must carry
 /// stable semantic identity, empty ids must fail loudly, and hosts that expose
 /// a static scoped controller must preserve the same scope metadata. It does
@@ -203,9 +199,6 @@ where
     effect_host_static_scope_preserves_metadata_when_available(make()).await;
 }
 
-/// Run the generic AwaitEvent conformance suite for hosts that implement the
-/// external completion primitive.
-///
 /// This is intentionally separate from [`effect_host`]: deployment-level hosts
 /// may be valid scope factories while requiring an external workflow/object
 /// context before an AwaitEvent can be awaited.
@@ -220,9 +213,6 @@ where
     .await;
 }
 
-/// Run the generic AwaitEvent conformance suite with an implementation-owned
-/// witness for the active-wait quiescence law.
-///
 /// Durable engine hosts use this form when starting an ingress task does not
 /// itself prove that the remote wait registration committed. The witness must
 /// establish that registration through the implementation's real await path
@@ -456,7 +446,6 @@ impl ConformanceInvocation {
         self.controller.as_ref()
     }
 
-    /// Clone the live controller handle for an in-flight task.
     pub fn controller_handle(&self) -> Arc<dyn RuntimeEffectController> {
         Arc::clone(&self.controller)
     }
@@ -471,7 +460,6 @@ impl ConformanceInvocation {
         self.effect_redrive
     }
 
-    /// Construct an invocation for the receipt-less native controller.
     pub fn native() -> Self {
         Self::new(
             Arc::new(crate::NativeRuntimeEffectController::default()),
@@ -2107,9 +2095,6 @@ struct ReplayConformanceProbe {
     completion_order: Arc<Mutex<Vec<String>>>,
 }
 
-/// Run a slow request before a fast request, prove both local executors are
-/// entered before either may finish, then observe the fast controller call
-/// finish recording before allowing the slow executor to complete.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

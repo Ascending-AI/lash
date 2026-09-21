@@ -78,13 +78,16 @@ fn render_numbers(items: &[f64]) -> String {
 /// One cell of a session, named by what it does rather than by its source.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Cell {
-    /// Bind `name` to a literal, shadowing any earlier binding of that name.
-    Bind { name: String, value: Literal },
+    Bind {
+        name: String,
+        value: Literal,
+    },
     /// Bind `name` to one more than the number already bound to `source`.
     /// The cell that proves a later cell reads an earlier cell's work.
-    Derive { name: String, source: String },
-    /// Bind `name` to the list at `source` with `value` appended.
-    ///
+    Derive {
+        name: String,
+        source: String,
+    },
     /// The destination is a fresh name on purpose: TypeScript's `const` puts a
     /// same-cell redeclaration in its own temporal dead zone, so `xs = [...xs,
     /// v]` is not a thing the language can say. Growing a structure across
@@ -96,21 +99,28 @@ pub(crate) enum Cell {
         value: f64,
     },
     /// Rebind `name` to null: the session keeps the name and drops the value.
-    Drop { name: String },
-    /// Finish the session with the value bound to `name`.
-    Finish { name: String },
+    Drop {
+        name: String,
+    },
+    Finish {
+        name: String,
+    },
     /// A cell that allocates a closure which is unreachable by the time the
     /// cell ends, and binds `name` to a plain number computed with it.
     ///
     /// This is the FIG-1562 shape: the closure is garbage, but it is resident
     /// garbage, and validating the *next* cell's program against it is what
     /// poisoned the session.
-    ClosureGarbage { name: String },
+    ClosureGarbage {
+        name: String,
+    },
     /// A cell that binds `name` to a closure — a live root, not garbage.
     ///
     /// TypeScript only; see [`Cell::expressed_by`]. The ruled contract is that
     /// the binding does not survive the cell boundary, so the model drops it.
-    ClosureBinding { name: String },
+    ClosureBinding {
+        name: String,
+    },
     /// A cell that does not compile.
     CompileError,
     /// A cell that compiles and fails at runtime, before it binds anything.

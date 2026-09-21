@@ -1055,8 +1055,6 @@ impl RestateEffectHostController {
         Ok(())
     }
 
-    /// Whether the bound registry has `process_id` registered; `false` with no
-    /// registry bound, so an unbound host trusts its index alone.
     async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, RuntimeError> {
         let probe = self
             .registrations
@@ -1077,8 +1075,6 @@ impl RestateEffectHostController {
             })
     }
 
-    /// Record `group_key` as opened under `scope`'s index; `false` when the
-    /// scope is retired.
     async fn record_scope_group(
         &self,
         scope: &ExecutionScope,

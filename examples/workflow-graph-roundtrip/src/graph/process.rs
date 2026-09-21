@@ -164,8 +164,6 @@ fn editable_identifier(
         })
 }
 
-/// Reads back a type the editor wrote, as the inverse of [`format_type_expr`].
-///
 /// ADR 0096 retired the Lashlang front-end, and with it the general
 /// type-expression grammar this used to call. The vocabulary is not a loss:
 /// the graph only ever renders a process parameter or signal schema, and the

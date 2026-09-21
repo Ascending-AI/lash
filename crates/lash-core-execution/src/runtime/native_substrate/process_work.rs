@@ -44,7 +44,6 @@ impl NativeProcessWork {
         }
     }
 
-    /// Construct registry-only native process work for test support.
     #[cfg(any(test, feature = "testing"))]
     pub fn for_registry(registry: Arc<dyn ProcessRegistry>) -> Self {
         Self {
@@ -53,7 +52,6 @@ impl NativeProcessWork {
         }
     }
 
-    /// Test-support terminal wait over the registry-only native port.
     #[cfg(any(test, feature = "testing"))]
     pub async fn await_terminal(
         &self,
@@ -70,7 +68,6 @@ impl NativeProcessWork {
         self.terminal_awaiter.await_terminal_ref(process_ref).await
     }
 
-    /// Test-support event wait over the registry-only native port.
     #[cfg(any(test, feature = "testing"))]
     pub async fn await_event(
         &self,

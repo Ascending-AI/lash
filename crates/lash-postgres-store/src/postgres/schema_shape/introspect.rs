@@ -27,7 +27,6 @@ use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION, StoreError, store_sqlx_error};
 /// `REPEATABLE READ` they can see a relation the very next `pg_class` read cannot.
 pub(crate) struct SearchPath(Vec<String>);
 
-/// Reads the connection's effective search path, in precedence order.
 pub(crate) async fn read_search_path(
     connection: &mut PgConnection,
 ) -> Result<SearchPath, StoreError> {
@@ -66,15 +65,10 @@ impl Installation {
     }
 }
 
-/// Resolves the namespace holding this database's lash installation.
-///
 /// Picks the first namespace on the search path that carries the anchoring table,
 /// which is the same relation an unqualified statement would resolve — but read
 /// from `pg_class` directly, so the answer belongs to the transaction's snapshot
 /// rather than to a name lookup that ignores it.
-///
-/// Returns `None` when no namespace on the path carries it: the unprovisioned
-/// database.
 pub(crate) async fn resolve_installation(
     connection: &mut PgConnection,
     search_path: &SearchPath,
@@ -120,8 +114,6 @@ pub(crate) enum ComponentVersion {
     Unreadable,
 }
 
-/// Reads the component version stamp from the anchored installation.
-///
 /// Qualified by namespace rather than resolved through `search_path`, so the
 /// version this reports is the version of the installation the rest of the check
 /// reads.
@@ -160,9 +152,6 @@ pub(crate) async fn read_component_version(
     Ok(ComponentVersion::Readable(version))
 }
 
-/// Whether every column a typed probe binds exists in the live table with the type
-/// this build expects.
-///
 /// The expected types come from the shape artifact rather than being restated here,
 /// so a probe cannot drift from the schema it probes. Any mismatch is already
 /// reported as column drift by the structural diff; this only decides whether it is
@@ -301,9 +290,6 @@ impl ResolvedTable {
     }
 }
 
-/// Reports every lash-named relation that the search path resolves outside the
-/// anchored namespace.
-///
 /// These are the relations lash's own unqualified statements would hit, so a
 /// database that has them is not the installation the rest of the check just
 /// verified — regardless of whether the anchored copy is itself perfect. Any
@@ -608,8 +594,6 @@ pub(crate) fn normalize_predicate(predicate: &str) -> String {
         .to_lowercase()
 }
 
-/// Checks the seed rows `schema.sql` inserts.
-///
 /// These are invisible to any structural comparison and lash cannot run without
 /// them: a missing `lash_process_change_clock` row breaks every process-registry
 /// write, and the await-event signing secret authenticates every durable promise.

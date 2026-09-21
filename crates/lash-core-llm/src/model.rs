@@ -17,14 +17,10 @@ pub struct ModelSpec {
 }
 
 impl ModelSpec {
-    /// Start building host-supplied model metadata without positional limit or capability
-    /// arguments.
     pub fn builder(id: impl Into<String>) -> ModelSpecBuilder {
         ModelSpecBuilder::new(id)
     }
 
-    /// Constructs provider-default model policy for protocol implementors with a non-zero prompt
-    /// budget, no known output ceiling, and no extra capabilities.
     pub fn new(id: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
         Self {
             id: id.into(),
@@ -37,8 +33,6 @@ impl ModelSpec {
         }
     }
 
-    /// Sets the limits carried by a `ModelSpec` for protocol and process-engine implementors while
-    /// materializing protocol-specific session and turn state.
     pub fn with_limits(
         id: impl Into<String>,
         variant: ReasoningSelection,
@@ -52,24 +46,17 @@ impl ModelSpec {
         }
     }
 
-    /// Sets the variant carried by a `ModelSpec` for protocol and process-engine implementors while
-    /// materializing protocol-specific session and turn state.
     pub fn with_variant(mut self, variant: ReasoningSelection) -> Self {
         self.variant = variant;
         self
     }
 
-    /// Sets the capability carried by a `ModelSpec` for protocol and process-engine implementors
-    /// while materializing protocol-specific session and turn state.
     pub fn with_capability(mut self, capability: ModelCapability) -> Self {
         self.capability = capability;
         self
     }
 
-    /// Build a spec from the prompt budget (`context_window_tokens` — the
-    /// maximum input the provider accepts for this model on this route) and the
-    /// optional output cap. The prompt budget bounds history pruning and model
-    /// input construction.
+    /// The prompt budget bounds history pruning and model input construction.
     ///
     /// This constructor never produces
     /// [`ModelLimitsError::MissingContextWindowTokens`]; the context-window
@@ -120,19 +107,16 @@ impl ModelSpecBuilder {
         }
     }
 
-    /// Select the provider reasoning variant for this model route.
     pub fn variant(mut self, variant: ReasoningSelection) -> Self {
         self.variant = variant;
         self
     }
 
-    /// Set the maximum input-token budget accepted by this model route.
     pub fn context_window_tokens(mut self, context_window_tokens: usize) -> Self {
         self.context_window_tokens = Some(context_window_tokens);
         self
     }
 
-    /// Set the known maximum number of output tokens this model route can produce.
     pub fn output_token_capacity(mut self, output_token_capacity: usize) -> Self {
         self.output_token_capacity = Some(output_token_capacity);
         self
@@ -144,7 +128,6 @@ impl ModelSpecBuilder {
         self
     }
 
-    /// Validate the configured token limits and build the model specification.
     pub fn build(self) -> Result<ModelSpec, ModelLimitsError> {
         let context_window_tokens = self
             .context_window_tokens
@@ -196,9 +179,6 @@ pub enum ModelLimitsError {
 }
 
 impl ModelLimits {
-    /// Validates model limits for protocol implementors, rejecting zero prompt budgets and present
-    /// zero output capacities while preserving an unknown output ceiling as `None`.
-    ///
     /// This constructor never produces
     /// [`ModelLimitsError::MissingContextWindowTokens`]; the context-window
     /// argument is always present.

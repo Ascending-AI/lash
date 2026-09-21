@@ -7,8 +7,6 @@
 //! the inner backend's optimized overrides stay in effect through the
 //! decorator.
 
-/// Implement [`ProcessQuery`](super::registry_concerns::ProcessQuery) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
 macro_rules! delegate_process_query {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
@@ -92,9 +90,6 @@ macro_rules! delegate_process_query {
 }
 pub(crate) use delegate_process_query;
 
-/// Implement [`ProcessRegistrar`](super::registry_concerns::ProcessRegistrar) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
-///
 /// The supplied hooks wrap the forwarded registration and event-producing
 /// operations so a decorator can retain its side effects without replacing
 /// the delegation itself.
@@ -162,9 +157,6 @@ macro_rules! delegate_process_registrar {
 }
 pub(crate) use delegate_process_registrar;
 
-/// Implement [`ProcessEventLog`](super::registry_concerns::ProcessEventLog) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
-///
 /// The supplied hook wraps each event-producing operation. Incarnation-pinned
 /// operations are still forwarded directly to the inner registry, so its
 /// atomic pair check remains authoritative through the decorator.
@@ -264,9 +256,6 @@ macro_rules! delegate_process_event_log {
 }
 pub(crate) use delegate_process_event_log;
 
-/// Implement [`ProcessLifecycle`](super::registry_concerns::ProcessLifecycle) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
-///
 /// The supplied hook wraps operations that append lifecycle events. Plan reads
 /// and settlement are forwarded without a hook because they do not append to
 /// the process event log.
@@ -450,8 +439,6 @@ macro_rules! delegate_process_lifecycle {
 }
 pub(crate) use delegate_process_lifecycle;
 
-/// Implement [`ProcessObserverRegistry`](super::registry_concerns::ProcessObserverRegistry) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
 macro_rules! delegate_process_observer_registry {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
@@ -548,8 +535,6 @@ macro_rules! delegate_process_observer_registry {
 }
 pub(crate) use delegate_process_observer_registry;
 
-/// Implement [`ProcessToolIntents`](super::registry_concerns::ProcessToolIntents) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
 macro_rules! delegate_process_tool_intents {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
@@ -575,8 +560,6 @@ macro_rules! delegate_process_tool_intents {
 }
 pub(crate) use delegate_process_tool_intents;
 
-/// Implement [`ProcessWakeOutbox`](super::registry_concerns::ProcessWakeOutbox) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
 macro_rules! delegate_process_wake_outbox {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
@@ -648,8 +631,6 @@ macro_rules! delegate_process_wake_outbox {
 }
 pub(crate) use delegate_process_wake_outbox;
 
-/// Implement [`ProcessLeases`](super::registry_concerns::ProcessLeases) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
 macro_rules! delegate_process_leases {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
@@ -710,8 +691,6 @@ macro_rules! delegate_process_leases {
 }
 pub(crate) use delegate_process_leases;
 
-/// Implement [`ProcessRetention`](super::registry_concerns::ProcessRetention) for `$wrapper` by
-/// forwarding every method to the registry held in its `$inner` field.
 macro_rules! delegate_process_retention {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]

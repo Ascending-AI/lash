@@ -62,9 +62,8 @@ pub(crate) fn emit_trace_at(
     }
 }
 
-/// Emit a context projected from a runtime invocation. Invocation-owned
-/// identity is authoritative, including absent fields; host-owned run metadata
-/// and an explicit host parent remain intact.
+/// Invocation-owned identity is authoritative, including absent fields; host-owned run
+/// metadata and an explicit host parent remain intact.
 pub(crate) fn emit_projected_trace(
     sink: &Option<Arc<dyn TraceSink>>,
     base_context: &TraceContext,
@@ -287,10 +286,8 @@ fn set_span(context: &mut TraceContext, self_id: Option<String>, parent_id: Opti
     }
 }
 
-/// Map a `caused_by` reference onto the node id its target span carries, so a
-/// child session/turn nests under whatever spawned it. The `Turn` / `ToolCall`
-/// arms intentionally mirror [`turn_node_id`] / [`tool_node_id`] so the
-/// cross-session parent reference resolves to a real span.
+/// The `Turn` / `ToolCall` arms intentionally mirror [`turn_node_id`] / [`tool_node_id`] so
+/// the cross-session parent reference resolves to a real span.
 #[expect(
     clippy::expect_used,
     reason = "a `CausalRef` is an enum of validated string identities, whose serialization has no failing case"
@@ -363,7 +360,6 @@ fn trace_context_for_invocation_parts(
     caused_by: Option<&crate::CausalRef>,
 ) -> TraceContext {
     // Invocation identity replaces any ambient identity on the host context.
-    // Run/experiment metadata and an explicit graph parent remain host-owned.
     context.session_id = attribution.session_id.clone();
     context.turn_id = attribution.turn_id.clone();
     context.turn_index = attribution.turn_index;

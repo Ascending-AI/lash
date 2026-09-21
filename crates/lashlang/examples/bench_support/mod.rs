@@ -145,7 +145,6 @@ fn ast_function(name: Option<&str>, params: &[&str], captures: &[&str], body: Ex
     }))
 }
 
-/// Builds the AST-only programs that guard function, frame, and map costs.
 #[allow(dead_code)]
 pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
     match scenario {

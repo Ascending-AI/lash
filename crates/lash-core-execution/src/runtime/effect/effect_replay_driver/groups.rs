@@ -434,9 +434,6 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         Ok(handle)
     }
 
-    /// Resolves each child's executor through this host's registered resolver,
-    /// before anything of this group is written.
-    ///
     /// All of them, not one at a time as each is dispatched: resolving lazily
     /// would journal the group first and discover the gap after, leaving a
     /// recorded group whose missing child permanently owns a rank no settlement
@@ -496,8 +493,6 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         )))
     }
 
-    /// Spawns one host-owned task per child this host has a runner for.
-    ///
     /// The task set is the host's, not the caller's: a group whose children ran
     /// inside the caller's future would drop its losers the moment the caller
     /// was dropped, which is precisely what `RunToCompletion` forbids.

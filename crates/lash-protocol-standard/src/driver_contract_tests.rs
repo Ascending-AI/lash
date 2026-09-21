@@ -349,8 +349,8 @@ fn a_successful_tool_outcome_control_finishes_the_turn() {
 
 #[test]
 fn the_max_turns_budget_is_the_run_offset_plus_the_budget() {
-    // Run offset 0, budget 2. After the first tool round the next protocol
-    // iteration is 1, and `0 + 2` leaves room for it while `0 * 2` does not.
+    // After the first tool round the next protocol iteration is 1, and `0 + 2` leaves room for
+    // it while `0 * 2` does not.
     let mut machine = machine(Some(2));
     let effects = drain(&mut machine);
 

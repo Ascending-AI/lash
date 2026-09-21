@@ -18,12 +18,8 @@ pub trait PromptLayerSink: Sized {
     /// Mutable access to the builder's prompt layer, created on first use.
     fn prompt_layer_mut(&mut self) -> &mut PromptLayer;
 
-    /// Add agent instructions to the project-instructions prompt slot.
-    ///
-    /// This is shorthand for [`PromptContribution::project_instructions`] in
-    /// [`PromptSlot::ProjectInstructions`]. With the default template it
-    /// renders under `## Guidance` / `### Project Instructions`; it does not
-    /// replace the built-in main-agent intro.
+    /// With the default template it renders under `## Guidance` / `### Project Instructions`;
+    /// it does not replace the built-in main-agent intro.
     ///
     /// Repeated calls append rather than replace, while identical
     /// contributions deduplicate when the prompt is assembled. Contributions
@@ -35,13 +31,11 @@ pub trait PromptLayerSink: Sized {
         self
     }
 
-    /// Set the base prompt template.
     fn prompt_template(mut self, template: PromptTemplate) -> Self {
         self.prompt_layer_mut().template = Some(template);
         self
     }
 
-    /// Add a single prompt contribution to its slot.
     fn prompt_contribution(mut self, contribution: PromptContribution) -> Self {
         self.prompt_layer_mut().add_contribution(contribution);
         self
@@ -57,7 +51,6 @@ pub trait PromptLayerSink: Sized {
         self
     }
 
-    /// Clear all contributions from a slot.
     fn clear_prompt_slot(mut self, slot: PromptSlot) -> Self {
         self.prompt_layer_mut().clear_slot(slot);
         self

@@ -63,7 +63,6 @@ pub struct LashCore {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-/// Report produced by session delete.
 pub struct SessionDeleteReport {
     /// Identifier of the deleted session.
     pub session_id: SessionId,
@@ -84,7 +83,6 @@ impl Default for SessionDeleteReport {
 }
 
 impl LashCore {
-    /// Creates a core builder with the supplied turn budget.
     pub fn builder(turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
         LashCoreBuilder::new(turn_budget)
     }
@@ -99,8 +97,6 @@ impl LashCore {
             .plugins(default_runtime_stack())
     }
 
-    /// Read whether this deployment is safe for a host to retire.
-    ///
     /// The host owns admission and must pass its current admission state. Lash
     /// reads the process registry on demand; it does not maintain a counter or
     /// orchestrate routing, deadlines, worker shutdown, or retirement. A core
@@ -136,7 +132,6 @@ impl LashCore {
             .plugins(default_runtime_stack())
     }
 
-    /// Creates a builder for the identified session.
     pub fn session(&self, session_id: impl Into<SessionId>) -> SessionBuilder {
         SessionBuilder {
             core: self.clone(),
@@ -279,14 +274,12 @@ impl LashCore {
 
     /// Flush this core's configured trace sink, if any.
     ///
-    /// Hosts that hand `lash` a trace sink via
-    /// [`LashCoreBuilder::trace_sink`] already hold their own `Arc` and can
-    /// flush it directly; this is the equivalent lever for hosts that did not
-    /// retain the handle. It flushes the core's copy — for a
-    /// [`JsonlTraceSink`](lash_trace::JsonlTraceSink) that fsyncs the file, and
-    /// for an OTel sink it is a no-op (the host still owns provider flush; see
-    /// the tracing docs). Call it before process exit alongside the host's own
-    /// exporter/provider shutdown.
+    /// Hosts that hand `lash` a trace sink via [`LashCoreBuilder::trace_sink`] already hold
+    /// their own `Arc` and can flush it directly; this is the equivalent lever for hosts that
+    /// did not retain the handle.
+    /// It flushes the core's copy — for a [`JsonlTraceSink`](lash_trace::JsonlTraceSink) that
+    /// fsyncs the file, and for an OTel sink it is a no-op (the host still owns provider
+    /// flush; see the tracing docs).
     pub fn flush_trace_sink(&self) -> Result<()> {
         if let Some(sink) = self.env.core.tracing.trace_sink.as_ref() {
             sink.flush()?;
@@ -294,22 +287,18 @@ impl LashCore {
         Ok(())
     }
 
-    /// Returns the trigger administration facade.
     pub fn triggers(&self) -> crate::admin::CoreTriggerAdmin {
         crate::admin::CoreTriggerAdmin { core: self.clone() }
     }
 
-    /// Returns the process administration facade.
     pub fn processes(&self) -> crate::process_admin::Processes {
         crate::process_admin::Processes { core: self.clone() }
     }
 
-    /// Returns the completion facade for this core.
     pub fn completions(&self) -> crate::admin::Completions {
         crate::admin::Completions { core: self.clone() }
     }
 
-    /// Returns the effect host used by this runtime.
     pub fn effect_host(&self) -> Arc<dyn EffectHost> {
         Arc::clone(&self.env.core.control.effect_host)
     }
@@ -391,7 +380,6 @@ impl LashCore {
         .await
     }
 
-    /// Forks a session at the requested point while preserving observer inheritance.
     pub async fn fork_at_with_observer_inheritance(
         &self,
         node_id: impl Into<String>,
@@ -503,7 +491,6 @@ impl LashCore {
         Ok(fork)
     }
 
-    /// Deletes the session and reports reclaimed storage and process state.
     pub async fn delete_session(
         context: lash_core::SessionDeleteContext<'_>,
     ) -> Result<SessionDeleteReport> {
@@ -668,7 +655,6 @@ impl LashCore {
         })
     }
 
-    /// Returns the configured process registry, if present.
     pub fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
         self.env.process_registry().cloned()
     }
@@ -891,7 +877,6 @@ impl LashCoreBuilder {
         }
     }
 
-    /// Configures the protocol plugin and returns the updated builder.
     pub fn protocol_plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.protocol_factory = Some(plugin);
         self
@@ -904,8 +889,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure the catalog used for sessions opened directly from this core.
-    ///
     /// The factory must honor `SessionStoreCreateRequest::session_id` and
     /// return a store for that specific session. It is also the default catalog
     /// for sessions created from a running session unless
@@ -923,9 +906,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure the persistence factory used for sessions created from a
-    /// running session.
-    ///
     /// The factory applies to every `SessionCreateRequest`, independent of its
     /// relation or subagent configuration, and must return a distinct store
     /// bound to the requested session id. Hosts that pass an exact opened store
@@ -941,13 +921,11 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configures the attachment store and returns the updated builder.
     pub fn attachment_store(mut self, attachment_store: Arc<dyn AttachmentStore>) -> Self {
         self.deps.attachment_store = Some(attachment_store);
         self
     }
 
-    /// Configures the process env store and returns the updated builder.
     pub fn process_env_store(
         mut self,
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
@@ -964,8 +942,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure the maximum bytes accepted by one attachment put.
-    ///
     /// The default `None` preserves unbounded attachment puts. `Some(max_bytes)`
     /// rejects larger puts before the configured attachment backend is called.
     /// This deployment limit is independent from [`Self::commit_budget`].
@@ -985,20 +961,16 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Select when process wakes may enter an active target session.
     pub fn process_wake_delivery_policy(mut self, policy: lash_core::DeliveryPolicy) -> Self {
         self.process_wake_delivery_policy = Some(policy);
         self
     }
 
-    /// Configure pacing for Lash's native process and queued-work scheduler loops.
     pub fn native_substrate_config(mut self, config: NativeSubstrateConfig) -> Self {
         self.native_substrate = config;
         self
     }
 
-    /// Install a synchronous, in-process, narrow-only filter for the
-    /// model-facing session process tools.
     pub fn process_tool_visibility_filter(
         mut self,
         filter: Arc<dyn facade_support::ProcessToolVisibilityFilter>,
@@ -1016,63 +988,51 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Adds a tool provider to the built core.
     pub fn tools(mut self, tools: Arc<dyn ToolProvider>) -> Self {
         self.tool_providers.push(tools);
         self
     }
 
-    /// Configures the plugin and returns the updated builder.
     pub fn plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.plugin_stack.push(plugin);
         self
     }
 
-    /// Configures the plugins and returns the updated builder.
     pub fn plugins(mut self, stack: PluginStack) -> Self {
         self.plugin_stack = stack;
         self
     }
 
-    /// Applies a callback to configure the plugin stack.
     pub fn configure_plugins(mut self, configure: impl FnOnce(&mut PluginStack)) -> Self {
         configure(&mut self.plugin_stack);
         self
     }
 
-    /// Configures the trace sink and returns the updated builder.
     pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
         self.trace_sink = Some(trace_sink);
         self
     }
 
-    /// Configures the trace jsonl path and returns the updated builder.
     pub fn trace_jsonl_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
         self
     }
 
-    /// Configures the trace level and returns the updated builder.
     pub fn trace_level(mut self, trace_level: lash_trace::TraceLevel) -> Self {
         self.trace_level = Some(trace_level);
         self
     }
 
-    /// Configures the trace context and returns the updated builder.
     pub fn trace_context(mut self, trace_context: lash_trace::TraceContext) -> Self {
         self.trace_context = Some(trace_context);
         self
     }
 
-    /// Configures the termination and returns the updated builder.
     pub fn termination(mut self, termination: TerminationPolicy) -> Self {
         self.termination = Some(termination);
         self
     }
 
-    /// Choose what an open does when a session's persisted tools have no live
-    /// source.
-    ///
     /// The default is [`ToolSourcePolicy::Tolerate`](lash_core::ToolSourcePolicy::Tolerate):
     /// the session opens and the host receives a typed
     /// [`ToolRestoreReport`](crate::support::ToolRestoreReport), because
@@ -1108,15 +1068,13 @@ impl LashCoreBuilder {
     /// leases, and durable effect-replay leases. Queued-work and turn-input
     /// claims are not leases and carry no TTL.
     ///
-    /// This is the failover-latency vs false-takeover-risk knob. Like
-    /// [`process_execution_concurrency`](Self::process_execution_concurrency)
-    /// it is an operational deployment decision, so it lives on the main
-    /// builder tier rather than behind
-    /// [`advanced`](Self::advanced). Construct the value with
-    /// [`LeaseTimings::new`](facade_support::LeaseTimings::new), which enforces
-    /// `ttl >= 3 * renew_interval`. Effect hosts accept the same type at
-    /// construction (e.g. SQLite/Postgres effect-replay options), so a host can
-    /// share one timing decision across both boundaries.
+    /// This is the failover-latency vs false-takeover-risk knob.
+    /// Like [`process_execution_concurrency`](Self::process_execution_concurrency) it is an
+    /// operational deployment decision, so it lives on the main builder tier rather than
+    /// behind [`advanced`](Self::advanced).
+    /// Effect hosts accept the same type at construction (e.g.
+    /// SQLite/Postgres effect-replay options), so a host can share one timing decision across
+    /// both boundaries.
     pub fn lease_timings(mut self, lease_timings: facade_support::LeaseTimings) -> Self {
         self.lease_timings = Some(lease_timings);
         self
@@ -1226,16 +1184,14 @@ impl LashCoreBuilder {
         // Threaded to every plugin host so core installs the same
         // plugin-contributed process engines wherever it rebuilds a runtime.
         let process_lifecycle_available = process_work_source.has_registry();
-        // Resolve the base engine set once for host-level process APIs and
-        // store-maintenance cleanup. Session construction still installs onto
-        // a clean clone so session-scoped plugin overlays remain isolated.
+        // Session construction still installs onto a clean clone so session-scoped plugin
+        // overlays remain isolated.
         let host_process_engines = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?
             .process_engines;
         let tool_registry =
             lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
         let native_process_registry = process_work_source.process_registry();
-        // Build the native config eagerly so a missing factory fails at build.
         let live_replay_clock = Arc::clone(&core.clock);
         let mut env_builder = RuntimeEnvironment::builder(
             core.durability.commit_budget,
@@ -1361,8 +1317,6 @@ impl LashCoreBuilder {
         })
     }
 
-    /// Decide how a built [`LashCore`] sources its process-work port.
-    ///
     /// - no registry => nothing to run ([`ProcessWorkSource::None`]);
     /// - external wiring supplied => use it ([`ProcessPortSetup::External`]);
     /// - native registry wired => lazily construct the native port on first open. Its
@@ -1411,8 +1365,8 @@ impl LashCoreBuilder {
             turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
             native_substrate,
         });
-        // Validate the same worker assembly eagerly. The live native worker is
-        // constructed lazily once the outer queued-work dispatcher exists.
+        // The live native worker is constructed lazily once the outer queued-work dispatcher
+        // exists.
         config.build(Arc::new(NoQueuedWork::new()))?;
         Ok(ProcessPortSetup::NativeDefault { config, watched })
     }
@@ -1457,20 +1411,15 @@ impl LashCoreBuilder {
         })
     }
 
-    /// Converts this builder into its advanced configuration facade.
     pub fn advanced(self) -> AdvancedLashCoreBuilder {
         AdvancedLashCoreBuilder { builder: self }
     }
 
-    /// Configures the process registry used by the built core.
     pub fn process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
         self.process_work_source = ProcessWorkSelection::Native(process_registry);
         self
     }
 
-    /// Install a best-effort, host-facing [`ProcessEventSink`] on the native
-    /// process registry.
-    ///
     /// Each appended process event is pushed to the sink after its durable
     /// write, in per-process append order. This is freshness, not truth: it
     /// never buffers or retries, and consumers reconcile from the durable event
@@ -1497,13 +1446,11 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configures the trigger store and returns the updated builder.
     pub fn trigger_store(mut self, store: Arc<dyn lash_core::TriggerStore>) -> Self {
         self.trigger_store = Some(store);
         self
     }
 
-    /// Configures the process-definition registry and returns the updated builder.
     pub fn process_definition_registry(
         mut self,
         registry: Arc<dyn lash_core::ProcessDefinitionRegistry>,
@@ -1512,8 +1459,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure an externally owned process work runner.
-    ///
     /// Durable hosts construct [`ProcessWorkWiring`] from the same watched
     /// registry and port used by their deployment runner, then pass it here.
     /// The wiring's registry becomes the core's process registry and no native
@@ -1523,19 +1468,16 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure an externally owned queued-work port.
     pub fn with_queued_work(mut self, port: Arc<dyn QueuedWorkSubstrate>) -> Self {
         self.queued_work_source = QueuedWorkSource::External(port);
         self
     }
 
-    /// Configure Lash's native queued-work executor.
     pub fn with_native_queued_work(mut self) -> Self {
         self.queued_work_source = QueuedWorkSource::Native;
         self
     }
 
-    /// Disables automatic queued-work execution for the built core.
     pub fn without_queued_work(mut self) -> Self {
         self.queued_work_source = QueuedWorkSource::Disabled;
         self

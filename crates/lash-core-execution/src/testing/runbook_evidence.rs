@@ -20,8 +20,6 @@
 //! `cargo test` or `cargo nextest` run and appears only where a caller asked
 //! for `--nocapture`.
 
-/// Writes one runbook evidence line as compact JSON on stdout.
-///
 /// Takes an already-built [`serde_json::Value`] rather than formatting fields
 /// here: the caller is the scope that holds the asserted values, and a helper
 /// that re-derived them would be evidencing itself.

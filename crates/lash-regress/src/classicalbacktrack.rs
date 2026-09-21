@@ -46,7 +46,6 @@ enum BacktrackInsn<Input: InputIndexer> {
         // This is guaranteed to point to an EnterLoopInsn.
         ip: IP,
         // The input position of the loop before entering it.
-        // This is used to set up backtracking that restores this position.
         orig_pos: Input::Position,
         data: LoopData<Input::Position>,
     },
@@ -245,8 +244,6 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         Some((min_pos, max_pos))
     }
 
-    // Compute the maximum position from a starting position, up to a limit.
-    // This is used for lazy computation in non-greedy loops.
     fn compute_max_pos<Dir: Direction, Scm: SingleCharMatcher<Input, Dir>>(
         input: &Input,
         mut pos: Input::Position,
@@ -457,8 +454,8 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
             "min should be <= (>=) max if cursor is tracking forwards (backwards)"
         );
 
-        // Oh no where is the continuation? It's one past the loop body, which is one
-        // past the loop. Strap in!
+        // Oh no where is the continuation?
+        // It's one past the loop body, which is one past the loop.
         let continuation = ip + 2;
         if min_pos != max_pos {
             // Backtracking is possible.
@@ -478,16 +475,12 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
             self.bts.push(bti);
         }
 
-        // Start at the max (min) if greedy (nongreedy).
         *pos = if greedy { max_pos } else { min_pos };
         Some(continuation)
     }
 
-    // Run a lookaround instruction, which is either forwards or backwards
-    // (according to Direction). The half-open range
-    // start_group..end_group is the range of contained capture groups.
-    // \return whether we matched and negate was false, or did not match but negate
-    // is true.
+    // The half-open range start_group..end_group is the range of contained capture groups.
+    // \return whether we matched and negate was false, or did not match but negate is true.
     fn run_lookaround<Dir: Direction>(
         &mut self,
         input: &Input,
@@ -504,12 +497,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         // Temporarily defeat backtracking.
         let saved_groups = self.s.groups.iat(range.clone()).to_vec();
 
-        // Start with an "empty" backtrack stack.
         // TODO: consider using a stack-allocated array.
         let mut saved_bts = vec![BacktrackInsn::Exhausted];
         core::mem::swap(&mut self.bts, &mut saved_bts);
 
-        // Enter into the lookaround's instruction stream.
         let matched = self.try_at_pos(*input, ip, pos, Dir::new()).is_some();
 
         // Put back our bts.
@@ -650,7 +641,6 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         self.bts.pop();
                         continue;
                     }
-                    // Move in the direction of the cursor.
                     let newmin = if Dir::FORWARD {
                         input.next_right_pos(*min)
                     } else {
@@ -1122,9 +1112,8 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
     ) -> Option<Match> {
         let inp = self.input;
         loop {
-            // Find the next start location, or None if none.
-            // Don't try this unless CODE_UNITS_ARE_BYTES - i.e. don't do byte searches
-            // on UTF-16 or UCS2.
+            // Don't try this unless CODE_UNITS_ARE_BYTES - i.e. don't do byte searches on
+            // UTF-16 or UCS2.
             if Input::CODE_UNITS_ARE_BYTES {
                 pos = inp.find_bytes(pos, prefix_search)?;
             }

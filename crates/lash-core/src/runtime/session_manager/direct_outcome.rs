@@ -13,10 +13,8 @@ use crate::{
 // Direct-completion outcome plumbing
 // =============================================================================
 
-/// Applies a recorded direct-effect outcome: records usage/trace against the
-/// session and yields the raw provider response. Both the text-only
-/// (`DirectCompletion`) and full-output (`DirectLlmCompletion`) client methods
-/// project from this single result.
+/// Both the text-only (`DirectCompletion`) and full-output (`DirectLlmCompletion`) client
+/// methods project from this single result.
 #[allow(private_interfaces)]
 pub(crate) async fn apply_direct_outcome(
     current: &CurrentSessionCapability,

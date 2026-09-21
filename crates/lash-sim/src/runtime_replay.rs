@@ -57,7 +57,6 @@ pub(crate) trait ReplayBackend {
     /// assertion messages and replayed turn text.
     const TARGET: &'static str;
 
-    /// Whether ingress asserts the opened session id equals the actor alias.
     /// Historically a SQLite-only check; kept per-backend deliberately.
     const ASSERT_INGRESS_SESSION_ID: bool;
 

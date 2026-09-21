@@ -263,13 +263,6 @@ fn a_literal_through_a_path_step_or_shape_mismatch_stays_refused() {
 
 #[test]
 fn the_signal_set_is_inferred_from_wait_sites_including_unreached_branches() {
-    // handle = await crew.run({
-    //   program: async (tick) => {
-    //     const signal = await waitSignal("go");
-    //     ... finish(signal);
-    //   },
-    //   inputs: {}
-    // })?
     // Structural enumeration, so an unreached branch's "hold" counts too.
     let program = builders::module(
         vec![],

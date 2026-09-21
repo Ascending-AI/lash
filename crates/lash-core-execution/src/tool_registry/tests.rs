@@ -123,8 +123,6 @@ fn leaf_outcome(outcome: crate::ToolAttemptOutcome) -> ToolOutcome {
     }
 }
 
-/// Execute a leaf call through the registry's single execution seam, resolving
-/// the pinned manifest by id first.
 async fn execute_leaf_by_id(
     registry: &ToolRegistry,
     tool_id: &crate::ToolId,

@@ -10,8 +10,6 @@ use lash_core_store::store::{ConformancePersistence, StoreError};
 /// their production `create_store`.
 #[async_trait::async_trait]
 pub trait ConformanceSessionStoreFactory: crate::SessionStoreFactory {
-    /// Create a session store exactly as `create_store` would, keeping the
-    /// test-support hooks reachable on the returned handle.
     async fn create_conformance_store(
         &self,
         request: &crate::SessionStoreCreateRequest,

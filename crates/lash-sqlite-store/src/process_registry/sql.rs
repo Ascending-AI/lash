@@ -119,8 +119,6 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only SQLite issues.
     pub(crate) struct ProcessSqliteStatements @ "process" {
-        /// Register a fresh process row.
-        ///
         /// No conflict clause: the row was read as absent under the same
         /// `BEGIN IMMEDIATE` lock, so a conflict is a defect and the
         /// constraint error is the right report. PostgreSQL cannot hold that
@@ -144,8 +142,6 @@ lash_store_sql::statements! {
         /// CTE that deletes the cleanup row.
         select_incarnation = "SELECT incarnation FROM processes WHERE process_id = ?1";
 
-        /// Delete every process named by the JSON id array `?1`.
-        ///
         /// SQLite spells a bound id list `json_each`; PostgreSQL deletes these
         /// rows inside its one-statement prune instead.
         delete_by_ids = "DELETE FROM processes
@@ -577,14 +573,10 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `process_observers` statements only SQLite issues.
     pub(crate) struct ObserverSqliteStatements @ "process_observer" {
-        /// Record that session `?1` observes incarnation `?2` / `?3`, keeping
-        /// an existing row. `INSERT OR IGNORE` is SQLite's spelling of
-        /// PostgreSQL's `ON CONFLICT DO NOTHING`.
+        /// `INSERT OR IGNORE` is SQLite's spelling of PostgreSQL's `ON CONFLICT DO NOTHING`.
         insert_if_absent = "INSERT OR IGNORE INTO process_observers (session_id, process_id, process_incarnation)
                              VALUES (?1, ?2, ?3)";
 
-        /// Whether session `?1` observes process `?2`, at any incarnation.
-        ///
         /// A standalone read on SQLite, where the caller's other half of the
         /// question runs under the same lock; PostgreSQL asks both halves in
         /// one statement because it cannot.
@@ -601,9 +593,6 @@ lash_store_sql::statements! {
                              WHERE process_id = ?1 AND process_incarnation = ?2
                              ORDER BY session_id";
 
-        /// Drop the observations of every process named by the JSON id array
-        /// `?1`.
-        ///
         /// SQLite deletes the dependent rows itself; PostgreSQL's prune
         /// statement lets the foreign key cascade do it.
         delete_by_process_ids = "DELETE FROM process_observers
@@ -762,7 +751,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `process_events` statements only SQLite issues.
     pub(crate) struct EventSqliteStatements @ "process_event" {
-        /// Delete the events of every process named by the JSON id array `?1`.
         delete_by_process_ids = "DELETE FROM process_events
              WHERE process_id IN (SELECT value FROM json_each(?1))";
     }
@@ -779,7 +767,6 @@ lash_store_sql::statements! {
         insert = "INSERT INTO process_segment_handovers
                          (process_id, segment_ordinal, handover_json) VALUES (?1, ?2, ?3)";
 
-        /// Drop the handovers of every process named by the JSON id array `?1`.
         delete_by_process_ids = "DELETE FROM process_segment_handovers
                  WHERE process_id IN (SELECT value FROM json_each(?1))";
 
@@ -813,8 +800,6 @@ LIMIT ?2";
 lash_store_sql::statements! {
     /// `process_wake_deliveries` statements only SQLite issues.
     pub(crate) struct WakeDeliverySqliteStatements @ "process_wake_delivery" {
-        /// Record a pending wake, keeping an existing row.
-        ///
         /// `INSERT OR IGNORE` is SQLite's spelling of PostgreSQL's
         /// `ON CONFLICT (delivery_id) DO NOTHING`.
         insert_pending = "INSERT OR IGNORE INTO process_wake_deliveries (

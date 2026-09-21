@@ -64,9 +64,8 @@ pub enum PreflightOutcome {
     /// build refuses. Booting produces exactly that refusal, later and less
     /// legibly.
     Refused,
-    /// Nothing refuses, but something could not be read far enough to decide
-    /// or the report could not join a carried format to its carrier. The
-    /// evidence for a pass is missing, not present.
+    /// Nothing refuses, but something could not be read far enough to decide or the report
+    /// could not join a carried format to its carrier.
     Undecided,
 }
 

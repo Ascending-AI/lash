@@ -90,7 +90,6 @@ pub struct RemoteSessionObservationEvent {
 }
 
 impl RemoteSessionObservationEvent {
-    /// Encodes one observation event inside the shared protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
     }

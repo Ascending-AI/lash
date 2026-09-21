@@ -129,8 +129,6 @@ pub mod facade_support {
     pub use crate::tool_provider::orchestration::{
         OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
     };
-    /// Build the core-level tool-registry projection through the same plugin
-    /// composition path used for runtime sessions.
     pub fn build_core_tool_registry(
         host: &crate::plugin::PluginHost,
     ) -> Result<std::sync::Arc<crate::ToolRegistry>, crate::PluginError> {
@@ -393,7 +391,6 @@ pub mod facade_support {
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;
-    /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
     /// Record one first-party PostgreSQL runtime-connection acquisition wait.
     pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
@@ -501,7 +498,6 @@ pub mod facade_support {
     pub use lash_trace::TraceSinkError;
     pub use schemars::JsonSchema;
 
-    /// Construct the facade's native queued-work driver with explicit cadence.
     pub fn native_queued_work_with_execution_concurrency_and_work_cadence(
         run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
         concurrency: usize,
@@ -514,7 +510,6 @@ pub mod facade_support {
         )
     }
 
-    /// Construct the facade's supplied-slot native queued-work driver.
     pub fn native_queued_work_with_worker_slot_supplier_and_work_cadence(
         run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
         supplier: std::sync::Arc<dyn crate::runtime::WorkerSlotSupplier>,
@@ -527,7 +522,6 @@ pub mod facade_support {
         )
     }
 
-    /// Construct the facade's autonomous wake-delivery driver with explicit cadence.
     pub fn wake_delivery_driver_with_work_cadence(
         registry: std::sync::Arc<dyn crate::runtime::ProcessRegistry>,
         session_store_factory: std::sync::Arc<dyn crate::runtime::SessionStoreFactory>,
@@ -568,7 +562,6 @@ pub mod sansio {
     };
 }
 
-// Re-exports
 pub use attachments::{
     AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
     AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,

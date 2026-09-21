@@ -439,11 +439,9 @@ pub trait ProviderNormalizer {
     fn build_next_request(&self, scenario: Scenario, messages: Vec<LlmMessage>) -> Value;
 }
 
-/// Commit a normalized response to Standard-protocol history and project the
-/// messages for the next request. Provider conformance adapters pass these
-/// messages to their real request builders; keeping this bridge in the shared
-/// suite prevents adapters from hand-copying replay metadata around the
-/// history seam the scenario is meant to protect.
+/// Provider conformance adapters pass these messages to their real request builders; keeping
+/// this bridge in the shared suite prevents adapters from hand-copying replay metadata around
+/// the history seam the scenario is meant to protect.
 #[expect(
     clippy::expect_used,
     reason = "test support: the conformance history is a crate-owned round-trip fixture whose serde_json encode/decode cannot fail"
@@ -507,7 +505,6 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
     render_prompt(&durable_history).messages
 }
 
-/// Build a trim/truncation-sensitive opaque fixture payload of roughly 2 KiB.
 pub fn strong_replay_payload(provider: &str) -> String {
     format!(
         " \n{provider}: replay-é\n{}\n ",

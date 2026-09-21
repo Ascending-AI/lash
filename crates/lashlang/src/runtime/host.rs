@@ -240,8 +240,6 @@ pub enum ExecutionBound<T> {
 }
 
 impl ExecutionBound<std::num::NonZeroU64> {
-    /// Construct a finite instruction budget.
-    ///
     /// # Panics
     ///
     /// Panics when `instructions` is zero.
@@ -252,8 +250,6 @@ impl ExecutionBound<std::num::NonZeroU64> {
         }
     }
 
-    /// Construct a finite logical-memory bound in bytes.
-    ///
     /// The same nonzero representation carries instruction counts and byte
     /// counts; naming both constructors keeps a byte limit from being spelled
     /// as an instruction budget at the call site.
@@ -383,8 +379,6 @@ pub const DEFAULT_HOST_MEMORY_LIMIT_BYTES: std::num::NonZeroU64 =
     std::num::NonZeroU64::new(512 * 1024 * 1024).expect("the default memory limit is nonzero");
 
 impl ExecutionBounds {
-    /// Builds a bound set.
-    ///
     /// All three limits are stated: a host that does not decide how much
     /// logical memory an execution may hold has not finished configuring it,
     /// and a silent default here would be a bound nobody chose.
@@ -657,24 +651,20 @@ impl ExecutionHostError {
         }
     }
 
-    /// Returns the human-readable host failure message.
     pub fn message(&self) -> &str {
         &self.message
     }
 
-    /// Returns the tool failure class when this error crossed a tool bridge.
     pub fn tool_failure_class(&self) -> Option<&ToolFailureClass> {
         self.tool_failure.as_ref().map(|failure| &failure.class)
     }
 
-    /// Returns the stable tool failure code when this error crossed a tool bridge.
     pub fn tool_failure_code(&self) -> Option<&str> {
         self.tool_failure
             .as_ref()
             .map(|failure| failure.code.as_str())
     }
 
-    /// Returns the tool failure provenance when this error crossed a tool bridge.
     pub fn tool_failure_source(&self) -> Option<&ToolFailureSource> {
         self.tool_failure.as_ref().map(|failure| &failure.source)
     }

@@ -73,7 +73,6 @@ pub struct LlmToolsProvider {
     model_capability: Option<lash_core::ModelCapability>,
 }
 
-/// Build the `llm_query` tool provider for the given optional model override.
 pub fn llm_query_provider(
     model: Option<String>,
     model_variant: Option<lash_core::ReasoningSelection>,
@@ -327,9 +326,6 @@ mod tests {
     use lash_core::runtime::RuntimeSessionState;
     use lash_core::{SessionCreateRequest, SessionSnapshot, ToolCall};
 
-    /// Run `llm_query` through the single `execute` seam and project the
-    /// attempt outcome to the plain outcome these assertions inspect,
-    /// asserting the tool declares no leaf intents.
     async fn run_llm_query(
         provider: &StaticToolProvider<LlmToolsProvider>,
         args: &serde_json::Value,

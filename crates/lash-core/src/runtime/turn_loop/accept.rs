@@ -8,9 +8,8 @@ use super::*;
 use crate::TurnId;
 
 impl LashRuntime {
-    /// Run one logical turn and stream every physical frame to the host sink.
-    /// Accept `input` as durable admission evidence, then drive it to a
-    /// terminal turn ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
+    /// Accept `input` as durable admission evidence, then drive it to a terminal turn ([ADR
+    /// 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
     ///
     /// Identical to [`stream_turn_with_agent_frames`](Self::stream_turn_with_agent_frames)
     /// except that it returns only the run's terminal physical turn.
@@ -648,7 +647,6 @@ impl LashRuntime {
         Ok(run)
     }
 
-    /// Run one logical turn and return only its assembled terminal result.
     pub async fn run_turn_assembled(
         &mut self,
         input: TurnInput,
@@ -659,7 +657,6 @@ impl LashRuntime {
             .await
     }
 
-    /// Run one logical turn using host-prepared message history.
     #[allow(
         clippy::too_many_arguments,
         reason = "this is the published `LashRuntime::stream_prepared_turn` signature; \

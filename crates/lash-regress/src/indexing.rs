@@ -20,7 +20,6 @@ pub trait ElementType:
     + core::convert::Into<u32>
     + core::convert::TryFrom<u32>
 {
-    /// Return another ElementType as self.
     #[inline(always)]
     fn try_from<Elem: ElementType>(v: Elem) -> Option<Self> {
         // Annoying there is no char->u8 conversion.
@@ -40,7 +39,6 @@ impl ElementType for u8 {}
 
 impl ElementType for u32 {}
 
-// A helper type that holds a string and allows indexing into it.
 pub trait InputIndexer: core::fmt::Debug + Copy + Clone
 where
     Self::CharProps: matchers::CharProperties<Element = Self::Element>,
@@ -54,8 +52,7 @@ where
     /// A type which references a position in the input string.
     type Position: PositionType;
 
-    /// Whether we have bytes as code units. This can optimize some operations.
-    /// This is true for ASCII and UTF8, but not for UCS2 or UTF16.
+    /// This can optimize some operations.
     const CODE_UNITS_ARE_BYTES: bool;
 
     /// \return whether we are using unicode for case-folding.
@@ -102,40 +99,32 @@ where
     /// \return a position at the right end of this input.
     fn right_end(&self) -> Self::Position;
 
-    /// Move a position right by a certain amount.
-    /// \return the new position, or None if it would exceed the length.
     fn try_move_right(&self, pos: Self::Position, amt: usize) -> Option<Self::Position>;
 
-    /// Move a position left by a certain amount.
-    /// \return the new position, or None if it would underflow 0.
     fn try_move_left(&self, pos: Self::Position, amt: usize) -> Option<Self::Position>;
 
-    /// Convert a position to an offset.
     fn pos_to_offset(&self, pos: Self::Position) -> usize;
 
-    /// Apply a literal byte matcher, finding a literal byte sequence in a string.
-    /// \return the new position, or None on failure.
     fn find_bytes<Search: bytesearch::ByteSearcher>(
         &self,
         pos: Self::Position,
         search: &Search,
     ) -> Option<Self::Position>;
 
-    /// Peek at the char to the right of a position, without changing that position.
     #[inline(always)]
     fn peek_right(&self, mut pos: Self::Position) -> Option<Self::Element> {
         self.next_right(&mut pos)
     }
 
-    /// Peek at the char to the left of a position, without changing that position.
     #[inline(always)]
     fn peek_left(&self, mut pos: Self::Position) -> Option<Self::Element> {
         self.next_left(&mut pos)
     }
 
-    /// Check if the subrange `range` is byte-for-byte equal to a range of the same length from the current position `pos`.
-    /// If `dir` is FORWARD, then the range is checked starting at `pos` and ending at `pos + range.len()`.
-    /// If `dir` is BACKWARD, then the range is checked starting at `pos - range.len()` and ending at `pos`.
+    /// If `dir` is FORWARD, then the range is checked starting at `pos` and ending at `pos +
+    /// range.len()`.
+    /// If `dir` is BACKWARD, then the range is checked starting at `pos - range.len()` and
+    /// ending at `pos`.
     fn subrange_eq<Dir: Direction>(
         &self,
         dir: Dir,
@@ -143,8 +132,8 @@ where
         range: Range<Self::Position>,
     ) -> bool;
 
-    /// Return whether we match some literal bytes.
-    /// If so, update the position. If not, the position is unspecified.
+    /// If so, update the position.
+    /// If not, the position is unspecified.
     fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         dir: Dir,
@@ -234,7 +223,6 @@ impl<'a> Utf8Input<'a> {
     }
 
     /// \return a byte at a given position.
-    /// This asserts that we are not at the right end.
     #[inline(always)]
     #[expect(
         unsafe_code,
@@ -668,7 +656,6 @@ impl<'a> AsciiInput<'a> {
     }
 
     /// \return a byte at a given position.
-    /// This asserts that we are not at the right end.
     #[inline(always)]
     #[expect(
         unsafe_code,

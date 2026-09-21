@@ -157,7 +157,6 @@ pub enum PluginError {
         session_id: SessionId,
         /// Canonical durable operation key of the corrupt receipt.
         operation_key: String,
-        /// Count stored with the first attempt.
         stored: u64,
         /// Count carried by the retry.
         attempted: u64,

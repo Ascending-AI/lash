@@ -333,10 +333,9 @@ pub fn peak_concurrent_live_turns(events: &[DeliveredBoundary]) -> usize {
     peak
 }
 
-/// Count of distinct sessions that ran at least one provider turn. Interleaving
-/// is structurally impossible below two such sessions, but the exemption is
-/// decided by the *declared* session count — this number only proves the
-/// declared sessions actually ran.
+/// Interleaving is structurally impossible below two such sessions, but the exemption is
+/// decided by the *declared* session count — this number only proves the declared sessions
+/// actually ran.
 pub(super) fn provider_turn_session_count(events: &[DeliveredBoundary]) -> usize {
     events
         .iter()

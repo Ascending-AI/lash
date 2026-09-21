@@ -26,7 +26,6 @@ pub(super) fn requires_local_commit_admission(
 /// Maximum number of waiting attempts retained for one hot session.
 const COMMIT_ADMISSION_MAX_WAITERS: usize = 64;
 
-/// Maximum residence of one waiting attempt in the process-local FIFO.
 const COMMIT_ADMISSION_WAIT_TTL: Duration = Duration::from_secs(30);
 
 /// The only data retained for a queued commit attempt.
@@ -78,7 +77,6 @@ enum CommitAdmissionError {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct CommitAdmissionObservation {
     waited: Duration,
-    /// Number of waiters ahead of or including this claim when it queued.
     queue_depth: usize,
 }
 
@@ -392,8 +390,6 @@ pub fn process_commit_admission_queue_depth(session_id: &SessionId) -> usize {
         .unwrap_or_default()
 }
 
-/// Run one head-advancing attempt after process-wide FIFO admission.
-///
 /// `attempt` is not invoked until this claim owns the session, so its durable
 /// head load and intent build cannot execute while queued. `Ok` means the head
 /// advanced and wakes exactly the next node; `Err` releases the lane without

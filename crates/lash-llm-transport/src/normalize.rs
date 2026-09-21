@@ -56,9 +56,7 @@ pub fn terminal_reason_from_parts(parts: &[LlmOutputPart]) -> LlmTerminalReason 
     }
 }
 
-/// Parse token usage from an OpenAI-compatible response object. Handles both
-/// Responses (`input_tokens` / `output_tokens`) and Chat Completions
-/// (`prompt_tokens` / `completion_tokens`) shapes, plus common gateway aliases.
+/// Parse token usage from an OpenAI-compatible response object.
 pub fn openai_usage_from_response_value(value: &Value) -> LlmUsage {
     openai_usage_from_usage_value(value.get("usage").unwrap_or(&Value::Null))
 }

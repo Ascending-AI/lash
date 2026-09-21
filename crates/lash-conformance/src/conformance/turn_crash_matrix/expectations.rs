@@ -1,6 +1,5 @@
 use super::*;
 
-/// Return the committed trace-derived matrix and its hand-written outcomes.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

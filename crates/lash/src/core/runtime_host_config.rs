@@ -61,12 +61,11 @@ impl HostDependencies {
 struct HostConfigOverlay {
     /// The `RuntimeHostConfigConflict` field name.
     field: &'static str,
-    /// Whether setting this builder field conflicts with the supplied base.
-    /// `provider` is the one conditional row: a builder provider only
-    /// conflicts when the base config already resolves providers itself.
+    /// `provider` is the one conditional row: a builder provider only conflicts when the base
+    /// config already resolves providers itself.
     conflicts: fn(&LashCoreBuilder, &RuntimeHostConfig) -> bool,
-    /// Apply the field to the base config. Reached only when no conflict was
-    /// reported, or on the from-parts path where the field is the sole source.
+    /// Reached only when no conflict was reported, or on the from-parts path where the field
+    /// is the sole source.
     apply: fn(&mut LashCoreBuilder, RuntimeHostConfig) -> RuntimeHostConfig,
 }
 
@@ -238,7 +237,6 @@ impl LashCoreBuilder {
         Ok(())
     }
 
-    /// Apply benign dependency overrides on top of a base core.
     fn apply_core_overrides(&mut self, mut core: RuntimeHostConfig) -> RuntimeHostConfig {
         for overlay in HOST_CONFIG_OVERLAYS {
             core = (overlay.apply)(self, core);

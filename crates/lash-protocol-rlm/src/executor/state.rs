@@ -619,8 +619,6 @@ impl RlmExecutionState {
         self.child_max_attempts
     }
 
-    /// Records the bound a cell pinned while it ran.
-    ///
     /// A cell that started no child pins nothing and leaves the snapshot root
     /// clean; the first cell that does start one dirties the root exactly once
     /// so the value rides the durable snapshot for later cells. The pin is
@@ -808,7 +806,6 @@ impl RlmExecutionState {
         self.absorb_pending_assignments();
     }
 
-    /// Build a capture. Reads state; mutates none of it.
     fn build_capture(&self, mode: CaptureMode) -> Result<PreparedCapture, SessionError> {
         let complete = mode == CaptureMode::Complete;
         let current_globals = self.rlm.globals();

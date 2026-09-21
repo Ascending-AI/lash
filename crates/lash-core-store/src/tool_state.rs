@@ -8,10 +8,8 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolStateEntry {
     pub manifest: ToolManifest,
-    /// True when this tool was not resolvable from any registered source at
-    /// export time (e.g. a detached MCP server). Orphaned entries keep their
-    /// last-known manifest, are excluded from the Tool Catalog (non-members
-    /// until their source returns), and rebind automatically when a source
+    /// Orphaned entries keep their last-known manifest, are excluded from the Tool Catalog
+    /// (non-members until their source returns), and rebind automatically when a source
     /// re-advertises the same tool id.
     ///
     /// Required in every serialized entry: a pre-cutover snapshot that omits
@@ -54,8 +52,8 @@ impl ToolStateEntry {
         self.orphaned
     }
 
-    /// Whether host curation retains this bound entry. Orphaned entries are
-    /// never effective members even when their retained curation bit is true.
+    /// Orphaned entries are never effective members even when their retained curation bit is
+    /// true.
     pub fn is_member(&self) -> bool {
         self.member && !self.orphaned
     }
@@ -107,8 +105,6 @@ impl ToolState {
         self.tools.iter()
     }
 
-    /// Delete a tool in an explicit `ToolRegistry::apply_state` delta.
-    ///
     /// Deletion intentionally removes the entry for that delta only. Use
     /// [`Self::set_membership`] for curation that must survive a rebuild from
     /// live sources.

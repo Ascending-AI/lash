@@ -93,7 +93,6 @@ impl FakeStore {
         self
     }
 
-    /// Make a surface hand back the cursor it was given, forever.
     fn stuck_cursor(mut self, surface: DurableSurface, cursor: &str) -> Self {
         self.stuck.insert(surface, cursor.to_string());
         self

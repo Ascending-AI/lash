@@ -32,7 +32,6 @@ impl ExecutionHost for Host {
     }
 }
 
-/// Runs `source` and returns the finished value.
 fn finished(source: &str) -> Value {
     let program = lash_typescript::compile(source).expect("TypeScript should compile");
     let host = Host::default();
@@ -44,7 +43,6 @@ fn finished(source: &str) -> Value {
     }
 }
 
-/// Runs `source` and returns the finished string.
 fn finished_string(source: &str) -> String {
     match finished(source) {
         Value::String(text) => text.to_string(),

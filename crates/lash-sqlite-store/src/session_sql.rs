@@ -42,8 +42,6 @@ use lash_store_sql::session::{
 lash_store_sql::statements! {
     /// `session_meta` statements only SQLite issues.
     pub(crate) struct SessionMetaSqliteStatements @ "session_meta" {
-        /// Record the identity row of a session, keeping an existing one.
-        ///
         /// `INSERT OR IGNORE` is the fork: PostgreSQL spells the same
         /// decision `ON CONFLICT (session_id) DO NOTHING`. The row count is
         /// load-bearing either way — a zero means the session was already
@@ -59,8 +57,6 @@ lash_store_sql::statements! {
              VALUES (?1, ?20, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                      ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)";
 
-        /// Record the identity row of a session, replacing the relation.
-        ///
         /// Forks with [`SessionMetaSqliteStatements::insert`], and again on
         /// the conflict alias: SQLite's is `excluded`, PostgreSQL's is
         /// `EXCLUDED`.
@@ -115,8 +111,6 @@ lash_store_sql::statements! {
         /// holding a share lock it would rather not take twice.
         select_sole_session_id = "SELECT session_id FROM session_meta ORDER BY session_id ASC LIMIT 2";
 
-        /// Whether `?1` is materialized at all, as identity or as a head.
-        ///
         /// Names the head table, so it forks on the name (ADR 0098);
         /// PostgreSQL additionally wraps it in `EXISTS(...)`.
         exists_materialized = "SELECT 1 FROM session_meta WHERE session_id = ?1
@@ -213,12 +207,10 @@ lash_store_sql::statements! {
                          (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                          VALUES (?1, ?2, ?3, ?4, ?5)";
 
-        /// Create a forked session's head at revision zero.
         insert_fork = "INSERT INTO session_head
                  (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                  VALUES (?1, ?2, 0, ?3, ?4)";
 
-        /// Remove `?1`'s head at delete time.
         delete_by_session = "DELETE FROM session_head WHERE session_id = ?1";
 
         /// Every live checkpoint root: heads that have published one, plus
@@ -382,7 +374,6 @@ lash_store_sql::statements! {
                                )
                            )";
 
-        /// Whether node `?1` is live.
         exists_live = "SELECT 1 FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0";
 
@@ -461,7 +452,6 @@ lash_store_sql::statements! {
                            )
                          ORDER BY node.generation DESC";
 
-        /// Tombstone `?1`.
         retire = "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1";
 
         /// Which of the node ids in the JSON array `?1` already have a row.
@@ -473,9 +463,6 @@ lash_store_sql::statements! {
         select_occupied = "SELECT node_id FROM graph_nodes
                  WHERE node_id IN (SELECT value FROM json_each(?1))";
 
-        /// Append every node of one commit's graph, bound as the JSON array
-        /// `?1` of six-element rows.
-        ///
         /// One statement rather than one per node: the rows are known in full
         /// before any of them is written and they all land or none do, so a
         /// statement per node bought no atomicity and cost a round trip per
@@ -493,7 +480,6 @@ lash_store_sql::statements! {
                     json_extract(node.value, '$[5]')
              FROM json_each(?1) AS node";
 
-        /// Drop session `?1`'s tombstoned rows: the per-session vacuum.
         delete_tombstoned_for_session = "DELETE FROM graph_nodes
                      WHERE session_id = ?1 AND tombstoned = 1";
 
@@ -514,8 +500,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only SQLite issues.
     pub(crate) struct TurnCommitSqliteStatements @ "turn_commit" {
-        /// Drop every receipt of a deleted session older than `?1`.
-        ///
         /// The shape the sweep uses when no scope is still live. Its sibling
         /// [`TurnCommitSqliteStatements::delete_retained_except_live`] carries
         /// the exclusion list; they are two statements because an empty
@@ -539,9 +523,8 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `usage_deltas` statements only SQLite issues.
     pub(crate) struct UsageDeltaSqliteStatements @ "usage_delta" {
-        /// Append one ledger entry, keeping an existing row for the same
-        /// identity. PostgreSQL spells the same decision `ON CONFLICT ... DO
-        /// NOTHING` over the identity columns.
+        /// PostgreSQL spells the same decision `ON CONFLICT ...
+        /// DO NOTHING` over the identity columns.
         insert = "INSERT OR IGNORE INTO usage_deltas (
                                     session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
                                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)";
@@ -551,14 +534,10 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `deleted_sessions` statements only SQLite issues.
     pub(crate) struct DeletedSessionSqliteStatements @ "deleted_session" {
-        /// Whether `?1` has been deleted.
-        ///
         /// Reads a row and lets the caller ask whether one came back;
         /// PostgreSQL asks `EXISTS(...)` and reads a boolean.
         exists = "SELECT 1 FROM deleted_sessions WHERE session_id = ?1";
 
-        /// Record `?1`'s permanent identity evidence from its metadata row
-        /// and the head revision it reached.
         insert_from_meta = "INSERT OR IGNORE INTO deleted_sessions
                      (session_id, created_at_ms, last_commit_at_ms, head_revision,
                       relation_kind, parent_session_id)
@@ -635,8 +614,6 @@ lash_store_sql::statements! {
         /// that has a release to name.
         select_release = "SELECT release_version FROM release_stamp WHERE singleton = 1";
 
-        /// Write the stamp, advancing an existing row.
-        ///
         /// The caller has already applied the update rule, so this is reached
         /// only when the row must move.
         upsert = "INSERT INTO release_stamp (

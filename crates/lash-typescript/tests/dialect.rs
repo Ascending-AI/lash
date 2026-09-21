@@ -381,8 +381,6 @@ fn normalized_continuation_bytes(
 
 #[test]
 fn typescript_lowering_and_the_stated_ir_have_identical_continuation_bytes() {
-    // print 1
-    // finish 2
     let stated = lashlang::compile_ast(&b::program(vec![
         b::print(b::num(1.0)),
         b::finish(b::num(2.0)),

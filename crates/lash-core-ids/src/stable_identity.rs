@@ -65,7 +65,6 @@ pub struct IdentityEncoder {
 }
 
 impl IdentityEncoder {
-    /// Starts a preimage with `magic || salt || family-version || domain`.
     pub fn new(domain: &str, family_version: u8) -> Self {
         debug_assert!(
             domain == "test" || FAMILY_DOMAINS.contains(&domain),
@@ -79,9 +78,6 @@ impl IdentityEncoder {
         encoder
     }
 
-    /// Starts a preimage *without* the framing header for one of the
-    /// grandfathered [`FROZEN_UNFRAMED_DOMAINS`] families.
-    ///
     /// The emitted bytes are the family's frozen legacy grammar; the
     /// registration check still applies so the unframed path cannot leak into
     /// a new family. New durable identity families must use
@@ -95,8 +91,7 @@ impl IdentityEncoder {
         Self { bytes: Vec::new() }
     }
 
-    /// Emits a reserved integer tag. Tags are permanent and must never be
-    /// reused after a variant or field is retired.
+    /// Tags are permanent and must never be reused after a variant or field is retired.
     pub fn tag(&mut self, tag: u8) {
         self.u8(tag);
     }

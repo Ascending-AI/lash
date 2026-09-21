@@ -3,7 +3,6 @@ use crate::codepointset::Interval;
 
 // Character classes like \d or \S.
 
-/// Construct an interval from an inclusive range of char.
 const fn r(first: char, last: char) -> Interval {
     Interval {
         first: first as u32,
@@ -11,7 +10,6 @@ const fn r(first: char, last: char) -> Interval {
     }
 }
 
-/// Construct an interval from a single char.
 const fn r1(c: char) -> Interval {
     Interval {
         first: c as u32,
@@ -21,10 +19,8 @@ const fn r1(c: char) -> Interval {
 
 // Note all of these are sorted.
 
-/// ES9 21.2.2.6.1.
 pub const WORD_CHARS: [Interval; 4] = [r('0', '9'), r('A', 'Z'), r1('_'), r('a', 'z')];
 
-/// ES9 21.2.2.12
 pub const DIGITS: [Interval; 1] = [r('0', '9')];
 
 /// [`ES13 12.2 White Space`][spec]
@@ -36,8 +32,6 @@ pub const WHITESPACE: [Interval; 9] = [
     // U+000C - Form Feed (FF)       - <FF>
     r('\u{0009}', '\u{000C}'),
     // From unicode “Space_Separator” (`Zs`) category:
-    //
-    // U+0020 - Space - <SP>
     r1('\u{0020}'),
     // From unicode “Space_Separator” (`Zs`) category:
     //
@@ -77,6 +71,5 @@ pub const WHITESPACE: [Interval; 9] = [
     r1('\u{FEFF}'),
 ];
 
-/// ES9 11.3
 pub const LINE_TERMINATOR: [Interval; 3] =
     [r1('\u{000A}'), r1('\u{000D}'), r('\u{2028}', '\u{2029}')];

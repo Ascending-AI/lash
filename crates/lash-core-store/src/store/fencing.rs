@@ -343,7 +343,6 @@ pub enum WorkRowClaimability {
 }
 
 impl WorkRowClaimability {
-    /// Whether the row may be claimed.
     pub fn is_claimable(self) -> bool {
         matches!(self, Self::Claimable)
     }

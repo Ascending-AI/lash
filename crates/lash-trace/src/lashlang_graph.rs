@@ -626,11 +626,9 @@ mod tests {
 
     /// A TypeScript session's executions reduce into the same projection.
     ///
-    /// This test used to assert the opposite, from when `lashlang` was the only
-    /// value the field could take. Now that a record carries the dialect of the
-    /// source that ran, ignoring anything else would empty the execution view
-    /// of every TypeScript session — the projection describes substrate node
-    /// and edge lifecycle, which is the same VM under both dialects.
+    /// Now that a record carries the dialect of the source that ran, ignoring anything else
+    /// would empty the execution view of every TypeScript session — the projection describes
+    /// substrate node and edge lifecycle, which is the same VM under both dialects.
     #[test]
     fn graph_store_reduces_every_dialects_execution_events() {
         let store = TraceLashlangGraphStore::default();

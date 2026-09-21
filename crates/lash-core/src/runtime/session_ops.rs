@@ -440,8 +440,8 @@ impl LashRuntime {
             .await
     }
 
-    /// The code executor's complete live execution state, or `None` when the
-    /// session has no code executor. Reads live state and stages nothing.
+    /// The code executor's complete live execution state, or `None` when the session has no
+    /// code executor.
     async fn hydrated_live_execution_state(
         &mut self,
     ) -> Result<Option<crate::plugin::HydratedExecutionState>, SessionError> {

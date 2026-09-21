@@ -41,7 +41,6 @@ lash_store_sql::statements! {
         select_blob_ref = "SELECT blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2";
 
-        /// Drop `?1`/`?2`'s pointer once its last owner edge is gone. The
         /// `NOT EXISTS` is the whole safety argument: an owner acquired
         /// between the release and this delete keeps the row.
         delete_unowned = "DELETE FROM artifact_refs
@@ -70,9 +69,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `artifact_owners` statements only SQLite issues.
     pub(crate) struct OwnerSqliteStatements @ "artifact_owner" {
-        /// Move artifact `?1`/`?2` from owner `?5`/`?6` to owner `?3`/`?4`,
-        /// reporting whether the source edge existed.
-        ///
         /// `INSERT … SELECT` is the fork: it makes "the destination edge
         /// appears only if the source edge was there" one statement under the
         /// write lock. PostgreSQL reads the source edge first because it

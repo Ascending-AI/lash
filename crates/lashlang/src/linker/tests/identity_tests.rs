@@ -79,9 +79,6 @@ fn label_annotations_require_enabled_language_feature() {
 
 #[test]
 fn disabled_label_annotation_in_main_reports_the_annotation_span() {
-    // count = 1
-    // @label(title: "Finish up") finish count
-    //
     // The diagnostic renders against a caller-supplied span table: TypeScript
     // programs carry lashlang spans only when the lowering populates them
     // (FIG-3065), so the test pins the two statement spans itself.

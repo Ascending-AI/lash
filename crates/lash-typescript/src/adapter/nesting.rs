@@ -264,9 +264,7 @@ fn word_can_end_statement(word: &str) -> bool {
     )
 }
 
-/// Whether a token can continue the expression on the previous line, which is
-/// what suppresses automatic semicolon insertion. Erring towards "continues"
-/// only keeps the budget accumulating, which is the safe direction.
+/// Erring towards "continues" only keeps the budget accumulating, which is the safe direction.
 fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
     if let Some(word) = word {
         // A cast keyword continues the expression on the previous line, exactly

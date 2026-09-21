@@ -1,9 +1,5 @@
-//! Output-cap clamping for host-supplied model specs.
-
 use crate::{GenerationOptions, ModelSpec};
 
-/// Output-cap clamping for host-supplied model specs.
-///
 /// `ModelSpec` lives in `lash-core-llm`; these two methods stay here because
 /// every caller is in `lash-core` and neither belongs on the type's public
 /// surface. The trait is crate-internal, so the published API is unchanged.

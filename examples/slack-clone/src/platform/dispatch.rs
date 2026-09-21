@@ -33,7 +33,6 @@ const IN_FLIGHT: usize = 4;
 /// a backlog whose wake-up notification died with the previous process.
 const IDLE_POLL: Duration = Duration::from_millis(500);
 
-/// Start the delivery loop.
 pub fn spawn(state: PlatformState) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -49,7 +48,7 @@ pub fn spawn(state: PlatformState) -> JoinHandle<()> {
     })
 }
 
-/// Attempt every due delivery once. Returns how many were attempted.
+/// Attempt every due delivery once.
 ///
 /// Deliveries within a pass run concurrently up to [`IN_FLIGHT`], so a dead
 /// endpoint cannot stall the others. The pass still awaits all of them before

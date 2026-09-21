@@ -59,7 +59,6 @@ impl Default for EmbeddedRuntimeDriverBindings {
 }
 
 impl EmbeddedRuntimeBuilder {
-    /// Construct an embedded runtime builder with an explicit commit budget.
     pub fn new(
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
@@ -427,10 +426,8 @@ impl EmbeddedRuntimeBuilder {
 }
 
 impl LashRuntime {
-    /// Construct an embedded runtime builder seeded with an in-memory host
-    /// using `commit_budget`. A later
-    /// [`with_runtime_host`](EmbeddedRuntimeBuilder::with_runtime_host) call
-    /// replaces that host config wholesale, including its commit budget.
+    /// A later [`with_runtime_host`](EmbeddedRuntimeBuilder::with_runtime_host) call replaces
+    /// that host config wholesale, including its commit budget.
     pub fn builder(
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,

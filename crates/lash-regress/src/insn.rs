@@ -61,7 +61,6 @@ pub enum Insn {
     /// Match any character except a line terminator; emitted by '.'
     MatchAnyExceptLineTerminator,
 
-    /// Enter a loop from "outside".
     EnterLoop(LoopFields),
 
     /// Re-enter a loop.
@@ -77,7 +76,6 @@ pub enum Insn {
         greedy: bool,
     },
 
-    /// Set the IP to a new value.
     Jump {
         target: JumpTarget,
     },
@@ -88,13 +86,10 @@ pub enum Insn {
         secondary: JumpTarget,
     },
 
-    /// Enter a capture group.
     BeginCaptureGroup(CaptureGroupID),
 
-    /// Exit a capture group.
     EndCaptureGroup(CaptureGroupID),
 
-    /// Clear a capture group.
     ResetCaptureGroup(CaptureGroupID),
 
     /// Perform a backreference match.
@@ -130,7 +125,6 @@ pub enum Insn {
 
     /// \w or \W word boundaries in Unicode case-insensitive mode.
     /// This considers characters that fold to ASCII word chars as word chars,
-    /// per ES9 21.2.2.6.1.
     WordBoundaryUnicodeICase {
         invert: bool,
     },
@@ -201,10 +195,8 @@ pub struct CompiledRegex {
     // Predicate to rapidly find the first potential match.
     pub start_pred: StartPredicate,
 
-    // Number of loops, used to populate loop data.
     pub loops: u32,
 
-    // Number of capture groups, used to populate capture group data.
     pub groups: u32,
 
     // A list of capture group names. This is either:

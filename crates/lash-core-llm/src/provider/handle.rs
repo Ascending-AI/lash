@@ -107,13 +107,13 @@ impl ProviderCompletionSideband {
 
 /// Component bundle returned by provider factories.
 ///
-/// Admission usage is shared across clones of this bundle, including resolved
-/// session bindings and per-turn overrides. A separately constructed bundle
-/// starts a separate scope. Each admission reads its provider's current options;
-/// changing a clock preserves the shared limiter and accumulated window usage.
-/// Clones with different options apply their own current limits to shared usage.
-/// Reconfiguring concurrency affects future acquisitions; issued permits live
-/// until their owners release them.
+/// Admission usage is shared across clones of this bundle, including resolved session bindings
+/// and per-turn overrides.
+/// A separately constructed bundle starts a separate scope.
+/// Each admission reads its provider's current options; changing a clock preserves the shared
+/// limiter and accumulated window usage.
+/// Reconfiguring concurrency affects future acquisitions; issued permits live until their
+/// owners release them.
 #[derive(Debug)]
 pub struct ProviderComponents {
     pub provider: Box<dyn Provider>,
@@ -130,7 +130,6 @@ impl ProviderComponents {
         }
     }
 
-    /// Install a transport-level decorator that wraps the provider.
     pub fn map_provider(
         mut self,
         map: impl FnOnce(Box<dyn Provider>) -> Box<dyn Provider>,
@@ -614,11 +613,10 @@ impl ProviderHandle {
 
     /// Release the underlying provider's host-visible transport resources.
     ///
-    /// This forwards to [`Provider::close`]. Hosts that want a graceful
-    /// transport shutdown (for example, sending WebSocket Close frames on
-    /// cached Codex sessions) retain a clone of the handle they hand to the
-    /// core and call this before process exit. Providers with no reusable
-    /// transport state close as a no-op.
+    /// Hosts that want a graceful transport shutdown (for example, sending WebSocket Close
+    /// frames on cached Codex sessions) retain a clone of the handle they hand to the core and
+    /// call this before process exit.
+    /// Providers with no reusable transport state close as a no-op.
     pub async fn close(&self) -> Result<(), LlmTransportError> {
         std::panic::AssertUnwindSafe(self.components.provider.close())
             .catch_unwind()
@@ -626,10 +624,7 @@ impl ProviderHandle {
             .unwrap_or_else(provider_close_panicked)
     }
 
-    /// Recover the usage of one generation whose stream ended before the
-    /// provider reported it. Forwards to [`Provider::reconcile_usage`]; a
-    /// panic inside the provider is contained as a typed failure like
-    /// [`ProviderHandle::close`].
+    /// Recover the usage of one generation whose stream ended before the provider reported it.
     pub async fn reconcile_usage(
         &mut self,
         generation_id: &str,

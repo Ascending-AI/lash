@@ -65,10 +65,8 @@ pub(crate) fn decode_rlm_termination_options(
 }
 
 /// Render the "Context Budget" line for the volatile turn-tail message.
-/// Returns the formatted text (status line + optional escalation tail)
-/// or `None` when there's nothing to say. The string is intentionally
-/// per-turn dynamic; callers must place it AFTER the cache breakpoint,
-/// never inside the cached system prompt.
+/// The string is intentionally per-turn dynamic; callers must place it AFTER the cache
+/// breakpoint, never inside the cached system prompt.
 /// Public API shape, unchanged: renders the default dialect's wording.
 ///
 /// The RLM driver calls [`format_budget_suffix_with_vocabulary`] with the
@@ -147,11 +145,8 @@ pub(crate) fn format_budget_suffix_with_vocabulary(
     Some(content)
 }
 
-/// Render the "Bound Variables" prompt section from the live execution
-/// namespace: the model's own scratch variables and any seeded computed
-/// globals, shown the same way (value inline when small, type + size hint when
-/// large). Read-only values are excluded by the caller and render in their own
-/// section without value previews.
+/// Read-only values are excluded by the caller and render in their own section without value
+/// previews.
 #[derive(Debug, Default)]
 pub(crate) struct BoundVariableRenderCache {
     entries: BTreeMap<String, BoundVariableRenderCacheEntry>,

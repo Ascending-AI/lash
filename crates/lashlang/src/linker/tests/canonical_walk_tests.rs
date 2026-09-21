@@ -561,7 +561,6 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         ));
     }
 
-    // print (missing ? 1 : 2)
     let print_program = builders::program(vec![builders::print(builders::if_else(
         builders::var("missing"),
         builders::num(1.0),

@@ -158,8 +158,6 @@ impl S3AttachmentStore {
         Path::parse(path).map_err(|err| terminal_backend_error("path", err))
     }
 
-    /// Read concrete object keys and bytes without using the
-    /// `AttachmentStore` facade that wrote them.
     #[cfg(any(test, feature = "testing"))]
     pub async fn raw_blobs_for_testing(
         &self,
@@ -343,8 +341,6 @@ async fn delete_at_path(store: &dyn ObjectStore, path: Path) -> Result<(), Attac
     Ok(())
 }
 
-/// Wraps a backend operation failure with its actionable class, preserving the
-/// underlying cause and the failed operation for operator diagnosis.
 fn backend_error(operation: &'static str, err: object_store::Error) -> AttachmentStoreError {
     AttachmentStoreError::Backend {
         operation,

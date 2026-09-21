@@ -750,10 +750,9 @@ impl GeneratedRuntimeWorld {
         }
     }
 
-    /// Whether every discovered boundary has been admitted to the scheduler.
-    /// The driver asserts this before it treats an empty scheduler as the end of
-    /// the run, so a future interleaving of suspend and workload times cannot
-    /// silently drop a staged boundary.
+    /// The driver asserts this before it treats an empty scheduler as the end of the run, so a
+    /// future interleaving of suspend and workload times cannot silently drop a staged
+    /// boundary.
     pub(super) fn staged_admissions_is_empty(&self) -> bool {
         self.staged_admissions.is_empty()
     }
@@ -919,12 +918,11 @@ impl GeneratedRuntimeWorld {
         }))
     }
 
-    /// Open a suspend session and spawn its real turn. The turn calls a sim tool
-    /// that registers its await key and returns `ToolOutcome::pending`, so the
-    /// turn future parks mid-flight and cannot finish until the scheduler later
-    /// delivers the matching completion boundary. The observed masquerades as a
-    /// normal ingress for the abstract store; suspend evidence lives in a
-    /// normalized-away field so cross-backend replay stays green.
+    /// The turn calls a sim tool that registers its await key and returns
+    /// `ToolOutcome::pending`, so the turn future parks mid-flight and cannot finish until the
+    /// scheduler later delivers the matching completion boundary.
+    /// The observed masquerades as a normal ingress for the abstract store; suspend evidence
+    /// lives in a normalized-away field so cross-backend replay stays green.
     async fn open_suspending_session(
         &mut self,
         event: &BoundaryEvent,
@@ -1047,12 +1045,12 @@ impl GeneratedRuntimeWorld {
         }))
     }
 
-    /// Poll the spawned suspend turns. Once a turn has registered its await key
-    /// (it parked on the tool) and is still in flight, stage the matching
-    /// completion boundary — mirroring how finished provider turns stage their
-    /// completion. The completion is the only thing that can resume the parked
-    /// turn, and it is delivered after the generated workload has drained, so it
-    /// is scheduled past every workload boundary.
+    /// Once a turn has registered its await key (it parked on the tool) and is still in
+    /// flight, stage the matching completion boundary — mirroring how finished provider turns
+    /// stage their completion.
+    /// The completion is the only thing that can resume the parked turn, and it is delivered
+    /// after the generated workload has drained, so it is scheduled past every workload
+    /// boundary.
     ///
     /// Its `at` is `resolution_at`, fixed from the spawn-order counter when the
     /// delivery that spawned the turn ran — not from how many driver passes had

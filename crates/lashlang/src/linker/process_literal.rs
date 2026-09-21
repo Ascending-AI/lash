@@ -184,8 +184,6 @@ impl<'module> Linker<'module> {
     }
 }
 
-/// Whether a resolved expected type admits a process value in the slot.
-///
 /// A union admits a literal when any branch does; every other shape does not,
 /// including `Any` — an untyped slot is not a process slot, and the error is
 /// what tells the model where the body belongs.

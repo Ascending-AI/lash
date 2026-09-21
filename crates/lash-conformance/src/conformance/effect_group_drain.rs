@@ -108,15 +108,12 @@ pub struct DrainWorldSpec {
     pub executors: Option<Arc<dyn GroupExecutors>>,
 }
 
-/// Builds a world over one substrate, as many times as a law needs.
-///
 /// Callable from any runtime — a crash law calls it from a runtime it is about
 /// to destroy — so a backend must open its own substrate handles inside the
 /// future rather than capturing handles bound to the test's runtime.
 pub type DrainWorldFactory =
     Arc<dyn Fn(DrainWorldSpec) -> Pin<Box<dyn Future<Output = DrainWorld> + Send>> + Send + Sync>;
 
-/// Run the effect-group drain suite.
 pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     let prefix = format!("drain-conformance-{}", uuid::Uuid::new_v4().simple());
     a_group_this_process_is_still_working_is_refused(&make, &prefix).await;
@@ -129,10 +126,6 @@ pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     a_child_this_host_cannot_run_is_reported_not_invented(&make, &prefix).await;
     a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(&make, &prefix).await;
 }
-
-// =============================================================================
-// Laws
-// =============================================================================
 
 /// The drain reclaims groups whose caller is gone, and this process can see
 /// perfectly well that this one's is not.
@@ -833,10 +826,6 @@ async fn a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(
     assert_eq!(capable.executions(), vec![child_replay_key(&key, 0)]);
 }
 
-// =============================================================================
-// Fixtures
-// =============================================================================
-
 const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
 const CANCEL: LoserPolicy = LoserPolicy::Cancel;
 
@@ -869,9 +858,6 @@ fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
     }
 }
 
-/// Runs `phase` on a host of its own, on a runtime of its own, and then destroys
-/// that runtime.
-///
 /// This is the suite's crash. Dropping a Tokio runtime drops every task it owns,
 /// including the host-owned tasks a group's children run on, and it drops the
 /// host's substrate handles with them. What is left behind is what a killed
@@ -967,8 +953,6 @@ async fn pass(
         .await
 }
 
-/// Waits until a dead process's claims have lapsed, without running anything.
-///
 /// A law that needs an *expired* starting state cannot sleep a guessed interval
 /// — expiry is the substrate's clock — and cannot poll with a settling host,
 /// which would drain the very children the law is about. A refusing host asks
@@ -1215,13 +1199,9 @@ fn never() -> RuntimeEffectLocalExecutor<'static> {
 /// What a recording host answers for one child.
 #[derive(Clone)]
 enum ExecutorAnswer {
-    /// Runs and produces an outcome immediately.
     Settle,
     /// This host cannot run the command.
     Refuse,
-    /// Runs, reports that it started, and stays in the effect until the law
-    /// releases it — which is how a law holds a *live claim* open for a known
-    /// stretch, since a claim lives exactly as long as the execution under it.
     Hold {
         entered: Arc<AtomicUsize>,
         release: CancellationToken,

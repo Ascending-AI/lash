@@ -15,7 +15,6 @@ crate::statements! {
                  SELECT 1 FROM await_event_revoked_sessions WHERE session_id = ?1
              )";
 
-        /// Record the revocation of `?1` at `?2`, keeping the first stamp.
         insert_ignore = "INSERT INTO await_event_revoked_sessions (session_id, revoked_at_ms)
              VALUES (?1, ?2)
              ON CONFLICT (session_id) DO NOTHING";

@@ -24,13 +24,10 @@ crate::statements! {
              FROM session_meta_pending_observer_intents
              WHERE session_id = ?1 ORDER BY process_index";
 
-        /// Record intent `?2` of session `?1`.
         insert = "INSERT INTO session_meta_pending_observer_intents
              (session_id, process_index, process_id, process_incarnation, attribution)
              VALUES (?1, ?2, ?3, ?4, ?5)";
 
-        /// Drop session `?1`'s intents, before a metadata write rewrites them
-        /// and at delete time.
         delete_by_session =
             "DELETE FROM session_meta_pending_observer_intents WHERE session_id = ?1";
     }

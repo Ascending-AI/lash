@@ -160,8 +160,6 @@ impl SimRunMode {
     }
 }
 
-/// Run identity recorded in the profile summary: which shard of which
-/// configured seed count ran, in which mode.
 struct GeneratedRunLabels {
     shard: String,
     configured_seeds: usize,

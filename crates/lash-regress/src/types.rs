@@ -34,7 +34,6 @@ pub struct BracketContents {
 }
 
 impl BracketContents {
-    // Return true if the bracket is empty.
     pub fn is_empty(&self) -> bool {
         match self.invert {
             false => self.cps.is_empty(),
@@ -91,7 +90,6 @@ impl<Position: PositionType> GroupData<Position> {
         }
     }
 
-    /// Reset the group to "not entered."
     pub fn reset(&mut self) {
         self.start = None;
         self.end = None;

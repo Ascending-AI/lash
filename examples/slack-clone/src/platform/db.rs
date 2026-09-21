@@ -108,7 +108,6 @@ pub struct UserRow {
     pub created_at: u64,
 }
 
-/// A channel.
 #[derive(Clone, Debug)]
 pub struct ChannelRow {
     pub id: String,
@@ -121,7 +120,7 @@ pub struct ChannelRow {
     pub created_at: u64,
 }
 
-/// A message. `author` distinguishes the two Slack authorship shapes.
+/// `author` distinguishes the two Slack authorship shapes.
 #[derive(Clone, Debug)]
 pub struct MessageRow {
     pub channel_id: String,
@@ -190,10 +189,6 @@ pub fn team_name(connection: &Connection) -> Result<String> {
     )
 }
 
-/// Insert a user, or return the existing one with the same handle.
-///
-/// Handle collision resolving to the existing row is what makes the UI's
-/// name-picker identity work across browser reloads without any auth.
 pub fn upsert_user(
     connection: &Connection,
     id: &str,
@@ -254,7 +249,6 @@ fn read_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserRow> {
     })
 }
 
-/// Insert a channel, or return the existing one with the same name.
 pub fn upsert_channel(
     connection: &Connection,
     id: &str,
@@ -309,8 +303,6 @@ pub fn list_channels(connection: &Connection, exclude_archived: bool) -> Result<
     Ok(rows)
 }
 
-/// Number of members in the workspace, reported as every channel's
-/// `num_members`: the platform has no per-channel membership.
 pub fn member_count(connection: &Connection) -> Result<u32> {
     Ok(connection.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?)
 }
@@ -328,8 +320,6 @@ fn read_channel(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelRow> {
     })
 }
 
-/// Append a message, minting the `ts` that becomes its identity.
-///
 /// The mint is `max(now, newest_ts + 1)`, so `ts` is unique and strictly
 /// increasing per channel even when two posts land in the same microsecond.
 /// Slack guarantees exactly this, and clients that treat `ts` as an ordering key

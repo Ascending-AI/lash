@@ -37,8 +37,6 @@ pub enum Stream {
     Err,
 }
 
-/// Formats `args` into one complete line, trailing newline included.
-///
 /// Formatting happens off the output lock: user `Display`/`Debug` code never
 /// runs while the process-wide lock is held.
 #[must_use]

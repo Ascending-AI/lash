@@ -39,12 +39,18 @@ const MAX_SNAPSHOT_MESSAGEPACK_DEPTH: usize = CANONICAL_MESSAGEPACK_DEPTH_LIMIT;
 /// One operation in a [`State::patch_globals`] batch.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GlobalPatch {
-    /// Binds `name`, replacing any existing value.
-    Insert { name: String, value: Value },
+    Insert {
+        name: String,
+        value: Value,
+    },
     /// Binds `name` only when it is currently unbound.
-    SetDefault { name: String, value: Value },
-    /// Unbinds `name` when it is bound.
-    Remove { name: String },
+    SetDefault {
+        name: String,
+        value: Value,
+    },
+    Remove {
+        name: String,
+    },
 }
 
 /// What a committed [`State::patch_globals`] batch changed.
@@ -120,8 +126,6 @@ impl State {
         Ok(!outcome.inserted.is_empty())
     }
 
-    /// Binds `name`, reporting whether it replaced a binding.
-    ///
     /// The report is about the binding, not about the host view of it: a
     /// heap-backed name whose value cannot cross the host boundary is live and
     /// is reported as replaced, even though [`State::globals`] never showed it.
@@ -138,8 +142,6 @@ impl State {
         Ok(replaced)
     }
 
-    /// Unbinds `name`, reporting whether a binding was removed.
-    ///
     /// Reported from the record the removal wrote, on the same rule as
     /// [`State::insert_global`].
     #[expect(
@@ -165,8 +167,6 @@ impl State {
         }
     }
 
-    /// Whether `name` is bound, read from the record that owns the binding.
-    ///
     /// When the state is heap-backed the runtime roots own the bindings and
     /// `globals` is a lossy projection of them, so asking the projection
     /// reports a live binding as absent — which is how a default used to

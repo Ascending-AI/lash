@@ -75,8 +75,6 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     let factory = storage.session_store_factory();
     let policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
 
-    // Reads hide tombstones, so only raw SQL can tell a reclaimed row from a
-    // hidden one.
     async fn resident_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
         sqlx::query_scalar::<_, String>("SELECT node_id FROM lash_graph_nodes ORDER BY node_id")
             .fetch_all(pool)

@@ -16,7 +16,6 @@ use crate::{log_err, log_out};
 /// Path the bot registers as its Events API request URL.
 pub const EVENTS_PATH: &str = "/slack/events";
 
-/// Build the bot's router.
 pub fn router(bot: Arc<ChannelBot>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
@@ -24,8 +23,6 @@ pub fn router(bot: Arc<ChannelBot>) -> Router {
         .with_state(bot)
 }
 
-/// Receive one Events API request.
-///
 /// The handler acknowledges and returns; handling happens on a spawned task.
 /// This is not an optimisation — Slack requires a 2xx within three seconds and
 /// retries otherwise, so a host that ran a model turn before acknowledging would

@@ -26,8 +26,7 @@ pub enum CompletionKeyPreparation {
 #[derive(Clone)]
 pub struct QueuedLaneHolder(crate::store::SessionExecutionLease);
 
-/// Prints only the [`QueuedLaneHolder::describe`] facts. The inner store row
-/// carries the lease token, which must never reach logs or panic messages.
+/// The inner store row carries the lease token, which must never reach logs or panic messages.
 impl std::fmt::Debug for QueuedLaneHolder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("QueuedLaneHolder")
@@ -91,6 +90,5 @@ pub enum QueuedLaneAcquisition {
 #[async_trait::async_trait]
 pub trait QueuedLaneProbe: Send + Sync {
     async fn try_acquire(&self) -> Result<QueuedLaneAttempt, RuntimeError>;
-    /// Sleep `slice` through the runtime's injected clock.
     async fn pause(&self, slice: std::time::Duration);
 }

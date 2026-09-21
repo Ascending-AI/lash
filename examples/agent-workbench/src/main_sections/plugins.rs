@@ -59,8 +59,6 @@ impl WorkbenchPluginFactory {
         self.config_changes.clone()
     }
 
-    /// Handle on what the per-turn context transform actually saw, so a harness
-    /// can check the prepared context the runtime handed it.
     #[cfg(test)]
     pub(crate) fn context_budget(&self) -> WorkbenchContextBudget {
         self.context_budget.clone()
@@ -356,7 +354,6 @@ impl WorkbenchDerivedNotes {
         for note in self.take_pending() {
             self.write_back(ctx, note).await;
         }
-        // Start the next derivation from the head this turn just committed.
         if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {
             let summary = workbench_note_summary(&ctx.state);
             self.inner

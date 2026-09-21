@@ -476,7 +476,6 @@ pub struct PostgresTriggerStore {
 }
 
 impl PostgresTriggerStore {
-    /// Bind trigger record timestamps to an explicit clock.
     pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
         self.clock = clock;
         self
@@ -505,16 +504,14 @@ pub struct PostgresLashlangArtifactStore {
 /// fence. `lock_timeout` caps lock waits before surfacing retryable contention.
 #[derive(Clone, Debug)]
 pub struct PostgresStoreConfig {
-    /// Maximum pooled connections. Default 16.
     pub max_connections: u32,
-    /// Minimum idle connections kept warm. Default 0.
     pub min_connections: u32,
     /// How long `acquire` may take before erroring, including pool waits and
     /// establishing a fresh TCP/TLS/Postgres connection. Default 30s.
     pub acquire_timeout: Duration,
-    /// Close a connection after this idle period. Default 10m.
+    /// Close a connection after this idle period.
     pub idle_timeout: Option<Duration>,
-    /// Recycle a connection after this lifetime. Default 30m.
+    /// Recycle a connection after this lifetime.
     pub max_lifetime: Option<Duration>,
     /// Postgres `lock_timeout` applied to every connection. Default 10s.
     pub lock_timeout: Option<Duration>,
@@ -729,9 +726,6 @@ impl PostgresStorage {
         SCHEMA_VERSION
     }
 
-    /// Compares the live database against the schema this build expects and
-    /// returns the structured result.
-    ///
     /// This is the same check every open runs, exposed so a host can gate its own
     /// migration CI on it — the intent being that a production open is the
     /// backstop that never fires rather than the place drift is discovered.
@@ -745,8 +739,6 @@ impl PostgresStorage {
         Self::verify_schema_for(&self.pool).await
     }
 
-    /// Runs the same check against a pool, without opening storage over it.
-    ///
     /// Constructing a [`PostgresStorage`] is strictly harder than verifying one:
     /// open additionally insists on a matching component version stamp and a
     /// usable await-event signing secret, and either of those can be exactly what
@@ -862,12 +854,10 @@ impl PostgresStorage {
     /// The advisory-lock key lash holds while provisioning, opening, or verifying
     /// the schema, as `(namespace, key)` arguments to the `pg_advisory_lock` family.
     ///
-    /// Open and provisioning take it exclusively;
-    /// [`PostgresStorage::verify_schema_for`] takes it in shared mode. Between them
-    /// that serializes everything lash does to the schema — but it cannot by itself
-    /// coordinate a host migration that does not participate. A non-participating
-    /// migration can commit before a verification's snapshot or after its commit, so
-    /// the report describes the schema as of that snapshot rather than as of now.
+    /// Between them that serializes everything lash does to the schema — but it cannot by
+    /// itself coordinate a host migration that does not participate.
+    /// A non-participating migration can commit before a verification's snapshot or after its
+    /// commit, so the report describes the schema as of that snapshot rather than as of now.
     ///
     /// The supported protocol is therefore to take this key around migrations —
     /// `SELECT pg_advisory_xact_lock(715421, 907001)` in the migration's own
@@ -928,10 +918,10 @@ impl PostgresStorage {
     /// Construct a handle bound to `session_id` without validating that the
     /// session already exists.
     ///
-    /// Construction binds identity; it does not validate existence. Reads of a
-    /// nonexistent session return `Ok(None)`, and a later admission or commit
-    /// may create that id. Consequently, a mistyped id produces a valid absent
-    /// handle that can subsequently create the mistyped session. Call
+    /// Construction binds identity; it does not validate existence.
+    /// Consequently, a mistyped id produces a valid absent handle that can subsequently create
+    /// the mistyped session.
+    /// Call
     /// [`SessionStoreFactory::open_existing_store`](lash_core::SessionStoreFactory::open_existing_store)
     /// through [`Self::session_store_factory`] when existence must be checked.
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {

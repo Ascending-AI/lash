@@ -178,8 +178,7 @@ impl InMemorySessionStore {
             .collect()
     }
 
-    /// Return raw queued-work batches and their claim state for differential
-    /// tests. The sequence is backend-local, so callers normalize ordering.
+    /// The sequence is backend-local, so callers normalize ordering.
     pub fn raw_queued_work_for_testing(&self) -> Vec<super::RawQueuedWorkForTesting> {
         let session_id = self
             .session_meta
@@ -328,7 +327,6 @@ pub struct RawSessionExecutionLeaseRow {
 }
 
 impl super::InMemorySessionStoreFactory {
-    /// Return the concrete testing store after `SessionStoreFactory` created it.
     pub fn raw_store_for_testing(
         &self,
         session_id: &SessionId,
@@ -336,7 +334,6 @@ impl super::InMemorySessionStoreFactory {
         self.stores.lock_recover().get(session_id).cloned()
     }
 
-    /// Return explicit node-anchor rows without mixing in implicit live tips.
     pub fn raw_node_anchors_for_testing(&self) -> Vec<(crate::NodeId, crate::BlobRef, SessionId)> {
         let mut rows = self
             .node_anchors

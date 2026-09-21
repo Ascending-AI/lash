@@ -1,10 +1,6 @@
 //! MCP (Model Context Protocol) integration for `lash`, packaged as a plugin.
 //!
-//! `lash-plugin-mcp` exposes MCP-compatible servers as a normal lash tool
-//! provider. Add the plugin once at [`LashCore::builder`] time, supply a
-//! `BTreeMap<String, McpServerConfig>`, and every session built from the
-//! core gets the configured servers' tools surfaced under
-//! bounded `mcp__<server>__<tool>_<identity-digest>` names.
+//! `lash-plugin-mcp` exposes MCP-compatible servers as a normal lash tool provider.
 //!
 //! Supported transports (selected per server via the `transport` field):
 //! - `stdio` — spawn a child process and speak JSON-RPC over its pipes.
@@ -48,8 +44,7 @@ pub use rmcp::model::{
     UrlElicitationCapability,
 };
 
-/// Return the bounded model-facing name for a raw tool advertised by an MCP
-/// server. The result is stable for that raw server/tool identity.
+/// The result is stable for that raw server/tool identity.
 pub fn mcp_tool_name(server_name: &str, native_tool_name: &str) -> String {
     naming::build_prefixed_name(server_name, native_tool_name).0
 }

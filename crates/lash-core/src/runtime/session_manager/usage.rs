@@ -342,9 +342,8 @@ pub fn record_unreported_attempts_shared(
     }
 }
 
-/// Append one reconciliation correction row attributed to the attempt whose
-/// usage was recovered from the provider. Append-only: never merged into the
-/// reported row and never rewrites the unreported row it fills.
+/// Append-only: never merged into the reported row and never rewrites the unreported row it
+/// fills.
 pub fn record_reconciled_usage_shared(
     token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     source: &str,

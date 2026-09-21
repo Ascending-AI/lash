@@ -324,8 +324,7 @@ fn is_rlm_protocol_message(
     )
 }
 
-/// Emit a buffered prose as a standalone assistant message (a prose-only
-/// finish). Carries nothing for empty prose with no images.
+/// Carries nothing for empty prose with no images.
 fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<PendingProse>) {
     if let Some(prose) = pending.take() {
         if prose.text.trim().is_empty()

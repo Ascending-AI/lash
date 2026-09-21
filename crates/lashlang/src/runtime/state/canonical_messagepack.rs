@@ -27,7 +27,6 @@ pub enum CanonicalPathSegment {
 }
 
 impl CanonicalPathSegment {
-    /// Return a map key; array positions have no key.
     pub fn key(&self) -> Option<&str> {
         match self {
             Self::Key(key) => Some(key),

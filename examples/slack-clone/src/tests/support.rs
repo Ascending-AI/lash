@@ -1,6 +1,3 @@
-//! Test harness: a real platform on a real socket, and a bot with a scripted
-//! model.
-//!
 //! No test in this crate ever needs a model token. The provider is
 //! `lash::testing::TestProvider` scripted with standard-mode responses — plain
 //! text, or a native tool call followed by text — so the tool loop is exercised
@@ -43,9 +40,8 @@ pub const VERIFICATION_TOKEN: &str = "test-verification";
 /// One scripted model response.
 #[derive(Clone, Debug)]
 pub enum Step {
-    /// Finish the turn with this text.
     Text(String),
-    /// Call a native tool. The loop continues, so a `Text` step must follow.
+    /// The loop continues, so a `Text` step must follow.
     ToolCall {
         name: String,
         args: serde_json::Value,
@@ -89,8 +85,6 @@ impl Script {
         }
     }
 
-    /// Wait until a gated step has been entered — i.e. the turn is live and its
-    /// queued input is claimed.
     pub async fn wait_gated(&self) {
         self.entered.notified().await;
     }
@@ -126,15 +120,12 @@ impl Script {
         self.requests.lock_recover().clone()
     }
 
-    /// Whether any request carried `needle` — used to prove that ambient channel
-    /// traffic really reached the prompt.
     pub fn saw(&self, needle: &str) -> bool {
         self.requests()
             .iter()
             .any(|request| request.contains(needle))
     }
 
-    /// Build the provider handle.
     pub fn provider(&self) -> ProviderHandle {
         let steps = Arc::clone(&self.steps);
         let requests = Arc::clone(&self.requests);
@@ -275,7 +266,6 @@ impl TestPlatform {
             .id
     }
 
-    /// Create a channel, returning its `C…`.
     pub async fn channel(&self, name: &str) -> String {
         let id = self.state.ids().mint("C");
         let name = name.to_string();
@@ -386,8 +376,6 @@ impl TestPlatform {
             .collect()
     }
 
-    /// Remove a message from the workspace.
-    ///
     /// Not a platform feature — the Slack subset here has no deletions. It exists
     /// so a test can reconstruct the state left by a crash between committing a
     /// turn and posting its reply: the transcript has the answer and the channel
@@ -443,8 +431,6 @@ impl TestPlatform {
     }
 }
 
-/// Build a bot against a platform, on `data_dir`.
-///
 /// Restart tests call this twice with the same `data_dir`: the second call is a
 /// new process's worth of state, rebuilt from the same durable stores.
 pub async fn start_bot(

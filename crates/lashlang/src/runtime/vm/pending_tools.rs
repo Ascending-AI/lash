@@ -59,8 +59,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         ) && matches!(self.pending_tools.get(id), Some(Some(_)))
     }
 
-    /// The error for a handle that names no live request of this execution.
-    ///
     /// Three different mistakes reach here and each has its own repair: a
     /// process handle that was written where a tool call belongs, a handle this
     /// execution minted and already awaited, and a handle from somewhere else

@@ -23,9 +23,6 @@ use lashlang::{
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Records what the host was actually asked to do: the `url` argument of every
-/// call in the order the calls arrived, how many batches were formed and how
-/// big each was, and every `console.log`.
 #[derive(Default)]
 struct OrderRecordingHost {
     batches: AtomicUsize,
@@ -53,8 +50,6 @@ impl OrderRecordingHost {
         }
     }
 
-    /// Records the call and answers `url + 10`, so a witness can tell a value
-    /// the host produced from a value the program carried through.
     fn record(&self, operation: &ResourceOperation) -> Result<f64, ExecutionHostError> {
         let url = Self::url_of(operation)?;
         self.urls.lock().expect("urls lock").push(url);

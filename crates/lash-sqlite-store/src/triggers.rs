@@ -108,8 +108,6 @@ lash_store_sql::statements! {
              FROM trigger_occurrences
              WHERE idempotency_key = ?1";
 
-        /// Delete every fired occurrence no delivery references.
-        ///
         /// SQLite reads the outcome with `json_extract`, PostgreSQL with
         /// `jsonb #>>`.
         delete_orphan_fired = "DELETE FROM trigger_occurrences
@@ -120,9 +118,6 @@ lash_store_sql::statements! {
                          trigger_occurrences.occurrence_id
                )";
 
-        /// Arm at `?2` every occurrence named in the candidate array `?1`
-        /// whose last delivery this pass removed. Forks on `json_each` and on
-        /// the outcome read.
         arm_reclaimable_for_candidates = "UPDATE trigger_occurrences
              SET reclaimable_at_ms = ?2
              WHERE reclaimable_at_ms IS NULL
@@ -140,10 +135,8 @@ lash_store_sql::statements! {
         /// The reclamation sweep's scope proof and its worklist, from one
         /// snapshot at cutoff `?1`.
         ///
-        /// The aggregate visits the whole table so `NothingToDo` stays
-        /// witnessed emptiness; only eligible ids are materialized. Forks on
-        /// the outcome read alone — see
-        /// [`lash_store_sql::trigger::occurrences::RECLAMATION_SCOPE_COUNTS_SQLITE`].
+        /// The aggregate visits the whole table so `NothingToDo` stays witnessed emptiness;
+        /// only eligible ids are materialized.
         select_reclamation_scope = "WITH scope AS (
                  SELECT COUNT(*) AS inspected_count,
                         COUNT(*) FILTER (
@@ -174,9 +167,9 @@ lash_store_sql::statements! {
              LEFT JOIN candidates ON TRUE
              ORDER BY candidates.occurrence_id ASC";
 
-        /// Reclaim occurrence `?1` if it is still eligible at cutoff `?2`. The
-        /// whole eligibility test is re-proved here, because the worklist was
-        /// read from an earlier snapshot. Forks on the outcome read.
+        /// Reclaim occurrence `?1` if it is still eligible at cutoff `?2`.
+        /// The whole eligibility test is re-proved here, because the worklist was read from an
+        /// earlier snapshot.
         delete_reclaimable_by_id = "DELETE FROM trigger_occurrences
              WHERE occurrence_id = ?1
                AND reclaimable_at_ms IS NOT NULL
@@ -188,8 +181,6 @@ lash_store_sql::statements! {
                          trigger_occurrences.occurrence_id
                )";
 
-        /// Drop non-fired (audit) occurrences older than `?1`. Forks on the
-        /// outcome read.
         prune_non_fired = "DELETE FROM trigger_occurrences
              WHERE occurred_at_ms < ?1
                AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') != 'fired'";
@@ -199,8 +190,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `trigger_deliveries` statements only SQLite issues.
     pub(crate) struct DeliverySqliteStatements @ "trigger_delivery" {
-        /// Delete every delivery named in the candidate array `?1`.
-        ///
         /// SQLite unnests the candidates with `json_each` and compares the
         /// three ids through `json_extract`; PostgreSQL joins three bound
         /// `TEXT[]`s with `UNNEST`.
@@ -216,9 +205,8 @@ lash_store_sql::statements! {
                            json_extract(candidate.value, '$.process_id')
              )";
 
-        /// Every session whose deliveries are still outstanding: the scopes a
-        /// retention pass must not reclaim receipts for. Forks on the JSON
-        /// read.
+        /// Every session whose deliveries are still outstanding: the scopes a retention pass
+        /// must not reclaim receipts for.
         select_session_owner_scopes = "SELECT DISTINCT
                                 'session:' || json_extract(
                                     subscription_snapshot_json,
@@ -235,8 +223,7 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `trigger_mutation_receipts` statements only SQLite issues.
     pub(crate) struct MutationReceiptSqliteStatements @ "trigger_mutation_receipt" {
-        /// Drop the session-owned receipts of the owner ids in JSON array
-        /// `?1`. Forks on `json_each` against PostgreSQL's bound `TEXT[]`.
+        /// Forks on `json_each` against PostgreSQL's bound `TEXT[]`.
         delete_for_session_owners = "DELETE FROM trigger_mutation_receipts
              WHERE owner_kind = 'session'
                AND owner_id IN (SELECT value FROM json_each(?1))";
@@ -427,8 +414,6 @@ impl SqliteTriggerStore {
         })
     }
 
-    /// Run one of the four named delivery listings.
-    ///
     /// `sql` is a rendered statement, never a clause this function completes:
     /// the listing used to be one `format!` over a `where_clause` argument,
     /// and each caller now names the statement it means.

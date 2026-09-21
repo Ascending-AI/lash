@@ -1,8 +1,5 @@
-//! Runs the public
-//! [`runtime_rebuild_and_worker_recovery`](crate::testing::conformance::runtime_rebuild_and_worker_recovery)
-//! conformance suite against this crate's store backends. The suite proves cold
-//! rebuild of a trigger-mutated session and durable worker recovery across every
-//! `ProcessInput` variant the worker runs.
+//! The suite proves cold rebuild of a trigger-mutated session and durable worker recovery
+//! across every `ProcessInput` variant the worker runs.
 //!
 //! Two backends cover the explicit-facet API: a fully inline backend using
 //! in-memory stores/registry and a fully durable backend using SQLite/file

@@ -654,7 +654,6 @@ pub struct RuntimeSessionState {
 }
 
 impl RuntimeSessionState {
-    /// Construct empty runtime state with an explicitly chosen session policy.
     pub fn new(policy: SessionPolicy) -> Self {
         Self {
             session_id: SessionId::from("root"),
@@ -778,16 +777,12 @@ impl RuntimeSessionState {
         Ok(())
     }
 
-    /// Appends non-transient messages in source order for protocol implementors restoring an
-    /// incremental session delta, then refreshes the current frame projection.
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
         self.session_graph.append_active_read_delta(messages);
         self.refresh_current_frame_projection();
     }
 
-    /// Appends non-transient conversation messages in source order for protocol implementors and
-    /// refreshes the current frame projection.
     pub fn append_active_conversation_messages(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
         self.session_graph.append_active_read_delta(messages);
@@ -805,20 +800,14 @@ impl RuntimeSessionState {
         self.refresh_current_frame_projection();
     }
 
-    /// Exposes read view to protocol and process-engine implementors while materializing or
-    /// restoring protocol session state.
     pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
         crate::SessionReadView::from_persisted_state(self)
     }
 
-    /// Exposes session graph to protocol and process-engine implementors while materializing or
-    /// restoring protocol session state.
     pub fn session_graph(&self) -> &crate::SessionGraph {
         &self.session_graph
     }
 
-    /// Exposes policy to protocol and process-engine implementors while materializing or restoring
-    /// protocol session state.
     pub fn policy(&self) -> &SessionPolicy {
         self.effective_policy()
     }
@@ -1054,24 +1043,18 @@ impl RuntimeSessionState {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
-    /// Exposes current agent frame to protocol and process-engine implementors while materializing
-    /// or restoring protocol session state. Returns `None` when no current agent frame is present.
     pub fn current_agent_frame(&self) -> Option<&crate::AgentFrameRecord> {
         self.agent_frames.iter().find(|frame| {
             Some(frame.frame_node_id.as_str()) == self.current_frame_node_id.as_deref()
         })
     }
 
-    /// Returns the live policy stored in runtime state.
-    ///
     /// This is a raw field read with no layering and is the single source of truth for live
     /// policy.
     pub fn effective_policy(&self) -> &SessionPolicy {
         &self.policy
     }
 
-    /// Returns the live protocol turn options stored in runtime state.
-    ///
     /// This is a raw field read with no layering and is the single source of truth for live
     /// protocol turn options.
     pub fn effective_protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
@@ -1124,8 +1107,6 @@ impl RuntimeSessionState {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
-    /// Resets initial agent frame with clock for protocol and process-engine implementors while
-    /// materializing or restoring protocol session state.
     #[expect(
         clippy::expect_used,
         reason = "the initial frame material is a non-empty literal"

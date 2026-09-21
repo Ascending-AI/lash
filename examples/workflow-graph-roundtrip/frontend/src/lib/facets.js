@@ -24,8 +24,6 @@ export function hasFacets(doc) {
 
 // --- type parsing ----------------------------------------------------------
 
-// Split `s` on top-level occurrences of `sep` (a single char), respecting
-// brackets `[] {} <> ()` and double-quoted strings. Returns the raw fragments.
 function splitTopLevel(s, sep) {
   const out = [];
   let depth = 0;
@@ -60,7 +58,6 @@ function splitTopLevel(s, sep) {
   return out;
 }
 
-// Parse a formatted type string into a light descriptor `{ kind, ... }`.
 // Unknown / nominal references collapse to `{ kind: 'ref', name }`.
 export function parseType(str) {
   const t = (str ?? '').trim();
@@ -116,10 +113,8 @@ export function enumMemberToText(member) {
   return JSON.stringify(String(member ?? ''));
 }
 
-// Which enum member the current slot text selects, or null when the text is not
-// one of the members (a variable / custom expression the user typed raw). Reads
-// both a quoted literal (`"ok"`, from an expression slot) and a bare member
-// (`ok`, from a plain string field).
+// Which enum member the current slot text selects, or null when the text is not one of the
+// members (a variable / custom expression the user typed raw).
 export function enumMemberFromText(text, members) {
   const t = (text ?? '').trim();
   const quoted = /^"((?:[^"\\]|\\.)*)"$/.exec(t);
@@ -240,10 +235,9 @@ export function nodeDiagnostics(node) {
   return node?.data?.diagnostics ?? [];
 }
 
-// Map every diagnostic in the document to its owning node id. Each node carries
-// its own diagnostics (diagnostic.nodeId === the analyzed node's id), but we
-// group defensively by the diagnostic's own `nodeId` so a diagnostic always
-// lands on the node it names even if the backend attaches it elsewhere.
+// Each node carries its own diagnostics (diagnostic.nodeId === the analyzed node's id), but we
+// group defensively by the diagnostic's own `nodeId` so a diagnostic always lands on the node
+// it names even if the backend attaches it elsewhere.
 export function mapDiagnosticsToNodes(doc) {
   const byNode = new Map();
   for (const node of doc?.nodes ?? []) {
@@ -276,11 +270,10 @@ export function saveBlocked(doc) {
   return blockingDiagnostics(doc).length > 0;
 }
 
-// Drop every node's diagnostics from the draft. A client-side edit invalidates
-// the last host derivation, so its diagnostics become STALE — and a stale error
-// is worse than none (it points at text the user already changed). We clear
-// them on edit so the graph reads as "unknown" (which never blocks Save) until
-// the next Save re-derives accurate facets. Returns true when anything cleared.
+// A client-side edit invalidates the last host derivation, so its diagnostics become STALE —
+// and a stale error is worse than none (it points at text the user already changed).
+// We clear them on edit so the graph reads as "unknown" (which never blocks Save) until the
+// next Save re-derives accurate facets.
 export function clearFacetDiagnostics(doc) {
   let cleared = false;
   for (const node of doc?.nodes ?? []) {

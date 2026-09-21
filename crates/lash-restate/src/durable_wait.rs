@@ -151,8 +151,6 @@ static WAIT_REGISTRATION_WITNESSES: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, WaitRegistrationWitness>>,
 > = std::sync::LazyLock::new(Default::default);
 
-/// Arm a test-only observation of the exact workflow-to-index registration.
-///
 /// The receiver fires from the index handler, so an unfinished ingress task is
 /// never mistaken for durable registration. The workflow key keeps concurrent
 /// live tests independent.
@@ -189,7 +187,6 @@ pub struct RestateDurableWaitAddress {
 }
 
 impl RestateDurableWaitAddress {
-    /// Derive the exact Restate workflow address for a Lash await-event key.
     pub fn for_key(key: &AwaitEventKey) -> Self {
         Self {
             workflow_key: format!("{:x}", Sha256::digest(key.key_id.as_bytes())),
@@ -202,7 +199,6 @@ impl RestateDurableWaitAddress {
         }
     }
 
-    /// Return the keyed virtual-object address that owns this wait's index state.
     pub fn index_key(&self) -> String {
         self.scope.index_key(&self.workflow_key)
     }
@@ -503,8 +499,6 @@ pub(crate) enum RestateTurnCancelGate {
     Revoked,
 }
 
-/// Register this invocation's turn-cancel gate entry against the session index.
-///
 /// `awakeable_id` is created by the caller, never here: the awakeable and the
 /// wait it guards are journaled commands whose relative order is part of the
 /// deployed journal shape (FIG-790), so only the call site may decide when each
@@ -552,9 +546,7 @@ where
 
 /// One durable Restate workflow per Lash await-event identity.
 ///
-/// Bind [`LashDurableWaitWorkflowImpl::serve`] on every endpoint that runs a
-/// [`RestateRuntimeEffectController`](crate::RestateRuntimeEffectController). The
-/// workflow key is a stable digest of the full Lash [`AwaitEventKey`], so all
+/// The workflow key is a stable digest of the full Lash [`AwaitEventKey`], so all
 /// execution-scope variants share the same exact-address resolution path.
 #[restate_sdk::workflow]
 pub trait LashDurableWaitWorkflow {
@@ -692,9 +684,8 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 }
 /// Durable session-to-wait index used by cancellation and session deletion.
 ///
-/// Bind [`LashDurableWaitIndexImpl::serve`] alongside
-/// [`LashDurableWaitWorkflowImpl`]. Object serialization makes registration,
-/// cancellation, and revocation atomic for one session.
+/// Object serialization makes registration, cancellation, and revocation atomic for one
+/// session.
 #[restate_sdk::object]
 pub trait LashDurableWaitIndex {
     async fn is_revoked(request: Json<()>) -> HandlerResult<Json<bool>>;
@@ -737,7 +728,6 @@ pub trait LashDurableWaitIndex {
     async fn begin_effect(
         request: Json<RestateDurableWaitEffectRequest>,
     ) -> HandlerResult<Json<bool>>;
-    /// Clear the record [`begin_effect`](Self::begin_effect) made.
     async fn end_effect(request: Json<RestateDurableWaitEffectRequest>) -> HandlerResult<Json<()>>;
     /// Record an effect group opened under this scope, answering whether the
     /// scope admits it (`false` once revoked). The scope is not quiescent
@@ -894,7 +884,6 @@ async fn load_durable_wait_index_metadata(
     Ok(metadata)
 }
 
-/// Read index metadata without initializing a previously unknown object.
 async fn read_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
@@ -948,7 +937,6 @@ async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey
     Ok(waits)
 }
 
-/// Read outstanding waits without initializing an unknown index object.
 async fn read_outstanding_waits(
     ctx: &ObjectContext<'_>,
 ) -> Result<Vec<AwaitEventKey>, TerminalError> {

@@ -75,7 +75,6 @@ impl From<RemoteTurnCancellationEvidence> for lash_core::facade_support::TurnCan
 }
 
 impl RemoteTurnCancelRequest {
-    /// Resolve a routing-only remote request into the core request.
     pub fn try_into_core(
         self,
     ) -> Result<lash_core::facade_support::TurnCancelRequest, RemoteProtocolError> {

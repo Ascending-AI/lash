@@ -84,8 +84,6 @@ impl QueuedIngressMode {
         }
     }
 
-    /// Decode the mode out of a queued-ingress payload or observation.
-    ///
     /// This is the only reader of [`Self::PAYLOAD_KEY`] and the only place the
     /// absent-key policy is written. Absent is an error, not a default: the
     /// generator is the sole producer and always writes the key, so a payload

@@ -37,9 +37,6 @@ const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
 lash_store_sql::statements! {
     /// `await_event_waits` statements only SQLite issues.
     pub(crate) struct WaitSqliteStatements @ "await_event_wait" {
-        /// Register a pending promise: `?1` key, `?2` scope JSON, `?3` wait
-        /// JSON, `?4` session, `?5` turn-control, `?6` now.
-        ///
         /// No `ON CONFLICT`: the absence of the row was read under the same
         /// `BEGIN IMMEDIATE` lock this insert commits under, so PostgreSQL's
         /// conflict clause has nothing to catch here.

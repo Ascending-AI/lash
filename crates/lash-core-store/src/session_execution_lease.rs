@@ -31,8 +31,6 @@ pub fn trace_acquisition(acquisition: &SessionExecutionLeaseAcquisition) {
     }
 }
 
-/// Report a takeover from the winning claim, naming the holder it displaced.
-///
 /// The fields describe the emitter, as they do on every other lease event:
 /// `fencing_token`/`owner_id`/`incarnation_id` are the *new* holder, and the
 /// `displaced_*` fields are the lapsed holder this claim took the lane from. Both

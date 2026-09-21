@@ -123,9 +123,8 @@ pub fn classify_oauth_refresh_error(error: OAuthError) -> CredentialError {
     }
 }
 
-/// Generate a PKCE code verifier and challenge pair. PKCE verifier is
-/// 32 bytes of OS entropy (via two UUID v4s) base64url-encoded; the
-/// challenge is its SHA-256 base64url-encoded.
+/// PKCE verifier is 32 bytes of OS entropy (via two UUID v4s) base64url-encoded; the challenge
+/// is its SHA-256 base64url-encoded.
 pub fn generate_pkce() -> (String, String) {
     let mut verifier_bytes = Vec::with_capacity(32);
     verifier_bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());

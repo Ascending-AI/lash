@@ -1,4 +1,3 @@
-//! Store construction helpers shared by kernel tests and certification fixtures.
 use crate::*;
 
 pub use lash_core_store::testing::store_fixtures::{

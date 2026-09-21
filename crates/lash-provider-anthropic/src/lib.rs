@@ -83,10 +83,10 @@ mod tests {
         }
     }
 
-    // Capability data mirrors what the host catalog supplies. Effort encoding
-    // sends the resolved variant verbatim (adaptive thinking); budget encoding
-    // maps each variant to a token budget and omits the wire thinking block for
-    // any variant absent from the map (e.g. "none").
+    // Capability data mirrors what the host catalog supplies.
+    // Effort encoding sends the resolved variant verbatim (adaptive thinking); budget encoding
+    // maps each variant to a token budget and omits the wire thinking block for any variant
+    // absent from the map (e.g.
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
             instruction_role: Default::default(),
@@ -1080,9 +1080,8 @@ mod tests {
         );
     }
 
-    // Header-capturing transport: records the outbound `anthropic-beta` header
-    // and answers with a minimal end_turn stream so `complete` succeeds. Used to
-    // assert the interleaved-thinking beta gates on the emitted thinking shape.
+    // Header-capturing transport: records the outbound `anthropic-beta` header and answers
+    // with a minimal end_turn stream so `complete` succeeds.
     #[derive(Debug)]
     struct HeaderCaptureTransport {
         beta: Arc<std::sync::Mutex<Option<String>>>,
@@ -1329,8 +1328,6 @@ mod tests {
             (parts, usage, terminal)
         }
 
-        // Build the SSE event array for a plain single-text-block message with a
-        // given stop_reason and message_start usage block.
         fn text_message(stop_reason: &str, text: &str, usage: Value) -> Value {
             json!([
                 json!({ "type": "message_start", "message": { "usage": usage } }).to_string(),
@@ -1488,7 +1485,6 @@ mod tests {
                     Scenario::ToolCallReplayRoundTrip => return None,
                     Scenario::StreamingUsageMerge => ProviderWire::body(Value::Null)
                         .with_usage_merge_stream(vec![
-                            // input arrives in message_start
                             json!({ "type": "message_start", "message": { "usage": { "input_tokens": U::BASE_INPUT } } }).to_string(),
                             // output arrives later in message_delta; merge must keep input
                             json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" }, "usage": { "output_tokens": U::BASE_OUTPUT } }).to_string(),

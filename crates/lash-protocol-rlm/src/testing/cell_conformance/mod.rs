@@ -73,8 +73,6 @@ fn assert_not_inherited(outcome: &CellOutcome, context: &str) {
     }
 }
 
-/// Runs `cells` as one session and checks every cell against the model.
-///
 /// This is the suite's workhorse, and it asserts more than the scenario that
 /// called it usually names. After *every* cell: the session's bindings equal
 /// the model's; the cell either succeeded or failed typed; the terminal value

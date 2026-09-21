@@ -271,21 +271,16 @@ fn trigger_source(
     }
 }
 
-/// Collect the module call-paths (`module.operation`, dotted for nested
-/// modules) that a parsed program references through receiver calls. This is
-/// the "gather" step of deferred tool resolution: the host resolver is asked to
-/// resolve any returned path that the link-time host environment does not
-/// already provide.
+/// This is the "gather" step of deferred tool resolution: the host resolver is asked to
+/// resolve any returned path that the link-time host environment does not already provide.
 pub fn referenced_module_call_paths(
     program: &crate::ast::Program,
 ) -> std::collections::BTreeSet<String> {
     referenced_receiver_call_paths(program)
 }
 
-/// Collect every syntactic receiver-call path once, for consumers that resolve
-/// different kinds of callable host definitions. Deferred tools and deferred
-/// trigger constructors deliberately share this collector while retaining
-/// separate provider and replay state.
+/// Deferred tools and deferred trigger constructors deliberately share this collector while
+/// retaining separate provider and replay state.
 pub fn referenced_receiver_call_paths(
     program: &crate::ast::Program,
 ) -> std::collections::BTreeSet<String> {

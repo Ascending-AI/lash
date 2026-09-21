@@ -137,8 +137,6 @@ impl TurnBoundary {
         }
     }
 
-    /// Records the ids of the assistant messages the protocol driver appended
-    /// after its final model call: the reply the driver materialized itself.
     pub(super) fn record_protocol_terminal_output(
         &mut self,
         message_ids: impl IntoIterator<Item = String>,

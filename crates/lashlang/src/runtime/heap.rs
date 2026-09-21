@@ -211,8 +211,6 @@ impl Heap {
         Ok(heap)
     }
 
-    /// Checks that every reference a value holds names a live object.
-    ///
     /// Reference discovery goes through the one value enumerator, and object
     /// members through `HeapObject::child_refs`, so no validator spells its own
     /// traversal.
@@ -328,8 +326,6 @@ impl Heap {
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
     }
 
-    /// Allocates one object directly.
-    ///
     /// Production allocation goes through the staged paths — `import_values`
     /// and `isolate_value` — which charge a whole batch before committing any of
     /// it. This single-object form is only used to build heaps in tests.
@@ -685,8 +681,6 @@ impl Heap {
         self.debug_assert_boundary_cache_invariant();
     }
 
-    /// Moves `parent`'s outgoing edges from `old_children` to `new_children`.
-    ///
     /// The reverse-edge map is exact rather than an over-approximation: a member
     /// overwrite drops the replaced child's edge in the same step that adds the
     /// new one, so nothing waits for the next sweep.
@@ -850,8 +844,6 @@ impl Heap {
         Ok(exported)
     }
 
-    /// Copies `value` into a freshly allocated, exclusively owned object graph.
-    ///
     /// This is the one isolation operation every durable store uses. It is
     /// recursive by construction: the whole graph reachable from `value` is
     /// reallocated under fresh IDs, so the result can never share an object with
@@ -1053,8 +1045,6 @@ impl Heap {
         })
     }
 
-    /// Appends `items` to the end of the JavaScript array `id` names, in place.
-    ///
     /// Every other mutation of a heap list rebuilds it: the caller clones the
     /// backing vector, edits the clone, and hands it back through
     /// `replace_javascript_list`, which clones the object a second time and
@@ -1068,8 +1058,6 @@ impl Heap {
     /// rebuild cloned them, the receiver keeps its identity, and every other
     /// name that reaches the object observes the append, exactly as ECMA
     /// reference semantics require (ADR 0096).
-    ///
-    /// Returns the array's new length.
     pub(crate) fn append_javascript_list(
         &mut self,
         id: HeapId,
@@ -1161,8 +1149,6 @@ impl Heap {
         Ok(Value::Ref(*id))
     }
 
-    /// Appends copies of `source`'s members to the list `target` names.
-    ///
     /// `acc = acc + other` builds a new list in the language, but under
     /// exclusive ownership nothing else can observe `acc`'s object, so the new
     /// list can be the old one extended. That turns a per-iteration cost

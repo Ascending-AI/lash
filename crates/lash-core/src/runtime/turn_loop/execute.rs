@@ -454,10 +454,9 @@ impl LashRuntime {
         };
         drop(event_tx);
 
-        // The preparation future and its SessionReadView are gone before this
-        // state clone. That keeps the graph from being held twice while the
-        // turn boundary takes ownership of its working state. Appends the
-        // prepare-turn hooks recorded ride this abort commit.
+        // The preparation future and its SessionReadView are gone before this state clone.
+        // That keeps the graph from being held twice while the turn boundary takes ownership
+        // of its working state.
         let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),

@@ -2362,7 +2362,6 @@ mod conformance {
                     }
                     Scenario::StreamingUsageMerge => {
                         ProviderWire::body(json!({})).with_usage_merge_stream(vec![
-                            // input arrives on an early event
                             format!(
                                 r#"{{"type":"response.output_text.delta","delta":"hi","usage":{{"input_tokens":{}}}}}"#,
                                 U::BASE_INPUT

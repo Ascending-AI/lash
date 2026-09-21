@@ -1,10 +1,9 @@
 //! Conservation checks for pending and durable runtime usage.
 //!
 //! The durable comparison is intentionally aggregate-by-source/model because
-//! `RuntimePersistence::load_session` exposes the merged token ledger, not its
-//! row identities. Store conformance separately pins identity persistence.
-//! Confirmation is a differential mutation oracle: its expected snapshot states
-//! which returned identities may disappear, then checks the production retain.
+//! `RuntimePersistence::load_session` exposes the merged token ledger, not its row identities.
+//! Confirmation is a differential mutation oracle: its expected snapshot states which returned
+//! identities may disappear, then checks the production retain.
 
 use super::*;
 use lash_sansio::sync::MutexExt;

@@ -887,7 +887,6 @@ pub async fn checkpoint_claim_probe_transaction_counts(
     assert_eq!(counts(), (3, 1));
 }
 
-/// Build a queued process-wake draft for backend conformance tests.
 pub fn queued_process_wake_draft(
     session_id: &SessionId,
     text: &str,

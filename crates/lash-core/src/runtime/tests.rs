@@ -1,5 +1,3 @@
-//! Test-only re-exports for `lash-core`'s remaining in-crate unit tests.
-//!
 //! The runtime suites that used to live here are now integration test binaries
 //! under `crates/lash-core/tests/runtime/tests/`. The fixtures they shared with
 //! the crate's own unit tests moved to `crate::testing`; this module keeps the

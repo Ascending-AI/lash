@@ -41,8 +41,6 @@ pub enum ProviderResolutionError {
 }
 
 pub trait RuntimeProviderResolver: Send + Sync {
-    /// Reports whether this resolver was configured by the host.
-    ///
     /// Resolver implementations are configured by default. The runtime's
     /// [`EmptyProviderResolver`] sentinel overrides this to report absence.
     fn is_configured(&self) -> bool {

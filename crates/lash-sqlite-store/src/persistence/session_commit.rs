@@ -1118,8 +1118,6 @@ fn occupied_node_ids_conn(
 /// staying far above any realistic per-commit node count.
 const OCCUPIED_NODE_ID_CHUNK_SIZE: usize = 16_384;
 
-/// Insert every node of one commit's graph.
-///
 /// Asked as one multi-row `INSERT` rather than one statement per node: the rows
 /// are already known in full before any of them is written, and they all land or
 /// none of them do regardless, so a statement per node bought no atomicity — it

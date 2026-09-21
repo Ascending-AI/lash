@@ -81,8 +81,6 @@ impl ExecutionHost for EchoHost {
     }
 }
 
-/// Adds the `processes` control tools every process fixture links against.
-///
 /// FIG-2999: starting, signalling, cancelling and yielding are leaf tools, not
 /// special forms, so a fixture that drives a process needs them in its
 /// catalogue.
@@ -177,7 +175,6 @@ pub fn link_labeled(program: Program) -> LinkedModule {
     LinkedModule::link(program, labeled_test_environment()).expect("program should link")
 }
 
-/// Runs a compiled program against `host`.
 pub async fn execute_compiled<H: ExecutionHost>(
     program: &CompiledProgram,
     state: &mut State,
@@ -186,7 +183,6 @@ pub async fn execute_compiled<H: ExecutionHost>(
     crate::execute(program, state, host).await
 }
 
-/// Runs a compiled program with `projected` bindings in scope.
 pub async fn execute_compiled_with_projected_bindings<H: ExecutionHost>(
     program: &CompiledProgram,
     state: &mut State,
@@ -197,7 +193,6 @@ pub async fn execute_compiled_with_projected_bindings<H: ExecutionHost>(
     crate::execute(program, state, &env).await
 }
 
-/// Runs a compiled program with tracing on, so a failure carries its span.
 pub async fn execute_compiled_traced<H: ExecutionHost>(
     program: &CompiledProgram,
     state: &mut State,

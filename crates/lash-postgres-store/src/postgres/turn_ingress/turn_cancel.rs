@@ -57,9 +57,6 @@ lash_store_sql::statements! {
         lock_request = "SELECT 1 FROM turn_cancel_requests
              WHERE session_id = ?1 AND turn_id = ?2 FOR UPDATE";
 
-        /// Record turn `?2` of session `?1`'s request at revision `?8`,
-        /// replacing whatever is there.
-        ///
         /// The caller has already proved the observed intent is still current,
         /// so this is the winner's write, not a blind overwrite.
         upsert_record = "INSERT INTO turn_cancel_requests (
@@ -118,9 +115,6 @@ lash_store_sql::statements! {
              WHERE session_id = ?1 AND turn_id = ?2
              ORDER BY ordinal ASC";
 
-        /// Append input `?3`'s disposition at the next ordinal for turn `?2`
-        /// of session `?1`.
-        ///
         /// The next ordinal is computed inside the insert rather than read
         /// first: the caller already holds the cancel-request row's lock, and
         /// deriving it in one statement is what keeps the ordinal allocation

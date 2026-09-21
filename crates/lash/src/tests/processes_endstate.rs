@@ -1889,8 +1889,6 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     Ok(())
 }
 
-/// Records `(event_type, sequence)` for each pushed event, in emit order, as a
-/// host would project the freshness feed into its own store.
 #[derive(Clone, Default)]
 struct CollectingProcessEventSink {
     events: Arc<std::sync::Mutex<Vec<(String, u64)>>>,

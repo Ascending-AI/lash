@@ -35,8 +35,6 @@ impl std::fmt::Debug for DurableNode {
 pub(super) struct CheckpointObservation {
     pub(super) checkpoint_ref: Option<BlobRef>,
     pub(super) turn_state: serde_json::Value,
-    /// Complete keyed projection: descriptor identity and exact logical bytes
-    /// are compared for every component, including keys unknown to Lash core.
     pub(super) components: BTreeMap<String, (lash_core::CheckpointComponentDescriptor, Vec<u8>)>,
 }
 

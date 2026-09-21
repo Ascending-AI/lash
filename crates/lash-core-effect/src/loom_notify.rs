@@ -55,8 +55,7 @@ impl Notify {
         }
     }
 
-    /// Fire the registered waiter, if any; stores no permit. The flag is set
-    /// before the wake so a waiter between `register` and the state re-check
+    /// The flag is set before the wake so a waiter between `register` and the state re-check
     /// still observes the notification — the same order `poll` relies on.
     pub fn notify_waiters(&self) {
         let _ = self

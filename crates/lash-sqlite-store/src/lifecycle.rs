@@ -1,8 +1,5 @@
 //! [`Store`] open/memory lifecycle plus session head/meta accessors.
 //!
-//! This is one of the two reference modules (with `blobs.rs`) establishing the
-//! tokio-rusqlite translation pattern every other module follows:
-//!
 //! * Async public reads return `Result` so SQLite and decode failures cannot be
 //!   mistaken for missing session state.
 //! * A read goes through `self.conn.call(move |c| { ... })`, where the closure
@@ -218,7 +215,6 @@ impl Store {
         })
     }
 
-    /// Open the local database read-only for internal read projections.
     pub(crate) async fn open_readonly(path: &Path) -> tokio_rusqlite::Result<Self> {
         // Read-only projections cannot reconcile intents or run a reclamation sweep.
         let conn = SqliteConnection::open_readonly(path).await?;

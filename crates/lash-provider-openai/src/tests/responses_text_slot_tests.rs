@@ -1,6 +1,3 @@
-//! Tests for how the Responses stream accumulator resolves a server output
-//! slot (`output_index`) to the `Text` part that carries its message.
-
 use super::*;
 
 #[test]

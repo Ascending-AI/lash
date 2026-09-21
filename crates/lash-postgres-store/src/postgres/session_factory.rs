@@ -895,7 +895,6 @@ pub(crate) async fn delete_process_sessions_tx(
         .await?;
         report.enumerated_blob_count = candidates.len();
 
-        // Record permanent identity before deletion so reclaim can see it.
         sqlx::query(
             session_sql()
                 .deleted_postgres

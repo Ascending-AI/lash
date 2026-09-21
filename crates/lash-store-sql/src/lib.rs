@@ -59,11 +59,10 @@
 //! SELECT COUNT(*) FROM processes WHERE {{live_process_status(status)}}
 //! ```
 //!
-//! renders, on both backends, to `… WHERE status IN ('running', 'waiting')`.
-//! The expansions come from the **backend** crate, which owns the
-//! `lash-core` dependency this crate does not have, so the vocabulary still
-//! has exactly one source. An unknown term, a dialect with no vocabulary, or
-//! a column that is not a plain or qualified identifier is a startup refusal.
+//! The expansions come from the **backend** crate, which owns the `lash-core` dependency this
+//! crate does not have, so the vocabulary still has exactly one source.
+//! An unknown term, a dialect with no vocabulary, or a column that is not a plain or qualified
+//! identifier is a startup refusal.
 //!
 //! A token names domain vocabulary only. It is not a template mechanism for
 //! dialect forks: a statement whose text differs between the backends is
@@ -258,12 +257,7 @@ impl Statement {
         self.neutral
     }
 
-    /// Render this statement for `dialect`.
-    ///
     /// # Errors
-    ///
-    /// Reports the neutral text's own defects: an unknown table, a malformed
-    /// placeholder, or an unterminated literal or comment.
     pub fn render(&self, dialect: Dialect) -> Result<Rendered, RenderError> {
         Ok(Rendered {
             name: self.name,
@@ -271,8 +265,6 @@ impl Statement {
         })
     }
 
-    /// Render this statement, naming it if its neutral text is malformed.
-    ///
     /// This is what [`statements!`] calls. A malformed neutral statement is a
     /// defect in this repository's own source, not a runtime condition a
     /// caller could handle, and rendering runs once at startup — so the store
@@ -312,8 +304,6 @@ impl Rendered {
     }
 }
 
-/// Declare a named statement set.
-///
 /// Every statement is a single string literal in neutral form, so the set is
 /// readable as SQL and parseable by the ownership gate. The generated type has
 /// one [`Rendered`] field per statement, a `NEUTRAL` inventory, and a `render`
@@ -362,8 +352,6 @@ macro_rules! statements {
                 )*
             ];
 
-            /// Render every statement in this set once, for `dialect`.
-            ///
             /// # Panics
             ///
             /// Panics when a statement's neutral text is malformed — an

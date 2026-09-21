@@ -1,5 +1,3 @@
-//! Trigger registration configs: the `inputs` arrow template.
-//!
 //! `inputs: (event) => ({ tick: event })` is a *template*, not a callback.
 //! The arrow is erased here: its parameter becomes the unresolved
 //! `trigger.event` path the linker rewrites into the `$lash.trigger.event` IR
@@ -51,8 +49,6 @@ fn mentions_identifier(expr: &Expr, name: &str) -> bool {
         .any(|child| mentions_identifier(child, name))
 }
 
-/// Whether `expr` names the same descriptor as the registration's `source`.
-///
 /// Identifiers and module paths only: those are the spellings a source can
 /// have and still be namable twice in one config, and they are the ones
 /// GitHub #1350 reports.
@@ -212,8 +208,6 @@ impl Lowerer {
     }
 }
 
-/// Whether a member access spells the retired `trigger.event` global.
-///
 /// Scoped to the bare identifier: a program that binds `trigger` itself reads
 /// its own value, here as everywhere else. The caller checks the binding.
 pub(super) fn names_the_retired_trigger_event(object: &Expr, property: &MemberProperty) -> bool {

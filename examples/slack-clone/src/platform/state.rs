@@ -124,7 +124,6 @@ impl PlatformState {
         })
     }
 
-    /// Configuration.
     pub fn config(&self) -> &PlatformConfig {
         &self.config
     }
@@ -159,7 +158,6 @@ impl PlatformState {
         let _ = tokio::time::timeout(timeout, self.delivery.notified()).await;
     }
 
-    /// Subscribe to the live UI stream.
     pub fn subscribe_live(&self) -> broadcast::Receiver<LiveEvent> {
         self.live.subscribe()
     }
@@ -264,7 +262,6 @@ impl PlatformState {
         }
     }
 
-    /// Resolve an author to `(id, display name, is_bot)` for the UI stream.
     async fn describe_author(&self, author: &Author) -> Result<(String, String, bool)> {
         match author {
             Author::User { user_id } => {
@@ -328,8 +325,6 @@ impl PlatformState {
     }
 }
 
-/// Builds Events API envelopes for a stored message.
-///
 /// Separated from [`PlatformState`] so it can be moved into the blocking write
 /// closure: it owns cloned handles rather than borrowing the state, which is what
 /// lets envelope construction sit inside the same transaction as the message
@@ -385,7 +380,6 @@ impl EventFactory {
         envelopes
     }
 
-    /// Wrap an event body in the callback envelope.
     fn envelope(&self, event: Event) -> EventCallback {
         EventCallback {
             token: self.verification_token.clone(),

@@ -20,7 +20,6 @@ pub const KEYED_ITEM_COLUMNS: &str = "batch_id, item_id, payload_json";
 crate::statements! {
     /// `queued_work_items` statements both backends issue verbatim.
     pub struct QueuedItemStatements @ "queued_work_item" {
-        /// Record item `?3` of batch `?1` at index `?2`.
         insert_new = "INSERT INTO queued_work_items (batch_id, item_index, item_id, payload_json)
              VALUES (?1, ?2, ?3, ?4)";
 

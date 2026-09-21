@@ -62,7 +62,6 @@ impl BackendFaultKind {
         }
     }
 
-    /// Parse the `--backend` value accepted by `lash-sim backend-faults`.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "sqlite" => Some(Self::Sqlite),
@@ -257,9 +256,6 @@ struct PostgresFaultLane {
 }
 
 impl BackendFaultLane {
-    /// Open a lane for `kind`, or `None` when the Postgres lane is not
-    /// configured.
-    ///
     /// `LASH_REQUIRE_POSTGRES=1` turns a missing database URL into a panic, so
     /// a missing CI variable cannot silently skip the Postgres lane.
     pub async fn open(kind: BackendFaultKind) -> Result<Option<Self>, String> {

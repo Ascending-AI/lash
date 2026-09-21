@@ -423,7 +423,6 @@ impl ToolChildRequest {
         }
     }
 
-    /// Binds the process incarnation this call executes inside.
     #[must_use]
     pub fn with_enclosing_process(mut self, process_ref: ProcessRef) -> Self {
         self.enclosing_process = Some(process_ref);
@@ -789,9 +788,8 @@ mod tests {
         );
     }
 
-    /// Completion routing is recorded, not re-derived. A process-lifetime key is
-    /// a different fact from a durable one, and a reopen that guessed would
-    /// derive a key nothing resolves (ADR 0099 §14).
+    /// A process-lifetime key is a different fact from a durable one, and a reopen that
+    /// guessed would derive a key nothing resolves (ADR 0099 §14).
     #[test]
     fn completion_routing_round_trips_every_mode() {
         for mode in [

@@ -32,7 +32,7 @@ pub trait Clock: ClockWallTime + Send + Sync + std::fmt::Debug {
     /// One wall-clock instant, shared by the derived durable timestamp faces.
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc>;
 
-    /// Sleep for `duration`. Replaces `tokio::time::sleep`.
+    /// Replaces `tokio::time::sleep`.
     async fn sleep(&self, duration: Duration);
 
     /// Sleep until `deadline` (a value from [`now`](Clock::now)). Replaces

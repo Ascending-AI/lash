@@ -361,9 +361,8 @@ impl ProcessWorkObserver {
 }
 
 impl ObservedProcess {
-    /// Build a read-side view of a process. `lease` is the current lease row (if
-    /// any), read separately so the observer exposes holder identity and expiry
-    /// as raw facts — no derived "stuck" classification (ADR 0019).
+    /// `lease` is the current lease row (if any), read separately so the observer exposes
+    /// holder identity and expiry as raw facts — no derived "stuck" classification (ADR 0019).
     fn from_record(record: ProcessRecord, lease: Option<ProcessLease>) -> Self {
         let lifecycle = record.status;
         let input = record.input.as_ref().clone();

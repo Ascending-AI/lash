@@ -354,8 +354,6 @@ pub struct LiveReplayEventDraft {
 }
 
 impl LiveReplayEventDraft {
-    /// Construct one event in a publication reservation.
-    ///
     /// Integrator class (ADR 0051): **custom live-replay store implementors**.
     pub fn new(
         turn_id: Option<impl Into<TurnId>>,
@@ -382,7 +380,6 @@ pub struct PreparedLiveReplayPublication {
 }
 
 impl PreparedLiveReplayPublication {
-    /// Construct a prepared publication for a custom store implementation.
     pub fn new(
         reservation_id: impl Into<String>,
         events: Vec<Arc<SessionObservationEvent>>,
@@ -407,8 +404,6 @@ impl PreparedLiveReplayPublication {
         &self.events
     }
 
-    /// Return the cursor at the end of this reserved publication.
-    ///
     /// Integrator class (ADR 0051): **custom live-replay store implementors**.
     #[expect(
         clippy::expect_used,
@@ -596,8 +591,6 @@ pub trait LiveReplayStore: Send + Sync {
         prepared: PreparedLiveReplayPublication,
     ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError>;
 
-    /// Return buffered events after `cursor`, or report a recoverable gap.
-    ///
     /// This must be fast and nonblocking from the runtime's point of view.
     fn replay_after_cursor(
         &self,
@@ -612,9 +605,6 @@ pub trait LiveReplayStore: Send + Sync {
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>;
 
-    /// Return the latest cursor known locally for a session without skipping
-    /// buffered events newer than `revision`.
-    ///
     /// A runtime snapshot at revision N can race with a separate worker
     /// publishing revision N+1. The returned cursor must remain before that
     /// newer event so replay reconciles the stale snapshot.
@@ -622,8 +612,6 @@ pub trait LiveReplayStore: Send + Sync {
     /// This must be fast and nonblocking from the runtime's point of view.
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor;
 
-    /// Apply best-effort retention trimming for a session.
-    ///
     /// This must be fast and nonblocking from the runtime's point of view.
     fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 }

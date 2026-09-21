@@ -148,8 +148,6 @@ impl ExecutionScratch {
         Self::default()
     }
 
-    /// Returns and clears the top-level globals assigned by the last execution.
-    ///
     /// The VM records assignment roots while it executes, including nested
     /// path assignments. Callers use this to persist only values that may have
     /// changed without comparing or re-encoding the complete global map.
@@ -253,9 +251,6 @@ impl ProfileStat {
         }
     }
 }
-/// Unwrap a `Value::Record` that carries the `$lash_type` marker back into the
-/// inner JSON-Schema value. Returns `None` when the value is not a wrapped
-/// Type literal.
 pub fn unwrap_type_value(value: &Value) -> Option<&Value> {
     let record = value.as_record()?;
     if record.len() != 1 {

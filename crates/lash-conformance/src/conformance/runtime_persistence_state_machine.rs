@@ -308,7 +308,6 @@ impl run_shape::Counter for RunShapeCounter {
 type RunShape = run_shape::RunShape<RunShapeCounter>;
 type RunShapeTotals = run_shape::RunShapeTotals<RunShapeCounter>;
 
-/// Run generated runtime-persistence laws with shrinking and persisted counterexamples.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

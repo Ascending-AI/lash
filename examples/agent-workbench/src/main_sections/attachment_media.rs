@@ -6,8 +6,6 @@
 // `AttachmentTypeMetadata` is therefore the host's job, and this is the whole
 // of it.
 
-/// Read a PNG's intrinsic size straight out of its IHDR chunk.
-///
 /// Returns `None` for anything that is not a PNG with a plausible IHDR, so an
 /// upload of another media type simply carries no dimensions rather than
 /// fabricated ones.

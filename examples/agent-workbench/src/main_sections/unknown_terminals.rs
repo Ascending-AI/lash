@@ -34,9 +34,8 @@ pub(crate) struct UnknownTurnTerminals {
 }
 
 impl UnknownTurnTerminals {
-    /// Record one turn, reporting whether this is the first time it was
-    /// recorded. A repeated cancel request for the same turn discloses the same
-    /// fact and must not stack rows in the timeline.
+    /// A repeated cancel request for the same turn discloses the same fact and must not stack
+    /// rows in the timeline.
     pub(crate) fn record(&self, session_id: &SessionId, record: UnknownTurnTerminal) -> bool {
         let mut ledger = self.inner.lock_recover();
         let session = ledger.entry(session_id.clone()).or_default();

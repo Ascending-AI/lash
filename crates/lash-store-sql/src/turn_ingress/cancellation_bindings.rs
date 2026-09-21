@@ -20,7 +20,6 @@ crate::statements! {
              FROM turn_cancellation_bindings
              WHERE session_id = ?1";
 
-        /// Delete session `?1`'s binding, on session deletion.
         delete_by_session = "DELETE FROM turn_cancellation_bindings WHERE session_id = ?1";
     }
 }

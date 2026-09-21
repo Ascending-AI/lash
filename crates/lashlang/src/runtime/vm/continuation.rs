@@ -861,9 +861,6 @@ mod continuation_serde {
     }
 }
 
-/// Splits a continuation's roots into the ones that own what they name and the
-/// ones that only borrow it.
-///
 /// Slots, globals and a parked loop binding all survive the boundary: whatever
 /// they name is theirs, and two of them naming one object is the aliasing this
 /// round exists to make unrepresentable. The operand stack, the last-value

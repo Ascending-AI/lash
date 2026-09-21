@@ -220,8 +220,7 @@ impl NativeSubstrateSlot {
         }
     }
 
-    /// Resolve host work ports for a session host. Idempotent: the once-guard
-    /// ensures native ports are constructed once.
+    /// Idempotent: the once-guard ensures native ports are constructed once.
     #[expect(
         clippy::expect_used,
         reason = "every value assembled here was validated when the setup was built: \

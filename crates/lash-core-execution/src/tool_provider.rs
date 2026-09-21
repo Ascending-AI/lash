@@ -346,9 +346,6 @@ impl<'run> AttemptContext<'run> {
     pub fn replay_key(&self) -> Option<&str> {
         self.replay_key.as_deref()
     }
-    /// Return the recorded process execution environment for a leaf intent
-    /// that starts a tool- or engine-backed process.
-    ///
     /// This accessor is part of ADR 0051's protocol and process-engine
     /// implementor class: a leaf [`ToolProvider`] declaring `StartProcess`
     /// must copy the captured environment into the durable request instead of
@@ -432,8 +429,7 @@ pub struct ToolContext<'run> {
     pub runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    /// The process this call executes inside. Set once at context
-    /// construction; `process_events`'s append target is asserted equal to it.
+    /// The process this call executes inside.
     pub(crate) enclosing_process: Option<ProcessId>,
     pub(crate) process_events: Option<ToolProcessEventContext>,
     pub(crate) attachment_store: Arc<crate::SessionAttachmentStore>,
@@ -468,7 +464,6 @@ pub struct ToolChildExecutionTraceHook {
 }
 
 impl ToolChildExecutionTraceHook {
-    /// Construct a hook from the callback invoked for each started child process.
     pub fn new(
         on_child_process_started: impl Fn(ToolChildProcessStarted) + Send + Sync + 'static,
     ) -> Self {
@@ -888,16 +883,14 @@ impl<'run> ToolContext<'run> {
         }
     }
 
-    /// Exposes the process this call executes inside to protocol and
-    /// process-engine implementors while preparing or executing an
-    /// authorized tool call. Returns `None` when the call runs outside a
-    /// process.
+    /// Exposes the process this call executes inside to protocol and process-engine
+    /// implementors while preparing or executing an authorized tool call.
     pub fn enclosing_process(&self) -> Option<&str> {
         self.enclosing_process.as_deref()
     }
 
     /// Exposes tool call id to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call. Returns `None` when no tool call id is present.
+    /// executing an authorized tool call.
     pub fn tool_call_id(&self) -> Option<&str> {
         self.tool_call_id.as_deref()
     }
@@ -914,8 +907,6 @@ impl<'run> ToolContext<'run> {
         &self.tool_execution_binding
     }
 
-    /// Deserializes the frozen prepared payload for tool implementors without consulting mutable
-    /// plugin or provider state.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
     where
         T: serde::de::DeserializeOwned,
@@ -949,10 +940,10 @@ impl<'run> ToolContext<'run> {
     /// `ToolOutcome::Pending(..)`. The key names the durable wait the runtime parks the
     /// call on; the external resolver delivers the result against it later.
     ///
-    /// The key is stored on the context and consumed by the dispatcher when the tool
-    /// returns `Pending`. Returning `Pending` without first calling this fails the call
-    /// with `pending_tool_missing_completion_key`. Calls made outside a prepared tool
-    /// invocation (no tool call id) fail with `tool_completion_key_missing_call_id`.
+    /// The key is stored on the context and consumed by the dispatcher when the tool returns
+    /// `Pending`.
+    /// Returning `Pending` without first calling this fails the call with
+    /// `pending_tool_missing_completion_key`.
     pub async fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
         let tool_call_id = self.tool_call_id.clone().ok_or_else(|| {
             crate::RuntimeError::new(
@@ -1049,9 +1040,6 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    /// Test-only: supply the prepared tool call id and enclosing process a
-    /// leaf body would receive from the attempt coordinator.
-    ///
     /// A body that declares tool intents derives its declaration identity from
     /// the prepared call id, and a body that appends to the process it runs
     /// inside needs that process's id. Neither is something a mock host has,
@@ -1068,9 +1056,6 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    /// Test-only: bind the scoped effect controller the runtime would have
-    /// installed for this attempt.
-    ///
     /// [`mock_tool_context`](crate::testing::mock_tool_context) runs under a
     /// `RuntimeOperation` scope, which names no opener — production attempts
     /// always run under a turn, drain or process scope. A fixture that
@@ -1282,8 +1267,6 @@ pub struct ToolExecutionGrant {
 }
 
 impl ToolExecutionGrant {
-    /// Constructs out-of-catalog execution authority from one tool definition for protocol and
-    /// process-engine implementors handling deferred-resolution flows.
     pub fn from_definition(definition: ToolDefinition) -> Self {
         Self {
             manifest: definition.manifest(),
@@ -1355,32 +1338,22 @@ impl ToolPrepareContext {
         &self.tool_execution_route
     }
 
-    /// Exposes session id to protocol and process-engine implementors while preparing or executing
-    /// plugin and tool work.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
-    /// Exposes tool call id to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work. Returns `None` when no tool call id is present.
     pub fn tool_call_id(&self) -> Option<&str> {
         self.tool_call_id.as_deref()
     }
 
-    /// Exposes tool execution binding to protocol and process-engine implementors while preparing
-    /// or executing plugin and tool work.
     pub fn tool_execution_binding(&self) -> &serde_json::Value {
         &self.tool_execution_binding
     }
 
-    /// Exposes turn context to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
     pub fn turn_context(&self) -> &crate::TurnContext {
         &self.turn_context
     }
 
-    /// Exposes plugin input to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work. Returns `None` when no plugin input is present.
     pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
     where
         T: 'static,
@@ -1401,8 +1374,6 @@ impl ToolPrepareContext {
         self.sessions.session_plugin_init(&self.session_id).await
     }
 
-    /// Exposes tool catalog to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         self.sessions.tool_catalog(&self.session_id).await
     }
@@ -1416,7 +1387,6 @@ impl ToolPrepareContext {
     }
 }
 
-/// Inputs handed to [`ToolProvider::prepare_tool_call`].
 pub struct ToolPrepareCall<'a> {
     pub tool_id: ToolId,
     pub pending: crate::sansio::PendingToolCall,
@@ -1435,8 +1405,7 @@ pub struct ToolCall<'a> {
 }
 
 impl<'a> ToolCall<'a> {
-    /// Construct the call view over one pinned manifest. Only the runtime
-    /// dispatcher builds these; the manifest is the coupling between stable
+    /// Only the runtime dispatcher builds these; the manifest is the coupling between stable
     /// ID and provider-facing name.
     pub fn new(
         manifest: &'a ToolManifest,
@@ -1461,7 +1430,7 @@ impl<'a> ToolCall<'a> {
     }
 }
 
-/// Trait for providing leaf tools to the sandbox. Implement this per-project.
+/// Trait for providing leaf tools to the sandbox.
 ///
 /// Implementations supply cheap [`ToolManifest`]s, lazily resolved
 /// [`ToolContract`]s, and a single required

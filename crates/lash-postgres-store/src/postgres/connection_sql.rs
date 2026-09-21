@@ -136,8 +136,6 @@ lash_store_sql::statements! {
              TRUE
          )";
 
-        /// Set this connection's `lock_timeout` to `?1` milliseconds.
-        ///
         /// `set_config` rather than `SET`: PostgreSQL's `SET` takes no bound
         /// parameter, so a deployment's configured timeout would have to be
         /// interpolated into the statement text — a per-connection `format!`

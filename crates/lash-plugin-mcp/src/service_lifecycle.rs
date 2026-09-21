@@ -90,8 +90,7 @@ pub(crate) fn connect_service(
                     "failed to spawn `{command}` for `{server_name}`: {err}"
                 ))
             })?;
-            // Construct the guard immediately after spawn. Preparation errors
-            // are returned by the handshake future so the actor first takes
+            // Preparation errors are returned by the handshake future so the actor first takes
             // ownership of the exact child handle and can always reap it.
             let mut stdio_child = StdioChildGuard::new(server_name, child, shutdown_requested);
             active_pid.store(stdio_child.pid(), Ordering::SeqCst);

@@ -295,7 +295,6 @@ async fn create_store(
         .unwrap_or_else(|error| panic!("create store {session_id}: {error}"))
 }
 
-/// Commit one root node and return its node id.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

@@ -33,9 +33,6 @@ pub(crate) struct NodeLabel {
     pub(crate) description: Option<String>,
 }
 
-/// Reads the label out of one block comment's inner text, or `None` when the
-/// comment is ordinary trivia.
-///
 /// `text` is what sits between `/*` and `*/`, so a JSDoc comment's text starts
 /// with the extra `*`.
 pub(crate) fn parse_label_comment(text: &str) -> Option<NodeLabel> {
@@ -60,8 +57,6 @@ pub(crate) fn parse_label_comment(text: &str) -> Option<NodeLabel> {
     })
 }
 
-/// Whether the comment is a label comment at all, used to tell a second
-/// `@label` on one statement from ordinary trivia.
 pub(crate) fn is_label_comment(text: &str) -> bool {
     !text.contains('\n')
         && !text.contains('\r')
@@ -72,8 +67,6 @@ pub(crate) fn is_label_comment(text: &str) -> bool {
             .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
 }
 
-/// Renders a label back into the comment a parse reads as that same label.
-///
 /// `None` means the text has no spelling: it would close the comment, span
 /// lines, or — for a title — swallow the description separator, so a render
 /// followed by a parse would not return what went in.
@@ -128,7 +121,6 @@ mod tests {
         assert_eq!(parse_label_comment("* Notes @label Title "), None);
         // Tag prefix only.
         assert_eq!(parse_label_comment("* @labelled Title "), None);
-        // No title.
         assert_eq!(parse_label_comment("* @label "), None);
         assert_eq!(parse_label_comment("* @label — only a description "), None);
     }

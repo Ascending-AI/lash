@@ -66,11 +66,9 @@ pub enum EmbedError {
     /// Returned when native queued work cannot rebuild session runtimes.
     NativeQueuedWorkRequiresStoreFactory,
     #[error("failed to create store for session `{session_id}`: {message}")]
-    /// Store creation failed for the identified session.
     StoreFactory {
         /// Session whose store could not be created.
         session_id: SessionId,
-        /// Store-factory failure detail suitable for diagnostics.
         message: String,
     },
     /// Session-store deletion stopped after witnessing some reclaim progress.
@@ -85,7 +83,6 @@ pub enum EmbedError {
         failure: Box<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
     },
     #[error("session store operation failed: {0}")]
-    /// Wraps the store failure.
     Store(#[from] lash_core::StoreError),
     #[error(
         "session store is required; pass an explicit store with SessionBuilder::store(...) or configure LashCoreBuilder::store_factory(...)"
@@ -122,15 +119,12 @@ pub enum EmbedError {
     /// Returned when durable process-worker configuration has no process registry.
     MissingProcessRegistry,
     #[error("invalid process execution configuration: {0}")]
-    /// Wraps the process execution concurrency failure.
     ProcessExecutionConcurrency(#[from] lash_core_worker::ProcessExecutionConcurrencyError),
     #[error("invalid queued-work execution configuration: {0}")]
-    /// Wraps the queued work execution concurrency failure.
     QueuedWorkExecutionConcurrency(
         #[from] lash_core::facade_support::QueuedWorkExecutionConcurrencyError,
     ),
     #[error("invalid native substrate configuration: {0}")]
-    /// Wraps a native scheduler pacing validation failure.
     NativeSubstrateConfig(#[from] lash_core::NativeSubstrateConfigError),
     #[error("session catalog does not support `{operation}` in this LashCore")]
     /// Returned when an administrative/catalog operation has no selected catalog.
@@ -160,7 +154,6 @@ pub enum EmbedError {
     /// Returned when a pull-style turn stream cannot obtain a static effect host.
     StaticTurnStreamRequiresStaticEffectHost,
     #[error("runtime session error: {0}")]
-    /// Wraps the session failure.
     Session(#[from] SessionError),
     #[error("selected queued-work drain refused: {cause:?}")]
     /// Wraps the selected queued work drain refused failure.
@@ -169,22 +162,16 @@ pub enum EmbedError {
         cause: SelectedQueuedWorkDrainRefusalCause,
     },
     #[error("runtime turn error: {0}")]
-    /// Wraps the runtime failure.
     Runtime(#[from] lash_core::RuntimeError),
     #[error("runtime plugin/control error: {0}")]
-    /// Wraps the plugin failure.
     Plugin(#[from] lash_core::PluginError),
     #[error("remote protocol error: {0}")]
-    /// Wraps the remote protocol failure.
     RemoteProtocol(#[from] lash_remote_protocol::RemoteProtocolError),
     #[error("failed to encode protocol turn options: {0}")]
-    /// Wraps the protocol turn options failure.
     ProtocolTurnOptions(#[from] serde_json::Error),
     #[error("failed to decode protocol turn options: {0}")]
-    /// Wraps the decode protocol turn options failure.
     DecodeProtocolTurnOptions(#[from] lash_core::ProtocolTurnOptionsError),
     #[error("runtime control unavailable: {0}")]
-    /// Wraps the control failure.
     Control(#[from] lash_core::facade_support::PluginOperationInvokeError),
 }
 

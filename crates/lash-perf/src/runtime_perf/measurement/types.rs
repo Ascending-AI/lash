@@ -241,8 +241,7 @@ pub(crate) struct RuntimePerfRunResult {
     pub(crate) extra_counters: BTreeMap<String, u64>,
     pub(crate) metric_samples: BTreeMap<String, Vec<f64>>,
     pub(crate) metric_samples_ms: BTreeMap<String, Vec<f64>>,
-    /// Run-scoped memory: the opening sample and whole-run growth. Stage
-    /// boundary readings live on the stage entries themselves.
+    /// Stage boundary readings live on the stage entries themselves.
     pub(crate) memory: RuntimePerfMemoryRunResult,
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
     pub(crate) turns: Vec<RuntimePerfTurnResult>,

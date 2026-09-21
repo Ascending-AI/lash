@@ -105,8 +105,6 @@ lash_store_sql::statements! {
              ORDER BY session_head.session_id
              LIMIT ?2";
 
-        /// Whether a blob exists at `?1`.
-        ///
         /// SQLite alone asks this: it is the session-delete sweep's proof that
         /// an enumerated reference is not already dangling, taken under the
         /// write lock. PostgreSQL gets the same proof from the row lock its
@@ -517,9 +515,8 @@ impl Store {
     }
 }
 
-/// Decode one persisted usage disposition. Rows written before the column
-/// existed cannot exist: the column is `NOT NULL` and version 52 catalogs are
-/// refused outright, so every value here was written by this encoding.
+/// Rows written before the column existed cannot exist: the column is `NOT NULL` and version
+/// 52 catalogs are refused outright, so every value here was written by this encoding.
 pub(crate) fn decode_usage_disposition(
     stored: &str,
 ) -> Result<lash_core::LedgerUsageDisposition, StoreError> {

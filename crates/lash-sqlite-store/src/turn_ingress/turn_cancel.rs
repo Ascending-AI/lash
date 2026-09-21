@@ -38,9 +38,6 @@ lash_store_sql::statements! {
              SET record_json = ?3
              WHERE session_id = ?1 AND turn_id = ?2";
 
-        /// Record turn `?2` of session `?1`'s request `?3` at revision `?4`,
-        /// replacing whatever is there.
-        ///
         /// The caller has already proved the observed intent is still current,
         /// so this is the winner's write, not a blind overwrite.
         upsert_record = "INSERT INTO turn_cancel_requests (

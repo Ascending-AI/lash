@@ -52,7 +52,6 @@ pub struct Flags {
 }
 
 impl Flags {
-    /// Construct a Flags from a Unicode codepoints iterator, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline, 'u' means unicode.
     /// Note the 'g' flag implies a stateful regex and is not supported.
     /// Other flags are not implemented and are ignored.
@@ -86,8 +85,6 @@ impl Flags {
 }
 
 impl From<&str> for Flags {
-    /// Construct a Flags from a string, using JavaScript field names.
-    ///
     /// See also: [`Flags::new`].
     #[inline]
     fn from(s: &str) -> Self {
@@ -171,14 +168,11 @@ impl Match {
         self.captures[pos].clone()
     }
 
-    /// Return an iterator over the named groups of a Match.
     #[inline]
     pub fn named_groups(&self) -> NamedGroups<'_> {
         NamedGroups::new(self)
     }
 
-    /// Returns the range over the starting and ending byte offsets of the match in the haystack.
-    ///
     /// This is a convenience function to work around
     /// the fact that Range does not support Copy.
     #[inline]
@@ -186,20 +180,16 @@ impl Match {
         self.range.clone()
     }
 
-    /// Returns the starting byte offset of the match in the haystack.
     #[inline]
     pub fn start(&self) -> usize {
         self.range.start
     }
 
-    /// Returns the ending byte offset of the match in the haystack.
     #[inline]
     pub fn end(&self) -> usize {
         self.range.end
     }
 
-    /// Returns the matched text as a string slice.
-    ///
     /// # Examples
     ///
     /// ```rust
@@ -215,8 +205,8 @@ impl Match {
         &text[self.range()]
     }
 
-    /// Return an iterator over a Match. The first returned value is the total
-    /// match, and subsequent values represent the capture groups.
+    /// The first returned value is the total match, and subsequent values represent the
+    /// capture groups.
     #[inline]
     pub fn groups(&self) -> Groups<'_> {
         Groups::new(self)
@@ -333,7 +323,7 @@ impl<'m> Iterator for NamedGroups<'m> {
                 continue;
             }
 
-            // This is the first occurrence of this name. Find the best range value.
+            // This is the first occurrence of this name.
             // Prefer a Some value over None when there are duplicate names.
             let mut best_range = self.mat.captures[idx].clone();
             for check_idx in (idx + 1)..end {
@@ -341,7 +331,7 @@ impl<'m> Iterator for NamedGroups<'m> {
                     // Found a duplicate name. Prefer a Some value over None.
                     if best_range.is_none() && self.mat.captures[check_idx].is_some() {
                         best_range = self.mat.captures[check_idx].clone();
-                        break; // Stop once we find a Some value
+                        break;
                     }
                 }
             }
@@ -377,18 +367,16 @@ impl From<CompiledRegex> for Regex {
 }
 
 impl Regex {
-    /// Construct a regex by parsing `pattern` using the default flags.
     /// An Error may be returned if the syntax is invalid.
-    /// Note that this is rather expensive; prefer to cache a Regex which is
-    /// intended to be used more than once.
+    /// Note that this is rather expensive; prefer to cache a Regex which is intended to be
+    /// used more than once.
     #[inline]
     pub fn new(pattern: &str) -> Result<Regex, Error> {
         Self::with_flags(pattern, Flags::default())
     }
 
-    /// Construct a regex by parsing `pattern` with `flags`.
     /// An Error may be returned if the syntax is invalid.
-    //
+    ///
     /// Note it is preferable to cache a Regex which is intended to be used more
     /// than once, as the parse may be expensive. For example:
     #[inline]
@@ -399,11 +387,9 @@ impl Regex {
         Self::from_unicode(pattern.chars().map(u32::from), flags)
     }
 
-    /// Construct a regex by parsing `pattern` with `flags`, where
-    /// `pattern` is an iterator of `u32` Unicode codepoints.
     /// An Error may be returned if the syntax is invalid.
-    /// This allows parsing regular expressions from exotic strings in
-    /// other encodings, such as UTF-16 or UTF-32.
+    /// This allows parsing regular expressions from exotic strings in other encodings, such as
+    /// UTF-16 or UTF-32.
     pub fn from_unicode<I, F>(pattern: I, flags: F) -> Result<Regex, Error>
     where
         I: Iterator<Item = u32> + Clone,
@@ -418,24 +404,20 @@ impl Regex {
         Ok(Regex { cr })
     }
 
-    /// Searches `text` to find the first match.
     #[inline]
     pub fn find(&self, text: &str) -> Option<Match> {
         self.find_iter(text).next()
     }
 
-    /// Searches `text`, returning an iterator over non-overlapping matches.
-    /// Note that the resulting Iterator borrows both the regex `'r` and the
-    /// input string as `'t`.
+    /// Note that the resulting Iterator borrows both the regex `'r` and the input string as
+    /// `'t`.
     #[inline]
     pub fn find_iter<'r, 't>(&'r self, text: &'t str) -> Matches<'r, 't> {
         self.find_from(text, 0)
     }
 
-    /// Returns an iterator for matches found in 'text' starting at byte index
-    /// `start`. Note this may be different from passing a sliced `text` in
-    /// the case of lookbehind assertions.
-    /// Example:
+    /// Note this may be different from passing a sliced `text` in the case of lookbehind
+    /// assertions.
     ///
     ///  ```rust
     ///   use lash_regress::Regex;
@@ -469,30 +451,23 @@ impl Regex {
         )
     }
 
-    /// Searches `text` to find the first match.
-    /// The input text is expected to be ascii-only: only ASCII case-folding is
-    /// supported.
+    /// The input text is expected to be ascii-only: only ASCII case-folding is supported.
     #[inline]
     pub fn find_ascii(&self, text: &str) -> Option<Match> {
         self.find_iter_ascii(text).next()
     }
 
-    /// Searches `text`, returning an iterator over non-overlapping matches.
-    /// The input text is expected to be ascii-only: only ASCII case-folding is
-    /// supported.
+    /// The input text is expected to be ascii-only: only ASCII case-folding is supported.
     #[inline]
     pub fn find_iter_ascii<'r, 't>(&'r self, text: &'t str) -> AsciiMatches<'r, 't> {
         self.find_from_ascii(text, 0)
     }
 
-    /// Returns an iterator for matches found in 'text' starting at byte index
-    /// `start`.
     #[inline]
     pub fn find_from_ascii<'r, 't>(&'r self, text: &'t str, start: usize) -> AsciiMatches<'r, 't> {
         backends::find(self, text, start)
     }
 
-    /// Returns an iterator for matches found in 'text' starting at index `start`.
     #[cfg(feature = "utf16")]
     pub fn find_from_utf16<'r, 't>(
         &'r self,
@@ -548,7 +523,6 @@ impl Regex {
         )
     }
 
-    /// Returns an iterator for matches found in 'text' starting at index `start`.
     #[cfg(feature = "utf16")]
     pub fn find_from_ucs2<'r, 't>(
         &'r self,
@@ -674,7 +648,6 @@ impl Regex {
     /// Replaces the first match of the regex in `text` using a closure.
     ///
     /// The closure receives a `&Match` and should return the replacement string.
-    /// This is useful for dynamic replacements that depend on the match details.
     ///
     /// If no match is found, the original text is returned unchanged.
     ///
@@ -710,7 +683,6 @@ impl Regex {
     /// Replaces all matches of the regex in `text` using a closure.
     ///
     /// The closure receives a `&Match` and should return the replacement string.
-    /// This is useful for dynamic replacements that depend on the match details.
     ///
     /// # Examples
     ///
@@ -750,12 +722,10 @@ impl Regex {
             if ch == '$' {
                 match chars.peek() {
                     Some('$') => {
-                        // $$ -> literal $
                         chars.next();
                         output.push('$');
                     }
                     Some(&digit) if digit.is_ascii_digit() => {
-                        // Parse the group number
                         let mut group_num = 0;
                         while let Some(&digit) = chars.peek() {
                             if digit.is_ascii_digit() {
@@ -770,15 +740,13 @@ impl Regex {
                             }
                         }
 
-                        // Get the matched text for this group
                         if let Some(range) = m.group(group_num) {
                             output.push_str(&text[range]);
                         }
                         // If group doesn't exist or didn't match, add nothing
                     }
                     Some('{') => {
-                        // Handle ${name} syntax for named groups
-                        chars.next(); // consume '{'
+                        chars.next();
                         let mut name = String::new();
                         let mut found_closing_brace = false;
 
@@ -801,7 +769,6 @@ impl Regex {
                         }
                     }
                     _ => {
-                        // Just a $ at end or followed by non-digit
                         output.push('$');
                     }
                 }
@@ -847,7 +814,6 @@ pub mod backends {
     pub type DefaultAsciiExecutor<'r, 't> =
         <DefaultExecutor<'r, 't> as exec::Executor<'r, 't>>::AsAscii;
 
-    /// Searches `text`, returning an iterator over non-overlapping matches.
     pub fn find<'r, 't, Executor: exec::Executor<'r, 't>>(
         re: &'r Regex,
         text: &'t str,
@@ -856,7 +822,6 @@ pub mod backends {
         exec::Matches::new(Executor::new(&re.cr, text), start)
     }
 
-    /// Searches `text`, returning an iterator over non-overlapping matches.
     /// This is a convenience method to avoid E0223.
     pub fn find_ascii<'r, 't, Executor: exec::Executor<'r, 't>>(
         re: &'r Regex,

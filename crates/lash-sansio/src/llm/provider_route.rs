@@ -13,9 +13,7 @@ impl ProviderRouteIdentity {
         }
     }
 
-    /// Construct a route from an HTTP(S) endpoint, normalizing the scheme and
-    /// authority case and removing trailing slashes from the path. Query and
-    /// fragment bytes are preserved verbatim.
+    /// Query and fragment bytes are preserved verbatim.
     pub fn for_endpoint(
         provider: impl Into<String>,
         endpoint: &str,

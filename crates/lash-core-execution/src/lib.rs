@@ -119,8 +119,6 @@ pub mod facade_support {
     pub use crate::tool_provider::orchestration::{
         OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
     };
-    /// Build the core-level tool-registry projection through the same plugin
-    /// composition path used for runtime sessions.
     pub fn build_core_tool_registry(
         host: &crate::plugin::PluginHost,
     ) -> Result<std::sync::Arc<crate::ToolRegistry>, crate::PluginError> {
@@ -346,7 +344,6 @@ pub mod facade_support {
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;
-    /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
     /// Record one first-party PostgreSQL runtime-connection acquisition wait.
     pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
@@ -482,7 +479,6 @@ pub mod sansio {
     };
 }
 
-// Re-exports
 pub use attachments::{
     AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
     AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,

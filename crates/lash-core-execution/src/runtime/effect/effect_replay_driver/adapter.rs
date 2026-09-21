@@ -44,8 +44,6 @@ pub trait StoreReplayAdapter: Send + Sync {
     }
 }
 
-/// Marks a store's deployment-level host: the type that mints scoped
-/// controllers. Gets [`EffectHost`] for free.
 #[async_trait]
 pub trait StoreReplayHost: StoreReplayAdapter + AwaitEventResolver {
     /// Stable identity of the await-event deployment backing this host.
@@ -92,8 +90,6 @@ pub trait StoreReplayHost: StoreReplayAdapter + AwaitEventResolver {
     }
 }
 
-/// Marks a store's scoped controller and names the scope it executes against.
-/// Gets [`RuntimeEffectController`] for free.
 pub trait StoreReplayController: StoreReplayAdapter + AwaitEventResolver {
     /// The scope whose journal this controller executes against.
     fn execution_scope(&self) -> &ExecutionScope;

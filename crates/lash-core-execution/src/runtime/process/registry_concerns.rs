@@ -88,9 +88,6 @@ pub trait ProcessQuery: Send + Sync {
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError>;
 
-    /// Return one bounded page of non-terminal records in stable `process_id`
-    /// order.
-    ///
     /// This is the recovery sweep's worklist: every process that was started
     /// but has not reached a terminal event is a candidate for re-execution by
     /// a [`DurableProcessWorker`](crate::DurableProcessWorker) after a crash.
@@ -159,9 +156,6 @@ pub trait ProcessQuery: Send + Sync {
         Ok(tombstoned.into_iter().collect())
     }
 
-    /// Count non-terminal process rows by their captured definition and
-    /// execution-environment references.
-    ///
     /// This is intentionally a full-scan aggregate. Implementations must read
     /// one consistent snapshot; worklist pagination is not part of this API.
     async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError>;
@@ -303,7 +297,6 @@ pub trait ProcessObserverRegistry: ProcessQuery {
     ) -> Result<(), PluginError>;
 
     /// List this session's observed processes matching every supplied filter.
-    /// Stores bound status and retired-row retention before decoding records.
     async fn list_observed_by(
         &self,
         session_id: &SessionId,
@@ -387,8 +380,6 @@ pub trait ProcessObserverRegistry: ProcessQuery {
 /// one exact process incarnation before touching its log.
 #[async_trait::async_trait]
 pub trait ProcessEventLog: ProcessQuery {
-    /// Append a host-owned event that is not emitted by the process execution.
-    ///
     /// This unfenced path is reserved for host signal/cancel coordination.
     /// Process engines receive only [`ProcessEngineProcessContext`](super::engine::ProcessEngineProcessContext);
     /// execution-owned events must use its authority-bound emitter.
@@ -398,7 +389,6 @@ pub trait ProcessEventLog: ProcessQuery {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
-    /// Append a host-owned event to one exact process incarnation.
     async fn append_event_ref(
         &self,
         process_ref: &ProcessRef,
@@ -408,8 +398,6 @@ pub trait ProcessEventLog: ProcessQuery {
         self.append_event(&process_ref.process_id, request).await
     }
 
-    /// Append an event emitted by the currently executing process attempt.
-    ///
     /// Implementations validate `authority` and append in one atomic write.
     async fn append_event_with_authority(
         &self,
@@ -424,7 +412,6 @@ pub trait ProcessEventLog: ProcessQuery {
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError>;
 
-    /// Read an event cursor pinned to one process incarnation.
     async fn events_after_ref(
         &self,
         process_ref: &ProcessRef,
@@ -435,8 +422,6 @@ pub trait ProcessEventLog: ProcessQuery {
             .await
     }
 
-    /// Count events of `event_type` with `sequence <= up_to_sequence`.
-    ///
     /// This is the signal-ordinal query: the Nth occurrence of a signal event
     /// resolves the Nth durable wait key. The default scans the event log;
     /// store backends override it with a COUNT so per-signal cost stays flat
@@ -455,7 +440,6 @@ pub trait ProcessEventLog: ProcessQuery {
             .count() as u64)
     }
 
-    /// Count matching events through a cursor pinned to one incarnation.
     async fn count_events_through_ref(
         &self,
         process_ref: &ProcessRef,
@@ -472,9 +456,9 @@ pub trait ProcessEventLog: ProcessQuery {
 
     /// The most recent `limit` events, in ascending sequence order.
     ///
-    /// Observation snapshots use this to show a bounded activity tail without
-    /// fetching a process's entire history on every poll. The default scans
-    /// the event log; store backends override it with ORDER BY ... LIMIT.
+    /// Observation snapshots use this to show a bounded activity tail without fetching a
+    /// process's entire history on every poll.
+    /// The default scans the event log; store backends override it with ORDER BY ...
     async fn recent_events(
         &self,
         process_id: &ProcessId,
@@ -535,8 +519,6 @@ pub trait ProcessLifecycle: Send + Sync {
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
-    /// Record that one parent scope has ended.
-    ///
     /// This is the single durable parent-end fact, written for a turn, a
     /// process and nothing else: a `Host` scope never ends, and implementations
     /// refuse it. The row carries no action list. On the SQL tiers the write
@@ -547,7 +529,6 @@ pub trait ProcessLifecycle: Send + Sync {
     /// is already settled.
     async fn record_parent_end(&self, parent: &crate::ParentScope) -> Result<(), PluginError>;
 
-    /// Return a bounded stable page of parent scopes whose sweep remains pending.
     async fn list_pending_parent_end_plans(
         &self,
         limit: NonZeroUsize,
@@ -746,8 +727,6 @@ pub trait ProcessToolIntents: Send + Sync {
 pub trait ProcessWakeOutbox: Send + Sync {
     fn wake_delivery_config(&self) -> WakeDeliveryConfig;
 
-    /// Return due group heads and record one delivery attempt for each.
-    ///
     /// Implementations must preserve sequence order inside a
     /// `(target_session_id, process_id)` group while selecting fairly across
     /// distinct groups by `next_attempt_at_ms`.
@@ -996,8 +975,6 @@ pub trait ProcessRetention: Send + Sync {
 /// This is a whole-registry construction concern, so it deliberately speaks in
 /// terms of the composed [`ProcessRegistry`] handle.
 pub trait ProcessClockRebind: Send + Sync {
-    /// Return the same registry backend bound to the runtime's clock.
-    ///
     /// First-party persistent registries override this so facade construction
     /// cannot mint wake expiry with a different clock than the driver uses.
     /// Host-owned registries that already own their clock may keep the default.
@@ -1291,7 +1268,6 @@ mod concern_isolation_tests {
 /// the registry's (ADR 0049).
 #[async_trait::async_trait]
 pub trait ProcessRegistrationProbe: Send + Sync {
-    /// Whether `process_id` has a registration row now.
     async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, PluginError>;
 }
 
@@ -1319,11 +1295,9 @@ impl std::fmt::Debug for ProcessRegistryBinding {
 }
 /// The effect hosts a process registry lifts scope fences on at registration.
 ///
-/// Shared by every registry backend: [`bind`](Self::bind) is idempotent and
-/// weak, [`reinstate_process_scope`](Self::reinstate_process_scope) lifts the
-/// fence of one process scope on every bound host that is still alive. Clones
-/// share the same binding set, so a clock-rebound registry copy keeps the
-/// bindings of the registry it was derived from.
+/// Shared by every registry backend: [`bind`](Self::bind) is idempotent and weak,
+/// [`reinstate_process_scope`](Self::reinstate_process_scope) lifts the fence of one process
+/// scope on every bound host that is still alive.
 #[derive(Clone, Default)]
 pub struct ProcessScopeFenceHosts {
     hosts: Arc<std::sync::Mutex<Vec<Weak<dyn EffectHost>>>>,
@@ -1347,7 +1321,6 @@ impl ProcessScopeFenceHosts {
         hosts.push(weak);
     }
 
-    /// Whether any live host is bound.
     pub fn is_empty(&self) -> bool {
         self.hosts
             .lock()

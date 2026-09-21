@@ -1979,10 +1979,8 @@ fn postgres_effect_history_native_claim_is_consistent_across_reviews_docs_and_ga
     assert!(script.contains("postgres-effect-history-status.json"));
 }
 
-/// Walks up from the crate directory to the repository root, recognising it by
-/// the gate script and ADR this test reads. Under Cargo `CARGO_MANIFEST_DIR` is
-/// absolute; under Bazel it is the runfiles-relative package directory, so the
-/// walk ends at the empty path, which names the working directory.
+/// Under Cargo `CARGO_MANIFEST_DIR` is absolute; under Bazel it is the runfiles-relative
+/// package directory, so the walk ends at the empty path, which names the working directory.
 fn repo_root_for_test() -> std::path::PathBuf {
     let mut cursor = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {

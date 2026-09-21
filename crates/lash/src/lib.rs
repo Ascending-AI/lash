@@ -168,19 +168,15 @@ pub mod observe {
     };
 }
 
-/// Triggers and subscriptions: declaring event sources, emitting occurrences,
-/// and inspecting trigger subscriptions. Entry points:
-/// [`LashCore::triggers`] and [`SessionAdmin::triggers`](admin::SessionAdmin::triggers)
-/// through [`LashSession::admin`].
+/// Entry points: [`LashCore::triggers`] and
+/// [`SessionAdmin::triggers`](admin::SessionAdmin::triggers) through [`LashSession::admin`].
 ///
-/// Reads have a facade: [`CoreTriggerAdmin::subscriptions`](crate::admin::CoreTriggerAdmin::subscriptions)
-/// and [`SessionTriggerAdmin`] project registrations for host and session
-/// scopes. Mutations go through the store contract below:
+/// Mutations go through the store contract below:
 /// [`TriggerCommand`](crate::triggers::TriggerCommand) executed by
-/// [`TriggerStore::execute_command`](crate::triggers::TriggerStore::execute_command),
-/// the only supported way to change a subscription. The tables a durable store
-/// keeps (`lash_*` in the first-party SQL backends) are private to lash; raw SQL
-/// against them is unsupported for reads and writes alike.
+/// [`TriggerStore::execute_command`](crate::triggers::TriggerStore::execute_command), the only
+/// supported way to change a subscription.
+/// The tables a durable store keeps (`lash_*` in the first-party SQL backends) are private to
+/// lash; raw SQL against them is unsupported for reads and writes alike.
 pub mod triggers {
     /// Trigger catalog state exposed to protocol and engine integrators.
     pub use lash_core::TriggerEventCatalog;
@@ -225,7 +221,6 @@ pub mod tools {
     pub use lash_core::ToolRetryPolicy;
     /// Collected replies returned by a runtime tool batch.
     pub use lash_core::session::ToolBatchReplies;
-    /// Trigger-effect outcome returned through the tool dispatch context.
     pub use lash_core::tool_dispatch::ToolTriggerEffectOutcome;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
@@ -341,7 +336,6 @@ pub mod persistence {
         TurnInputState, TurnInputStateKind, TurnWorkPayload, UnclaimedTurnInputs,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
-    /// Store-integrator attachment-manifest contracts and their persisted vocabulary.
     pub use lash_core::{
         AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     };
@@ -400,8 +394,6 @@ pub mod persistence {
         TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
         facade_support::SessionNodeProjection,
     };
-    /// Committed session history flattened into presentation order, as returned
-    /// by [`SessionReadView::chronological_projection`].
     pub use lash_core::{
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,
         facade_support::ChronologicalProjection,
@@ -542,7 +534,6 @@ pub mod plugins {
 
 /// Protocol message and content types.
 pub mod messages {
-    /// Read-side session-tree values exposed through integrator session views.
     pub use lash_core::session_graph::{SessionMessageTreeNode, SharedJsonValue};
     pub use lash_core::{
         Message, MessageOrigin, MessageRole, Part, PartKind, PruneState, TurnOutputSource,
@@ -679,8 +670,6 @@ pub mod remote {
         };
     }
 
-    /// Trigger envelopes: occurrence emission, subscriptions, and
-    /// registrations.
     pub mod triggers {
         pub use lash_remote_protocol::triggers::{
             RemoteTriggerDeliveryEmitOutcome, RemoteTriggerDeliveryEmitReceipt,
@@ -939,8 +928,6 @@ pub mod tracing {
     };
 }
 
-/// Test helpers for embedders. Enable with `lash = { ..., features = ["testing"] }`
-/// to script model responses in integration tests without a live provider.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
@@ -958,19 +945,19 @@ pub mod sqlite {
     pub use lash_sqlite_store::*;
 }
 
-/// PostgreSQL durable store backend. Enable with `features = ["postgres"]`.
+/// PostgreSQL durable store backend.
 #[cfg(feature = "postgres")]
 pub mod postgres {
     pub use lash_postgres_store::*;
 }
 
-/// S3 attachment store backend. Enable with `features = ["s3"]`.
+/// S3 attachment store backend.
 #[cfg(feature = "s3")]
 pub mod s3 {
     pub use lash_s3_store::*;
 }
 
-/// Restate durable-execution substrate. Enable with `features = ["restate"]`.
+/// Restate durable-execution substrate.
 #[cfg(feature = "restate")]
 pub mod restate {
     pub use lash_restate::*;
@@ -988,32 +975,31 @@ pub mod anthropic {
     pub use lash_provider_anthropic::*;
 }
 
-/// Google model provider. Enable with `features = ["google"]`.
+/// Google model provider.
 #[cfg(feature = "google")]
 pub mod google {
     pub use lash_provider_google::*;
 }
 
-/// Model Context Protocol tool plugin. Enable with `features = ["mcp"]`.
+/// Model Context Protocol tool plugin.
 #[cfg(feature = "mcp")]
 pub mod mcp {
     pub use lash_plugin_mcp::*;
 }
 
-/// Subagent spawning plugin. Enable with `features = ["subagents"]`.
+/// Subagent spawning plugin.
 #[cfg(feature = "subagents")]
 pub mod subagents {
     pub use lash_subagents::*;
 }
 
-/// TypeScript process dialect. Enable with `features = ["typescript"]`.
+/// TypeScript process dialect.
 #[cfg(feature = "typescript")]
 pub mod typescript {
     pub use lash_typescript::*;
 }
 
-/// HTTP transport for provider and ingress traffic. Enable with
-/// `features = ["http-transport"]`.
+/// HTTP transport for provider and ingress traffic.
 #[cfg(feature = "http-transport")]
 pub mod http_transport {
     pub use lash_http_transport::*;

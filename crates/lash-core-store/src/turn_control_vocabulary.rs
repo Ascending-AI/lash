@@ -82,11 +82,10 @@ pub enum TurnCancelClosureProposal {
 }
 /// Durable authorization to close one turn's cancellation gate pair.
 ///
-/// Store implementations persist this value in a non-overwritable per-turn
-/// slot bound to its admitted execution scope. A successor may finish the exact
-/// promise operation after takeover. Final publication uses head CAS and durable
-/// cancellation facts, independent of advisory lease liveness or generation;
-/// activation's orphan repair retains its current execution fence.
+/// A successor may finish the exact promise operation after takeover.
+/// Final publication uses head CAS and durable cancellation facts, independent of advisory
+/// lease liveness or generation; activation's orphan repair retains its current execution
+/// fence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnCancelClosureAuthorization {
     session_id: SessionId,
@@ -304,7 +303,6 @@ impl TurnCancelInputOutcome {
         self.affected_inputs.is_empty()
     }
 
-    /// Number of affected pending inputs.
     #[must_use]
     pub fn len(&self) -> usize {
         self.affected_inputs.len()
@@ -359,8 +357,6 @@ impl TurnCancelRequest {
         self
     }
 
-    /// Whether this request is a timing escalation of the `accepted` one.
-    ///
     /// Only a repeat that already agrees with the accepted undelivered-input
     /// disposition can escalate. A repeat that disagrees is a policy conflict
     /// the authoritative gate refuses, so it must not advance the durable
@@ -427,9 +423,8 @@ impl TurnCancelOriginHint {
         }
     }
 
-    /// Record a process-local after-step stop. The token stays untouched; the
-    /// owning turn honours the flag at its next step boundary by resolving its
-    /// own cancellation gate with internal after-step evidence.
+    /// The token stays untouched; the owning turn honours the flag at its next step boundary
+    /// by resolving its own cancellation gate with internal after-step evidence.
     pub fn request_after_step(&self, origin: Option<String>) {
         let mut state = self.state.lock_recover();
         if state.observed_origin.is_none() {

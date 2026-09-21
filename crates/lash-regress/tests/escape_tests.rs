@@ -11,7 +11,6 @@ fn test_escape_basic() {
 
 #[test]
 fn test_escape_special_characters() {
-    // Test individual special characters
     assert_eq!(escape("\\"), "\\\\");
     assert_eq!(escape("^"), "\\^");
     assert_eq!(escape("$"), "\\$");
@@ -42,7 +41,6 @@ fn test_escape_mixed_strings() {
 
 #[test]
 fn test_escape_with_regex() {
-    // Test that escaped strings work as literal matches
     let test_cases = vec![
         "Hello. How are you?",
         "$100 + tax (15%)",
@@ -106,7 +104,7 @@ fn test_escape_prevents_regex_interpretation() {
         ("a+", "a\\+"),         // a+ means "one or more a's"
         ("(abc)", "\\(abc\\)"), // (abc) is a capture group
         ("[abc]", "\\[abc\\]"), // [abc] is a character class
-        ("a|b", "a\\|b"),       // a|b is alternation
+        ("a|b", "a\\|b"),
         ("^start", "\\^start"), // ^ is start anchor
         ("end$", "end\\$"),     // $ is end anchor
     ];

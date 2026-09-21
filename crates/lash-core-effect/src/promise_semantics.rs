@@ -1,5 +1,3 @@
-//! Store-agnostic state transitions for AwaitEvent keyed promises.
-//!
 //! Backends own persistence, authentication, and compare-and-swap mechanics.
 //! This module owns the semantic decisions that must remain identical across
 //! the native, SQLite, Postgres, and engine-backed implementations.
@@ -17,9 +15,7 @@ const AWAIT_EVENT_FAMILY_VERSION: u8 = 3;
 
 /// Permanent tag registry for await-event promise identities.
 ///
-/// Execution scopes: 1 turn, 2 process, 3 queue drain, 4 session delete,
-/// 5 runtime operation. Wait identities: 1 tool completion, 2 process signal,
-/// 3 turn cancel gate, 4 turn terminal, 5 custom, 6 turn cancel escalation.
+/// Execution scopes: 1 turn, 2 process, 3 queue drain, 4 session delete, 5 runtime operation.
 /// Retired tags remain burned.
 fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
@@ -82,7 +78,6 @@ fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -
     identity.finish()
 }
 
-/// Derive the stable promise identity shared by every substrate.
 pub fn derive_key_id(
     scope: &ExecutionScope,
     wait: &AwaitEventWaitIdentity,
@@ -145,8 +140,6 @@ pub enum PromiseTransition {
 }
 
 impl PromiseTransition {
-    /// Convert a committed resolution decision to the public resolver result.
-    ///
     /// `Unchanged` is not a resolve result; it is used only by cancel sweeps.
     pub fn resolve_outcome(self) -> Option<ResolveOutcome> {
         match self {
@@ -158,8 +151,6 @@ impl PromiseTransition {
     }
 }
 
-/// Decide a normal first-writer-wins resolve.
-///
 /// Missing promises accept the terminal so signal-before-wait is buffered.
 pub fn resolve(state: PromiseState, proposed: Resolution) -> PromiseTransition {
     match state {
@@ -169,8 +160,6 @@ pub fn resolve(state: PromiseState, proposed: Resolution) -> PromiseTransition {
     }
 }
 
-/// Decide the session cancel-sweep transition for one promise.
-///
 /// Turn-control promises are never swept: cancelling their observation must
 /// not manufacture a turn cancellation or terminal publication. Existing
 /// terminals are equally immutable.
@@ -231,8 +220,6 @@ pub(crate) fn revoke_session(already_revoked: bool) -> SessionRevocationTransiti
     }
 }
 
-/// Whether mint and resolve may proceed for a session.
-///
 /// Both operations must consult the tombstone before touching promise rows.
 pub(crate) fn session_allows_access(revoked: bool) -> bool {
     !revoked

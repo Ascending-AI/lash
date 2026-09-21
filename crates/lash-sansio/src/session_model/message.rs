@@ -11,11 +11,10 @@ use std::sync::{Arc, OnceLock};
 
 /// A structured message with typed parts for context management.
 ///
-/// `parts` is `Arc`-shared so cloning a `Message` is one Arc bump per
-/// message field rather than a deep-clone of every `Part`. Construct with
-/// `parts: shared_parts(vec![...])` or `parts: Arc::new(...)`. Mutate via
-/// `Arc::make_mut(&mut message.parts)` when truly needed; most plugin
-/// pipelines should produce a fresh `Vec<Part>` and assign it.
+/// `parts` is `Arc`-shared so cloning a `Message` is one Arc bump per message field rather
+/// than a deep-clone of every `Part`.
+/// Mutate via `Arc::make_mut(&mut message.parts)` when truly needed; most plugin pipelines
+/// should produce a fresh `Vec<Part>` and assign it.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Message {
     pub id: String,
@@ -25,8 +24,6 @@ pub struct Message {
     pub origin: Option<MessageOrigin>,
 }
 
-/// Wrap a `Vec<Part>` for the `Message::parts` field so construction sites stay
-/// short and uniform.
 #[inline]
 pub fn shared_parts(parts: Vec<Part>) -> Arc<Vec<Part>> {
     Arc::new(parts)
@@ -75,8 +72,6 @@ impl<'a> From<&'a super::ConversationRecord> for MessageContentRef<'a> {
     }
 }
 
-/// Whether two messages carry the same content.
-///
 /// This is the predicate the active-read projection asks of every message it
 /// reconciles. It compares the message's fields directly: every field is part
 /// of the serialized form and none is skipped, so this answers exactly what
@@ -530,8 +525,6 @@ pub enum PruneState {
 }
 
 impl Part {
-    /// Test-only constructor used by fixtures that only need a kind and
-    /// content; tool variants get placeholder call metadata.
     #[cfg(test)]
     fn base(id: String, kind: PartKind, content: String) -> Self {
         let prune_state = PruneState::Intact;
@@ -1157,10 +1150,10 @@ impl MessageSequence {
         }
     }
 
-    /// Attach a shared render cache for the `base` portion. Subsequent
-    /// `render_prompt` calls will reuse the memoized `RenderedPrompt` for
-    /// the base instead of rewalking it. The delta is always re-rendered
-    /// because it changes per LLM iteration. Returns `self` for chaining.
+    /// Attach a shared render cache for the `base` portion.
+    /// Subsequent `render_prompt` calls will reuse the memoized `RenderedPrompt` for the base
+    /// instead of rewalking it.
+    /// The delta is always re-rendered because it changes per LLM iteration.
     pub(crate) fn with_base_render_cache(mut self, cache: Arc<BaseRenderCache>) -> Self {
         self.base_rendered = Some(cache);
         self

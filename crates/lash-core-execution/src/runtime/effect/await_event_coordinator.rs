@@ -83,7 +83,6 @@ pub struct AwaitEventRowIdentity {
     pub wait_json: String,
     /// Owning session, when the scope has one. `NULL` rows are session-free.
     pub session_id: Option<SessionId>,
-    /// Whether this promise is turn-control (gate or terminal) machinery.
     pub turn_control: bool,
 }
 
@@ -163,7 +162,6 @@ pub struct RegisteredAwaitEvent {
     pub scope_json: String,
     /// Canonical encoded wait identity.
     pub wait_json: String,
-    /// Whether the stored row identifies turn-control machinery.
     pub turn_control: bool,
 }
 
@@ -223,8 +221,6 @@ pub trait AwaitEventBackend: Send + Sync {
         now_ms: u64,
     ) -> Result<bool, RuntimeError>;
 
-    /// Compare-and-store `terminal_json` as the promise's first terminal.
-    ///
     /// Atomically: reject when the owning session is tombstoned, the scope is
     /// retired, or a row with a different identity owns `key_id`; write and report
     /// [`TerminalCas::Stored`] when no row exists or the matching row has no
@@ -347,8 +343,6 @@ impl<B: AwaitEventBackend> crate::AwaitEventResolver for DirectAwaitEventResolve
 }
 
 impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
-    /// Build a coordinator over `backend`.
-    ///
     /// `signing_secret` is the substrate's persisted await-event secret: two
     /// hosts reading the same secret mint byte-identical keys, which is what
     /// makes a key usable after a reopen. `clock` stamps durable rows and
@@ -444,8 +438,6 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
             .expect("resolve never returns the unchanged transition"))
     }
 
-    /// Read the terminal without registering a waiter.
-    ///
     /// `None` covers both "no row yet" and "pending": neither is oracular
     /// about whether a promise was ever created.
     pub async fn peek(&self, key: &AwaitEventKey) -> Result<Option<Resolution>, RuntimeError> {
@@ -456,7 +448,6 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         }
     }
 
-    /// Wait for the terminal using this host's clock.
     pub async fn await_resolution(
         &self,
         key: &AwaitEventKey,

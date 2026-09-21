@@ -249,9 +249,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
             invocation,
             crate::RuntimeEffectCommand::process(command),
         );
-        // Route through the controller explicitly selected by the process
-        // operation scope: host-configured for host/API paths, scoped for
-        // in-turn paths.
         let (owned_controller, task_requests): (
             Arc<dyn crate::RuntimeEffectController>,
             Option<

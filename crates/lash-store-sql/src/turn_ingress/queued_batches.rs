@@ -70,7 +70,6 @@ pub const WAKE_FENCE_SOURCE_COLUMNS: &str = "batch.session_id,
 crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
     pub struct QueuedBatchStatements @ "queued_work_batch" {
-        /// Batch `?1`.
         select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
@@ -145,7 +144,6 @@ crate::statements! {
                AND claim_id = ?3
                AND claim_token = ?4";
 
-        /// Delete every batch of session `?1`, on session deletion.
         delete_by_session = "DELETE FROM queued_work_batches WHERE session_id = ?1";
     }
 }

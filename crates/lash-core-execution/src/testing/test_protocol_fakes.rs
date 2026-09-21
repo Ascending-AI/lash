@@ -40,13 +40,9 @@ pub fn test_standard_protocol_factory_with_runtime_state(
     })
 }
 
-/// Build a `PluginHost` the way `lash-core`'s own `cfg(test)` binary used to:
-/// `builtin_plugin_factories` injects the in-tree protocol fake under
-/// `cfg(test)`, and the relocated `runtime::tests` binaries link the library
-/// without it. Widening that builtin to the whole `testing` feature would push
-/// a second protocol session onto every crate that turns the feature on, so the
-/// injection lives here, applying the same id-override rule `PluginHost::new`
-/// uses.
+/// Widening that builtin to the whole `testing` feature would push a second protocol session
+/// onto every crate that turns the feature on, so the injection lives here, applying the same
+/// id-override rule `PluginHost::new` uses.
 pub fn test_plugin_host(factories: Vec<Arc<dyn PluginFactory>>) -> crate::PluginHost {
     let override_ids: std::collections::BTreeSet<&'static str> =
         factories.iter().map(|factory| factory.id()).collect();

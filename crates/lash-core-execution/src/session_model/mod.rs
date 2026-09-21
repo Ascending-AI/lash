@@ -124,8 +124,7 @@ pub struct SessionSpec {
 }
 
 impl SessionSpec {
-    /// Create an explicit root-style spec. Unset fields resolve from the
-    /// runtime's core defaults.
+    /// Unset fields resolve from the runtime's core defaults.
     pub fn new() -> Self {
         Self {
             inherit: false,
@@ -139,8 +138,7 @@ impl SessionSpec {
         }
     }
 
-    /// Create a parent-relative spec. Unset fields inherit from the live
-    /// parent policy at resolution time.
+    /// Unset fields inherit from the live parent policy at resolution time.
     pub fn inherit() -> Self {
         Self {
             inherit: true,
@@ -170,8 +168,6 @@ impl SessionSpec {
         self
     }
 
-    /// Configure the host's bounded appetite for duplicate provider billing.
-    ///
     /// # Integrator class
     ///
     /// Host applications use this setting; protocol and provider implementors

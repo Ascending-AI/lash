@@ -237,7 +237,6 @@ pub struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
-    /// Wraps a body with the current remote protocol version.
     pub fn new(body: T) -> Self {
         Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
@@ -245,12 +244,10 @@ impl<T> Envelope<T> {
         }
     }
 
-    /// Returns the protocol version carried by this envelope.
     pub fn protocol_version(&self) -> u32 {
         self.protocol_version
     }
 
-    /// Returns the bare message body.
     pub fn into_body(self) -> T {
         self.body
     }
@@ -342,8 +339,6 @@ impl<T> Envelope<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    /// Decodes a JSON envelope after refusing a mismatched version before its
-    /// flattened body is deserialized.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
         Self::decode_json_expecting_protocol_version(bytes, REMOTE_PROTOCOL_VERSION)
     }
@@ -379,7 +374,6 @@ impl<T> Envelope<T>
 where
     T: serde::Serialize,
 {
-    /// Encodes this envelope as a flattened JSON object.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         serde_json::to_vec(self)
     }

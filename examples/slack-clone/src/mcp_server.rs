@@ -1,5 +1,3 @@
-//! Read-only workspace information served over MCP stdio.
-//!
 //! This is intentionally a separate process from the bot. It exercises the
 //! same MCP boundary a deployment-owned server would, while reading the demo
 //! workspace only through its Slack-compatible HTTP API.
@@ -151,7 +149,6 @@ impl WorkspaceMcpServer {
 
 #[tool_router(router = tool_router)]
 impl WorkspaceMcpServer {
-    /// Return every channel's compact identity and membership summary.
     #[tool(
         name = "list_channels_summary",
         description = "List workspace channels with id, name, topic, and member count"
@@ -174,7 +171,6 @@ impl WorkspaceMcpServer {
         Ok(Json(ChannelSummaries { channels }))
     }
 
-    /// Return aggregate workspace counts from the platform APIs.
     #[tool(
         name = "workspace_stats",
         description = "Count workspace channels and active members"

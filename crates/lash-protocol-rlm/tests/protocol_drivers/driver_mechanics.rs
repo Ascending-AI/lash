@@ -1286,9 +1286,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
 // provider calls in 4m36s and committed nothing. These drive the real machine
 // to a terminal state and count the calls.
 
-/// Drive `machine` until it is done or `max_llm_calls` provider calls have
-/// been answered, answering each call with `reply` and each exec with
-/// `exec_result`. Returns the number of provider calls the machine made.
+/// Drive `machine` until it is done or `max_llm_calls` provider calls have been answered,
+/// answering each call with `reply` and each exec with `exec_result`.
 #[expect(
     clippy::expect_used,
     reason = "test support: the fixture scripts every provider call and expects only cells it scripted; a mismatch is the stall scenario under test"

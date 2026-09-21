@@ -70,7 +70,6 @@ impl ReasoningEffort {
 #[derive(Debug, Parser)]
 #[command(about = "Deterministic Lash RLM tool-calling bench")]
 struct Args {
-    /// Select the easy, hard, or combined task pack.
     #[arg(long, value_enum, default_value_t = Pack::All)]
     pack: Pack,
     #[arg(long, env = "LASH_RLM_CHANNEL", value_enum, default_value_t = ChannelSelection::Cell)]
@@ -80,7 +79,6 @@ struct Args {
     paired: bool,
     #[arg(long, alias = "runs", default_value_t = 1)]
     repetitions: usize,
-    /// Maximum simultaneous task runs; start at 4–8 for OpenRouter.
     #[arg(long, default_value_t = 1)]
     concurrency: usize,
     /// Per-provider-attempt machine-readable evidence, including retries.
@@ -106,13 +104,11 @@ struct Args {
     channel_set: ChannelSet,
     #[arg(long, value_enum, default_value_t = ReasoningEffort::None)]
     reasoning_effort: ReasoningEffort,
-    /// Run only these task ids; repeat --task to select a subset.
     #[arg(long)]
     task: Vec<String>,
     /// Exit successfully even when one or more task rows fail.
     #[arg(long)]
     allow_partial: bool,
-    /// Maximum provider-reported cost per task in USD.
     #[arg(long, default_value_t = 0.10, value_parser = parse_cost)]
     max_task_cost_usd: f64,
     /// Outer harness deadline for each turn.

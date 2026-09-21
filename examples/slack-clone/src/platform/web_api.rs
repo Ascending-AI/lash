@@ -429,7 +429,6 @@ async fn resolve_channel(
     found.ok_or_else(|| ApiError::new("channel_not_found"))
 }
 
-/// Parse an `oldest`/`latest` bound.
 fn parse_bound(raw: Option<&str>, error: &str) -> Result<Option<Ts>, ApiError> {
     match raw.map(str::trim).filter(|value| !value.is_empty()) {
         Some(value) => Ts::parse(value)
@@ -439,7 +438,6 @@ fn parse_bound(raw: Option<&str>, error: &str) -> Result<Option<Ts>, ApiError> {
     }
 }
 
-/// Decode an id-keyed cursor (`team:` / `user:`).
 fn decode_id_cursor(kind: &str, raw: Option<&str>) -> Result<Option<String>, ApiError> {
     match raw.filter(|value| !value.is_empty()) {
         Some(value) => cursor::decode(kind, value)

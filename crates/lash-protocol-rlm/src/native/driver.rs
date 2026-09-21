@@ -833,8 +833,6 @@ fn diagnostic_event(phase: &str, payload: Value) -> SessionHistoryRecord {
     )))
 }
 
-/// The counts for one native attempt.
-///
 /// A native reply says in two parts what a cell reply says in one, so
 /// `full_text_chars` is the prose and the program together; there are no fences
 /// between them to account for. An attempt whose call did not parse committed

@@ -57,7 +57,6 @@ crate::statements! {
         delete_settled = "DELETE FROM turn_cancel_closure_authorizations
              WHERE session_id = ?1 AND turn_id = ?2 AND authorization_json = ?3";
 
-        /// Delete session `?1`'s pins, on session deletion.
         delete_by_session = "DELETE FROM turn_cancel_closure_authorizations
              WHERE session_id = ?1";
     }

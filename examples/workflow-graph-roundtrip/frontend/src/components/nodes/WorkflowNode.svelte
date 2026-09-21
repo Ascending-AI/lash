@@ -47,7 +47,6 @@
   // Derived, read-only type diagnostics for THIS node (definite type errors).
   const diagnostics = $derived(nodeDiagnostics(node));
   const hasDiag = $derived(diagnostics.length > 0);
-  // Whether a diagnostic points at a specific field (for a local underline).
   const diagFields = $derived(new Set(diagnostics.map((d) => diagnosticFieldHint(d.kind)).filter(Boolean)));
   const reads = $derived(data.reads ?? []);
   const moveTargets = $derived(data.getMoveTargets ? data.getMoveTargets(id) : []);
@@ -55,8 +54,6 @@
 
   const isWaitEffect = $derived(node.data.effect && WAITING_EFFECTS.has(node.data.effect));
   const terminalKind = $derived(node.data.terminalKind ?? 'finish');
-  // Invoke nodes surface their operation as an editable <select>; other kinds
-  // get a short descriptive subtitle in the header.
   const subtitle = $derived(
     isAssign
       ? 'assignment'
@@ -110,8 +107,8 @@
     data.onCommit?.();
   }
 
-  // Add / remove record arguments on a call node. The lens rebuilds the receiver
-  // record from `data.fields` verbatim, so both are authoritative.
+  // The lens rebuilds the receiver record from `data.fields` verbatim, so both are
+  // authoritative.
   let addingField = $state(false);
   let newFieldName = $state('');
   let newFieldType = $state('string');
@@ -1123,7 +1120,6 @@
       var(--shadow);
   }
 
-  /* run overlay states */
   .wf-node.is-running {
     border-color: var(--cyan);
     box-shadow:

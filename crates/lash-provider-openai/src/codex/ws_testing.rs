@@ -65,8 +65,8 @@ pub fn function_call_item(call_id: &str, tool_name: &str, arguments: &str) -> Va
 /// request it receives. Actions are consumed in order across connections.
 #[derive(Clone, Debug)]
 pub enum ScriptedWsAction {
-    /// Send exact recorded provider frames. This is the fixture-matrix seam:
-    /// the same Responses event payloads drive Codex SSE and WebSocket.
+    /// This is the fixture-matrix seam: the same Responses event payloads drive Codex SSE and
+    /// WebSocket.
     RecordedFrames {
         frames: Vec<String>,
         close_after_frames: bool,
@@ -88,8 +88,6 @@ pub enum ScriptedWsAction {
         message_id: &'static str,
         text: &'static str,
     },
-    /// Emit a completed `function_call` item and `response.completed`,
-    /// terminating the turn iteration with a tool call.
     ToolCall {
         response_id: &'static str,
         call_id: &'static str,
@@ -104,12 +102,10 @@ pub enum ScriptedWsAction {
     },
     /// An `error` event before any output.
     Error { message: &'static str },
-    /// Allocate an empty message item, then emit an error event.
     AllocationThenError {
         message_id: &'static str,
         message: &'static str,
     },
-    /// Start streaming output, then emit an `error` event mid-stream.
     MidStreamError {
         message_id: &'static str,
         text: &'static str,
@@ -183,7 +179,7 @@ pub const MAX_CONSECUTIVE_ACCEPT_FAILURES: u32 = 100;
 /// spin the runtime.
 pub const ACCEPT_RETRY_PAUSE: Duration = Duration::from_millis(1);
 
-/// Handle to a running scripted server. Dropping it aborts the accept loop.
+/// Dropping it aborts the accept loop.
 pub struct ScriptedWsServer {
     /// `ws://…` URL to point [`crate::codex::CodexProvider::with_endpoint_urls`] at.
     pub url: String,
@@ -211,7 +207,6 @@ impl ScriptedWsServer {
         self.handshakes.lock_recover().clone()
     }
 
-    /// Number of WebSocket Close frames the server has received.
     pub fn close_frame_count(&self) -> u32 {
         *self.close_frames.lock_recover()
     }
@@ -234,8 +229,6 @@ impl Drop for ScriptedWsServer {
     }
 }
 
-/// Bind a local WebSocket server that answers successive requests with
-/// `actions`, capturing every request payload and handshake headers.
 pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> ScriptedWsServer {
     spawn_scripted_websocket_with_injected_accept_faults(actions, Vec::new()).await
 }

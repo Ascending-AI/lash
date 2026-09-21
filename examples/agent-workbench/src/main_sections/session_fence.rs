@@ -21,19 +21,15 @@ use lash::SessionId;
 /// What a surface intends to do with the session it is admitting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SessionAdmission {
-    /// Read the session or submit work to it. Refused while retiring or
-    /// retired: work admitted during a delete would be work the delete has to
-    /// cancel, or work that commits against a tombstone.
+    /// Refused while retiring or retired: work admitted during a delete would be work the
+    /// delete has to cancel, or work that commits against a tombstone.
     Use,
-    /// Delete the session. Refused only once retired: a delete whose earlier
-    /// attempt ended ambiguously left the mark at `Retiring`, and the retry is
-    /// the only way to settle it.
+    /// Refused only once retired: a delete whose earlier attempt ended ambiguously left the
+    /// mark at `Retiring`, and the retry is the only way to settle it.
     Delete,
 }
 
 impl AppState {
-    /// Resolve `query` to a session id and admit it for use on `surface`.
-    ///
     /// This is the one admission read. Session-bound routes call it first, so a
     /// retired id is refused before the route reads state, pushes a message,
     /// delivers mail, or submits a workflow.

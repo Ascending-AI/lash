@@ -2468,7 +2468,6 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
     );
 }
 
-/// Build the shared state used to prove bare-prose replies are not duplicated.
 pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_store(
     data_dir: &std::path::Path,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,

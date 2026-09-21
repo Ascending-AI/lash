@@ -412,8 +412,6 @@ impl SeamControl {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Hold a renewal until the provider's mid-stream seam is in the trace.
-    ///
     /// A no-op unless [`SeamControl::pin_renewal_after_provider`] armed it.
     async fn park_renewal_behind_provider(&self) {
         if !self
@@ -494,8 +492,6 @@ impl SeamControl {
     }
 
     async fn stop_here(&self) -> ! {
-        // Store a permit when the spawned turn reaches the seam before its
-        // parent starts waiting; `notify_waiters` would lose that signal.
         self.hit.notify_one();
         std::future::pending().await
     }

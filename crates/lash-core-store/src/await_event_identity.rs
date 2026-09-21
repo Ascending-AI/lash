@@ -27,16 +27,12 @@ pub enum AwaitEventWaitIdentity {
     TurnCancelEscalation,
 }
 impl AwaitEventWaitIdentity {
-    /// Constructs the stable wait identity effect-host implementors use to resolve a deferred tool
-    /// call by its call ID.
     pub fn tool_completion(tool_call_id: impl Into<String>) -> Self {
         Self::ToolCompletion {
             tool_call_id: tool_call_id.into(),
         }
     }
 
-    /// Constructs the stable wait identity effect-host implementors use to resolve one named
-    /// process signal without colliding with other signals or attempts.
     pub fn process_signal(
         process_id: impl Into<ProcessId>,
         signal_name: impl Into<String>,

@@ -218,7 +218,6 @@ pub fn required_tool_typescript_executable(
 }
 
 pub trait ToolManifestBindingExt {
-    /// Read the binding stored under the `typescript.tool` wire key.
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError>;
 }
 
@@ -614,7 +613,6 @@ pub struct LashlangProcessInput {
 pub enum LashlangHostEnvironmentCheck<'a> {
     /// Prepare validates immutable artifact claims and deliberately omits live-host checks.
     OmitHostEnvironment,
-    /// Run validates against the environment it resolved for this attempt.
     CheckHostEnvironment(Result<&'a LashlangHostEnvironment, String>),
 }
 

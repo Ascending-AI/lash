@@ -392,7 +392,6 @@ const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     ("prefix-readonly", "readonly ", "1;"),
     ("prefix-infer", "infer ", "1;"),
     ("prefix-unique", "unique ", "1;"),
-    // infix
     ("infix-add", "1+", "1;"),
     ("infix-strict-equal", "1===", "1;"),
     ("infix-and", "1&&", "1;"),
@@ -405,7 +404,6 @@ const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     ("infix-arrow", "() =>", "1;"),
     ("infix-as", " as number", ";"),
     ("infix-satisfies", " satisfies number", ";"),
-    // postfix
     ("postfix-call", "(1)", ";"),
     ("postfix-subscript", "[0]", ";"),
     ("postfix-member", ".a", ";"),
@@ -415,7 +413,6 @@ const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     ("postfix-non-null", "!", ";"),
     ("postfix-tagged-template", "`x`", ";"),
     ("postfix-mixed-tails", "(1)[0].a", ";"),
-    // delimiter
     ("delimiter-paren", "(", "1"),
     ("delimiter-bracket", "[", "1"),
     ("delimiter-brace", "{a:", "1"),

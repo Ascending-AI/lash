@@ -1063,8 +1063,6 @@ impl RuntimeErrorCode {
         Self::TriggerStoreUnavailable,
     ];
 
-    /// Constructs a typed code from its stable wire representation.
-    ///
     /// Built-in strings are always canonicalized to their dedicated variants;
     /// only unknown extension strings produce [`Self::ForeignCode`]. This is
     /// the supported construction path for host-defined codes.
@@ -1371,9 +1369,6 @@ impl RuntimeError {
         self.cause.is_some() || self.code.is_terminal()
     }
 
-    /// Build the loud error raised when a process (re-)execution is handed an
-    /// empty/non-persisted id.
-    ///
     /// Process execution identity is the persisted `process_id`, so a retry
     /// must present that stable id — mirroring how
     /// [`ExecutionScope`](crate::ExecutionScope) rejects an empty stable id.
@@ -1423,7 +1418,6 @@ pub struct RuntimeEffectControllerError {
 }
 
 impl RuntimeEffectControllerError {
-    /// Constructs a first-party `RuntimeEffectControllerError` from a classified code.
     pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -1433,8 +1427,6 @@ impl RuntimeEffectControllerError {
         }
     }
 
-    /// Constructs an error minted by a foreign effect-host extension.
-    ///
     /// Hosts must namespace these codes and must not mint a built-in
     /// [`RuntimeErrorCode`] spelling. First-party producers use [`Self::new`],
     /// whose typed argument makes an unclassified string a compile error.

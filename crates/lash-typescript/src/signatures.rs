@@ -10,8 +10,6 @@ pub(crate) use lashlang::{
     INSTANCE_STDLIB_SIGNATURES, LiteralReceivers, STATIC_STDLIB_SIGNATURES, StdlibSignature,
 };
 
-/// Renders the standard-library inventory used by the model prompt.
-///
 /// Keeping this text derived from the same tables that drive lowering makes a
 /// newly accepted method impossible to omit from the prompt accidentally.
 pub fn render_stdlib_contract() -> String {

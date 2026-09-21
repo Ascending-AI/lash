@@ -444,7 +444,6 @@ async fn closed_status(
     (!status.is_still_active()).then_some(status.status)
 }
 
-/// Polls `probe` until it yields a value or `budget` elapses.
 async fn poll_until<T, P, F>(budget: Duration, what: &str, mut probe: P) -> T
 where
     P: FnMut() -> F,

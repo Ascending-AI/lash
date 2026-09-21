@@ -633,8 +633,6 @@ async fn async_main() -> anyhow_like::Result<()> {
     }
 }
 
-/// Resolve when the process receives Ctrl-C or SIGTERM — the host-owned signal
-/// that begins the drain. lash has no opinion on which signal means "drain".
 async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;

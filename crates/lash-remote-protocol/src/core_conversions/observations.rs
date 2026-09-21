@@ -463,9 +463,8 @@ pub fn replay_collected_activities(
         .collect()
 }
 
-/// Writes one remote activity as a newline-terminated JSON record and flushes
-/// the writer before returning. Serialization, framing, and flushing share one
-/// writer lock; write failures are retained for the host to inspect.
+/// Serialization, framing, and flushing share one writer lock; write failures are retained for
+/// the host to inspect.
 pub struct RemoteTurnActivitySink<W: Write + Send + 'static> {
     writer: Mutex<W>,
     next_sequence: AtomicU64,

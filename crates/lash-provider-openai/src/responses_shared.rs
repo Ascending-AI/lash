@@ -465,9 +465,9 @@ pub struct ResponsesStreamingToolCall {
     pub call_id: String,
     pub tool_name: String,
     pub input_json: String,
-    /// Responses API item-id (e.g. `fc_...`). Preserved so we can re-emit it on
-    /// the next request body alongside `call_id`; the server uses it to pair a
-    /// function_call with its sibling reasoning item.
+    /// Responses API item-id (e.g.
+    /// Preserved so we can re-emit it on the next request body alongside `call_id`; the server
+    /// uses it to pair a function_call with its sibling reasoning item.
     pub item_id: String,
 }
 
@@ -517,10 +517,9 @@ pub struct ResponsesStreamState {
     /// canonical owner per part kind. Aliases never carry payloads.
     pub(crate) part_slots: HashMap<ResponsesPartSlotKey, usize>,
     pub(crate) slot_owners: Vec<ResponsesPartSlot>,
-    /// Set once streamed output evidence has arrived. Allocating an empty
-    /// message, reasoning, or tool-call slot does not set this flag. The terminal
-    /// `response.completed.response.output` is authoritative for status/usage
-    /// but is only parsed into parts when the stream did not deliver items.
+    /// Allocating an empty message, reasoning, or tool-call slot does not set this flag.
+    /// The terminal `response.completed.response.output` is authoritative for status/usage but
+    /// is only parsed into parts when the stream did not deliver items.
     pub streamed_item_content_received: bool,
     /// Set when the stream contains an event type this adapter does not
     /// recognise. Unknown events are possible output by default: teaching the
@@ -992,10 +991,8 @@ impl ResponsesStreamState {
         }
     }
 
-    /// Allocate or find a slot of a kind that is keyed by output index, and
-    /// resolve the part index it owns. `allocate_or_find_part_slot` declines
-    /// only when a slot needs a provider key it was not given, which the
-    /// message and reasoning kinds never do.
+    /// `allocate_or_find_part_slot` declines only when a slot needs a provider key it was not
+    /// given, which the message and reasoning kinds never do.
     #[expect(clippy::expect_used, reason = "no provider key needed")]
     fn keyless_part_slot(
         &mut self,
@@ -1189,8 +1186,7 @@ impl ResponsesStreamState {
 
     pub fn finish_reasoning_part(&mut self) {
         self.close_reasoning_block();
-        // Drop the cursor; the next `part.added` opens a fresh slot. Trim
-        // trailing whitespace so concatenated paragraphs don't carry blanks.
+        // Trim trailing whitespace so concatenated paragraphs don't carry blanks.
         if let Some(owner) = self.current_reasoning_slot.take()
             && let Some(index) = self.part_slot_index(owner, ResponsesPartKind::Reasoning)
             && let Some(LlmOutputPart::Reasoning { text, .. }) = self.parts.get_mut(index)

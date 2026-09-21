@@ -1,8 +1,6 @@
 import { layoutDocument } from './layout.js';
 import { defaultSource, fieldDefaultValue, synthCallExpression } from './operations.js';
 
-// Build SvelteFlow nodes + edges from a draft WorkflowDocument.
-//
 // The draft document is the source of truth (the host owns the mutable draft).
 // Each SvelteFlow node's `data.node` is a live reference into the draft, so an
 // edit inside a node component mutates the draft that Save serializes back.
@@ -279,8 +277,6 @@ function containerSlots(kind) {
   }
 }
 
-// Resolve an insertion target to the concrete list its new node id joins, the
-// parentId to stamp, and the scope string sequence edges in that group carry.
 // A target is either { main: true } or { ownerId, slot }.
 function resolveGroup(doc, target) {
   if (target?.main) {
@@ -294,11 +290,10 @@ function resolveGroup(doc, target) {
   return { nodeIds: group.nodeIds, parentId: owner.id, scope: group.scope };
 }
 
-// Insert a new top-level process from the `proc.process` catalog entry. It joins
-// `roots.processes` with a `body` slot seeded with one default action node (an
-// empty body is also accepted — the backend seeds `finish 0`). The process's
-// name comes from the catalog `name` field default. Mutates `doc`; returns the
-// new process id.
+// It joins `roots.processes` with a `body` slot seeded with one default action node (an empty
+// body is also accepted — the backend seeds `finish 0`).
+// The process's name comes from the catalog `name` field default.
+// Mutates `doc`; returns the new process id.
 export function addProcessToDoc(doc, operation, catalog = []) {
   const taken = new Set(doc.nodes.map((n) => n.id));
   const id = mintNodeId(taken);
@@ -328,14 +323,13 @@ export function addProcessToDoc(doc, operation, catalog = []) {
   return id;
 }
 
-// Insert a new node built from an operation-catalog entry into the target
-// group. Mirrors deleteNodeFromDoc's draft-mutation style: splice the id into
-// the group's nodeIds (BEFORE a trailing terminal so the new node isn't dead
-// code after a `finish`/`fail`), push the FlowNode, set parentId to match how
-// buildFlow reads membership, and chain sequence edges around the new position.
-// Container entries also get their slot group(s) + one seeded child. Data edges
-// are never added here — the backend recomputes them on reproject. Mutates
-// `doc`; returns the new node id (or null if the target could not be resolved).
+// Mirrors deleteNodeFromDoc's draft-mutation style: splice the id into the group's nodeIds
+// (BEFORE a trailing terminal so the new node isn't dead code after a `finish`/`fail`), push
+// the FlowNode, set parentId to match how buildFlow reads membership, and chain sequence edges
+// around the new position.
+// Container entries also get their slot group(s) + one seeded child.
+// Data edges are never added here — the backend recomputes them on reproject.
+// Mutates `doc`; returns the new node id (or null if the target could not be resolved).
 export function addNodeToDoc(doc, target, operation, catalog = []) {
   // A process is a top-level declaration, not a body statement: it joins
   // `roots.processes` with its own body slot rather than an owner's group.
@@ -418,12 +412,10 @@ export function addNodeToDoc(doc, target, operation, catalog = []) {
   return id;
 }
 
-// Remove a node from the draft document: drop it from nodes, from every root /
-// child group that references it, and drop incident edges. Mutates `doc`.
+// Mutates `doc`.
 export function deleteNodeFromDoc(doc, nodeId) {
   const node = doc.nodes.find((n) => n.id === nodeId);
   if (!node) return;
-  // Collect the node and all its descendants (deleting a container prunes its subtree).
   const toRemove = new Set();
   const nodeMap = new Map(doc.nodes.map((n) => [n.id, n]));
   (function collect(id) {
@@ -458,9 +450,8 @@ export function deleteNodeFromDoc(doc, nodeId) {
 // reproject. Mutates `doc`; returns true if the order actually changed.
 // ---------------------------------------------------------------------------
 
-// Resolve the group list (and its sequence-edge scope) that contains `nodeId`.
-// Top-level `main` nodes carry the `main` scope; processes are parallel
-// top-level definitions with no sequence ordering (scope null, no re-chain).
+// Top-level `main` nodes carry the `main` scope; processes are parallel top-level definitions
+// with no sequence ordering (scope null, no re-chain).
 function findGroupOf(doc, nodeId) {
   const main = doc.roots?.main ?? [];
   if (main.includes(nodeId)) return { nodeIds: main, scope: 'main' };
@@ -492,9 +483,9 @@ function rechainSequenceEdges(doc, group) {
   }
 }
 
-// Move `nodeId` within its scope. `direction` is 'up' | 'down' or a target
-// index. A trailing terminal (`finish`/`fail`) is a barrier: a non-terminal
-// node cannot move after it (clamp), and a terminal itself never moves.
+// `direction` is 'up' | 'down' or a target index.
+// A trailing terminal (`finish`/`fail`) is a barrier: a non-terminal node cannot move after it
+// (clamp), and a terminal itself never moves.
 export function reorderNodeInDoc(doc, nodeId, direction) {
   const group = findGroupOf(doc, nodeId);
   if (!group) return false;
@@ -548,8 +539,6 @@ function descendantsOf(doc, nodeId) {
   return out;
 }
 
-// Resolve a destination descriptor ({ main:true } | { ownerId, slot }) to its
-// concrete nodeIds list, sequence scope, and parentId (undefined for main).
 function resolveDestination(doc, dest) {
   if (dest?.main) {
     doc.roots ??= { main: [], processes: [] };
@@ -562,10 +551,9 @@ function resolveDestination(doc, dest) {
   return { nodeIds: group.nodeIds, scope: group.scope, parentId: owner.id };
 }
 
-// Enumerate the scopes a node may move INTO: top-level `main`, plus every
-// insertable container slot that is not the node's current scope nor inside the
-// node's own subtree. `element` slots (comprehension) hold exactly one node and
-// are excluded. Returns `[{ key, label, dest }]` for a "move to…" menu.
+// Enumerate the scopes a node may move INTO: top-level `main`, plus every insertable container
+// slot that is not the node's current scope nor inside the node's own subtree.
+// `element` slots (comprehension) hold exactly one node and are excluded.
 export function moveTargetsFor(doc, nodeId) {
   const node = doc.nodes.find((n) => n.id === nodeId);
   // Terminals stay put; processes are always top-level and never move into a scope.
@@ -594,10 +582,9 @@ export function moveTargetsFor(doc, nodeId) {
   return targets;
 }
 
-// Move `nodeId` into `dest`, inserting at `insertIndex` (clamped before a
-// trailing terminal). A same-scope destination degrades to a reorder. A
-// container cannot move into its own subtree. Mutates `doc`; returns true when
-// the document actually changed.
+// A same-scope destination degrades to a reorder.
+// A container cannot move into its own subtree.
+// Mutates `doc`; returns true when the document actually changed.
 export function moveNodeToGroup(doc, nodeId, dest, insertIndex = Infinity) {
   const node = doc.nodes.find((n) => n.id === nodeId);
   if (!node) return false;

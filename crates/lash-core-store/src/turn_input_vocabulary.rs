@@ -64,8 +64,6 @@ impl TurnInputIngress {
         Self::NextTurn
     }
 
-    /// Exposes the target turn ID to turn-input store implementors for active-turn ingress,
-    /// returning `None` for next-turn ingress.
     pub fn active_turn_id(&self) -> Option<&TurnId> {
         match self {
             Self::ActiveTurn { turn_id, .. } => Some(turn_id),
@@ -137,12 +135,10 @@ impl TurnInputStateKind {
         matches!(self, Self::Cancelled | Self::Completed)
     }
 
-    /// Returns whether this state name is an open (claimable) state.
     pub fn is_open(self) -> bool {
         matches!(self, Self::PendingActive | Self::DeferredNextTurn)
     }
 
-    /// Returns whether this state name is the `deferred_next_turn` open state.
     pub fn is_next_turn_pending(self) -> bool {
         matches!(self, Self::DeferredNextTurn)
     }
@@ -182,8 +178,6 @@ impl TurnInputState {
         }
     }
 
-    /// Decodes a persisted `state` spelling against the row's decoded ingress.
-    ///
     /// Returns `None` for an unknown spelling or a state/scope pair the
     /// persisted CHECKs forbid (`pending_active` under `next_turn` scope,
     /// `deferred_next_turn` under `active_turn` scope, or `accepted` under
@@ -277,7 +271,6 @@ impl TurnInputState {
         self.kind().is_terminal()
     }
 
-    /// Returns whether this state is open (claimable) — `pending_active` or `deferred_next_turn`.
     pub fn is_open(&self) -> bool {
         self.kind().is_open()
     }
@@ -385,8 +378,6 @@ impl PendingTurnInputRead {
     }
 }
 
-/// Read-time claim status of an open pending turn input.
-///
 /// `Held` reports only durable lease facts. It does not assert that the holder
 /// process is alive, and lease expiry does not itself supersede the holder's
 /// completion authority.
@@ -452,7 +443,7 @@ impl PendingTurnInput {
     }
 
     /// Exposes accepted input to store and durable-substrate implementors while claiming and
-    /// settling durable turn inputs. Returns `None` when no accepted input is present.
+    /// settling durable turn inputs.
     pub fn accepted_input(&self) -> Option<crate::AcceptedInjectedTurnInput> {
         plugin_message_from_turn_input(&self.input).map(|message| {
             crate::AcceptedInjectedTurnInput {
@@ -595,8 +586,6 @@ pub struct TurnInputCompletion {
     pub data: TurnInputCompletionData,
 }
 impl TurnInputCompletion {
-    /// Exposes the settling claim id to store implementors, or `None` when the
-    /// settlement is unclaimed.
     pub fn claim_id(&self) -> Option<&str> {
         self.claim.as_ref().map(|claim| claim.claim_id.as_str())
     }
@@ -786,8 +775,6 @@ impl UnclaimedTurnInputs {
         }
     }
 
-    /// Records the initial application evidence for rows driven without a
-    /// claim, matching [`TurnInputClaim::record_initial_turn_application`].
     pub fn record_initial_turn_application(
         &mut self,
         turn_id: &crate::TurnId,
@@ -945,14 +932,10 @@ pub enum InputItem {
     Attachment { source: crate::AttachmentSource },
 }
 impl InputItem {
-    /// Constructs a text turn item for protocol implementors while preserving its position among
-    /// mixed text and attachment input.
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
 
-    /// Constructs an attachment item for protocol implementors while preserving the source variant
-    /// until runtime attachment resolution.
     pub fn attachment(source: crate::AttachmentSource) -> Self {
         Self::Attachment { source }
     }
@@ -966,9 +949,8 @@ pub struct TurnInput {
     pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     /// Internal protocol transport carrier for the facade builder's turn ID.
     ///
-    /// All non-advanced facade paths overwrite this field. Set
-    /// `TurnBuilder::turn_id` to control turn identity. Only low-level protocol
-    /// transport should read this field directly.
+    /// All non-advanced facade paths overwrite this field.
+    /// Only low-level protocol transport should read this field directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_turn_id: Option<TurnId>,
     #[serde(skip)]
@@ -977,14 +959,10 @@ pub struct TurnInput {
     pub turn_context: TurnContext,
 }
 impl TurnInput {
-    /// Constructs an input with no items for protocol and process-engine implementors that will add
-    /// content or extensions before execution.
     pub fn empty() -> Self {
         Self::items(std::iter::empty())
     }
 
-    /// Constructs a one-item text input for protocol and process-engine implementors without adding
-    /// protocol extensions or metadata.
     pub fn text(text: impl Into<String>) -> Self {
         Self::items([InputItem::text(text)])
     }
@@ -1000,15 +978,11 @@ impl TurnInput {
         }
     }
 
-    /// Appends an attachment after existing turn items for protocol implementors, preserving
-    /// mixed-input source order.
     pub fn with_attachment(mut self, source: crate::AttachmentSource) -> Self {
         self.items.push(InputItem::attachment(source));
         self
     }
 
-    /// Sets the protocol turn options carried by a `TurnInput` for protocol and process-engine
-    /// implementors while materializing protocol-specific session and turn state.
     pub fn with_protocol_turn_options(mut self, options: crate::ProtocolTurnOptions) -> Self {
         self.protocol_turn_options = Some(options);
         self
@@ -1096,14 +1070,10 @@ impl Default for TurnContext {
     }
 }
 impl TurnContext {
-    /// Constructs a `TurnContext` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Updates plugin input state for protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
     pub fn insert_plugin_input<T>(&mut self, plugin_id: &'static str, input: T)
     where
         T: Send + Sync + 'static,
@@ -1111,14 +1081,10 @@ impl TurnContext {
         self.plugin_inputs.insert(plugin_id, input);
     }
 
-    /// Updates provider state for protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
     pub fn set_provider(&mut self, provider: crate::ProviderHandle) {
         self.provider = Some(provider);
     }
 
-    /// Exposes provider to protocol and process-engine implementors while preparing or executing
-    /// plugin and tool work. Returns `None` when no provider is present.
     pub fn provider(&self) -> Option<&crate::ProviderHandle> {
         self.provider.as_ref()
     }
@@ -1146,8 +1112,6 @@ impl TurnContext {
         }
     }
 
-    /// Exposes plugin input to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work. Returns `None` when no plugin input is present.
     pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
     where
         T: 'static,
@@ -1173,14 +1137,10 @@ impl TurnContext {
         &self.plugin_inputs
     }
 
-    /// Updates prompt layer state for protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
     pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
         self.prompt = prompt;
     }
 
-    /// Exposes prompt layer to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
     pub fn prompt_layer(&self) -> &crate::PromptLayer {
         &self.prompt
     }
@@ -1234,8 +1194,6 @@ impl ProtocolTurnExtensionHandle {
         self.0.as_any()
     }
 
-    /// Exposes prompt contributions to protocol and process-engine implementors while materializing
-    /// or restoring protocol session state.
     pub fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
         self.0.prompt_contributions()
     }
@@ -1258,8 +1216,6 @@ pub trait ProtocolTurnExtension: Send + Sync {
 #[serde(transparent)]
 pub struct TurnActivityId(pub Arc<str>);
 impl TurnActivityId {
-    /// Constructs a `TurnActivityId` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
     pub fn new(id: impl Into<Arc<str>>) -> Self {
         Self(id.into())
     }
@@ -1289,8 +1245,6 @@ pub mod facade_ops {
     }
 }
 
-/// Generates a turn-input wire vocabulary and its complete variant list from one declaration.
-///
 /// The generated encoder and decoder matches are exhaustive, so adding a variant requires its
 /// persisted spelling here and necessarily extends `ALL`.
 macro_rules! turn_input_wire {
@@ -1301,14 +1255,12 @@ macro_rules! turn_input_wire {
             #[allow(dead_code)]
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
-            /// Returns the stable wire spelling persisted by turn-input stores.
             $visibility fn $encoder(self) -> &'static str {
                 match self {
                     $(Self::$variant => $wire),+
                 }
             }
 
-            /// Parses a stable wire spelling persisted by turn-input stores.
             #[allow(dead_code)]
             $visibility fn $decoder(value: &str) -> Option<Self> {
                 match value {

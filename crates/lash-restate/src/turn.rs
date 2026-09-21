@@ -116,10 +116,8 @@ impl TurnAttach for RestateTurnAttach {
 
 /// Bundled Restate wiring for foreground-turn control.
 ///
-/// Use the returned effect host to configure Lash turn execution and the
-/// returned driver for out-of-process cancellation/terminal attachment. Bind
-/// `LashDurableWaitWorkflowImpl` and `LashDurableWaitIndexImpl` on the endpoint;
-/// no Restate Admin API access is involved.
+/// Use the returned effect host to configure Lash turn execution and the returned driver for
+/// out-of-process cancellation/terminal attachment.
 pub struct RestateTurnDeployment {
     effect_host: Arc<RestateEffectHost>,
 }

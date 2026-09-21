@@ -31,8 +31,8 @@ const SOAK_SESSIONS: u64 = 25_000;
 /// Cells per generated session.
 const SESSION_LENGTH: usize = 10;
 
-/// SplitMix64. Small, seekable, and identical on every platform, which is what
-/// a fixture corpus needs; the corpus must not depend on the host's `rand`.
+/// Small, seekable, and identical on every platform, which is what a fixture corpus needs; the
+/// corpus must not depend on the host's `rand`.
 struct Prng(u64);
 
 impl Prng {
@@ -75,8 +75,6 @@ const NAMES: &[&str] = &["alpha", "beta", "gamma", "delta"];
 /// which keeps a generated session's length a function of the seed alone.
 const ANCHOR: &str = "anchor";
 
-/// Builds one session from `seed`.
-///
 /// The sequence always ends with a finish over a live name, so every generated
 /// session also exercises the terminal path after whatever came before it.
 fn generate_session(seed: u64) -> Vec<Cell> {

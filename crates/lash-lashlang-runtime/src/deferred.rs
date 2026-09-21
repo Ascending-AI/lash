@@ -253,7 +253,6 @@ impl DeferredResolutionRecord {
         }
     }
 
-    /// Clear the active link when execution has no stable `ExecCode` identity.
     /// Such an invocation cannot safely reuse durable resolution outcomes.
     pub fn clear_link(&mut self) {
         self.link_key = None;

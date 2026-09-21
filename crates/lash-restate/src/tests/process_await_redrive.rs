@@ -1033,7 +1033,6 @@ pub(super) async fn fig1631_await_event_gate_journals_the_event_before_its_gate(
     fig1631_parked_await_event_gate(&endpoint, "fig1631-await-gate-positions").await;
 }
 
-/// Completion path: the winning event retires the gate entry it registered.
 #[tokio::test]
 pub(super) async fn fig1631_await_event_completion_retires_its_gate_entry() {
     let endpoint = fig1631_await_event_endpoint();

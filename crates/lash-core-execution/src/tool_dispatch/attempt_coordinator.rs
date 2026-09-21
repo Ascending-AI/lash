@@ -282,10 +282,8 @@ impl IntentDrainGuard {
         )
     }
 
-    /// Publishes this child's committed final result and waits for its turn to
-    /// drain the declared intents. The matching discharge is the guard's drop,
-    /// so a body that exits between the two — by error return, cancellation or
-    /// unwind — still releases the next slot.
+    /// The matching discharge is the guard's drop, so a body that exits between the two — by
+    /// error return, cancellation or unwind — still releases the next slot.
     pub(crate) async fn begin_final_drain(&self) {
         self.final_result_committed.send_replace(true);
         self.gate.wait_for(self.index).await;
@@ -724,7 +722,6 @@ struct ProjectedIntentAnswer {
     fields: Vec<(String, serde_json::Value)>,
 }
 
-/// Picks the one realized answer this output is the optimistic form of.
 fn matching_answer<'a>(
     current: &serde_json::Value,
     answers: &'a [ProjectedIntentAnswer],

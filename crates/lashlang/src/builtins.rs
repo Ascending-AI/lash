@@ -270,7 +270,6 @@ pub(crate) fn lookup(name: &str) -> Option<Builtin> {
         .find(|builtin| builtin.name == name)
 }
 
-/// Whether `name` is a known builtin function.
 pub(crate) fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
 }

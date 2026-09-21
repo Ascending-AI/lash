@@ -144,9 +144,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `runtime_effect_group` statements only PostgreSQL issues.
     pub(crate) struct GroupPostgresStatements @ "effect_group" {
-        /// Record a group, returning the inserted row and nothing on a
-        /// conflict.
-        ///
         /// The `RETURNING` clause is the fork: it saves the read-back on the
         /// insert path, which SQLite performs unconditionally.
         insert_new = "INSERT INTO runtime_effect_group (
@@ -198,8 +195,6 @@ lash_store_sql::statements! {
              WHERE artifact_cleanup_completed = FALSE
              ORDER BY scope_id";
 
-        /// Record that scope `?1`'s artifact cleanup has run. Forks on the
-        /// same boolean representation.
         complete_artifact_cleanup = "UPDATE effect_scope_retirements
              SET artifact_cleanup_completed = TRUE
              WHERE scope_id = ?1";
@@ -414,7 +409,6 @@ impl PostgresEffectHost {
         )
     }
 
-    /// Construct a host with an explicit record/scheduling clock.
     pub fn with_options_and_clock(
         storage: &PostgresStorage,
         options: PostgresEffectReplayOptions,
@@ -434,8 +428,6 @@ impl PostgresEffectHost {
         self.inner.start_replay();
     }
 
-    /// Register the resolver that says how a grouped child is run.
-    ///
     /// This is the host's one wiring seam: it is supplied here — by the host
     /// that owns those runners — rather than discovered from whatever session is
     /// in scope, and every path resolves through it, the open of a group, a
@@ -480,8 +472,6 @@ impl PostgresRuntimeEffectController {
         )
     }
 
-    /// Construct a scoped controller with an explicit scheduling clock.
-    ///
     /// PostgreSQL remains authoritative for lease timestamps and comparisons;
     /// this clock drives only effect sleeps, busy backoff, and renewal cadence.
     pub fn with_options_and_clock(
@@ -784,10 +774,6 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         row.map(stored_group_record).transpose()
     }
 
-    /// Reads the group's children that hold no rank: the complement of
-    /// [`read_group_settlement`](Self::read_group_settlement)'s
-    /// `settlement_seq IS NOT NULL`.
-    ///
     /// Served by `idx_lash_runtime_effect_replay_group_unsettled`, whose
     /// predicate is exactly this filter. That index is the 55 generation's whole
     /// content, and it arrived with the drain (FIG-1536) — the workload that
@@ -1061,9 +1047,8 @@ pub(crate) async fn scope_has_turn_cancel_closure_participant(
     .await
 }
 
-/// Scope-exact retirement (N4) of one non-session scope under the caller's
-/// scope lock: the permanent fence first, then the scope's promise rows,
-/// effect rows, and group rows. Returns the effect rows deleted.
+/// Scope-exact retirement (N4) of one non-session scope under the caller's scope lock: the
+/// permanent fence first, then the scope's promise rows, effect rows, and group rows.
 pub(crate) async fn retire_scope_rows_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     scope_id: &str,

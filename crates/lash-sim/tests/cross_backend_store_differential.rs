@@ -1,5 +1,3 @@
-//! Store-level differential testing for `RuntimePersistence`.
-//!
 //! The generator is deliberately table-driven for its first landing. These
 //! malformed shapes are individually named, reviewable, and shrink no further
 //! than the short sequences below. Add a case by extending `generated_cases`;
@@ -238,7 +236,6 @@ enum StoreOperation {
     DriveSurface {
         method: SurfaceMethod,
     },
-    /// Make one persisted record undecodable on the SQL backends.
     SeedCorruptRecord {
         target: CorruptTarget,
     },

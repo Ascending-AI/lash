@@ -678,8 +678,6 @@ pub struct TraceExecutionEvidence {
 }
 
 impl TraceEvent {
-    /// Returns `true` when this event represents one of these failure outcomes:
-    ///
     /// - [`Self::LlmCallFailed`], [`Self::EffectEnvelopeDiff`], and
     ///   [`Self::StoreErrorObserved`] always;
     /// - [`Self::JournaledEffectSettled`] only with
@@ -1197,8 +1195,7 @@ pub enum TraceTurnOutcome {
 }
 
 impl TraceTurnOutcome {
-    /// Returns `true` only for [`Self::Failed`]. A cancelled turn is a
-    /// deliberate stop, not a failure.
+    /// A cancelled turn is a deliberate stop, not a failure.
     pub fn is_failed(&self) -> bool {
         match self {
             Self::Failed { .. } => true,
@@ -1286,8 +1283,8 @@ pub enum TraceJournaledEffectStatus {
 }
 
 impl TraceJournaledEffectStatus {
-    /// Whether this outcome is a failure. The shared failure predicate matches
-    /// on the variant; no status string is compared anywhere.
+    /// The shared failure predicate matches on the variant; no status string is compared
+    /// anywhere.
     pub fn is_failed(&self) -> bool {
         match self {
             Self::Failed => true,
@@ -1324,8 +1321,8 @@ pub enum TraceDurableWaitResolution {
 }
 
 impl TraceDurableWaitResolution {
-    /// Whether this outcome is a failure. The shared failure predicate matches
-    /// on the variant; no status string is compared anywhere.
+    /// The shared failure predicate matches on the variant; no status string is compared
+    /// anywhere.
     pub fn is_failed(&self) -> bool {
         match self {
             Self::Failed => true,
@@ -1360,8 +1357,8 @@ pub enum TraceDurableTimerStatus {
 }
 
 impl TraceDurableTimerStatus {
-    /// Whether this outcome is a failure. The shared failure predicate matches
-    /// on the variant; no status string is compared anywhere.
+    /// The shared failure predicate matches on the variant; no status string is compared
+    /// anywhere.
     pub fn is_failed(&self) -> bool {
         match self {
             Self::Failed => true,
@@ -1681,9 +1678,6 @@ impl TraceSink for JsonlTraceSink {
     }
 }
 
-/// Writes each trace record as one JSON line to stderr — handy for `cargo run`
-/// debugging without a trace file.
-///
 /// The newline is appended to the serialized record so both leave in one
 /// `write_all`: stderr is unbuffered and `eprintln!` emits one syscall per
 /// format fragment, so a host logging from another task could land between a

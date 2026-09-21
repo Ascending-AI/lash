@@ -210,7 +210,6 @@ pub fn process_sse_event(
     Ok(())
 }
 
-/// Parse a buffered SSE payload into `state`.
 pub fn parse_sse_payload(
     provider: &str,
     payload: &str,

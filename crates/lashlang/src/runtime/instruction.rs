@@ -72,7 +72,6 @@ pub(crate) struct HandlerScopeExtent {
     pub(crate) handler_ip: usize,
     /// The scope's `finally` entry, when it has one.
     pub(crate) finally_ip: Option<usize>,
-    /// Whether the scope catches, as opposed to only running cleanup.
     pub(crate) catches: bool,
     /// One past the last instruction the scope protects.
     pub(crate) end_ip: usize,

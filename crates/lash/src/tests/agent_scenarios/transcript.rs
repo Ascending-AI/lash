@@ -4,8 +4,6 @@
 //! `TurnActivity` sequence in emission order, the runtime-checkpoint commits the
 //! session store actually accepted (through
 //! [`lash_core::testing::checkpoint_observer`]), and the terminal process fold
-//! read back from the process registry.
-//!
 //! Two deliberate omissions, both documented so a reviewer knows what a diff
 //! here cannot tell them:
 //!
@@ -34,8 +32,6 @@ use super::harness::AgentScenarioRun;
 use lash_core::testing::behavior_transcript::{Actor, Attr, Component, Entry, IdKind, Kind, Usage};
 use lash_core::testing::checkpoint_observer::{CheckpointComponentWriteKind, CheckpointWriteEvent};
 
-/// Render one Agent Scenario run as a behavior transcript.
-///
 /// `root` is the semantic name pinned to the scenario's root session, so the
 /// text reads `root` instead of an alias that shifts when an unrelated session
 /// appears first.

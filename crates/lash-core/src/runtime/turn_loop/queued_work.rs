@@ -86,7 +86,6 @@ impl<T> QueuedTurnDrain<T> {
         }
     }
 
-    /// Returns the turn this drain ran, or panics with `message`.
     #[track_caller]
     pub fn expect(self, message: &str) -> T {
         match self {
@@ -150,16 +149,12 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
         self.turn.is_none()
     }
 
-    /// Reports whether this successful drain executed a newly claimed turn.
-    ///
     /// `false` has the same fully-satisfied meaning as
     /// [`Self::settled_without_selected_turn`].
     pub fn executed_selected_turn(&self) -> bool {
         self.turn.is_some()
     }
 
-    /// Returns the executed turn or panics with `message` after a successful
-    /// drain that was fully satisfied without running a selected turn.
     #[track_caller]
     #[expect(clippy::expect_used, reason = "the crate's own panicking accessor")]
     pub fn expect(self, message: &str) -> T {

@@ -64,9 +64,7 @@ pub(crate) enum TruncationDirection {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TruncationUnit {
-    /// Report removed *characters*, labelled `bytes`.
     Bytes,
-    /// Report an approximate removed *token* count, labelled `tokens`.
     Tokens,
 }
 

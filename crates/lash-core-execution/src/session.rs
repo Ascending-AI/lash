@@ -416,8 +416,6 @@ impl Session {
         self.tool_catalog_cache_entry(session_id)
     }
 
-    /// Derive and pin the effective surface for one model request.
-    ///
     /// Live sources are enumerated exactly once before the registry snapshot is
     /// frozen. Host curation is already attached by ToolId in that snapshot;
     /// authority and plugin contributions then filter the model-facing names.

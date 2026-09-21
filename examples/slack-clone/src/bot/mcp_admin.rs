@@ -42,7 +42,6 @@ use crate::secrets::constant_time_eq;
 pub const SERVERS_PATH: &str = "/admin/mcp/servers";
 /// Member route for one attached MCP server.
 pub const SERVER_PATH: &str = "/admin/mcp/servers/{name}";
-/// Route that publishes a workspace root and notifies connected servers.
 pub const ROOTS_PATH: &str = "/admin/mcp/roots";
 
 /// Operator handle over the bot's MCP plugin factory and published roots.
@@ -106,7 +105,7 @@ impl ServerView {
     }
 }
 
-/// Build the operator router. Merged into the bot's server next to the webhook.
+/// Merged into the bot's server next to the webhook.
 pub fn router(admin: McpAdmin) -> Router {
     let token = Arc::clone(&admin.token);
     Router::new()
@@ -211,8 +210,6 @@ fn server_views(admin: &McpAdmin) -> Vec<ServerView> {
         .collect()
 }
 
-/// Map a typed MCP failure onto the HTTP status an operator should act on.
-///
 /// A configuration error is the operator's own request to fix — a name with the
 /// reserved `__` separator in it, a URL that is empty — so it is a 400. Anything
 /// else happened between this host and a server it does not own, which is a
