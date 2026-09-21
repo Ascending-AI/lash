@@ -35,6 +35,15 @@
 //! [`ToolRestoreAuthority`] makes that structural rather than a rule three call
 //! sites have to remember: a live install cannot name a policy, because the
 //! type has nowhere to put one.
+//!
+//! # Opens that never install (FIG-3353)
+//!
+//! A fifth kind of open never reaches this installer at all: a host that opens
+//! a session it will not run a turn on — enqueue-only or read-only — declares
+//! [`ToolSurfaceOpenMode::PreservePersisted`](crate::ToolSurfaceOpenMode) and
+//! the open skips the reconcile, the catalog rebuild, this report and its
+//! warning wholesale. The loaded snapshot rides the runtime's commits forward
+//! untouched instead of being restamped from an unreconciled registry.
 
 use crate::{SessionError, SessionId, ToolRestoreReport, ToolSourcePolicy, ToolState};
 

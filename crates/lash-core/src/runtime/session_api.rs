@@ -10,8 +10,14 @@ impl LashRuntime {
 
     pub fn stamp_live_plugin_state(&mut self) {
         if let Some(session) = self.session.as_ref() {
-            let snapshot = session.plugins().tool_registry().export_state();
-            self.state.set_tool_state_snapshot(Some(snapshot));
+            // A `PreservePersisted` open never reconciled its registry, so
+            // exporting it would overwrite the durable surface with whatever
+            // the sources happen to advertise. The loaded snapshot stays on
+            // the state and rides the next commit forward untouched.
+            if !self.state.preserve_tool_state_snapshot {
+                let snapshot = session.plugins().tool_registry().export_state();
+                self.state.set_tool_state_snapshot(Some(snapshot));
+            }
             self.state.capture_plugin_states(session.plugins());
         } else {
             self.state.set_tool_state_snapshot(None);
@@ -178,8 +184,10 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state().await?;
         let mut state = self.state.clone();
         if let Some(session) = self.session.as_ref() {
-            let snapshot = session.plugins().tool_registry().export_state();
-            state.set_tool_state_snapshot(Some(snapshot));
+            if !state.preserve_tool_state_snapshot {
+                let snapshot = session.plugins().tool_registry().export_state();
+                state.set_tool_state_snapshot(Some(snapshot));
+            }
             state.capture_plugin_states(session.plugins());
         }
         Ok(state)

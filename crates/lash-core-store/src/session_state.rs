@@ -645,6 +645,12 @@ pub struct RuntimeSessionState {
     /// while host-side edits can add resident nodes before they commit.
     #[serde(skip)]
     pub persisted_node_ids: std::collections::HashSet<crate::NodeId>,
+    /// Runtime-only marker set by a `PreservePersisted` open (FIG-3353): the
+    /// loaded tool-state snapshot is durable truth and is never restamped from
+    /// the live registry. Skipped on serialize — it is a per-open claim, not
+    /// durable session content.
+    #[serde(skip)]
+    pub preserve_tool_state_snapshot: bool,
 }
 
 impl RuntimeSessionState {
@@ -666,6 +672,7 @@ impl RuntimeSessionState {
             checkpoint_ref: None,
             head_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
+            preserve_tool_state_snapshot: false,
         }
     }
 
@@ -694,6 +701,7 @@ impl RuntimeSessionState {
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
+            preserve_tool_state_snapshot: false,
         };
         state.ensure_agent_frame_initialized();
         state
@@ -1012,10 +1020,16 @@ impl RuntimeSessionState {
         plugins: &dyn SessionPluginStateSource,
         capture: fn(&dyn SessionPluginStateSource) -> crate::PluginState,
     ) {
-        let generation = plugins.tool_state_generation();
-        if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
-            let snapshot = plugins.export_tool_state();
-            self.set_tool_state_snapshot(Some(snapshot));
+        // A `PreservePersisted` open (FIG-3353) never reconciled its registry,
+        // so refreshing tool state here would overwrite the durable surface
+        // with whatever the sources happen to advertise. The loaded snapshot
+        // rides the next commit forward untouched.
+        if !self.preserve_tool_state_snapshot {
+            let generation = plugins.tool_state_generation();
+            if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
+                let snapshot = plugins.export_tool_state();
+                self.set_tool_state_snapshot(Some(snapshot));
+            }
         }
 
         let generations = plugins.plugin_state_generations();
