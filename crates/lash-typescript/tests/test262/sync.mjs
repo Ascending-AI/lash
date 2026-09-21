@@ -82,6 +82,11 @@ const directoryNames = readdirSync(join(source, "test"))
 const typescriptNames = [
   "annotations",
   "as-casts",
+  // Not TypeScript syntax: a dialect decision with no upstream feature tag.
+  // The async array driver runs callbacks sequentially, which the census
+  // records as `registered-deviation:TS_ASYNC_MAP_SEQUENTIAL_V1` because there
+  // is no other row that can carry it (FIG-3392).
+  "async-array-callbacks",
   "decorators",
   "enum",
   "generics",

@@ -89,12 +89,17 @@ an object-valued `inputs` each reject by name with
 aggregate its pending tool handles and already-settled values through the shared
 batch machine. Unawaited tool calls create handles; abandoning one at cell end
 is a typed runtime error. Non-array values and awaiting a settled value also
-fail loudly. Mixed aggregates settle tool leaves first, then process promises in
-input order. Tool rejections take precedence over process rejections.
-`Promise.all` rejects with the reason of the leaf that settled first, and
-`Promise.allSettled` keeps its results in input order, both as ECMA specifies.
-The host records the order its leaves settled in as part of the journaled batch
-result, so replay selects the same reason rather than re-deriving one.
+fail loudly. A mixed aggregate is **one** batch on **one** recorded settlement
+order: a `processes.await` leaf parks on a durable wait and takes its place in
+that order when its completion arrives, so a tool rejection has no precedence
+over a process rejection and there is no tool-then-process phase split. A raw
+process handle at an element position is refused, with a repair naming
+`processes.await(handle)`; a handle carried inside a value bound to a name is
+passed through untouched. `Promise.all` rejects with the reason of the leaf that
+settled first, and `Promise.allSettled` keeps its results in input order, both as
+ECMA specifies. The host records the order its leaves settled in as part of the
+journaled batch result, so replay selects the same reason rather than re-deriving
+one.
 
 A rejected `Promise.all` still waits for every leaf to settle before it reports.
 ECMA specifies which reason surfaces, not when: it has no wall times, and a
@@ -351,7 +356,12 @@ language semantics:
   `splice(index, 1)`.
 - Async array callbacks run sequentially in v1
   (`TS_ASYNC_MAP_SEQUENTIAL_V1`): result order matches Node, while callback
-  interleaving and shared-mutation order can differ.
+  interleaving and shared-mutation order can differ. The census records it as
+  `registered-deviation:TS_ASYNC_MAP_SEQUENTIAL_V1` on the
+  `typescript async-array-callbacks` row, so the deviation is indexed where
+  every other ruling is indexed rather than living only in this list. That row
+  indexes the deviation; the callback semantics themselves are pinned by the
+  async-driver tests, not by the census.
 - Direct `globalThis.name` reads and writes, including replacement from inside
   a function, plus nested-path mutation, membership, and deletion share the
   same durable session slots as top-level bindings. Nested-function replacement

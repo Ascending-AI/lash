@@ -318,3 +318,59 @@ children, Lashlang syntax change, nursery scoping, per-parent admission cap, or
 registration-plus-admission transaction. It does not change checkpoint
 backtracking, after-step Stop, cancellation observation at a step or wake, or
 recovery's obligation to follow the declared disposition.
+
+## Amendment: an opener's close is not a parent end (FIG-3392)
+
+**Decided, not yet implemented.** FIG-3396 owns close recovery and FIG-3397 lands
+it; the full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
+
+Effect-group tool children introduce a second thing that "ends" — the *opener*
+of a group, which closes its tool work — and it must not be confused with the
+parent end this ADR defines. They are different facts with different writers and
+different effects.
+
+**A parent end is a durable registry fact about a process's children.** It is
+written by the three turn exits and by each terminal process completion, it is
+keyed by `(parent_kind, parent_id)`, and one registry sweep settles every child
+whose policy says Cancel. Nothing about that changes.
+
+**An opener close is a phase of a group's tool children.** It is entered by a
+**durable live→closing transition recorded before admission stops or any
+cancellation is issued**; it stops new tool work, decides cancellation for
+eligible attempts, and drains protected settlements. It settles no process,
+writes no ledger row, and reads no Lifecycle Policy.
+
+**Every final turn exit and every process terminal path enters closing, including
+failed and cancelled exits. Worker loss and segment handover do not.** Recovery
+resumes closing whenever the transition fact exists, even where no turn commit,
+process terminal or parent-end row does — which is why the transition cannot be
+inferred from the facts this ADR already writes.
+
+Three consequences, each of which an implementation can get wrong quietly:
+
+1. **A process really started by a tool child belongs to ADR 0094, not to the
+   group.** Closing a group never cancels it. If the start was realized, the
+   process exists with its required Lifecycle Policy and Parent Scope, and the
+   parent-end sweep settles it when its *parent* ends. Refusing a late
+   completion suppresses delivery of a result; it does not unmake a registered
+   process.
+2. **A dead worker is not a parent end and not an opener close.** This ADR
+   already says "A turn that crashed before its commit is interrupted, not
+   ended", and that reading now carries the group contract too: an accepted
+   child of a live opener is recovered, never abandoned, and no recovery pass may
+   read a missing lease as an ended opener.
+3. **Ordering.** Finalization is an ordered, idempotent sequence: finish every
+   protected obligation and incorporate the required usage and projection, commit
+   the opener's outcome and accounting, **then** record parent end, then complete
+   retirement. A crash between steps resumes the first incomplete one. A start
+   realized during closing therefore registers before the parent-end row exists,
+   which is the "registered before the row" case this ADR already covers: the
+   sweep selects children by Parent Scope and Cancel policy, so it finds them when
+   the row arrives. The window can delay settlement and cannot defeat it — the
+   same shape as this ADR's own turn-commit-before-ledger-row window.
+
+Cancellation vocabulary is unchanged: a child cancelled by the parent-end sweep
+carries origin `ParentEnded`, and closing a group is not a new `CancelOrigin`
+because it cancels *tool attempts*, which are not processes and carry no
+`CancelRequest`.

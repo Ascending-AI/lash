@@ -205,6 +205,7 @@ feature	WeakSet
 feature	well-formed-json-stringify
 typescript	annotations
 typescript	as-casts
+typescript	async-array-callbacks
 typescript	decorators
 typescript	enum
 typescript	generics

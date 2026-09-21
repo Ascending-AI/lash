@@ -20,6 +20,14 @@ dialect; there is no second surface to be at parity with. Every reference to
 "Lashlang" below names the IR and VM that this dialect lowers into, never a
 second authored language.
 
+Amended 2026-09-21 (FIG-3392): two **host lifetime contracts** are recorded —
+opener-close cancellation of an unfinished tool call, and an await that nothing
+can resolve — with a Node oracle that keeps the host alive after an async
+function returns. Neither is a deviation-register entry. See
+["Two host lifetime contracts"](#two-host-lifetime-contracts-fig-3392) below.
+Decided, not yet implemented; the full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
@@ -245,13 +253,23 @@ instead.
 
 ### Promise aggregates settle on journaled order
 
-As revised by [ADR 0087](0087-typescript-runtime-promise-arrays.md),
+As revised by [ADR 0087](0087-typescript-runtime-promise-arrays.md) and
+replaced in part by [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md),
 `Promise.all` and `Promise.allSettled` evaluate arbitrary array-valued
 expressions at runtime. Tool-handle elements are awaited and settled values
 pass through; mixed arrays and arrays stored in bindings are accepted. Direct
 async maps retain the existing callback driver. Non-array values fail with a
-typed runtime error. Process and timer promises retain their separate-await
-requirement; mixed process/tool settlement ordering is not implemented.
+typed runtime error.
+
+ADR 0087's two-phase tool-then-process rule is **gone** (FIG-2996, landed
+2026-09-14). A mixed aggregate is one resource-operation batch settling on one
+recorded order: a parked `processes.await` leaf takes its place in that order at
+the moment its completion arrives, so `Promise.all([tools.x.op(),
+processes.await(h)])` reports whichever failure the batch recorded first, and a
+tool rejection has no precedence over a process rejection. A **raw** process
+handle at an element position is refused, with a repair naming
+`processes.await(handle)`; a handle carried inside a value bound to a name is
+passed through untouched.
 
 `Promise.all` rejects with the reason of the leaf that settled **first**, as
 ECMA specifies, and `allSettled` keeps results in input order. Settlement order
@@ -268,6 +286,85 @@ The selection rule is recorded per batch at lowering, where the compiler already
 knows the dialect, rather than read from the VM's reference-semantics flag at run
 time. That flag answers a heap-ownership question, and one predicate answering
 two questions is the defect shape that cost an earlier layer three rounds.
+
+### Two host lifetime contracts (FIG-3392)
+
+**Decided, not yet implemented.** `Promise.race` and `Promise.any` are still
+refused at lowering with `"Unsupported: Promise.{method} requires durable
+partial-settlement ordering (FIG-1416)."` The full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md);
+[ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)
+carries the matching group-side amendment.
+
+A **host lifetime contract** is not a deviation. The deviation register below
+covers operations whose *meaning* departs from ECMA-262. Both rules here keep the
+program's meaning exactly and describe what happens to the host that was running
+it — a subject ECMA-262 does not address at all, since it has neither a `finish`,
+nor a host shutdown, nor a process. Neither becomes a register entry.
+
+#### 1. Opener close cancels an unfinished arm
+
+**Selection never cancels.** While the opener lives, `all`, `race` and `any`
+leave every losing arm running, which is ECMA-262's meaning.
+
+**At opener end an unfinished arm is cancelled.** The comparison cannot be made
+against the specification, and it must not be made against Node *process death*
+either — a process that exits kills its pending work, which would flatter lash by
+hiding the difference. **The Node oracle therefore keeps the host alive after the
+function returns:** in a still-running Node process, returning from an async
+function does not cancel a losing timer or socket, and that arm's later write can
+land after the caller returned. Lash suppresses that write at opener close.
+
+This statement concerns **cancellation only**. It claims no general Node
+scheduling or lifetime equivalence — the registered sequential async-map
+deviation still produces observable ordering differences while the opener is live
+— and opener close fences further unprotected Lash semantic writes without
+guaranteeing that external I/O already issued stops.
+
+One ordering divergence that exists today is **removed** rather than accepted.
+Every terminal leaf of a batch currently drains its declarations in *source*
+order, whether or not it declared any, so an aggregate resolves in source order
+and a hung source-first tool blocks every later sibling. Under ADR 0099 §5 the
+order becomes the durable **final-commit** order, which is what a host does with
+`Promise.all([a(), b()])`: each call's side effects happen as it settles, not in
+argument order. The observable consequence is that intent realization order for
+`Promise.all` moves from argument order to completion order.
+
+**An attempt whose final result already committed is exempt.** Its declared
+intents are realized before the opener settles and survive a crash in that window
+(ADR 0099 §4). Cancellation stops delivery of a *result*, never a side effect
+already performed — [ADR 0042](0042-tool-attempts-are-atomic.md) already makes
+in-attempt effects at-least-once.
+
+**Work that must outlive the opener is a process the program named.** A losing
+`processes.await` stays admitted while the opener lives; opener close releases
+the wait without cancelling the process
+([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)).
+
+#### 2. An await that nothing can resolve ends the cell
+
+`Promise.race([])` returns a forever-pending promise in ECMA-262, and **the
+dialect keeps exactly that meaning**: there is no exception to catch, no
+synthesized rejection, and no registered deviation. Because the dialect awaits
+aggregates in place, zero operands open no group at all — ADR 0065 already
+refuses empty groups — so the host detects an await nothing can resolve and
+**fails the cell with a typed host-level unsettled-await error**.
+
+That is the analogue of Node exiting with code 13 on an unsettled top-level
+await: the program's semantics are ECMA's, and the host's lifetime ends rather
+than parking a durable execution forever. FIG-3397 names the error code.
+
+The other empty aggregates need no host rule: `Promise.all([])` and
+`Promise.allSettled([])` return `[]`, and `Promise.any([])` rejects with an
+`AggregateError` whose `errors` is empty, all as ECMA-262 specifies.
+
+#### Register bookkeeping
+
+Neither contract above enters the numbered register. What does move when
+FIG-3397 lands is register entry 15 (aggregate rejection timing), which retires
+in that change because every aggregate is then on first-settlement wake — as ADR
+0065's consequences already anticipate. That move does not happen ahead of the
+code.
 
 ### Parser: SWC, pinned, behind a lash-owned adapter
 

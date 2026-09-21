@@ -6,6 +6,17 @@ Accepted. Amended 2026-08-19 (FIG-1578): a group carries envelopes and nothing
 else, and what runs a child is the host's registered `GroupExecutors` resolver
 rather than a caller-supplied executor vec paired with the group.
 
+Amended 2026-09-21 (FIG-3392): a tool child's loser lifetime is `live → closing
+→ settled` rather than unconditional run-to-completion, one rank authority per
+group is named explicitly, close releases consumer interest instead of deleting
+group state, and FIG-1416 ruling 3 is superseded for unfinished tool execution
+at normal opener end. The full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md),
+which is decided and not yet implemented; the clauses this ADR itself changes
+are marked inline and summarised in
+["Tool children have an opener lifetime"](#tool-children-have-an-opener-lifetime-fig-3392)
+below.
+
 ## Context
 
 A tool batch has been one atomic effect: `call_tool_batch` built a single
@@ -90,11 +101,19 @@ rank-indexes a *reference* into wherever the child's output already lives on
 Restate — the existing large-payload discipline — so object state stays a
 counter, a shape fence, and a rank → reference map.
 
-**Close deletes the object's state, and the delete is idempotent** because close
-is. `close_effect_group(Cancel)` returns once one idempotent cancel per unsettled
-child has been durably issued — keyed by the child's replay key, so the handle is
-derivable from state the group already carries and nothing extra is recorded at
-open — and does **not** await confirmed loser termination. Awaiting it would
+**Close is idempotent, and it releases the caller's interest without deleting the
+object's state.** *(Amended by FIG-3392: this clause originally read "Close
+deletes the object's state, and the delete is idempotent". Deleting at close
+destroys the rank, discharge and projection authority a committed-but-undrained
+child still needs — see
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) §4.
+State is released at **retirement**, which requires discharged obligations, no
+retained consumer dependency, and a surviving identity fence.)*
+`close_effect_group(Cancel)` returns once one idempotent cancel per **eligible**
+unsettled child has been durably issued — keyed by the child's replay key, so the
+handle is derivable from state the group already carries and nothing extra is
+recorded at open — and does **not** await confirmed loser termination. Awaiting it
+would
 block the winner on loser teardown, re-introduce the unbounded-tail coupling
 `Cancel` exists to sever, and make Restate stronger than the contract, which is
 itself the divergence this ADR exists to prevent. A loser's actual terminal —
@@ -382,7 +401,12 @@ Empty groups are refused. `Promise.all([])` resolves immediately with `[]` and
 `Promise.race([])` never settles; neither has a child to journal, so neither is a
 durable fact and neither reaches this seam — the dialect resolves the first
 locally, and the second is a never-settling program that must not become an
-unbounded durable await.
+unbounded durable await. *(FIG-3392 completes the second half: `race([])` keeps
+ECMA-262's never-settling semantics, no group is opened, and the host reports a
+typed unsettled-await failure rather than parking. That is a host lifetime
+contract in [ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md),
+not a deviation-register entry; see
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) §11.)*
 
 A grouped child that reaches a dispatch path with no slot for its membership is a
 typed refusal, never a silent strip. Restate's timer, await-event, and process
@@ -601,3 +625,153 @@ per-caller state, so "how many callers are suspended at once" is a question this
 contract never asks and cannot be made to ask. The work is VM-side continuation
 encoding. A typed signal/deadline select is a two-child `First` group over two
 existing commands with `Cancel` disposition — no new command, no new method.
+
+## Tool children have an opener lifetime (FIG-3392)
+
+**Decided, not yet implemented.** FIG-2266, FIG-3396 and FIG-3397 build it, and
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) is
+the contract. This section records what changes in *this* ADR.
+
+### The loser lifetime is three phases, not one disposition
+
+`LoserPolicy::RunToCompletion` above says what happens to a losing child *while
+its opener lives*, and this ADR wrote it as though that were the whole lifetime.
+A tool child now has three phases — **live**, **closing**, **settled** — defined
+in ADR 0099 §0. Selection still cancels nothing while the opener lives, which is
+the ECMA-262 fidelity this ADR already required.
+
+**An opener is `Turn(session_id, turn_id)` or `Process(ProcessRef { process_id,
+incarnation })`**, stable across worker attempts and segments and changing on
+process re-registration. Today's `ExecutionScope::Process` carries only
+`process_id`, so it does not establish that identity; FIG-3394 binds the
+incarnation into the shared group and child identity, and FIG-3396 validates it
+during recovery. A retired or mismatched incarnation is refused, never rebound to
+the current process of the same name.
+
+**A dead worker is not a closed opener.** ADR 0094 calls an uncommitted crashed
+turn "interrupted, not ended", and the drain guards in `group_drain.rs` are
+expressly local — "A group open in *another* process is not distinguishable from
+a closed one here". Recovery therefore classifies an opener by a **durable
+live→closing transition recorded before admission stops or any cancellation is
+issued** (ADR 0099 §7), not by a lease or a terminal that a crash may precede.
+
+### Commit and cancel meet at one linearization point
+
+**Cancellation requests are not cancellation decisions.** The final-attempt
+record and the cancel disposition compete at one durable, fenced linearization
+point, and exactly one commits. A winning final record retains settlement
+ownership; a winning cancel disposition refuses any later attempt-final record.
+The bounded grace follows the decision and cannot reverse it.
+
+**Rankability follows the child's own obligations, not opener close.** A
+committed final proceeds through intent drain and durable projection to rankable
+while the opener is live or closing, so a live aggregate reaches rankability.
+
+**Within a group, intent drains are admitted in final-commit order**, the durable
+order of that linearization point, rather than in the batch's source order. This
+ADR's whole purpose is to make settlement order a durable fact, and that is what
+makes the replacement available: cross-child source order was a determinism device
+chosen when completion order was re-raced on every redrive. Carrying it into
+groups would have made `Promise.race([slow(), fast()])` unable to resolve with
+`fast` — every terminal leaf takes its source turn today, whether or not it
+declared an intent — and one hung source-first tool would stop every sibling from
+ever ranking. Rank order therefore equals commit order; only drain duration
+varies, and cancel-decided children still route through for rank like any other
+terminal.
+
+**A committed-but-undrained final remains unsettled and is ineligible for
+cancellation.** It is excluded from *cancellation*, not from lifecycle
+accounting: it still needs the rank, discharge and projection authority this ADR
+provides. Issuing a cancel for it would drop a recorded declaration ADR 0042
+protects, and would make the presence of a deadline arm decide whether a recorded
+trigger or start exists.
+
+**Cancel/abandon is a durable, fenced disposition, distinct from physical stop.**
+It forbids new unprotected semantic admission under the cancelled invocation; it
+does **not** undo already-admitted commands or cancel committed descendant
+obligations, which retain authority to finish under the original opener.
+Orchestrating children — which ADR 0042 says have no `ToolAttempt` frame of their
+own — are classified by their retained command and child obligations, never by an
+invented outer attempt. Known usage is never fenced out (ADR 0099 §13).
+
+**Restate engine cancellation is never the sole close protocol.** The pinned
+shared core cancels tracked child calls from inside `do_await` without consulting
+any Lash commit fence, so switching `.send()` to `.call()` does not by itself
+protect a committed final. The journaled cooperative path and retained
+protected-work recovery must preserve these rules even when implicit cancellation
+interrupts a child invocation.
+
+### One rank authority per group
+
+Restate's notification order is **invocation-local**: the protocol requires a
+replaying SDK to observe the same relative order it observed while processing,
+which serves a consumer replaying one selection schedule inside one invocation.
+Attaching already-finished children from a *successor* segment yields new
+notifications, not the predecessor's observation order.
+
+**SDK notification order may serve as rank only where same-invocation replay
+proves the whole contract.** The group virtual object above stays wherever
+consumption, discharge or retained observation crosses invocations, and removing
+it requires proof of the cross-segment contract. The consumed prefix and the
+settlement payloads a successor still needs persist across handover; expired
+Restate attachment is a typed recovery failure, never permission to rerun a side
+effect.
+
+Two corrections to this ADR's earlier reading of the engine tier:
+
+- **Implicit child-call cancellation covers zero group children today.** The
+  pinned VM cancels tracked request-response children and deliberately exempts
+  one-way sends, and every group child is currently dispatched one-way
+  (`crates/lash-restate/src/effect_group/dispatch.rs`, `.send()`). The per-child
+  CANCEL durable wait is the only cancel path those children have, and it may be
+  removed only in the same cutover that makes children `call` children.
+- **The "a Restate group child is an invocation" ruling survives, but not for the
+  reason given.** "The Rust SDK requires `ctx.run` closures to be awaited
+  immediately" is a Rust-SDK binding gap with an upstream issue, not a protocol
+  constraint: the shared core lash links models a *set* of executing runs, and the
+  TypeScript and Java SDKs compose runs today. The conclusion stands on better
+  ground — a child invocation gets its own retry policy, suspension, native
+  cancellation and idempotency-key identity, and keeps the leaf attempt body out
+  of the parent's ordinal journal.
+
+### FIG-1416 ruling 3 is superseded, narrowly
+
+FIG-1416 ruling 3 assigned losers to the queued-work driver under both
+dispositions and rejected leaving them on the opening scope's task set. **That
+ruling is superseded for unfinished tool execution at normal opener end, and for
+nothing else.** Recovery ownership of protected settlement stays, as do the
+drain, the disposition-at-open rule and the work-driver seam. The owner gives up
+implicit durable background tools — an unfinished loser is no longer guaranteed
+to eventually perform its opaque work or produce new intents after `finish` — and
+keeps the explicit process, whose ADR 0094 lifecycle is unchanged.
+
+The Node comparison lives in
+[ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md)'s matching
+amendment: within a live opener nothing diverges from Promise non-cancellation,
+and the divergence at opener end is a host lifetime contract measured against a
+Node host that stays alive after an async function returns.
+
+### Admission bounds retained work, and retirement is not close
+
+"No segment boundary while tool children are unsettled" is refused: it fails
+[ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md) for a
+days-long process racing one quick tool against one hung tool at width two.
+Outstanding children are reattached across segments instead.
+
+A group's open admits, as a typed refusal of the **whole open before dispatch**,
+a bound on retained work **per exact logical opener** — nested, accepted-unclaimed,
+running, closing **and settled-but-still-required** children and group metadata —
+counting unique executions separately from operand positions, with capacity
+reserved atomically at acceptance, reused by replay, and released only when a
+child's recovery and consumer dependencies are discharged. Accepted work is never
+retroactively refused by a changed budget. Backend command headroom for
+parent-side dispatch, observation, cancellation, incorporation and handover is a
+**per executing controller/segment** bound, not one counter over a days-long
+opener; FIG-3397 names those accounting units and their release conditions.
+
+**A completed group may retire as a whole while its opener remains live**, once no
+replay or continuation needs it and an existing identity fence prevents
+resurrection. Retiring the live opener's entire scope to retire one group is not
+available, and retirement stays group-atomic (N3 above). Mid-aggregate VM
+suspension is required only if command accounting shows a bounded aggregate cannot
+meet the controller budget, and no universal tool-result byte cap follows.
