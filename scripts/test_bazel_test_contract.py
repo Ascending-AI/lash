@@ -47,27 +47,33 @@ def generated_batches() -> dict[str, list[str]]:
     return ast.literal_eval(match.group(1))
 
 
-def inventory_targets() -> list[dict[str, object]]:
-    inventory = json.loads(
+def inventory() -> dict[str, object]:
+    return json.loads(
         (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
     )
+
+
+def inventory_targets() -> list[dict[str, object]]:
     return [
         target | {"package": package["package"]}
-        for package in inventory["packages"]
+        for package in inventory()["packages"]
         for target in package["targets"]
     ]
 
 
 def test_targets() -> list[dict[str, object]]:
-    inventory = json.loads(
-        (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
-    )
     return [
-        target | {"package": package["package"]}
-        for package in inventory["packages"]
-        for target in package["targets"]
+        target
+        for target in inventory_targets()
         if target["label"] is not None and target["kind"] in TEST_KINDS
     ]
+
+
+def labels_tagged(targets: list[dict[str, object]], *tags: str) -> set[str]:
+    """Labels carrying any of `tags` -- the inventory's own partition facts."""
+    return {
+        target["label"] for target in targets if set(tags) & set(target["tags"])
+    }
 
 
 def workflow() -> dict[str, object]:
@@ -129,42 +135,77 @@ class BazelTestContractTests(unittest.TestCase):
         `lash-internal-core` entry whose dependencies went empty) would turn
         that architecture gate into a vacuous pass.
         """
-        inventory = json.loads(
-            (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
-        )
-        for package in inventory["packages"]:
+        packages = inventory()["packages"]
+        for package in packages:
             with self.subTest(package=package["package"]):
                 dependencies = package["dependencies"]
                 self.assertIsInstance(dependencies, list)
                 self.assertEqual(sorted(set(dependencies)), dependencies)
         core = next(
-            package
-            for package in inventory["packages"]
-            if package["package"] == "lash-internal-core"
+            package for package in packages if package["package"] == "lash-internal-core"
         )
         self.assertIn("serde", core["dependencies"])
 
+    def test_inventory_counts_describe_its_own_target_list(self) -> None:
+        """The inventory's summary counts are projections of its target list.
+
+        They are the only counts this contract reads, and they are read back
+        against the list they summarise, never against a literal: a target
+        added with a regenerated inventory moves both halves together, and a
+        hand edit to one half is what this refuses.
+        """
+        payload = inventory()
+        labelled = [
+            target for target in inventory_targets() if target["label"] is not None
+        ]
+        unlabelled = [
+            target for target in inventory_targets() if target["label"] is None
+        ]
+        self.assertEqual(len(payload["packages"]), payload["cargo_package_count"])
+        self.assertEqual(len(labelled), payload["generated_label_count"])
+        self.assertEqual(len(unlabelled), payload["cargo_only_target_count"])
+        # `cargo_target_count` is Cargo's own target list; every labelled
+        # entry here stands for at least one Cargo target, but a library
+        # yields both a lib and a unit-test label, so the inventory can only
+        # be at least that large.
+        self.assertGreaterEqual(len(labelled), payload["cargo_target_count"])
+
     def test_generated_suite_partitions_every_executable_test(self) -> None:
+        """Every executable test label lands in exactly one generated partition.
+
+        FIG-3477: the partitions are derived from the tags the inventory
+        records for each label, never from a count. A target added without
+        regenerating the inventory is refused by
+        `test_generated_inventory_is_current`; a target added with a
+        regenerated inventory moves every list here in step and needs no edit
+        to this file.
+        """
         targets = test_targets()
         all_labels = {target["label"] for target in targets}
         bazel_labels = set(generated_list("WORKSPACE_BAZEL_TEST_TARGETS"))
         cargo_labels = set(generated_list("WORKSPACE_CARGO_TEST_TARGETS"))
         deferred_labels = set(generated_list("WORKSPACE_DEFERRED_TEST_TARGETS"))
-
         dev_labels = set(generated_list("WORKSPACE_DEV_TEST_TARGETS"))
 
-        self.assertEqual(124, len(all_labels))
-        self.assertEqual(106, len(bazel_labels))
-        self.assertEqual(104, len(dev_labels))
-        self.assertEqual(17, len(cargo_labels))
-        self.assertEqual(1, len(deferred_labels))
-        self.assertEqual(
-            {
-                "//crates/lash-sim:lash-sim__unit_test",
-                "//crates/lash-typescript:integration__test",
-            },
-            bazel_labels - dev_labels,
-        )
+        # The tags are the partition facts; the lists are their projections.
+        manual = labels_tagged(targets, "manual")
+        pr_deferred = labels_tagged(targets, "pr-deferred")
+        dev_deferred = labels_tagged(targets, "dev-deferred")
+        self.assertEqual(manual, cargo_labels)
+        self.assertEqual(pr_deferred, deferred_labels)
+        self.assertEqual(all_labels - manual - pr_deferred, bazel_labels)
+        self.assertEqual(bazel_labels - dev_deferred, dev_labels)
+        # Every partition is populated, so a generator that stopped tagging
+        # would fail here instead of passing on three empty sets.
+        for name, labels in (
+            ("bazel", bazel_labels),
+            ("dev", dev_labels),
+            ("cargo", cargo_labels),
+            ("pr-deferred", deferred_labels),
+            ("dev-deferred", bazel_labels - dev_labels),
+        ):
+            with self.subTest(partition=name):
+                self.assertTrue(labels)
         self.assertFalse(bazel_labels & cargo_labels)
         self.assertFalse(bazel_labels & deferred_labels)
         self.assertFalse(cargo_labels & deferred_labels)
@@ -190,55 +231,43 @@ class BazelTestContractTests(unittest.TestCase):
         # The parallel tail leg must stay a strict subset of the suite: a
         # label in the tail but not the suite would silently run nowhere on
         # the main leg's `//:workspace_tests -//:workspace_tail_tests`.
+        # The tail is two measured shapes -- every `//examples/` leaf and every
+        # `dev-deferred` label -- each in the form the suite carries it (its
+        # batch when batched, itself otherwise). Asserting the set from those
+        # two facts, not from a list of labels, is what lets a new example
+        # crate land without an edit here while a dev-deferred label the tail
+        # forgot still fails.
         tail_suite = set(generated_list("WORKSPACE_TAIL_SUITE_LABELS"))
         self.assertLessEqual(tail_suite, suite_labels)
+        batch_of = {
+            member: batch for batch, members in batches.items() for member in members
+        }
         self.assertEqual(
-            {
-                "//crates/lash-sim:lash-sim__unit_test",
-                "//crates/lash-typescript:integration__test",
-                "//examples/agent-service:agent-service__unit_test",
-                "//examples/agent-service:fresh_boot__test",
-                "//examples/agent-workbench:agent-workbench__unit_test",
-                "//examples/slack-clone:mcp__test",
-                "//examples/slack-clone:slack-clone__unit_test",
-                "//examples/toolbench:toolbench__unit_test",
-                "//examples/workflow-graph-roundtrip:test_batch",
-            },
+            {label for label in suite_labels if label.startswith("//examples/")}
+            | {batch_of.get(label, label) for label in dev_deferred},
             tail_suite,
         )
+        self.assertTrue(dev_deferred)
 
         by_label = {target["label"]: target for target in targets}
-        self.assertTrue(
-            all(
-                "manual" not in by_label[label]["tags"]
-                and "pr-deferred" not in by_label[label]["tags"]
-                for label in bazel_labels
-            )
-        )
-        self.assertTrue(
-            all(
-                "manual" in by_label[label]["tags"]
-                and by_label[label]["cargo_only"]
-                for label in cargo_labels
-            )
-        )
+        for label in sorted(cargo_labels):
+            with self.subTest(cargo_owned=label):
+                self.assertTrue(by_label[label]["cargo_only"])
 
-        exception_classes = collections.Counter(
-            tag
-            for label in cargo_labels
-            for tag in by_label[label]["tags"]
-            if tag != "manual"
-        )
-        self.assertEqual(
-            {
-                "cargo-frontend-assets": 4,
-                "cargo-service-gate": 12,
-                "cargo-trybuild": 1,
-            },
-            dict(exception_classes),
-        )
-
+        # Every Cargo-owned label records exactly one exception class, drawn
+        # from the closed vocabulary the generator's classifier emits, and
+        # every class in that vocabulary is still in use -- so a class that
+        # emptied out (its last label moved to the partition) is a conscious
+        # edit here, not a silent one.
         excluded = {"cargo-service-gate", "cargo-trybuild", "cargo-frontend-assets"}
+        exception_classes = collections.Counter()
+        for label in sorted(cargo_labels):
+            classes = excluded & set(by_label[label]["tags"])
+            with self.subTest(cargo_owned=label):
+                self.assertEqual(1, len(classes))
+            exception_classes.update(classes)
+        self.assertEqual(excluded, set(exception_classes))
+
         expected_nextest = set()
         for target in targets:
             if target["label"] not in cargo_labels:
@@ -819,7 +848,12 @@ class BazelTestContractTests(unittest.TestCase):
             set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
             clippy,
         )
-        self.assertEqual(196, len(clippy))
+        # The partition's size is the inventory's own label count less the
+        # exemptions it records -- a fact read from the inventory, not pinned.
+        self.assertEqual(
+            inventory()["generated_label_count"] - len(build_scripts), len(clippy)
+        )
+        self.assertTrue(build_scripts)
         # The half that actually compiles `build.rs` is linted, not exempted.
         self.assertIn("//crates/lash-protocol-rlm:build_script_", clippy)
         self.assertTrue(
