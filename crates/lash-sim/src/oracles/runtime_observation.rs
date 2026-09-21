@@ -705,7 +705,7 @@ pub(super) fn runtime_graph_projection_acyclic(events: &[DeliveredBoundary]) -> 
             );
         };
         checked += 1;
-        if !facts.passed {
+        if !facts.passed() {
             return OracleVerdict::failed(
                 RUNTIME_GRAPH_ACYCLIC_ORACLE,
                 format!(
@@ -860,7 +860,7 @@ pub fn runtime_single_active_agent_frame(events: &[DeliveredBoundary]) -> Oracle
             );
         };
         checked += 1;
-        if !facts.passed {
+        if !facts.passed() {
             return OracleVerdict::failed(
                 RUNTIME_SINGLE_ACTIVE_AGENT_FRAME_ORACLE,
                 format!(

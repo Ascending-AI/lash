@@ -2,7 +2,7 @@ use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, ser::SerializeStruct};
 use serde_json::Value;
 
 use crate::trace::{OracleStatus, OracleVerdict};
@@ -24,17 +24,51 @@ pub struct RuntimeTurnObservation {
     pub usage_invariant: Option<RuntimeUsageInvariantFacts>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct RuntimeGraphInvariantFacts {
     pub node_count: usize,
     pub edge_count: usize,
     pub duplicate_node_ids: Vec<String>,
     pub missing_parent_links: Vec<RuntimeGraphMissingParent>,
     pub cycle_node_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub leaf_node_id: Option<String>,
     pub leaf_exists: bool,
-    pub passed: bool,
+}
+
+impl RuntimeGraphInvariantFacts {
+    /// The leaf-existence rule: a declared leaf must name a recorded node, and
+    /// an absent leaf declaration satisfies the invariant vacuously.
+    pub fn leaf_exists(leaf_node_id: Option<&str>, known_node_ids: &BTreeSet<String>) -> bool {
+        leaf_node_id.is_none_or(|leaf| known_node_ids.contains(leaf))
+    }
+
+    pub fn passed(&self) -> bool {
+        self.duplicate_node_ids.is_empty()
+            && self.missing_parent_links.is_empty()
+            && self.cycle_node_ids.is_empty()
+            && self.leaf_exists
+    }
+}
+
+impl Serialize for RuntimeGraphInvariantFacts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct(
+            "RuntimeGraphInvariantFacts",
+            8 + usize::from(self.leaf_node_id.is_some()),
+        )?;
+        state.serialize_field("node_count", &self.node_count)?;
+        state.serialize_field("edge_count", &self.edge_count)?;
+        state.serialize_field("duplicate_node_ids", &self.duplicate_node_ids)?;
+        state.serialize_field("missing_parent_links", &self.missing_parent_links)?;
+        state.serialize_field("cycle_node_ids", &self.cycle_node_ids)?;
+        if let Some(leaf_node_id) = &self.leaf_node_id {
+            state.serialize_field("leaf_node_id", leaf_node_id)?;
+        }
+        state.serialize_field("leaf_exists", &self.leaf_exists)?;
+        state.serialize_field("passed", &self.passed())?;
+        state.end()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -43,7 +77,7 @@ pub struct RuntimeGraphMissingParent {
     pub parent_node_id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct RuntimeAgentFrameInvariantFacts {
     pub current_frame_node_id: String,
     pub frame_count: usize,
@@ -52,12 +86,47 @@ pub struct RuntimeAgentFrameInvariantFacts {
     pub current_frame_active: bool,
     pub nodes_without_agent_frame: Vec<String>,
     pub node_agent_frame_ids_without_record: Vec<String>,
-    pub passed: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub observation_limit: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+impl RuntimeAgentFrameInvariantFacts {
+    pub fn passed(&self) -> bool {
+        self.active_frame_ids.len() == 1
+            && self.active_frame_ids.first().map(String::as_str)
+                == Some(self.current_frame_node_id.as_str())
+            && self.current_frame_exists
+            && self.current_frame_active
+            && self.nodes_without_agent_frame.is_empty()
+            && self.node_agent_frame_ids_without_record.is_empty()
+    }
+}
+
+impl Serialize for RuntimeAgentFrameInvariantFacts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct(
+            "RuntimeAgentFrameInvariantFacts",
+            9 + usize::from(self.observation_limit.is_some()),
+        )?;
+        state.serialize_field("current_frame_node_id", &self.current_frame_node_id)?;
+        state.serialize_field("frame_count", &self.frame_count)?;
+        state.serialize_field("active_frame_ids", &self.active_frame_ids)?;
+        state.serialize_field("current_frame_exists", &self.current_frame_exists)?;
+        state.serialize_field("current_frame_active", &self.current_frame_active)?;
+        state.serialize_field("nodes_without_agent_frame", &self.nodes_without_agent_frame)?;
+        state.serialize_field(
+            "node_agent_frame_ids_without_record",
+            &self.node_agent_frame_ids_without_record,
+        )?;
+        state.serialize_field("passed", &self.passed())?;
+        if let Some(observation_limit) = &self.observation_limit {
+            state.serialize_field("observation_limit", observation_limit)?;
+        }
+        state.end()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct RuntimeUsageInvariantFacts {
     pub turn_usage: RuntimeUsageTotals,
     pub total_usage: RuntimeUsageTotals,
@@ -68,7 +137,32 @@ pub struct RuntimeUsageInvariantFacts {
     pub non_negative: bool,
     pub usage_events_monotonic: bool,
     pub negative_fields: Vec<String>,
-    pub passed: bool,
+}
+
+impl RuntimeUsageInvariantFacts {
+    pub fn passed(&self) -> bool {
+        self.negative_fields.is_empty() && self.non_negative && self.usage_events_monotonic
+    }
+}
+
+impl Serialize for RuntimeUsageInvariantFacts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("RuntimeUsageInvariantFacts", 10)?;
+        state.serialize_field("turn_usage", &self.turn_usage)?;
+        state.serialize_field("total_usage", &self.total_usage)?;
+        state.serialize_field("token_ledger_total", &self.token_ledger_total)?;
+        state.serialize_field("token_ledger_entry_count", &self.token_ledger_entry_count)?;
+        state.serialize_field("usage_event_count", &self.usage_event_count)?;
+        state.serialize_field(
+            "usage_event_cumulative_totals",
+            &self.usage_event_cumulative_totals,
+        )?;
+        state.serialize_field("non_negative", &self.non_negative)?;
+        state.serialize_field("usage_events_monotonic", &self.usage_events_monotonic)?;
+        state.serialize_field("negative_fields", &self.negative_fields)?;
+        state.serialize_field("passed", &self.passed())?;
+        state.end()
+    }
 }
 
 macro_rules! define_runtime_usage_totals {
@@ -168,17 +262,51 @@ define_runtime_usage_totals! {
     reasoning_output_tokens => false,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct RuntimeFinalValueInvariantFacts {
     pub outcome_kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub semantic_value: Option<Value>,
     pub terminal_event_count: usize,
     pub assistant_prose_delta_count: usize,
     pub assistant_output_text: String,
     pub semantic_channel_observed: bool,
-    pub transcript_inference_required: bool,
-    pub passed: bool,
+}
+
+impl RuntimeFinalValueInvariantFacts {
+    pub fn transcript_inference_required(&self) -> bool {
+        !self.semantic_channel_observed
+    }
+
+    pub fn passed(&self) -> bool {
+        self.semantic_channel_observed
+    }
+}
+
+impl Serialize for RuntimeFinalValueInvariantFacts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct(
+            "RuntimeFinalValueInvariantFacts",
+            7 + usize::from(self.semantic_value.is_some()),
+        )?;
+        state.serialize_field("outcome_kind", &self.outcome_kind)?;
+        if let Some(semantic_value) = &self.semantic_value {
+            state.serialize_field("semantic_value", semantic_value)?;
+        }
+        state.serialize_field("terminal_event_count", &self.terminal_event_count)?;
+        state.serialize_field(
+            "assistant_prose_delta_count",
+            &self.assistant_prose_delta_count,
+        )?;
+        state.serialize_field("assistant_output_text", &self.assistant_output_text)?;
+        state.serialize_field("semantic_channel_observed", &self.semantic_channel_observed)?;
+        state.serialize_field(
+            "transcript_inference_required",
+            &self.transcript_inference_required(),
+        )?;
+        state.serialize_field("passed", &self.passed())?;
+        state.end()
+    }
 }
 
 pub fn runtime_turn_contract(
@@ -251,7 +379,7 @@ pub fn runtime_turn_contract(
         );
     }
     if let Some(graph) = &observation.graph_invariant
-        && !graph.passed
+        && !graph.passed()
     {
         return OracleVerdict::failed(
             "runtime.turn_contract",
@@ -259,7 +387,7 @@ pub fn runtime_turn_contract(
         );
     }
     if let Some(agent_frame) = &observation.agent_frame_invariant
-        && !agent_frame.passed
+        && !agent_frame.passed()
     {
         return OracleVerdict::failed(
             "runtime.turn_contract",
@@ -267,7 +395,7 @@ pub fn runtime_turn_contract(
         );
     }
     if let Some(usage) = &observation.usage_invariant
-        && !usage.passed
+        && !usage.passed()
     {
         return OracleVerdict::failed(
             "runtime.turn_contract",
@@ -336,16 +464,12 @@ pub fn runtime_graph_invariant_facts(
         .iter()
         .filter(|node| node.parent_node_id.is_some())
         .count();
-    let leaf_exists = graph
-        .leaf_node_id
-        .as_ref()
-        .is_none_or(|leaf| parent_by_node.contains_key(leaf.as_str()));
+    let leaf_exists = RuntimeGraphInvariantFacts::leaf_exists(
+        graph.leaf_node_id.as_ref().map(|leaf| leaf.as_str()),
+        &parent_by_node.keys().cloned().collect(),
+    );
     let duplicate_node_ids = duplicate_node_ids.into_iter().collect::<Vec<_>>();
     let cycle_node_ids = cycle_node_ids.into_iter().collect::<Vec<_>>();
-    let passed = duplicate_node_ids.is_empty()
-        && missing_parent_links.is_empty()
-        && cycle_node_ids.is_empty()
-        && leaf_exists;
     RuntimeGraphInvariantFacts {
         node_count: graph.nodes.len(),
         edge_count,
@@ -354,7 +478,6 @@ pub fn runtime_graph_invariant_facts(
         cycle_node_ids,
         leaf_node_id: graph.leaf_node_id.as_ref().map(ToString::to_string),
         leaf_exists,
-        passed,
     }
 }
 
@@ -415,13 +538,6 @@ pub fn runtime_agent_frame_invariant_facts(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let passed = active_frame_ids.len() == 1
-        && active_frame_ids.first().map(String::as_str)
-            == snapshot.current_frame_node_id.as_deref()
-        && current_frame_exists
-        && current_frame_active
-        && nodes_without_agent_frame.is_empty()
-        && node_agent_frame_ids_without_record.is_empty();
     RuntimeAgentFrameInvariantFacts {
         current_frame_node_id: snapshot
             .current_frame_node_id
@@ -434,7 +550,6 @@ pub fn runtime_agent_frame_invariant_facts(
         current_frame_active,
         nodes_without_agent_frame,
         node_agent_frame_ids_without_record,
-        passed,
         observation_limit: None,
     }
 }
@@ -487,7 +602,6 @@ pub fn runtime_usage_invariant_facts(
         non_negative,
         usage_events_monotonic,
         negative_fields,
-        passed: non_negative && usage_events_monotonic,
     }
 }
 
@@ -538,8 +652,6 @@ pub fn runtime_final_value_invariant_facts(
         assistant_prose_delta_count,
         assistant_output_text: result.assistant_output.safe_text.clone(),
         semantic_channel_observed,
-        transcript_inference_required: !semantic_channel_observed,
-        passed: semantic_channel_observed,
     }
 }
 
@@ -650,7 +762,7 @@ mod tests {
             Some("child".to_string().into()),
         );
         let facts = runtime_graph_invariant_facts(&missing_parent);
-        assert!(!facts.passed);
+        assert!(!facts.passed());
         assert_eq!(facts.missing_parent_links[0].parent_node_id, "missing");
 
         let cycle_nodes = serde_json::from_value(json!([
@@ -677,7 +789,7 @@ mod tests {
             Some("b".to_string().into()),
         );
         let facts = runtime_graph_invariant_facts(&cycle);
-        assert!(!facts.passed);
+        assert!(!facts.passed());
         assert!(!facts.cycle_node_ids.is_empty());
     }
 
@@ -754,8 +866,8 @@ mod tests {
                 },
             )],
         );
-        assert!(!failed.passed);
-        assert!(failed.transcript_inference_required);
+        assert!(!failed.passed());
+        assert!(failed.transcript_inference_required());
 
         let value = serde_json::json!({"answer": 42});
         let semantic = result(lash_core::facade_support::TurnOutcome::Finished(
@@ -771,11 +883,11 @@ mod tests {
                 },
             )],
         );
-        assert!(!mismatched.passed);
+        assert!(!mismatched.passed());
         assert_eq!(mismatched.terminal_event_count, 1);
 
         let missing_terminal_event = runtime_final_value_invariant_facts(&semantic, &[]);
-        assert!(!missing_terminal_event.passed);
+        assert!(!missing_terminal_event.passed());
         assert_eq!(missing_terminal_event.terminal_event_count, 0);
 
         let passed = runtime_final_value_invariant_facts(
@@ -786,8 +898,8 @@ mod tests {
                 },
             )],
         );
-        assert!(passed.passed);
+        assert!(passed.passed());
         assert_eq!(passed.semantic_value, Some(value));
-        assert!(!passed.transcript_inference_required);
+        assert!(!passed.transcript_inference_required());
     }
 }

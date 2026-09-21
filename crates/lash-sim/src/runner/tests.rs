@@ -1004,7 +1004,7 @@ async fn final_value_semantic_channel_proof_uses_runtime_outcome_and_event() {
     );
     assert!(proof.final_value_event_count > 0);
     assert!(proof.assistant_prose_delta_count > 0);
-    assert!(!proof.facts.transcript_inference_required);
+    assert!(!proof.facts.transcript_inference_required());
     assert!(proof.semantic_channel_invariant.is_passed());
 }
 

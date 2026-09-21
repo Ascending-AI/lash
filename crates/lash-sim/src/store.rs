@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::runtime_boundaries::EFFECT_SCOPE_ID;
-use crate::runtime_contracts::{RuntimeTurnObservation, RuntimeUsageTotals, runtime_turn_contract};
+use crate::runtime_contracts::{
+    RuntimeAgentFrameInvariantFacts, RuntimeFinalValueInvariantFacts, RuntimeGraphInvariantFacts,
+    RuntimeTurnObservation, RuntimeUsageInvariantFacts, RuntimeUsageTotals, runtime_turn_contract,
+};
 use crate::scheduler::{
     ACTIVE_TURN_INPUT_STATE, BoundaryEvent, BoundaryKind, NEXT_TURN_INPUT_STATE, QueuedIngressMode,
 };
@@ -663,6 +666,47 @@ impl ModelStore {
                     &SessionId::from(event.actor_alias.clone()),
                     frame_key.as_str(),
                 );
+                // The model's runtime invariant facts are the same typed fact
+                // sets the real turn path emits, so `passed` and the
+                // leaf-existence rule are derived exactly once.
+                let graph_facts = RuntimeGraphInvariantFacts {
+                    node_count: graph_node_count,
+                    edge_count: graph_node_count.saturating_sub(1),
+                    duplicate_node_ids: Vec::new(),
+                    missing_parent_links: Vec::new(),
+                    cycle_node_ids: Vec::new(),
+                    leaf_node_id: None,
+                    leaf_exists: RuntimeGraphInvariantFacts::leaf_exists(None, &BTreeSet::new()),
+                };
+                let agent_frame_facts = RuntimeAgentFrameInvariantFacts {
+                    current_frame_node_id: frame_node_id.as_str().to_string(),
+                    frame_count: 1,
+                    active_frame_ids: vec![frame_node_id.as_str().to_string()],
+                    current_frame_exists: true,
+                    current_frame_active: true,
+                    nodes_without_agent_frame: Vec::new(),
+                    node_agent_frame_ids_without_record: Vec::new(),
+                    observation_limit: None,
+                };
+                let usage_facts = RuntimeUsageInvariantFacts {
+                    turn_usage: turn_usage.clone(),
+                    total_usage: turn_usage.clone(),
+                    token_ledger_total: total_usage,
+                    token_ledger_entry_count: ledger_keys.len(),
+                    usage_event_count: 1,
+                    usage_event_cumulative_totals: vec![turn_usage],
+                    non_negative: true,
+                    usage_events_monotonic: true,
+                    negative_fields: Vec::new(),
+                };
+                let final_value_facts = RuntimeFinalValueInvariantFacts {
+                    outcome_kind: "assistant_message".to_string(),
+                    semantic_value: None,
+                    terminal_event_count: 0,
+                    assistant_prose_delta_count: 1,
+                    assistant_output_text: text.clone(),
+                    semantic_channel_observed: false,
+                };
                 json!({
                     "session": event.actor_alias,
                     "runtime_session_id": event.actor_alias,
@@ -681,53 +725,16 @@ impl ModelStore {
                         "graph_non_empty": true,
                         "transcript_contains_provider_output": true,
                         "activity_count_nonzero": true,
-                        "graph_acyclic": true,
-                        "single_active_agent_frame": true,
-                        "usage_monotonic": true,
+                        "graph_acyclic": graph_facts.cycle_node_ids.is_empty(),
+                        "single_active_agent_frame": agent_frame_facts.active_frame_ids.len() == 1,
+                        "usage_monotonic": usage_facts.usage_events_monotonic,
                     },
                     "runtime_invariant_facts": {
-                        "graph": {
-                            "node_count": graph_node_count,
-                            "edge_count": graph_node_count.saturating_sub(1),
-                            "duplicate_node_ids": [],
-                            "missing_parent_links": [],
-                            "cycle_node_ids": [],
-                            "leaf_node_id": null,
-                            "leaf_exists": graph_node_count > 0,
-                            "passed": true,
-                        },
-                        "agent_frame": {
-                            "current_frame_node_id": frame_node_id,
-                            "frame_count": 1,
-                            "active_frame_ids": [frame_node_id],
-                            "current_frame_exists": true,
-                            "current_frame_active": true,
-                            "nodes_without_agent_frame": [],
-                            "node_agent_frame_ids_without_record": [],
-                            "passed": true,
-                        },
-                        "usage": {
-                            "turn_usage": turn_usage,
-                            "total_usage": turn_usage,
-                            "token_ledger_total": total_usage,
-                            "token_ledger_entry_count": ledger_keys.len(),
-                            "usage_event_count": 1,
-                            "usage_event_cumulative_totals": [turn_usage],
-                            "non_negative": true,
-                            "usage_events_monotonic": true,
-                            "negative_fields": [],
-                            "passed": true,
-                        },
+                        "graph": graph_facts,
+                        "agent_frame": agent_frame_facts,
+                        "usage": usage_facts,
                     },
-                    "runtime_final_value_facts": {
-                        "outcome_kind": "assistant_message",
-                        "terminal_event_count": 0,
-                        "assistant_prose_delta_count": 1,
-                        "assistant_output_text": text,
-                        "semantic_channel_observed": false,
-                        "transcript_inference_required": true,
-                        "passed": false,
-                    },
+                    "runtime_final_value_facts": final_value_facts,
                     "runtime_contract": runtime_contract,
                 })
             }

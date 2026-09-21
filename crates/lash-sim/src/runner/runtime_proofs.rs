@@ -587,11 +587,11 @@ pub(super) async fn prove_final_value_semantic_channel()
         .join("\n");
     let transcript_contains_final_value =
         transcript_text.contains("semantic-channel") || transcript_text.contains("\"count\"");
-    let semantic_ok = facts.passed
+    let semantic_ok = facts.passed()
         && facts.outcome_kind == "final_value"
         && facts.semantic_value.as_ref() == Some(&final_value)
         && final_value_events.iter().any(|value| value == &final_value)
-        && !facts.transcript_inference_required
+        && !facts.transcript_inference_required()
         && result.assistant_message().is_none()
         && !transcript_contains_final_value;
     require(
