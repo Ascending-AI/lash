@@ -628,7 +628,7 @@ impl DurableProcessWorker {
                 // The opener is the name bound to the incarnation this run was
                 // admitted under, read off the record the authority CAS
                 // returned rather than re-read later (ADR 0099 §1).
-                crate::runtime::effect::AdmittedProcess {
+                crate::execution::runtime::effect::AdmittedProcess {
                     registration,
                     incarnation: admitted_incarnation,
                 },
