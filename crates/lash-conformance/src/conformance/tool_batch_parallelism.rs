@@ -180,6 +180,13 @@ pub struct ToolBatchProducer {
     /// its batch from the turn leaves this absent, so no tier has to supply a
     /// process engine it never runs.
     pub process_registry: Option<ToolBatchProcessRegistryFactory>,
+    /// When true the law runs the scenario's turn under a borrowed scoped
+    /// controller — the shape a Restate-style host produces — so the runtime
+    /// cannot hold a `'static` controller and every effect the turn and its
+    /// process commands issue must cross `EffectTaskController` (FIG-3415). A
+    /// producer that leaves this false exercises only the `'static` shortcut
+    /// and never reaches the proxy.
+    pub through_task_proxy: bool,
 }
 
 impl std::fmt::Debug for ToolBatchProducer {
@@ -189,6 +196,7 @@ impl std::fmt::Debug for ToolBatchProducer {
             .field("factories", &self.factories.len())
             .field("reaches_relay", &self.reaches_relay)
             .field("runs_in_a_process", &self.process_registry.is_some())
+            .field("through_task_proxy", &self.through_task_proxy)
             .finish()
     }
 }
@@ -228,6 +236,7 @@ pub fn parallel_model_tool_calls_producer() -> ToolBatchProducer {
         }),
         reaches_relay: true,
         process_registry: None,
+        through_task_proxy: false,
     }
 }
 
@@ -255,6 +264,7 @@ pub fn rlm_promise_all_producer(
         }),
         reaches_relay: true,
         process_registry: None,
+        through_task_proxy: false,
     }
 }
 
@@ -302,6 +312,13 @@ fn rlm_promise_all_cell(plan: &ToolBatchPlan) -> String {
 ///
 /// `registry` is the tier's process registry; the law binds the process work to
 /// it and installs the engine contributions the producer's plugins declare.
+///
+/// `through_task_proxy` is declared here because this is the producer whose
+/// process commands are the reason `EffectTaskController` exists: running the
+/// scenario's turn under a borrowed scoped controller makes `processes.start`
+/// and the attach that awaits it cross the proxy on the way to the real
+/// controller, which is the path a group reached through the proxy had to
+/// serve (FIG-3415).
 pub fn lashlang_process_aggregate_producer(
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     registry: ToolBatchProcessRegistryFactory,
@@ -321,6 +338,7 @@ pub fn lashlang_process_aggregate_producer(
         }),
         reaches_relay: true,
         process_registry: Some(registry),
+        through_task_proxy: true,
     }
 }
 
@@ -1107,6 +1125,22 @@ async fn drive_turn(
                 &turn_id,
             )))
             .expect("scope the tool-batch parallelism turn"),
+    };
+    // A producer declaring `through_task_proxy` must reach its controller the
+    // way a scoped controller that cannot be held 'static is reached — the
+    // shape a Restate-style host produces. The borrowed view makes
+    // `to_static()` answer `None` everywhere, so every typed turn effect and
+    // every `processes.*` command the scenario issues is wrapped in
+    // `EffectTaskController` and driven over its request channel rather than
+    // taking the 'static shortcut (FIG-3415).
+    let turn_scope = if producer.through_task_proxy {
+        crate::ScopedEffectController::borrowed(
+            turn_scope.controller(),
+            turn_scope.admitted_scope().clone(),
+        )
+        .expect("a borrowed view of the turn's scoped controller")
+    } else {
+        turn_scope
     };
     let mut input = crate::TurnInput::text("run the planned batch");
     input.trace_turn_id = Some(turn_id);

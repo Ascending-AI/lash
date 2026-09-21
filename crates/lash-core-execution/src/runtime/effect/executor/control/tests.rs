@@ -340,6 +340,228 @@ async fn task_proxy_refuses_wrong_scope_before_handoff() {
     ));
 }
 
+fn test_group(scope: ExecutionScope, key: &str) -> RuntimeEffectGroup {
+    RuntimeEffectGroup::try_new(
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(scope.clone(), format!("{key}:group"))
+                .expect("valid group address"),
+            crate::RuntimeAttribution::none(),
+            "group",
+        ),
+        key,
+        vec![sleep_envelope(scope, &format!("{key}:child:0"))],
+        crate::GroupWakePolicy::All,
+        crate::LoserPolicy::RunToCompletion,
+    )
+    .expect("a one-child group assembles")
+}
+
+#[tokio::test]
+async fn task_proxy_group_open_refuses_wrong_scope_before_handoff() {
+    let probe = EffectAdmissionProbe::default();
+    let (scoped, mut requests) = EffectTaskController::scoped(
+        &probe,
+        AdmittedScope::runtime_operation("admitted-group-scope"),
+    )
+    .expect("scoped task proxy");
+
+    let error = scoped
+        .controller()
+        .open_effect_group(test_group(
+            ExecutionScope::runtime_operation("foreign-group-scope"),
+            "group-foreign",
+        ))
+        .await
+        .expect_err("a group under a foreign scope must be refused");
+
+    assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectScopeMismatch);
+    assert!(matches!(
+        requests.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn task_proxy_group_await_writes_back_the_advanced_cursor() {
+    let probe = EffectAdmissionProbe::default();
+    let (scoped, mut requests) = EffectTaskController::scoped(
+        &probe,
+        AdmittedScope::runtime_operation("admitted-group-scope"),
+    )
+    .expect("scoped task proxy");
+    let mut handle =
+        EffectGroupHandle::restored("group-cursor:0", 2, 0).expect("a valid restored cursor");
+
+    let await_call = scoped
+        .controller()
+        .await_next_settlement(&mut handle, CancellationToken::new());
+    let service = async {
+        let EffectControllerTaskRequest::AwaitNextSettlement {
+            mut handle,
+            response,
+            ..
+        } = requests.recv().await.expect("a settlement request")
+        else {
+            panic!("expected a group settlement request");
+        };
+        // The task-side cursor is a copy of the caller's; the controller
+        // advances it on the settlement it returns, and the caller's handle —
+        // still the sole cursor of record — is written back to that.
+        assert_eq!(handle.group_key(), "group-cursor:0");
+        assert_eq!(handle.consumed(), 0);
+        handle
+            .advance()
+            .expect("the delivered settlement advances the cursor");
+        let _ = response.send((
+            handle,
+            Ok(GroupSettlement {
+                position: 0,
+                sequence: 1,
+                outcome: Ok(RuntimeEffectOutcome::Sleep),
+            }),
+        ));
+    };
+    let (settlement, ()) = tokio::join!(await_call, service);
+
+    let settlement = settlement.expect("the settlement lands through the proxy");
+    assert_eq!((settlement.position, settlement.sequence), (0, 1));
+    assert_eq!(
+        handle.consumed(),
+        1,
+        "the caller's handle becomes the cursor the task side returned"
+    );
+}
+
+#[tokio::test]
+async fn task_proxy_group_await_carries_a_live_cancellation() {
+    let probe = EffectAdmissionProbe::default();
+    let (scoped, mut requests) = EffectTaskController::scoped(
+        &probe,
+        AdmittedScope::runtime_operation("admitted-group-scope"),
+    )
+    .expect("scoped task proxy");
+    let mut handle =
+        EffectGroupHandle::restored("group-cancel:0", 2, 0).expect("a valid restored cursor");
+    let cancel = CancellationToken::new();
+
+    let await_call = scoped
+        .controller()
+        .await_next_settlement(&mut handle, cancel.clone());
+    let service = async {
+        let EffectControllerTaskRequest::AwaitNextSettlement {
+            handle,
+            cancel,
+            response,
+        } = requests.recv().await.expect("a settlement request")
+        else {
+            panic!("expected a group settlement request");
+        };
+        // The token in the request is the caller's own: cancelling the await
+        // is what wakes the task side, so it stays live for the whole await.
+        cancel.cancelled().await;
+        let _ = response.send((
+            handle,
+            Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+                "the await was cancelled",
+            )),
+        ));
+    };
+    let cancel_after_arrival = async {
+        tokio::task::yield_now().await;
+        cancel.cancel();
+    };
+    let (result, (), ()) = tokio::join!(await_call, service, cancel_after_arrival);
+
+    let error = result.expect_err("a cancelled await returns its typed error");
+    assert_eq!(
+        error.code,
+        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
+    );
+    assert_eq!(
+        handle.consumed(),
+        0,
+        "a cancelled await leaves the caller's cursor untouched"
+    );
+}
+
+#[tokio::test]
+async fn task_proxy_group_calls_fail_closed_when_the_task_is_gone() {
+    let probe = EffectAdmissionProbe::default();
+    let (scoped, requests) = EffectTaskController::scoped(
+        &probe,
+        AdmittedScope::runtime_operation("admitted-group-scope"),
+    )
+    .expect("scoped task proxy");
+    drop(requests);
+
+    let scope = ExecutionScope::runtime_operation("admitted-group-scope");
+    let open_error = scoped
+        .controller()
+        .open_effect_group(test_group(scope, "group-closed-task"))
+        .await
+        .expect_err("a group open on a closed task must return a typed error");
+    assert_eq!(
+        open_error.code,
+        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+    );
+
+    let mut handle =
+        EffectGroupHandle::restored("group-closed-task:0", 1, 0).expect("a valid restored cursor");
+    let await_error = scoped
+        .controller()
+        .await_next_settlement(&mut handle, CancellationToken::new())
+        .await
+        .expect_err("a settlement await on a closed task must return a typed error");
+    assert_eq!(
+        await_error.code,
+        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+    );
+    assert_eq!(
+        handle.consumed(),
+        0,
+        "a send failure leaves the caller's cursor untouched"
+    );
+
+    let close_error = scoped
+        .controller()
+        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect_err("a group close on a closed task must return a typed error");
+    assert_eq!(
+        close_error.code,
+        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+    );
+}
+
+#[tokio::test]
+async fn task_proxy_group_open_reports_a_dropped_response() {
+    let probe = EffectAdmissionProbe::default();
+    let (scoped, mut requests) = EffectTaskController::scoped(
+        &probe,
+        AdmittedScope::runtime_operation("admitted-group-scope"),
+    )
+    .expect("scoped task proxy");
+
+    let open_call = scoped.controller().open_effect_group(test_group(
+        ExecutionScope::runtime_operation("admitted-group-scope"),
+        "group-dropped",
+    ));
+    let accept_then_drop = async {
+        match requests.recv().await.expect("a group-open request") {
+            EffectControllerTaskRequest::OpenEffectGroup { response, .. } => drop(response),
+            _ => panic!("expected a group-open request"),
+        }
+    };
+    let (result, ()) = tokio::join!(open_call, accept_then_drop);
+
+    let error = result.expect_err("a dropped response must return a typed error");
+    assert_eq!(
+        error.code,
+        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+    );
+}
+
 struct FakeQueuedLaneProbe {
     attempts: std::sync::Mutex<std::collections::VecDeque<QueuedLaneAttempt>>,
     try_calls: std::sync::atomic::AtomicUsize,

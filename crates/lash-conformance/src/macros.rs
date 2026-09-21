@@ -615,6 +615,7 @@ macro_rules! effect_group_host_tests {
             (a_child_with_no_runner_refuses_the_open_and_refuses_the_retry, "group-no-runner", wired),
             (a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal, "group-lost-runner", wired),
             (a_wired_host_serves_all_three_group_methods, "group-capability", wired),
+            (a_proxied_controller_serves_all_three_group_methods, "group-proxied", wired),
             (wrong_scope_groups_are_refused_before_any_child_runs, "group-scope", wired),
             (duplicate_replay_keys_are_refused_before_a_host_sees_them, "group-duplicate-replay", wired),
             (the_first_settlement_wakes_the_caller_while_the_loser_still_runs, "group-first", wired),
