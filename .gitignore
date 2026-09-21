@@ -53,7 +53,6 @@ Thumbs.db
 /.agent-workbench.schema*-backup-*/
 /.claude/
 /CLAUDE.md
-/AGENTS.md
 /.tmp/
 /tmp/
 /scratchpad/
