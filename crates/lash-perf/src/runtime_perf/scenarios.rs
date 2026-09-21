@@ -861,7 +861,7 @@ impl RuntimePerfScenario {
             "resident_graph_append_curve",
             Standard,
             RuntimeScenario,
-            "Measures turn construction, one-node append adoption, id remap, realized-timestamp application, and the isolated record copy-on-write on resident session graphs at sizes 0, 32, 128, and 512 nodes while a pre-turn snapshot is held, below protocol and facade ownership. The COW phase asserts allocated bytes stay flat in resident size.",
+            "Measures turn construction, one-node append adoption, id remap, realized-timestamp application, and the isolated record copy-on-write on resident session graphs at sizes 0, 32, 128, and 512 nodes while a pre-turn snapshot is held, below protocol and facade ownership. Every phase asserts allocated bytes stay flat in resident size.",
             false
         ),
     ];

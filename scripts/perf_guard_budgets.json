@@ -909,8 +909,8 @@
       "resident_graph_append_curve": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 26000000.0,
-          "steady_state_turn_alloc_bytes_max": 1800000.0
+          "alloc_bytes_max": 20000000.0,
+          "steady_state_turn_alloc_bytes_max": 800000.0
         },
         "advisory_duration": {
           "ms_max": 40.0,
@@ -993,6 +993,54 @@
             },
             "resident_graph_append.n512.timestamps": {
               "budget_ms": 3.0,
+              "required": true
+            },
+            "resident_graph_append.n0.builder": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n0.snapshot_append": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n32.builder": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n32.snapshot_append": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n128.builder": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n128.snapshot_append": {
+              "budget_ms": 2.0,
+              "required": true
+            },
+            "resident_graph_append.n512.builder": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n512.snapshot_append": {
+              "budget_ms": 2.0,
+              "required": true
+            },
+            "resident_graph_append.n0.event_read": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n32.event_read": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n128.event_read": {
+              "budget_ms": 1.0,
+              "required": true
+            },
+            "resident_graph_append.n512.event_read": {
+              "budget_ms": 1.0,
               "required": true
             }
           }
