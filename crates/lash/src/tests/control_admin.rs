@@ -188,14 +188,13 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         "initial frame should contain the original request"
     );
 
-    let compacted = session
-        .admin()
-        .state()
-        .compact_context(
-            Some("focus on durable summary".to_string()),
-            runtime_operation_scope(&core, "compact-context-test"),
-        )
-        .await?;
+    // Boxed: the future carries the scoped controller, which now also carries
+    // the admitted incarnation (FIG-3394) — past the `large_futures` budget.
+    let compacted = Box::pin(session.admin().state().compact_context(
+        Some("focus on durable summary".to_string()),
+        runtime_operation_scope(&core, "compact-context-test"),
+    ))
+    .await?;
 
     assert!(compacted);
     let read_view = session.read_view();
@@ -370,14 +369,11 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
         .run()
         .await?;
     assert!(
-        session
-            .admin()
-            .state()
-            .compact_context(
-                None,
-                runtime_operation_scope(&core, "compact-prompt-stack-test")
-            )
-            .await?
+        Box::pin(session.admin().state().compact_context(
+            None,
+            runtime_operation_scope(&core, "compact-prompt-stack-test"),
+        ))
+        .await?
     );
     Ok(())
 }
