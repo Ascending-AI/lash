@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::generator::generate_workload;
 use crate::oracles::{
-    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, ScenarioFactMemo, combine_oracles,
-    generated_trace_oracles, passed_battery_verdict, walk_generated_trace_oracles,
+    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
+    ScenarioFactMemo, combine_oracles, generated_trace_oracles, passed_battery_verdict,
+    walk_generated_trace_oracles,
 };
 use crate::replay::{ReplayError, replay_trace};
 use crate::runner::run_generated_workload_for_fixture;
@@ -372,7 +373,32 @@ pub fn minimize_trace(
 fn preserves_target_failure(candidate: &SimulationTrace, target: TargetFailure<'_>) -> bool {
     candidate.oracle.oracle_id == target.oracle_id
         && &candidate.oracle.status == target.status
-        && candidate.oracle.message == target.reason
+        && reason_matches_target(
+            candidate.oracle.oracle_id.as_str(),
+            &candidate.oracle.message,
+            target.reason,
+        )
+}
+
+/// Whether a candidate verdict's reason is the target failure. Exact equality
+/// always matches. The scheduler-owned completion oracle names observed and
+/// declared counts, so removing more completions of an under-delivered kind
+/// changes the digits without changing the failure; that one verdict shape is
+/// compared with its digits normalized. Every other oracle keeps the exact
+/// match — a changed reason is a different failure.
+fn reason_matches_target(oracle_id: &str, candidate: &str, target: &str) -> bool {
+    candidate == target
+        || (oracle_id == SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE
+            && target.contains("the workload declared")
+            && candidate.contains("the workload declared")
+            && digits_normalized(candidate) == digits_normalized(target))
+}
+
+fn digits_normalized(message: &str) -> String {
+    message
+        .chars()
+        .map(|c| if c.is_ascii_digit() { '#' } else { c })
+        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -558,7 +584,7 @@ fn find_target_oracle<'a>(
 fn verdict_matches_target(oracle: &OracleVerdict, target: TargetFailure<'_>) -> bool {
     oracle.oracle_id == target.oracle_id
         && &oracle.status == target.status
-        && oracle.message == target.reason
+        && reason_matches_target(&oracle.oracle_id, &oracle.message, target.reason)
 }
 
 fn select_fixture_target_oracle(

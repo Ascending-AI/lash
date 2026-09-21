@@ -84,6 +84,12 @@ impl GeneratedWorkload {
                 .count(),
             self.boundary_count(BoundaryKind::LeaseTime),
         )
+        .with_completion_counts(
+            crate::oracles::SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS
+                .iter()
+                .map(|&kind| (kind, self.boundary_count(kind)))
+                .collect(),
+        )
     }
 
     fn boundary_count(&self, kind: BoundaryKind) -> usize {

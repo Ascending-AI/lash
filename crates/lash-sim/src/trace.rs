@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::scheduler::DeliveredBoundary;
+use crate::scheduler::{BoundaryKind, DeliveredBoundary};
 
 pub const TRACE_SCHEMA: &str = "lash.sim.trace.v2";
 pub const TRACE_EVENT_LINE_SCHEMA: &str = "lash.sim.trace-event-line.v2";
@@ -155,6 +155,13 @@ pub struct WorkloadExpectations {
     pub transport_mutation_count: usize,
     /// Lease-time boundaries the workload planned.
     pub lease_time_boundary_count: usize,
+    /// Scheduler-owned runtime completions the workload planned per boundary
+    /// kind. A declared count is a lower bound, not an exact count: the
+    /// delivered trace may contain world-scheduled completions the plan did not
+    /// enumerate, so the oracle fails only when the observed count falls short.
+    /// Kinds absent from the map fall back to the oracle's presence floor.
+    #[serde(default)]
+    pub completion_counts: BTreeMap<BoundaryKind, usize>,
 }
 
 impl WorkloadExpectations {
@@ -172,7 +179,23 @@ impl WorkloadExpectations {
             provider_turn_count,
             transport_mutation_count,
             lease_time_boundary_count,
+            completion_counts: BTreeMap::new(),
         }
+    }
+
+    /// Attach declared per-kind scheduler-owned completion counts.
+    pub fn with_completion_counts(
+        mut self,
+        completion_counts: BTreeMap<BoundaryKind, usize>,
+    ) -> Self {
+        self.completion_counts = completion_counts;
+        self
+    }
+
+    /// The declared scheduler-owned completion count for `kind`, when the
+    /// workload declared one.
+    pub fn declared_completion_count(&self, kind: BoundaryKind) -> Option<usize> {
+        self.completion_counts.get(&kind).copied()
     }
 
     /// How many sessions the workload declared.

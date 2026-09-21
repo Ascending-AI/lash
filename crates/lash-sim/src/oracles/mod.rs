@@ -278,7 +278,7 @@ pub fn walk_generated_trace_oracles<S, V>(
     );
     battery!(
         SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
-        scheduler_owned_runtime_completions(events)
+        scheduler_owned_runtime_completions(events, expectations)
     );
     battery!(
         STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE,
