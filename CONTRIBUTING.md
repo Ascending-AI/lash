@@ -270,6 +270,27 @@ finish sooner; it makes every other one finish later.
 There is no `staging` branch. Preview work belongs in pull requests, while the
 merged product state lives on `main`.
 
+## Rust toolchain
+
+The toolchain is pinned, not floating: a new Rust release changes nothing
+until a pull request bumps it, so new-lint fallout lands inside a reviewed
+diff instead of turning `main` red overnight (FIG-1672). The pinned version
+is stated in three places that must move together — `rust-toolchain.toml`
+(local Cargo/rustup), the `toolchain` input default in
+`.github/actions/rust-toolchain/action.yml` (every CI install step inherits
+it; call sites never pass `toolchain:` themselves), and `toolchains.toolchain`
+in `MODULE.bazel` (the hermetic Bazel toolchain). `scripts/test_toolchain_pin.py`
+fails if they disagree.
+
+Routine bump: after each Rust release, open one PR that moves all three sites
+to the new version and fixes whatever the new clippy lints flag. A scheduled
+canary run against latest stable (FIG-1684) is the early warning that a bump
+is due — a red canary names the offending lints before release day.
+
+The `rust-version` in the workspace manifest is a separate, deliberately
+older number: the declared compatibility floor for published crates, not the
+toolchain anyone builds with.
+
 ## Releases
 
 Merging to `main` does not release. A maintainer manually runs the GitHub
