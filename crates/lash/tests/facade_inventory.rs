@@ -41,6 +41,7 @@ use lash::attachments::AttachmentCreateMeta as _;
 use lash::attachments::AttachmentId as _;
 use lash::attachments::AttachmentRef as _;
 use lash::attachments::MediaType as _;
+use lash::attachments::content_id as _;
 use lash::direct::GenerationOptions as _;
 use lash::direct::GenerationOptions as _;
 use lash::direct::LlmOutputPart as _;
@@ -207,7 +208,9 @@ mod rlm_inventory {
 mod testing_inventory {
     use lash::testing::TestLocalProcessRegistry as _;
     use lash::testing::TestProvider as _;
+    use lash::testing::code_execution_context as _;
     use lash::testing::mock_tool_context_with_execution_binding as _;
+    use lash::testing::store_fixtures::authorize_completion_deferral_for_test as _;
     // The durable-backend certification laws ride the facade: a host certifies
     // its store through `lash::testing::conformance` alone.
     use lash::testing::conformance::ReopenableAttachmentStore as _;
@@ -621,6 +624,14 @@ mod whole_module_coverage {
             "lash_remote_protocol::processes",
             "remote::processes",
             60,
+        );
+        assert_module_covered(
+            &exports,
+            "../lash-remote-protocol/src/triggers.rs",
+            "../lash-remote-protocol/src/triggers",
+            "lash_remote_protocol::triggers",
+            "remote::triggers",
+            20,
         );
         assert_module_covered(
             &exports,

@@ -560,6 +560,10 @@ pub mod messages {
 /// Where the bytes live is a persistence concern:
 /// [`persistence`] carries the store trait, its errors, and reclamation.
 pub mod attachments {
+    /// The canonical content address of a byte payload, so a host
+    /// [`AttachmentStore`](crate::persistence::AttachmentStore) can key stored
+    /// bytes by their content id.
+    pub use lash_core::attachments::content_id;
     pub use lash_core::{
         AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType,
     };
@@ -682,7 +686,7 @@ pub mod remote {
             RemoteTriggerDeliveryEmitOutcome, RemoteTriggerDeliveryEmitReceipt,
             RemoteTriggerEmitReport, RemoteTriggerInputBinding, RemoteTriggerInputTemplate,
             RemoteTriggerListSubscriptionsResponse, RemoteTriggerOccurrenceOutcome,
-            RemoteTriggerOccurrenceRecord, RemoteTriggerOccurrenceRequest,
+            RemoteTriggerOccurrenceRecord, RemoteTriggerOccurrenceRequest, RemoteTriggerOwnerScope,
             RemoteTriggerProviderRoute, RemoteTriggerRegisterSubscriptionReceipt,
             RemoteTriggerRegisterSubscriptionRequest, RemoteTriggerRegistration,
             RemoteTriggerSourceCapture, RemoteTriggerSubscriptionDraft,

@@ -22,6 +22,22 @@ pub use lash_core::testing::{
     mock_tool_context, mock_tool_context_with_execution_binding, test_code_protocol_factories,
 };
 
+/// [`RuntimeExecutionContext`](crate::tools::RuntimeExecutionContext)
+/// constructors for host tests that drive context-bound execution —
+/// e.g. [`tools::link_with_deferred_resolution`](crate::tools::link_with_deferred_resolution)
+/// — without a production runtime.
+pub use lash_core::testing::{
+    cancelled_code_execution_context, code_execution_context,
+    code_execution_context_cancelling_after_yield, code_execution_context_for_process,
+    code_execution_context_with_effect_controller_and_invocation,
+    code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
+    code_execution_context_with_tool_catalog,
+    code_execution_context_with_tool_provider_and_catalog,
+    code_execution_context_with_tool_provider_catalog_and_invocation,
+    code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation,
+    code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
+};
+
 #[cfg(test)]
 pub(crate) fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {
     lash_core::LeaseOwnerIdentity::opaque("lash-runtime-test-worker", "lash-runtime-test-boot")
@@ -35,6 +51,11 @@ pub use lash_core::testing::behavior_transcript;
 /// Store-factory decorator that observes accepted runtime-checkpoint commits, so
 /// a scenario can render durable-write transcript lines from real facts.
 pub use lash_core::testing::checkpoint_observer;
+
+/// Store-construction fixtures shared by kernel tests and certification
+/// scenarios: session-store requests, lease claims, commit helpers, and the
+/// completion-deferral authorization seam.
+pub use lash_core::testing::store_fixtures;
 
 pub mod conformance {
     //! Backend certification: the durable-store laws (re-exported from
