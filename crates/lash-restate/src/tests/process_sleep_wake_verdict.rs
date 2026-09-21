@@ -103,9 +103,7 @@ pub(super) async fn process_sleep_wake_verdict_replays_from_the_journal() {
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(
-                    &process_id,
-                )))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(&process_id)))
                 .expect("verdict replay redelivery scope"),
             0,
             None,
@@ -215,9 +213,7 @@ pub(super) async fn process_sleep_wake_verdict_extends_a_pre_verdict_journal() {
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(
-                    &process_id,
-                )))
+                .scoped_effect_controller(durable_admission(&ExecutionScope::process(&process_id)))
                 .expect("pre-verdict journal redelivery scope"),
             0,
             None,

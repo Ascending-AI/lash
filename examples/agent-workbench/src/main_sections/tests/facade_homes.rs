@@ -345,7 +345,7 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
                 .expect("serialize the provider request the runtime issued")
         };
         assert!(
-            rendered.contains("prepared 1 message(s) from 0 committed; base tools on"),
+            rendered.contains("prepared 1 message(s) from 0 committed"),
             "the transform's contribution must reach the prompt the provider received"
         );
         assert!(

@@ -71,6 +71,16 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| SessionId::from(uuid::Uuid::new_v4().to_string()));
     request.session_id = Some(session_id.clone());
+    // `SessionStartPoint` keeps predecessor variants only so durable and
+    // remote payloads still decode; `Empty` is the only start point
+    // initialisation admits. A recorded request carrying anything else can
+    // never run — refuse it here so the refusal is typed rather than a
+    // silent reinterpretation.
+    if !matches!(request.start, crate::SessionStartPoint::Empty) {
+        return Err(crate::PluginError::Session(format!(
+            "session `{session_id}` create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)"
+        )));
+    }
     let parent_session_id = request.relation.parent_session_id().map(ToOwned::to_owned);
     // Every session initializes empty: `SessionStartPoint::Empty` is the only
     // start point initialisation admits. Durable forks and resumed sessions
@@ -482,30 +492,44 @@ async fn initialize_session(
 ) -> Result<InitializedSession, crate::PluginError> {
     let plan = resolve_session_init(current, request).await?;
     match durable_session_store(current, &plan.session_id).await? {
-        Some(store) => reopen_initialized_session(current, &plan, store).await,
-        None => {
-            let materialized = materialize_session_init(current, &plan).await?;
-            let (handle_view, handle) =
-                Box::pin(commit_initialized_session(current, plan, materialized)).await?;
-            Ok(InitializedSession {
-                handle,
-                session_id: handle_view.session_id,
-            })
-        }
+        Some(store) => match recorded_session_state(&plan, &store).await? {
+            Some(state) => reopen_committed_session(current, &plan, store, state).await,
+            // A catalog row without a committed head is a metadata-only
+            // partial create: a previous attempt committed the row and
+            // crashed before the initial head landed. The recorded request
+            // finishes the create — `create_store`'s metadata insert is
+            // idempotent and the head commit completes what the crashed
+            // attempt started — so the session is not stranded retry-proof.
+            None => commit_fresh_session_init(current, plan).await,
+        },
+        None => commit_fresh_session_init(current, plan).await,
     }
 }
 
-/// Reopen an already-committed session through the ordinary open path: load
-/// its durable head, rebuild its plugin session from the recorded state, and
-/// assemble the runtime under the resumed-session assembly. This is the
-/// redelivery contract for `ProcessInput::SessionTurn` — a new run whose
-/// previous attempt crashed after the create commit finds the row here and
-/// never re-runs the create.
-pub(in crate::runtime::session_manager) async fn reopen_initialized_session(
+/// The fresh-create half of `initialize_session`: materialize the plan and
+/// commit its initial head, then hand the ordinary runtime to the caller.
+async fn commit_fresh_session_init(
     current: &CurrentSessionCapability,
-    plan: &SessionInitPlan,
-    store: Arc<dyn crate::store::RuntimePersistence>,
+    plan: SessionInitPlan,
 ) -> Result<InitializedSession, crate::PluginError> {
+    let materialized = materialize_session_init(current, &plan).await?;
+    let (handle_view, handle) =
+        Box::pin(commit_initialized_session(current, plan, materialized)).await?;
+    Ok(InitializedSession {
+        handle,
+        session_id: handle_view.session_id,
+    })
+}
+
+/// Inspect the durable session behind an existing catalog row for a
+/// redelivery: replay-check the recorded relation, then load the committed
+/// head. `None` means the row is a metadata-only partial create — a crash
+/// landed between the metadata insert and the initial head commit — which
+/// the caller finishes as a create rather than reopening.
+async fn recorded_session_state(
+    plan: &SessionInitPlan,
+    store: &Arc<dyn crate::store::RuntimePersistence>,
+) -> Result<Option<crate::RuntimeSessionState>, crate::PluginError> {
     // The durable row decides lineage. A redelivery replays the same recorded
     // request, so a recorded relation that disagrees is a conflict, never a
     // silent adopt.
@@ -523,20 +547,46 @@ pub(in crate::runtime::session_manager) async fn reopen_initialized_session(
             plan.session_id, meta.relation, plan.relation
         )));
     }
-    let state = crate::store::load_persisted_session_state(store.as_ref())
+    crate::store::load_persisted_session_state(store.as_ref())
         .await
         .map_err(|error| {
             crate::PluginError::Session(format!(
                 "failed to load session `{}` for reopen: {error}",
                 plan.session_id
             ))
-        })?
-        .ok_or_else(|| {
-            crate::PluginError::Session(format!(
-                "session `{}` committed its catalog row without a session head",
-                plan.session_id
-            ))
-        })?;
+        })
+}
+
+/// Reopen an already-committed session through the ordinary open path: load
+/// its durable head, rebuild its plugin session from the recorded state, and
+/// assemble the runtime under the resumed-session assembly. Test seam for
+/// the reopen contract — the production redelivery path routes through
+/// `initialize_session`, which finishes a metadata-only row as a create
+/// rather than refusing it here.
+#[cfg(test)]
+pub(in crate::runtime::session_manager) async fn reopen_initialized_session(
+    current: &CurrentSessionCapability,
+    plan: &SessionInitPlan,
+    store: Arc<dyn crate::store::RuntimePersistence>,
+) -> Result<InitializedSession, crate::PluginError> {
+    let state = recorded_session_state(plan, &store).await?.ok_or_else(|| {
+        crate::PluginError::Session(format!(
+            "session `{}` committed its catalog row without a session head",
+            plan.session_id
+        ))
+    })?;
+    reopen_committed_session(current, plan, store, state).await
+}
+
+/// The reopen half of `initialize_session` against an already-loaded durable
+/// head: rebuild the plugin session from the recorded state and assemble the
+/// runtime under the resumed-session assembly.
+async fn reopen_committed_session(
+    current: &CurrentSessionCapability,
+    plan: &SessionInitPlan,
+    store: Arc<dyn crate::store::RuntimePersistence>,
+    state: crate::RuntimeSessionState,
+) -> Result<InitializedSession, crate::PluginError> {
     let authority = crate::plugin::SessionAuthorityContext {
         tool_access: state.authority.tool_access.clone(),
         subagent: state.authority.subagent.clone(),
@@ -662,6 +712,19 @@ impl RuntimeSessionServices {
                 source: Box::new(source),
             })?;
             return Err(SessionTurnInitError::CancelledBeforeCreate);
+        }
+        // A recorded request can carry a start point this build keeps only
+        // for decode (a predecessor `snapshot` payload on a durable
+        // `ProcessInput::SessionTurn` row or its remote copy). Nothing can
+        // run it — refuse deterministically so the process terminalizes
+        // instead of retrying an unrunnable row on every redelivery.
+        if !matches!(create_request.start, crate::SessionStartPoint::Empty) {
+            return Err(SessionTurnInitError::Refused {
+                session_id: requested_session_id.clone(),
+                source: Box::new(crate::PluginError::Session(
+                    "the recorded session create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)".to_string(),
+                )),
+            });
         }
         // The child runtime is owned by this run. A redelivery within the run
         // finds it in this local — never in a registry — and skips
@@ -967,6 +1030,15 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
         session_id: Option<SessionId>,
         source: Box<crate::PluginError>,
     },
+    /// The recorded request itself is not initializable on this build — a
+    /// predecessor payload whose start point `SessionStartPoint` keeps only
+    /// for decode. Deterministic: no attempt can run it, so the process
+    /// terminalizes with the refusal rather than staying recoverable and
+    /// retrying an unrunnable row forever.
+    Refused {
+        session_id: Option<SessionId>,
+        source: Box<crate::PluginError>,
+    },
     /// The process's execution authority did not validate for the child turn.
     Request {
         session_id: SessionId,
@@ -1000,9 +1072,9 @@ impl SessionTurnInitError {
             Self::CancelledAfterCreate { session_id }
             | Self::Request { session_id, .. }
             | Self::Turn { session_id, .. } => Some(session_id),
-            Self::Create { session_id, .. } | Self::Reconcile { session_id, .. } => {
-                session_id.as_ref()
-            }
+            Self::Create { session_id, .. }
+            | Self::Refused { session_id, .. }
+            | Self::Reconcile { session_id, .. } => session_id.as_ref(),
             Self::CancelledBeforeCreate => None,
         }
     }

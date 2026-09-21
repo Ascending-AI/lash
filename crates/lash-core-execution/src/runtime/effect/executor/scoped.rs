@@ -11,8 +11,11 @@ impl<'run> ScopedEffectController<'run> {
     /// than rebound — ADR 0099 §1 rules that "a retired or mismatched
     /// incarnation is refused, never rebound to the current process carrying
     /// the same name". Dropping the pin is fine: a process controller may
-    /// rescope onto a turn or any other unpinned scope, which is what a
-    /// process-scoped child session turn narrowing to its own turn scope does.
+    /// rescope onto a turn or any other unpinned scope. The one production
+    /// rescope — a process-origin child session turn narrowing to the child
+    /// session's own turn scope
+    /// (`crates/lash-core/src/runtime/session_manager/session_init.rs`) —
+    /// starts from a turn scope, which a process pin cannot match.
     pub fn rescope(
         &self,
         admitted: AdmittedScope,

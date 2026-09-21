@@ -1,10 +1,46 @@
 use super::*;
 
-pub(super) struct TestSessionStoreFactory;
-pub(super) struct InMemorySessionStoreFactory;
-pub(super) struct SegmentBoundarySessionStoreFactory;
+/// The session catalog these factories keep: `create_store` binds one
+/// `InMemorySessionStore` per session id and by-id opens resolve exactly the
+/// ids a create bound. Session initialisation inspects the catalog on every
+/// `ProcessInput::SessionTurn` run, so a factory that cannot answer the by-id
+/// seam cannot run a session turn at all.
+#[derive(Default)]
+struct SessionStoreCatalog {
+    stores: Mutex<std::collections::HashMap<SessionId, Arc<InMemorySessionStore>>>,
+}
 
-// These factories create attachment-aware stores but do not retain them, so
+impl SessionStoreCatalog {
+    fn create(&self, session_id: &SessionId) -> Arc<InMemorySessionStore> {
+        Arc::clone(
+            self.stores
+                .lock_recover()
+                .entry(session_id.clone())
+                .or_default(),
+        )
+    }
+
+    /// `None` for an id no create bound — "no such session" stays a real
+    /// answer; the catalog never auto-vivifies a row on lookup.
+    fn by_id(&self, session_id: &SessionId) -> Option<Arc<InMemorySessionStore>> {
+        self.stores.lock_recover().get(session_id).cloned()
+    }
+}
+
+#[derive(Default)]
+pub(super) struct TestSessionStoreFactory {
+    catalog: SessionStoreCatalog,
+}
+#[derive(Default)]
+pub(super) struct InMemorySessionStoreFactory {
+    catalog: SessionStoreCatalog,
+}
+#[derive(Default)]
+pub(super) struct SegmentBoundarySessionStoreFactory {
+    catalog: SessionStoreCatalog,
+}
+
+// These factories keep a session catalog but no attachment-root index, so
 // they cannot enumerate roots and must fail closed if passed to GC.
 #[async_trait::async_trait]
 impl crate::AttachmentRootSet for TestSessionStoreFactory {
@@ -76,26 +112,29 @@ impl crate::AttachmentRootSet for SegmentBoundarySessionStoreFactory {
 impl SessionStoreFactory for TestSessionStoreFactory {
     async fn create_store(
         &self,
-        _request: &crate::SessionStoreCreateRequest,
+        request: &crate::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-        Ok(Arc::new(InMemorySessionStore::default()))
+        Ok(self.catalog.create(&request.session_id))
     }
 
-    // Stateless: `create_store` mints a fresh in-memory store each time and
-    // nothing is kept under an id, so this catalog cannot resolve a session by
-    // id at all. It says so rather than inheriting "no such session".
+    async fn open_existing_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+        Ok(self
+            .catalog
+            .by_id(&request.session_id)
+            .map(|store| store as _))
+    }
+
     async fn open_existing_store_by_id(
         &self,
-        _session_id: &SessionId,
+        session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
-        Err(
-            "this test factory keeps no session catalog and cannot resolve a store by id"
-                .to_string(),
-        )
+        Ok(self.catalog.by_id(session_id).map(|store| store as _))
     }
 
-    // Stateless: every create_store hands back a fresh in-memory store and no
-    // tombstone is ever recorded, so no session has been deleted.
+    // No tombstone is ever recorded, so no session has been deleted.
     async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
@@ -112,26 +151,29 @@ impl SessionStoreFactory for TestSessionStoreFactory {
 impl SessionStoreFactory for InMemorySessionStoreFactory {
     async fn create_store(
         &self,
-        _request: &crate::SessionStoreCreateRequest,
+        request: &crate::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-        Ok(Arc::new(InMemorySessionStore::default()))
+        Ok(self.catalog.create(&request.session_id))
     }
 
-    // Stateless: `create_store` mints a fresh in-memory store each time and
-    // nothing is kept under an id, so this catalog cannot resolve a session by
-    // id at all. It says so rather than inheriting "no such session".
+    async fn open_existing_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+        Ok(self
+            .catalog
+            .by_id(&request.session_id)
+            .map(|store| store as _))
+    }
+
     async fn open_existing_store_by_id(
         &self,
-        _session_id: &SessionId,
+        session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
-        Err(
-            "this test factory keeps no session catalog and cannot resolve a store by id"
-                .to_string(),
-        )
+        Ok(self.catalog.by_id(session_id).map(|store| store as _))
     }
 
-    // Stateless: every create_store hands back a fresh in-memory store and no
-    // tombstone is ever recorded, so no session has been deleted.
+    // No tombstone is ever recorded, so no session has been deleted.
     async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
@@ -148,26 +190,29 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
 impl SessionStoreFactory for SegmentBoundarySessionStoreFactory {
     async fn create_store(
         &self,
-        _request: &crate::SessionStoreCreateRequest,
+        request: &crate::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-        Ok(Arc::new(InMemorySessionStore::default()))
+        Ok(self.catalog.create(&request.session_id))
     }
 
-    // Stateless: `create_store` mints a fresh in-memory store each time and
-    // nothing is kept under an id, so this catalog cannot resolve a session by
-    // id at all. It says so rather than inheriting "no such session".
+    async fn open_existing_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+        Ok(self
+            .catalog
+            .by_id(&request.session_id)
+            .map(|store| store as _))
+    }
+
     async fn open_existing_store_by_id(
         &self,
-        _session_id: &SessionId,
+        session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
-        Err(
-            "this test factory keeps no session catalog and cannot resolve a store by id"
-                .to_string(),
-        )
+        Ok(self.catalog.by_id(session_id).map(|store| store as _))
     }
 
-    // Stateless: every create_store hands back a fresh in-memory store and no
-    // tombstone is ever recorded, so no session has been deleted.
+    // No tombstone is ever recorded, so no session has been deleted.
     async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
@@ -184,9 +229,12 @@ impl SessionStoreFactory for SegmentBoundarySessionStoreFactory {
 async fn attachment_untracked_process_worker_factories_fail_closed() {
     let id = crate::attachments::content_id(b"untracked-factory-root-probe");
     let factories: [(&str, &dyn crate::AttachmentRootSet); 3] = [
-        ("test", &TestSessionStoreFactory),
-        ("in-memory", &InMemorySessionStoreFactory),
-        ("segment-boundary", &SegmentBoundarySessionStoreFactory),
+        ("test", &TestSessionStoreFactory::default()),
+        ("in-memory", &InMemorySessionStoreFactory::default()),
+        (
+            "segment-boundary",
+            &SegmentBoundarySessionStoreFactory::default(),
+        ),
     ];
 
     for (name, factory) in factories {

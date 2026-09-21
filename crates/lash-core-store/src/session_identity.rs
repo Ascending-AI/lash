@@ -698,6 +698,18 @@ impl SessionSnapshot {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionStartPoint {
     Empty,
+    /// A predecessor payload kept for decode only.
+    ///
+    /// `SessionCreateRequest` rides inside durable `ProcessInput::SessionTurn`
+    /// rows and the remote process wire as serialized JSON, so payloads
+    /// recorded before FIG-3378 can carry `{"kind":"snapshot",...}`.
+    /// Session initialisation refuses this start with a typed error — no
+    /// build since FIG-3378 can honor it — but keeping the variant lets
+    /// those rows decode for listing and inspection, and lets the run port
+    /// return a deliberate refusal instead of failing record decode.
+    Snapshot {
+        snapshot: Box<SessionSnapshot>,
+    },
 }
 
 #[derive(Clone)]

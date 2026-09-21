@@ -1528,7 +1528,7 @@ async fn run_tool_granted_honors_the_granted_source_binding() {
         )))
         .expect("source registered");
     let registry = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("resident catalog with live grant sources");
 
     let grant = crate::ToolExecutionGrant::from_definition(test_tool("host_only", "host-only"))

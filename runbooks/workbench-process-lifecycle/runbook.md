@@ -183,8 +183,10 @@ Expect:
 
 - the follow-up turn completes and renders its answer — a wedged parent manager would
   fail or hang instead;
-- the second subagent reaches a non-terminal card and then a terminal state, proving the
-  parent's managed-turn registry admitted new child work after the cancellation;
+- the second subagent reaches a non-terminal card and then a terminal state. There is no
+  per-session turn registry to deny it: the child session turn is initialized and run
+  through the ordinary turn path, so its admission and progress are themselves the proof
+  that nothing stale blocks new child work after the cancellation;
 - **durable-catalog gate (objective):** `03b-sessions-before.json` proves the query saw
   the recorded child session. FIG-3377 changed the aftermath: lash never deletes a
   session because a process was cancelled, so `03b-sessions-after.json` must still show
@@ -197,20 +199,17 @@ Expect:
   session delete, which is the only path that tombstones it. Quote the child id, the
   retained row counts, and the open-input count when scoring — an unquoted "looked
   clean" does not pass;
-- capture the workbench logs with debug-level records enabled: `managed_turn.admission`
-  and `managed_turn.release` are emitted by `tracing::debug!`, so an info-only log does
-  not prove their absence. The records are log evidence, not a guaranteed event in the
-  default `trace.jsonl` sink; if debug logging was not captured, mark this gate
-  unverifiable and Abort rather than infer from silence. Then require
-  `managed_turn.admission` with `outcome=admitted` for the second
-  subagent and `managed_turn.release` with `outcome=released, reason=dropped` for the
-  cancelled one. A `managed_turn.admission` with `outcome=denied` and reason
-  "already has a running turn" after the cancellation is the exact FIG-884 regression.
+- the `managed_turn.admission`/`managed_turn.release` debug records this gate used to
+  cite are gone with the managed-turn machinery (FIG-3378) — there is no admission
+  lease to emit them. The functional gate replaces them: a second subagent reaching a
+  non-terminal card after the cancellation is what "admitted" means now, and any
+  refusal of new child work on the grounds that a turn is still running is the
+  FIG-884 regression shape.
 
 The cancelled subagent's child session is retained durable and reusable: a host can open
 it (for example via the `caused_by` catalog listing) and run an ordinary follow-up turn
 on it. The gate above still uses a *new* subagent for the parent-session check, since the
-parent's wedge was the managed-turn registration, not the child's durability. Screenshot
+parent's wedge was the stale turn registration, not the child's durability. Screenshot
 the follow-up answer and the second subagent's terminal card as
 `03b-session-still-usable.png`.
 
@@ -237,7 +236,7 @@ container are gone.
 | Owner deleted | new rendered/API session id; old session has no live catalog rows, its host-facing tombstone is present, and observer rows are gone | | `02-owner-gone-processes-live.png`, `02-after-delete-*.json` |
 | Runtime independence | both original ids remain live in rail and `/api/work` after delete | | `02-owner-gone-processes-live.png`, API/trace report |
 | Global cancel | exact id accepted; `cancel_requested` then cancelled | | `03-orphan-cancelled.png`, `03-cancel-receipt.json`, store events |
-| Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent runs; `managed_turn.release` released, no `already has a running turn` denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
+| Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent is admitted and runs; no "already has a running turn" denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
 | Cancelled child session retained, not reclaimed (FIG-3377) | `03b-sessions-before.json` has a non-zero baseline for the recorded child id; `03b-sessions-after.json` keeps its `session_meta`/`session_head` rows, has no `deleted_sessions` tombstone, and has no open `pending_turn_inputs` for that id | | `03b-subagent-running.json` (child session id), `03b-sessions-before.json`, `03b-sessions-after.json`, `03b-sessions-delta.txt` |
 | Survivor completion | completed terminal and terminal marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
