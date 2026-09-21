@@ -208,6 +208,16 @@ impl LiveConformanceHarness {
             .bind(services.wait.workflow.serve())
             .bind(services.wait.index.serve())
             .build();
+        // The suite binds the same five services the deployment does, and
+        // until now asserted none of them. A dropped bind would have surfaced
+        // as a 404 partway through a group — after the index had recorded it,
+        // which is the state ADR 0065's whole-open refusal exists to prevent.
+        crate::assert_services_bound(
+            &endpoint,
+            RestateEffectGroupServices::required_service_names().as_slice(),
+        )
+        .await
+        .expect("effect-group conformance endpoint must bind the whole group surface");
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
             HttpServer::new(endpoint)

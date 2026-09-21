@@ -25,8 +25,9 @@ use lash_core::{
     RuntimeEffectGroup, RuntimeEffectOutcome, RuntimeErrorCode,
 };
 use restate_sdk::context::{
-    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, ObjectContext,
-    RunFuture, RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+    CallFuture, ContextClient, ContextReadState, ContextSideEffects, ContextWriteState,
+    ObjectContext, RunFuture, RunRetryPolicy, SharedObjectContext, SharedWorkflowContext,
+    WorkflowContext,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -124,6 +125,14 @@ impl RestateEffectGroupServices {
     /// The three effect-group services plus the durable-wait pair the
     /// dispatcher resolves waits and cancellation gates through. Assert the
     /// set at wiring time with [`crate::assert_services_bound`].
+    ///
+    /// Deliberately an associated function rather than an
+    /// `assert_endpoint_bound(&self)` like
+    /// [`RestateTurnDeployment`](crate::RestateTurnDeployment) has: binding an
+    /// endpoint moves this struct's four service fields into the builder, so
+    /// by the only point where an `Endpoint` exists to check there is no
+    /// `&self` left to call. Those deployments survive binding; this one does
+    /// not.
     pub fn required_service_names() -> Vec<&'static str> {
         vec![
             "EffectGroupIndex",
