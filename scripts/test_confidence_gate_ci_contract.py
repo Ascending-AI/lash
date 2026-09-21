@@ -19,6 +19,7 @@ import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+CHECKOUT_STEP = ROOT / "scripts" / "ci" / "checkout-step.sh"
 CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
@@ -293,11 +294,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
         scripts = {next(s["run"] for s in job["steps"] if s["name"] == "Check out repository")
                    for job in jobs.values()}
-        # Every producer, consumer and conclusion uses the identical checkout.
+        # Every producer, consumer and conclusion uses the identical checkout:
+        # the canonical step scripts/test_checkout_step.py holds every workflow to.
         self.assertEqual(1, len(scripts))
         script = scripts.pop()
+        self.assertEqual(CHECKOUT_STEP.read_text(), script)
         self.assertIn('git config gc.auto 0', script)
-        self.assertIn('git checkout --detach --force "${GITHUB_SHA}"', script)
+        self.assertIn('git checkout --detach --force FETCH_HEAD', script)
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             remote = root / "repo.git"

@@ -141,12 +141,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -219,31 +229,6 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  facade-only-examples:
-    name: Facade-only examples
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-
-    steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
-
-      - name: Check example facade imports
-        run: python3 scripts/check_facade_only_examples.py
-
   # The API seal lane alone: the workspace compile proof lives in the Lint
   # job's `//:workspace_clippy`, which type-checks the full all-targets
   # workspace shape. Untrusted (fork/dependabot) pull requests lose no
@@ -268,16 +253,26 @@ jobs:
       - name: Check out repository
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
+          CHECKOUT_TAGS: --tags
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -377,16 +372,26 @@ jobs:
       - name: Check out repository
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
+          CHECKOUT_TAGS: --tags
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -483,6 +488,7 @@ jobs:
           python3 scripts/test_perf_duration_history_contract.py
           python3 scripts/test_ci_plan.py
           python3 scripts/test_ci_plan_hygiene.py
+          python3 scripts/test_checkout_step.py
           python3 scripts/test_ci_workspace_cache.py
           python3 scripts/test_ci_artifact_provenance.py
           python3 scripts/test_toolchain_pin.py
@@ -506,13 +512,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -550,13 +565,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -624,12 +648,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -699,12 +733,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -743,6 +787,7 @@ jobs:
             --remote_download_outputs=minimal \
             --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
+            --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
             -- //:workspace_tests -//:workspace_tail_tests
 
       # FIG-3429 item 8: conformance laws leave an execution receipt in each
@@ -751,6 +796,20 @@ jobs:
       - name: Census law execution receipts
         shell: bash
         run: python3 scripts/check_law_execution_receipts.py --bazel-testlogs bazel-testlogs
+
+      # The pool's per-action timeline. A core-touching diff can end this leg
+      # 30+ minutes after it started with only ~90 remote actions executed;
+      # the job log names no crate, and the critical path a partition pays is
+      # invisible below job granularity without this. Load the file at
+      # chrome://tracing or with `bazel analyze-profile`.
+      - name: Upload Bazel profile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Remove client credentials
         if: always()
@@ -777,12 +836,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -805,6 +874,7 @@ jobs:
             --remote_download_outputs=minimal \
             --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
+            --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
             //:workspace_tail_tests
 
       # Same law-execution census as the main leg: whichever law-bearing
@@ -812,6 +882,20 @@ jobs:
       - name: Census law execution receipts
         shell: bash
         run: python3 scripts/check_law_execution_receipts.py --bazel-testlogs bazel-testlogs
+
+      # The pool's per-action timeline. A core-touching diff can end this leg
+      # 30+ minutes after it started with only ~90 remote actions executed;
+      # the job log names no crate, and the critical path a partition pays is
+      # invisible below job granularity without this. Load the file at
+      # chrome://tracing or with `bazel analyze-profile`.
+      - name: Upload Bazel profile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Remove client credentials
         if: always()
@@ -851,10 +935,18 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -1050,13 +1142,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -1368,12 +1469,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -1472,13 +1583,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -1612,13 +1732,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -1697,8 +1826,16 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -1744,13 +1881,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -1809,10 +1955,18 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         if: env.RUN_WORKER_ARTIFACTS == 'true'
@@ -1943,13 +2097,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -2059,10 +2222,18 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -2188,13 +2359,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -2376,13 +2556,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
@@ -2455,7 +2644,18 @@ jobs:
           target/restate-postgres-workers-e2e-download/segment-2/workflow-inventory.tsv
           target/restate-postgres-workers-e2e-download/segment-2/completed-workflows.txt
 
-  diff-hygiene:
+  # The three cheapest gates share one runner. They used to be three jobs,
+  # each paying runner start-up and its own checkout for a few seconds of
+  # work; at the current pull-request volume that was most of their cost.
+  # Nothing here is path-gated, so the job has no `if:` and runs on every
+  # event (scripts/ci_plan.py lists it in UNGATED_JOBS). The secret scan
+  # steps run even when diff hygiene fails so both verdicts surface at once.
+  #
+  # The checkout is deliberately not scripts/ci/checkout-step.sh: it deepens
+  # both sides of the scanned range in lockstep, and
+  # scripts/test_ci_plan_hygiene.py executes this step's text verbatim.
+  hygiene:
+    name: Hygiene
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -2476,91 +2676,6 @@ jobs:
       SCAN_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
       # Labels exist only on pull_request; the footer override also covers merge_group.
       DIFF_HYGIENE_BYPASS: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'diff-hygiene-override') && '1' || '0' }}
-    steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          # Background auto-gc rewrites .git/shallow between the deepen fetch and
-          # the ancestry check ("shallow file has changed since we read it").
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${SCAN_HEAD_SHA}"
-          git checkout --detach --force "${SCAN_HEAD_SHA}"
-          # Deepen both sides in lockstep. A boundary on one chain that the
-          # other has already walked past is what leaks foreign commits into
-          # the range, and `--unshallow` on an already-complete repository is a
-          # fatal error rather than a no-op.
-          unshallow_if_needed() {
-            if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
-              git fetch --no-tags --unshallow origin
-            fi
-          }
-          main_refspec='+refs/heads/main:refs/remotes/origin/main'
-          if [[ -n "${BASE_SHA}" ]]; then
-            git fetch --no-tags --depth=1 origin "${BASE_SHA}"
-            depth=50
-            until git merge-base "${BASE_SHA}" HEAD >/dev/null 2>&1; do
-              if [[ ${depth} -gt 1600 ]]; then
-                unshallow_if_needed
-                break
-              fi
-              git fetch --no-tags --deepen="${depth}" origin "${SCAN_HEAD_SHA}" "${BASE_SHA}"
-              depth=$((depth * 2))
-            done
-            git merge-base "${BASE_SHA}" HEAD >/dev/null
-          else
-            git fetch --no-tags --depth=1 origin "${main_refspec}"
-            depth=50
-            until git merge-base origin/main HEAD >/dev/null 2>&1; do
-              if [[ ${depth} -gt 1600 ]]; then
-                unshallow_if_needed
-                break
-              fi
-              git fetch --no-tags --deepen="${depth}" origin "${SCAN_HEAD_SHA}" "${main_refspec}"
-              depth=$((depth * 2))
-            done
-            git merge-base origin/main HEAD >/dev/null
-          fi
-          # A merge base existing is not the same as the whole shared ancestry
-          # being connected. `--deepen` extends every shallow boundary, so a
-          # branch that merged main in earlier reaches main through a second
-          # chain rooted much further down; the loop stops at the first merge
-          # base, and the main commits that chain exposes are never covered by
-          # the base's own boundary, so the range does not exclude them. PR
-          # #1226 head c5aad0ae6 carries ten such merges and reported 12
-          # findings, all fingerprinted to 0625be3de, an ancestor of main.
-          # With no merge in the range there is a single chain and the shallow
-          # graph is already exact; with merges, only a complete graph excludes
-          # correctly.
-          if [[ -n "${BASE_SHA}" ]]; then
-            range_base="$(git merge-base "${BASE_SHA}" HEAD)"
-          else
-            range_base="$(git merge-base origin/main HEAD)"
-          fi
-          if [[ "$(git rev-list --merges --count "${range_base}..HEAD")" -gt 0 ]]; then
-            unshallow_if_needed
-          fi
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-
-      - name: Check diff hygiene
-        run: bash scripts/ci/check-diff-hygiene.sh
-
-  secret-scan:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
-      # The pull request's own head, not the ephemeral `refs/pull/N/merge`
-      # commit `github.sha` names; see the diff-hygiene job for why.
-      SCAN_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
       # Labels exist only on pull_request; the footer override also covers merge_group.
       SECRET_SCAN_BYPASS: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'secret-scan-override') && '1' || '0' }}
       GITLEAKS_VERSION: 8.30.1
@@ -2639,8 +2754,15 @@ jobs:
           fi
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
+      - name: Check example facade imports
+        run: python3 scripts/check_facade_only_examples.py
+
+      - name: Check diff hygiene
+        run: bash scripts/ci/check-diff-hygiene.sh
+
       - name: Resolve secret scan range and override
         id: secret-scan
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
 
@@ -2707,7 +2829,7 @@ jobs:
           fi
 
       - name: Download pinned Gitleaks binary
-        if: steps.secret-scan.outputs.bypass != '1'
+        if: steps.secret-scan.outcome == 'success' && steps.secret-scan.outputs.bypass != '1'
         run: |
           archive="${RUNNER_TEMP}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           curl --fail --location --silent --show-error \
@@ -2717,13 +2839,13 @@ jobs:
           tar -xzf "${archive}" -C "${RUNNER_TEMP}" gitleaks
 
       - name: Test secret rejection
-        if: steps.secret-scan.outputs.bypass != '1'
+        if: steps.secret-scan.outcome == 'success' && steps.secret-scan.outputs.bypass != '1'
         env:
           GITLEAKS_BINARY: ${{ runner.temp }}/gitleaks
         run: python3 scripts/test_ci_plan_hygiene.py
 
       - name: Scan pull request commit range
-        if: steps.secret-scan.outputs.bypass != '1'
+        if: steps.secret-scan.outcome == 'success' && steps.secret-scan.outputs.bypass != '1'
         env:
           SCAN_BASE_SHA: ${{ steps.secret-scan.outputs.base_sha }}
         run: |
@@ -2739,7 +2861,6 @@ jobs:
     if: always()
     needs:
       - plan
-      - facade-only-examples
       - check
       - repo-gates
       - unused-deps
@@ -2750,8 +2871,7 @@ jobs:
       - bazel-tests-tail
       - heavy-tests
       - lint
-      - diff-hygiene
-      - secret-scan
+      - hygiene
       - unicode-tests
       - postgres-store
       - s3-store
@@ -2770,12 +2890,22 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 

@@ -292,10 +292,8 @@ def postgres_matrix(event_name: str, schema: bool = False) -> list[dict[str, str
 UNGATED_JOBS = {
     "worker-artifacts",
     "plan",
-    "facade-only-examples",
     "lint",
-    "diff-hygiene",
-    "secret-scan",
+    "hygiene",
     "restate-postgres-workers",
     "restate-postgres-workers-summary",
 }
