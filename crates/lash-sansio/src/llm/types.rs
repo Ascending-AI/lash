@@ -1900,9 +1900,12 @@ pub struct LlmResponse {
     /// Whether the caller asked the provider to surface reasoning. Providers
     /// stamp this from `ProviderOptions::expose_thinking`; reasoning parts
     /// stay in `parts` for multi-turn replay regardless, but the runtime only
-    /// republishes unstreamed reasoning blocks when this is set.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub expose_thinking: bool,
+    /// suppresses unstreamed reasoning blocks when a provider explicitly
+    /// reports `Some(false)` — `None` (providers that do not stamp the flag,
+    /// including third-party `Provider` impls) keeps the legacy publish
+    /// behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expose_thinking: Option<bool>,
 }
 
 impl LlmResponse {

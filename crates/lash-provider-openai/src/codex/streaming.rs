@@ -1007,7 +1007,7 @@ impl Provider for CodexProvider {
                     execution_evidence,
                     generation_disposition,
                     response_metadata: response_metadata.into_metadata(),
-                    expose_thinking: provider.options.expose_thinking,
+                    expose_thinking: Some(provider.options.expose_thinking),
                 });
             }
 

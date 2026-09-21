@@ -22,7 +22,7 @@ fn bare_ok_response() -> LlmResponse {
         execution_evidence: None,
         generation_disposition: None,
         response_metadata: Default::default(),
-        expose_thinking: false,
+        expose_thinking: Some(false),
     }
 }
 

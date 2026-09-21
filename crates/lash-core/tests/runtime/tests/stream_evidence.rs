@@ -266,7 +266,7 @@ async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() {
                     response_meta: None,
                 },
             ],
-            expose_thinking: false,
+            expose_thinking: Some(false),
             ..Default::default()
         }),
     }))
@@ -323,7 +323,7 @@ async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() {
                     response_meta: None,
                 },
             ],
-            expose_thinking: true,
+            expose_thinking: Some(true),
             ..Default::default()
         }),
     }))

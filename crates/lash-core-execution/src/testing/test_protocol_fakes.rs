@@ -446,7 +446,9 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     response_meta,
                 } => {
                     if !text.is_empty() {
+                        let previous_len = assistant_text.len();
                         crate::append_assistant_text_part(&mut assistant_text, &text);
+                        let text = assistant_text[previous_len..].to_string();
                         if !text_streamed {
                             // Mirror StandardDriver: buffered completions emit
                             // the same Started/Delta/Completed lifecycle the

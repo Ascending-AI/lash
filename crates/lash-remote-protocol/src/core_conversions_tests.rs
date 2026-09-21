@@ -383,7 +383,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         }),
         generation_disposition: None,
         response_metadata: response_metadata.clone(),
-        expose_thinking: false,
+        expose_thinking: Some(false),
     };
     let remote = RemoteLlmResponse::from_core("request-1", response);
     remote.validate().expect("valid remote response");

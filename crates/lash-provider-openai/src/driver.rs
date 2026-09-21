@@ -823,7 +823,7 @@ fn complete_buffered_responses(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
-        expose_thinking: state.expose_thinking,
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -969,7 +969,7 @@ fn complete_buffered_chat(
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
-        expose_thinking: state.expose_thinking,
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -1176,7 +1176,7 @@ async fn drive_streaming_responses(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
-        expose_thinking: state.expose_thinking,
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -1305,7 +1305,7 @@ async fn drive_streaming_chat(
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
-        expose_thinking: state.expose_thinking,
+        expose_thinking: Some(state.expose_thinking),
     })
 }
 
@@ -1327,6 +1327,6 @@ fn chat_response_from_state(state: ChatStreamState, url: &str) -> LlmResponse {
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
-        expose_thinking: state.expose_thinking,
+        expose_thinking: Some(state.expose_thinking),
     }
 }

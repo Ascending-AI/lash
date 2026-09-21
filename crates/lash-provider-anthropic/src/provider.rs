@@ -262,7 +262,7 @@ impl Provider for AnthropicProvider {
             execution_evidence,
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
-            expose_thinking,
+            expose_thinking: Some(expose_thinking),
         };
         response
             .stamp_replay_origin(&minting_route)
@@ -339,7 +339,7 @@ impl AnthropicProvider {
             execution_evidence,
             generation_disposition,
             response_metadata: Default::default(),
-            expose_thinking,
+            expose_thinking: Some(expose_thinking),
         }
     }
 }

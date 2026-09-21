@@ -256,7 +256,7 @@ pub fn response_from_stream_state(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
-        expose_thinking: state.expose_thinking,
+        expose_thinking: Some(state.expose_thinking),
     }
 }
 
