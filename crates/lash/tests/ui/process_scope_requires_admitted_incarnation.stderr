@@ -1,0 +1,26 @@
+error[E0308]: mismatched types
+ --> tests/ui/process_scope_requires_admitted_incarnation.rs:6:9
+  |
+4 |     let _ = lash::runtime::ScopedEffectController::borrowed(
+  |             ----------------------------------------------- arguments to this function are incorrect
+5 |         controller,
+6 |         lash::runtime::ExecutionScope::process("unadmitted"),
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AdmittedScope`, found `ExecutionScope`
+  |
+note: associated function defined here
+ --> $WORKSPACE/crates/lash-core-execution/src/runtime/effect/executor/control/scope.rs
+  |
+  |     pub fn borrowed(
+  |            ^^^^^^^^
+
+error[E0599]: no method named `with_admitted_process` found for reference `&ScopedEffectController<'_>` in the current scope
+  --> tests/ui/process_scope_requires_admitted_incarnation.rs:13:20
+   |
+13 |     let _ = scoped.with_admitted_process(lash::process::ProcessRef::new(
+   |             -------^^^^^^^^^^^^^^^^^^^^^
+   |
+help: there is a method `admitted_process` with a similar name, but with different arguments
+  --> $WORKSPACE/crates/lash-core-execution/src/runtime/effect/executor/control/scope.rs
+   |
+   |     pub fn admitted_process(&self) -> Option<&crate::ProcessRef> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
