@@ -1025,8 +1025,10 @@ at the runtime's lifetime, as the host already says of externally routed complet
 keys through `allow_process_lifetime_completion_keys` — "Explicitly accept that
 externally routed completion keys die with this process."
 
-*Status.* Scope liveness, its fence and the completion-key opt-in **hold today**.
-The owned supervisor and context retention through drain are **new** (FIG-2266).
+*Status.* Scope liveness, its fence, the completion-key opt-in, the owned
+supervisor and context retention through drain **hold today** (FIG-2266 C3:
+the group owns its children's tasks for exactly its own life, and a closed
+group's unsettled children count against the scope's quiescence).
 
 ---
 

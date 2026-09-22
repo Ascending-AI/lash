@@ -24,10 +24,17 @@ pub struct NativeEffectHost {
     /// arbitrary controller cannot inspect that controller's private registry
     /// and therefore reports the administrative read as unsupported.
     await_event_admin: Option<Arc<super::await_events::AwaitEventRegistry>>,
+    /// Present for the built-in native controller, for the same reason as
+    /// `await_event_admin`: a host wrapping an arbitrary controller cannot see
+    /// that controller's groups, so its quiescence gate counts only what the
+    /// host itself admitted.
+    groups_admin: Option<Arc<super::executor::NativeEffectGroups>>,
     allow_process_lifetime_completion_keys: Arc<std::sync::atomic::AtomicBool>,
     /// Effects executing and groups open under each non-session scope, by
     /// journal key: the in-process twin of a journal's `in_progress` rows and
     /// open group rows, which a quiescent-gated retirement must not cut under.
+    /// A *closed* group's still-draining children are not here — they are
+    /// counted through `groups_admin`, the supervisor's own unsettled count.
     live: Arc<ScopeLiveness>,
     /// This host's one tool-child wiring, installed on first use
     /// (ADR 0099 §2). Shared by every clone of the host, because the registry
@@ -103,11 +110,35 @@ impl Drop for LiveScopeGuard {
 }
 
 impl NativeEffectHost {
+    /// A host over a foreign controller: its quiescence gate counts only what
+    /// the host itself admitted, because that controller's groups are not
+    /// visible to it.
     pub fn new(controller: Arc<dyn RuntimeEffectController>) -> Self {
         Self {
             turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller,
             await_event_admin: None,
+            groups_admin: None,
+            allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
+            live: Arc::new(ScopeLiveness::default()),
+            tool_children: Arc::new(std::sync::OnceLock::new()),
+        }
+    }
+
+    /// A host over the built-in native controller, wired with both admin
+    /// handles so a quiescent-gated retirement can count this controller's
+    /// unsettled group children alongside the host's own admissions (ADR 0099
+    /// §14: a closed group's draining losers keep their scope live).
+    pub fn with_native_controller(controller: Arc<NativeRuntimeEffectController>) -> Self {
+        let await_event_admin = Some(controller.await_event_registry());
+        let groups_admin = Some(controller.groups());
+        Self {
+            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
+            controller,
+            await_event_admin,
+            groups_admin,
             allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
@@ -127,18 +158,7 @@ impl NativeEffectHost {
 
 impl Default for NativeEffectHost {
     fn default() -> Self {
-        let controller = NativeRuntimeEffectController::default();
-        let await_event_admin = Some(controller.await_event_registry());
-        Self {
-            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
-            controller: Arc::new(controller),
-            await_event_admin,
-            allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
-                false,
-            )),
-            live: Arc::new(ScopeLiveness::default()),
-            tool_children: Arc::new(std::sync::OnceLock::new()),
-        }
+        Self::with_native_controller(Arc::new(NativeRuntimeEffectController::default()))
     }
 }
 
@@ -320,10 +340,11 @@ impl EffectHost for NativeEffectHost {
     /// revoked through the session lever the host already calls.
     ///
     /// A `WhenQuiescent` retirement is refused with `effect_scope_not_quiescent`
-    /// while an effect is executing or a group is open under the scope through
-    /// a controller this host handed out, or while a waiter is parked on one
-    /// of the scope's promises; the proof and the fence are taken under the
-    /// admission lock every scoped controller enters through.
+    /// while an effect is executing, a group is open, or a grouped child under
+    /// the scope has not settled through a controller this host handed out, or
+    /// while a waiter is parked on one of the scope's promises; the proof and
+    /// the fence are taken under the admission lock every scoped controller
+    /// enters through.
     async fn retire_effect_journal(
         &self,
         retirement: EffectJournalRetirement,
@@ -335,6 +356,10 @@ impl EffectHost for NativeEffectHost {
             let key = scope.journal_identity()?.key().to_string();
             let _admission = self.live.admission.lock().await;
             if self.live.is_live(&key)
+                || self
+                    .groups_admin
+                    .as_ref()
+                    .is_some_and(|groups| groups.unsettled_children_under(&scope) > 0)
                 || !self
                     .controller
                     .retire_await_events_for_scope_if_quiescent(&scope)

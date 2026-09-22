@@ -153,7 +153,7 @@ fn controller() -> NativeRuntimeEffectController {
 /// An native host whose controller resolves grouped children through this
 /// file's staging table.
 fn native_host() -> crate::NativeEffectHost {
-    crate::NativeEffectHost::new(Arc::new(controller()))
+    crate::NativeEffectHost::with_native_controller(Arc::new(controller()))
 }
 
 /// The capability flag is the admission gate, and the scoped view a host
@@ -214,17 +214,14 @@ mod shared_effect_group_host_laws {
         // refused open journals nothing" — and it is no cost at all, because this
         // tier journals nothing to leave behind.
         let controller = Arc::new(NativeRuntimeEffectController::default());
-        let host: std::sync::Arc<dyn crate::EffectHost> =
-            std::sync::Arc::new(crate::NativeEffectHost::new(
-                Arc::clone(&controller) as Arc<dyn RuntimeEffectController>
-            ));
+        let host: std::sync::Arc<dyn crate::EffectHost> = std::sync::Arc::new(
+            crate::NativeEffectHost::with_native_controller(Arc::clone(&controller)),
+        );
         ((), move |suite_executors| {
             let Some(suite_executors) = suite_executors else {
-                return std::sync::Arc::new(crate::NativeEffectHost::new(Arc::new(
-                    NativeRuntimeEffectController::default(),
-                )
-                    as Arc<dyn RuntimeEffectController>))
-                    as std::sync::Arc<dyn crate::EffectHost>;
+                return std::sync::Arc::new(crate::NativeEffectHost::with_native_controller(
+                    Arc::new(NativeRuntimeEffectController::default()),
+                )) as std::sync::Arc<dyn crate::EffectHost>;
             };
             controller
                 .register_group_executors(suite_executors)
@@ -285,6 +282,89 @@ async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs() {
         0,
         "the caller resumed on the winner, so the loser cannot have completed"
     );
+}
+
+/// ADR 0099 §14's "unclaimed tasks are counted" on this tier: a group closed
+/// under `RunToCompletion` keeps its draining loser counted against the scope
+/// until the loser settles, which is what a quiescent retirement reads.
+#[tokio::test]
+async fn a_draining_loser_is_counted_until_it_settles() {
+    let controller = Arc::new(controller());
+    let host = crate::NativeEffectHost::with_native_controller(Arc::clone(&controller));
+    let scope = crate::ExecutionScope::runtime_operation(SCOPE);
+    let scoped = host.scoped(admit(scope.clone())).expect("a scope binds");
+    let key = "fig2266:draining-counted";
+    let (slow, loser) = gated();
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(staged(
+            group(key, 2, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
+            vec![immediate(), slow],
+        ))
+        .await
+        .expect("the group opens");
+
+    let settlement = scoped
+        .controller()
+        .await_next_settlement(&mut handle, CancellationToken::new())
+        .await
+        .expect("the first settlement arrives");
+    assert_eq!(settlement.position, 0);
+    scoped
+        .controller()
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group closes under RunToCompletion");
+
+    assert_eq!(
+        controller.unsettled_children_under(&scope),
+        1,
+        "the draining loser is still counted after the caller closed"
+    );
+    loser.release.send(()).expect("release the loser");
+    until(|| controller.unsettled_children_under(&scope) == 0).await;
+}
+
+/// The supervisor owns its children's tasks for exactly the group's life:
+/// both live in the group's task set while the loser drains, and the set is
+/// gone once the last settlement reaps the group — never aborted mid-drain.
+#[tokio::test]
+async fn the_supervisor_owns_its_children_for_the_groups_life() {
+    let controller = Arc::new(controller());
+    let host = crate::NativeEffectHost::with_native_controller(Arc::clone(&controller));
+    let scoped = host
+        .scoped(admit(crate::ExecutionScope::runtime_operation(SCOPE)))
+        .expect("a scope binds");
+    let key = "fig2266:supervisor-life";
+    let (slow, loser) = gated();
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(staged(
+            group(key, 2, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
+            vec![immediate(), slow],
+        ))
+        .await
+        .expect("the group opens");
+
+    let settlement = scoped
+        .controller()
+        .await_next_settlement(&mut handle, CancellationToken::new())
+        .await
+        .expect("the first settlement arrives");
+    assert_eq!(settlement.position, 0);
+    assert_eq!(
+        controller.open_group_task_count(key),
+        Some(2),
+        "the group still owns both child tasks while the loser drains"
+    );
+    scoped
+        .controller()
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group closes");
+
+    loser.release.send(()).expect("release the loser");
+    until(|| controller.open_group_task_count(key).is_none()).await;
 }
 
 /// The settlement at rank `n` is a record, not a race: reading it again — as a

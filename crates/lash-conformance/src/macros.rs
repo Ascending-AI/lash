@@ -655,6 +655,7 @@ macro_rules! effect_group_host_tests {
             (duplicate_replay_keys_are_refused_before_a_host_sees_them, "group-duplicate-replay", wired),
             (the_first_settlement_wakes_the_caller_while_the_loser_still_runs, "group-first", wired),
             (a_scope_with_a_live_group_child_is_not_quiescent, "group-live-child", wired),
+            (a_closed_group_with_a_draining_loser_is_not_quiescent, "group-closed-draining-loser", wired),
             (settlement_n_is_stable_across_re_reads, "group-reread", wired),
             (every_child_is_delivered_once_in_rank_order, "group-order", wired),
             (awaiting_past_the_last_child_is_refused, "group-past-last", wired),

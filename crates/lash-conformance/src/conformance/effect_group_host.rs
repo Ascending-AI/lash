@@ -1356,6 +1356,94 @@ pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
     assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
 }
 
+/// ADR 0099 §14's "unclaimed tasks are counted": a group closed under
+/// `RunToCompletion` still has a draining loser, and that loser keeps its
+/// scope live on every tier — SQL counts the unsettled membership, Restate
+/// asks the index's `unsettled_children`, and native counts its supervisor's
+/// unsettled children. This is what protects a loser's intent drain from a
+/// retirement fence landing mid-drain.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_closed_group_with_a_draining_loser_is_not_quiescent<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let scope = scope(prefix, "closed-drain");
+    let scoped = host.scoped(admit(scope.clone())).expect("a scope binds");
+    let key = group_key(prefix, "closed-drain");
+    let (slow, loser) = gated(1);
+    let mut handle = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::First,
+        RUN,
+        vec![settles(0), slow],
+    )
+    .await;
+    let winner = next(&scoped, &mut handle)
+        .await
+        .expect("the first settlement arrives");
+    assert_eq!(winner.position, 0);
+    close(&scoped, handle, RUN)
+        .await
+        .expect("the group closes under RunToCompletion");
+    loser.wait_until_waiting().await;
+
+    let refused = host
+        .retire_effect_journal(
+            crate::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations are retirable")
+                .when_quiescent(),
+        )
+        .await
+        .expect_err("a closed group with a draining loser is not quiescent");
+    assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
+    host.await_event_key(
+        &scope,
+        AwaitEventWaitIdentity::tool_completion("still-open-after-close"),
+    )
+    .await
+    .expect("the refused retirement left the scope unfenced");
+
+    loser.release();
+    until(|| loser.finished() == 1).await;
+    // The terminal is journaled after the executor returns, so the retirement
+    // is retried until the store proves the scope quiescent.
+    tokio::time::timeout(AWAIT_BUDGET, async {
+        loop {
+            match host
+                .retire_effect_journal(
+                    crate::EffectJournalRetirement::for_scope(&scope)
+                        .expect("runtime operations are retirable")
+                        .when_quiescent(),
+                )
+                .await
+            {
+                Ok(_) => break,
+                Err(err) if err.code == crate::RuntimeErrorCode::EffectScopeNotQuiescent => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(err) => panic!("quiescent retirement failed: {err}"),
+            }
+        }
+    })
+    .await
+    .expect("the scope becomes quiescent once the loser has drained");
+
+    let fenced = host
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("after-retirement"),
+        )
+        .await
+        .expect_err("the retired scope mints nothing");
+    assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
+}
+
 /// The settlement at rank `n` is a record, not a race: reading it again — as a
 /// replayed frame does — yields the same child.
 ///
