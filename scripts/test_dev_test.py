@@ -136,6 +136,11 @@ class DevTestTests(unittest.TestCase):
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
             ["kiln", "build", "//crates/service:all", "//:schema_checks"],
         ])
+        self.source.write_text("pub fn example() { let _ = 2; }\n")
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
+            ["kiln", "build", "//crates/service:all", "//:schema_checks"],
+            ["kiln", "test", "//crates/example:test_batch", "//:schema_checks"],
+        ])
 
     def test_facade_keeps_explicit_manual_seal(self):
         (self.root / "Cargo.toml").write_text("[workspace]\n")

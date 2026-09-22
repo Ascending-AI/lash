@@ -165,9 +165,11 @@ def plan(base: str, dependents: bool) -> dict:
     labels = ["//:dev_tests"] if broad else batch_labels(members, batches)
     if facade:
         labels.append("//crates/lash:ui_fixtures")
-    if packages and not broad and not members:
-        # Service-only and compile-only packages still need compilation proof.
-        commands.append(["kiln", "build", *(p + ":all" for p in packages), "//:schema_checks"])
+    uncovered = [p for p in packages if not any(label.split(":")[0] == p for label in members)]
+    if uncovered and not broad:
+        # Service-only and compile-only packages still need compilation proof,
+        # including mixed diffs that also select tests in another package.
+        commands.append(["kiln", "build", *(p + ":all" for p in uncovered), "//:schema_checks"])
     if labels:
         labels.append("//:schema_checks")
         commands.append(["kiln", "test", *labels])
