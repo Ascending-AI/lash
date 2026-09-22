@@ -128,6 +128,40 @@ fn turn_input_round_trips_remote_safe_fields() {
 }
 
 #[test]
+fn remote_turn_request_idempotency_key_contract() {
+    // `idempotency_key` is a host-transport key that lash does not deduplicate
+    // on (see `RemoteTurnRequest::idempotency_key`), so it must never reach
+    // the core turn input. Two requests that differ only in the key convert
+    // identically: the same key is admitted twice, and dedup is the host's
+    // `source_key` at admission.
+    fn request(idempotency_key: Option<&str>) -> RemoteTurnRequest {
+        RemoteTurnRequest {
+            session_id: SessionId::from("session"),
+            turn_id: TurnId::from("turn"),
+            idempotency_key: idempotency_key.map(str::to_string),
+            input: RemoteTurnInput::text("hello"),
+            tool_grants: Vec::new(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    let keyed =
+        lash_core::TurnInput::try_from(request(Some("same-key"))).expect("keyed request converts");
+    let resend = lash_core::TurnInput::try_from(request(Some("same-key")))
+        .expect("resent keyed request converts");
+    let unkeyed = lash_core::TurnInput::try_from(request(None)).expect("unkeyed request converts");
+
+    assert_eq!(
+        serde_json::to_value(&keyed).expect("serialize keyed"),
+        serde_json::to_value(&resend).expect("serialize resend"),
+    );
+    assert_eq!(
+        serde_json::to_value(&keyed).expect("serialize keyed"),
+        serde_json::to_value(&unkeyed).expect("serialize unkeyed"),
+    );
+}
+
+#[test]
 fn turn_input_rejects_non_remote_safe_fields() {
     struct DummyTurnExtension;
 
