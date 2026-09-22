@@ -88,6 +88,16 @@ symbols = [
 
 [[surface.guard]]
 kind = "rust_items"
+paths = ["crates/lash-sansio/src/effect_identity.rs"]
+symbols = ["ExecutionScope"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/runtime_error.rs"]
+symbols = ["RuntimeErrorCode"]
+
+[[surface.guard]]
+kind = "rust_items"
 paths = ["crates/lash-sansio/src/session_model/mod.rs"]
 symbols = [
   "TurnOutcome", "TurnFinish", "TurnStop", "TurnCancellationEvidence",
@@ -163,6 +173,16 @@ symbols = [
   "QueuedRunAdmission", "QueuedRunOrigin", "QueuedRunRequest", "QueuedRunPosition",
   "QueuedRunMember", "QueuedRunTerminal", "QueuedRunProgress", "QueuedRunCommit",
 ]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/effect_identity.rs"]
+symbols = ["ExecutionScope"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/runtime_error.rs"]
+symbols = ["RuntimeErrorCode"]
 
 [[surface.guard]]
 kind = "rust_items"

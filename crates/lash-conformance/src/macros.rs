@@ -152,6 +152,7 @@ macro_rules! runtime_persistence_tests {
             (queued_run_continuation_commits_outbox_and_retains_receipts, "queued-run-continuation"),
             (queued_run_exact_selection_never_commits_a_partial_claim, "queued-run-exact"),
             (queued_run_terminal_disposition_preserves_unassigned_work, "queued-run-disposition"),
+            (queued_run_cancelled_follow_on_receipt_retains_withheld_members, "queued-run-cancelled-follow-on"),
             (queued_run_checkpoint_assignment_survives_lane_rotation, "queued-run-checkpoint-assignment"),
             (queued_run_frozen_batches_survive_takeover_and_changed_limits, "queued-run-batches"),
             (queued_run_selected_excludes_pending_input, "queued-run-selected-composition"),

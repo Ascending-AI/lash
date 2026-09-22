@@ -905,6 +905,176 @@ pub async fn queued_run_terminal_disposition_preserves_unassigned_work(
     assert_eq!(receipt.terminal, settled.terminal);
 }
 
+/// Cancellation of a later physical frame terminalizes the run's earlier
+/// withheld input. The explicit receipt must retain both its ownership and
+/// the cancellation outcome after the payload row stops being claimable.
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance fixture fails at the violated durable receipt invariant"
+)]
+pub async fn queued_run_cancelled_follow_on_receipt_retains_withheld_members(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    use lash_core::store::{
+        QueuedRunCommit, QueuedRunMember, QueuedRunProgress, QueuedRunTerminal,
+    };
+
+    let session_id = SessionId::from("queued-run-cancelled-follow-on");
+    let mut state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let lease = claim_session_execution_lease_for_test(&store, &session_id, "cancelled").await;
+    let request = BeginQueuedRun {
+        session_id: session_id.clone(),
+        identity: Some(crate::ExecutionScope::queue_drain(&session_id, "cancelled")),
+        request: QueuedRunRequest::Automatic,
+        configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+        expected_head_revision: 0,
+        initial_turn_index: 1,
+    };
+    let admission = store
+        .begin_or_resume_queued_run(&lease.authority(), request.clone())
+        .await
+        .unwrap();
+    let selected = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &lease.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap();
+    let withheld = store
+        .enqueue_pending_turn_input(checkpoint_claims::pending_active_turn_input_draft(
+            &session_id,
+            &selected.admission.position.turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "withheld by frame zero",
+        ))
+        .await
+        .unwrap();
+    let current = store
+        .enqueue_pending_turn_input(checkpoint_claims::pending_active_turn_input_draft(
+            &session_id,
+            &selected.admission.position.turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "frame one",
+        ))
+        .await
+        .unwrap();
+    store
+        .claim_active_turn_inputs(
+            &session_id,
+            &lease.authority(),
+            &lease.owner,
+            &selected.admission.position.turn_id,
+            crate::CheckpointKind::AfterWork,
+            2,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let mut advance = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        crate::OperationId::new(admission.scope.clone(), "physical-0"),
+    );
+    advance.session_execution_lease_fence = Some(lease.authority());
+    advance.queued_run = Some(Box::new(QueuedRunCommit {
+        scope: admission.scope.clone(),
+        expected_revision: selected.admission.revision,
+        progress: QueuedRunProgress::Advance {
+            position: selected.admission.position.next(&admission.scope).unwrap(),
+            members: vec![QueuedRunMember::Input(current.input_id.clone())],
+            withheld_members: vec![QueuedRunMember::Input(withheld.input_id.clone())],
+            include_outbox: false,
+        },
+    }));
+    let head = store.commit_runtime_state(advance).await.unwrap();
+    let resumed = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &lease.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resumed.admission.withheld_members,
+        vec![QueuedRunMember::Input(withheld.input_id.clone())]
+    );
+    assert_eq!(
+        resumed.admission.members,
+        Some(vec![QueuedRunMember::Input(current.input_id.clone())])
+    );
+    state.head_revision = head.head_revision;
+    let cancelled = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
+        evidence: crate::TurnCancellationEvidence::internal("cancelled-follow-on"),
+    });
+    let mut settle = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        crate::OperationId::new(admission.scope.clone(), "physical-1"),
+    );
+    settle.session_execution_lease_fence = Some(lease.authority());
+    settle.queued_run = Some(Box::new(QueuedRunCommit {
+        scope: admission.scope.clone(),
+        expected_revision: resumed.admission.revision,
+        progress: QueuedRunProgress::Settle {
+            terminal: QueuedRunTerminal::Completed {
+                turn_id: resumed.admission.position.turn_id,
+                outcome: cancelled.clone(),
+            },
+        },
+    }));
+    store.commit_runtime_state(settle).await.unwrap();
+    assert!(
+        store
+            .pending_queued_run(&session_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .list_pending_turn_inputs(&session_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .claim_next_turn_inputs(&session_id, &lease.authority(), &lease.owner, 2)
+            .await
+            .unwrap()
+            .is_none(),
+        "a terminalized withheld input cannot escape into a later run"
+    );
+    let receipt = store
+        .begin_or_resume_queued_run(&lease.authority(), request)
+        .await
+        .unwrap();
+    assert_eq!(
+        receipt.withheld_members,
+        vec![QueuedRunMember::Input(withheld.input_id)]
+    );
+    assert_eq!(
+        receipt.members,
+        Some(vec![QueuedRunMember::Input(current.input_id)])
+    );
+    assert!(matches!(
+        receipt.terminal,
+        Some(QueuedRunTerminal::Completed { outcome, .. }) if outcome == cancelled
+    ));
+}
+
 #[expect(
     clippy::unwrap_used,
     reason = "conformance fixtures fail at the violated durable invariant"
