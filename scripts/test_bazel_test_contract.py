@@ -443,12 +443,16 @@ class BazelTestContractTests(unittest.TestCase):
         # the small-action defaults; anything heavier carries its own
         # `exec_properties` from `tools/bazel/action-sizes.json`.
         self.assertIn(
-            "build:shared --remote_default_exec_properties=cpu_count=1", bazelrc
+            "build --remote_default_exec_properties=cpu_count=1", bazelrc
         )
         self.assertIn(
-            "build:shared --remote_default_exec_properties=memory_kb=2097152", bazelrc
+            "build --remote_default_exec_properties=memory_kb=2097152", bazelrc
         )
         self.assertIn("build:shared --remote_local_fallback=false", bazelrc)
+        action = (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text()
+        for property_name in ("cpu_count", "memory_kb"):
+            self.assertNotIn(f"--remote_default_exec_properties={property_name}=", action)
+
 
         sources = [(pathlib.Path(".bazelrc"), bazelrc)]
         for path in sorted((ROOT / ".github").rglob("*")):

@@ -603,14 +603,20 @@ fork and golden refresh; it is gitignored and `.bazelrc` `try-import`s it. The
 CI values are `build-cache` environment secrets, masked on read and validated
 by `.github/actions/bazel-shared-cache`, which fails with the name of any empty
 one. The build-infra repository writes both sides; nothing here is edited by
-hand. `.bazelrc` keeps only what the pool is asked *for* — the four-CPU,
-4 GiB action shape, `--remote_local_fallback=false`, and the download and
+hand. `.bazelrc` keeps only what the pool is asked *for* — the common one-CPU,
+2 GiB fallback and explicit per-target resource requests, `--remote_local_fallback=false`, and the download and
 upload policy — and `scripts/test_bazel_test_contract.py` refuses an IP
 address, an instance name, a fingerprint, a certificate path or a home
 directory in `.bazelrc`, under `.github/`, or in `scripts/ci_plan.py`.
 
-`--jobs=32` counts in-flight remote actions rather than local cores, against
-the eight concurrent slots the pool advertises. `--remote_local_fallback=false`
+The local `--jobs=16` and CI `--jobs=32` limits count in-flight remote actions,
+not local cores. Resource defaults live in the unconditional `build` section
+of `.bazelrc`, so forks and CI use identical action keys for inherited requests.
+Sized targets keep their existing higher floors. Aligning CI's previous
+4 CPU/4 GiB fallback with the local 1 CPU/2 GiB fallback changes the keys of
+unannotated CI actions once; those actions can then reuse local results.
+
+`--remote_local_fallback=false`
 makes an unreachable pool a red job rather than a silent two-core compile,
 which is the intended trust posture. Service-backed tests are the one spawn
 that stays on the runner: `scripts/ci/store-tests.sh` adds `no-remote-exec` to
@@ -626,3 +632,40 @@ runs. Compare focused Bazel edit builds with Cargo's existing `cargo check`
 path as separate operations: Bazel `build` produces linkable
 artifacts, while Cargo `check` normally stops at metadata. Cargo release or
 judged timings are not comparable to this graph.
+
+
+## Remote action diagnostics
+
+Use an explicit bundle and baseline when a compile unexpectedly repeats or a
+remote action is slow. The command submits through Kiln with the normal jobs
+and resource policy; it adds a JSON profile, compact execution log, gRPC log
+and invocation/source manifest. Bundles are private local artifacts and may
+contain command environment values: keep them outside the checkout and do not
+upload raw logs to CI artifacts.
+
+```sh
+python3 scripts/bazel-diagnose.py capture --output /tmp/lash-before test //crates/lash-sansio:lash-sansio__unit_test
+# Make the representative edit, then capture a separate bundle.
+python3 scripts/bazel-diagnose.py capture --output /tmp/lash-after --baseline /tmp/lash-before test //crates/lash-sansio:lash-sansio__unit_test
+python3 scripts/bazel-diagnose.py report /tmp/lash-after
+python3 scripts/bazel-diagnose.py compare /tmp/lash-before /tmp/lash-after
+```
+
+The first invocation downloads the checksum-pinned BuildBuddy CLI into the
+user cache. Its `print` and `explain` commands decode local files without a
+BuildBuddy service or credentials. It does not replace the Bazel executable.
+`build.log` receives live build output; `manifest.json` records exit status,
+interruptions, source-content identity and capture/analysis durations.
+`summary.json` joins action digests to real executed-action worker metadata;
+`explain.txt` identifies source, argument, environment and property changes.
+A cached result's worker is historical. Missing metadata, ambiguous retries,
+truncated captures and negative clock-skewed queue timestamps remain explicit.
+A successful build with incomplete diagnostics keeps its successful exit status
+and marks the diagnostics incomplete in the manifest.
+
+The source digest covers tracked and non-ignored untracked files, including
+executable bits and symlink destinations; ignored/generated inputs are described
+by the captured action log instead. The diagnostic manifest is an observation,
+not a reusable validation receipt. Capture is opt-in: remote logs add I/O and
+result decoding has its own measured duration. Compare like target/features,
+cache state and host load, and keep upload/queue time separate from execution.
