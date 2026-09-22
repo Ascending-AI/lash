@@ -1,4 +1,12 @@
 {
+  "crates/lash": {
+    "tests": {
+      "integration": [
+        "tests/integration.rs",
+        "tests/integration/**/*.rs"
+      ]
+    }
+  },
   "crates/lash-core": {
     "tests": {
       "runtime_effect": [

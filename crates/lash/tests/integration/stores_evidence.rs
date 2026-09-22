@@ -5,10 +5,6 @@
 #![cfg(feature = "testing")]
 #![allow(dead_code, unreachable_code, unused_variables)]
 
-mod facade_support {
-    pub use lash_core::facade_support::*;
-}
-
 use lash_sansio::SessionId;
 
 type SessionNodeRecord = lash_core::SessionNodeRecord;

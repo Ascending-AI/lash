@@ -546,7 +546,7 @@ def target_support(
         "runtime_scenarios",
     ):
         extra_data.append("//crates/lash-core-execution:rust_sources")
-    if package["name"] == "lash-runtime" and target["name"] == "facade_inventory":
+    if package["name"] == "lash-runtime" and target["name"] == "integration":
         extra_data.extend([
             "//crates/lash-remote-protocol:rust_sources",
             "//crates/lash-sansio:rust_sources",
