@@ -264,6 +264,21 @@ impl EffectGroupDispatch {
             .await?;
         let admission = match first {
             EffectGroupAdmissionResponse::Admitted => EffectGroupAdmissionResponse::Admitted,
+            EffectGroupAdmissionResponse::AttachExpired => {
+                // §8: the index retains a different invocation id for this
+                // position — the original's retention expired and the
+                // idempotency-keyed dispatch minted this successor. The child
+                // settles with the typed failure rather than running under an
+                // identity the group never recorded.
+                return record_child_settlement(
+                    &ctx,
+                    &request,
+                    EffectGroupChildRunOutcome::Completed {
+                        outcome: Err(attach_expired_error(&request)),
+                    },
+                )
+                .await;
+            }
             EffectGroupAdmissionResponse::Refused | EffectGroupAdmissionResponse::Retired => {
                 return Ok(Json(()));
             }
@@ -299,6 +314,16 @@ impl EffectGroupDispatch {
         };
         match admission {
             EffectGroupAdmissionResponse::Admitted => {}
+            EffectGroupAdmissionResponse::AttachExpired => {
+                return record_child_settlement(
+                    &ctx,
+                    &request,
+                    EffectGroupChildRunOutcome::Completed {
+                        outcome: Err(attach_expired_error(&request)),
+                    },
+                )
+                .await;
+            }
             EffectGroupAdmissionResponse::Refused | EffectGroupAdmissionResponse::Retired => {
                 return Ok(Json(()));
             }
@@ -582,6 +607,23 @@ impl EffectGroupDispatch {
     }
 }
 
+/// The §8 typed failure: this invocation is a successor minted under the
+/// idempotency key after the retained child invocation's retention expired —
+/// it never runs, and its settlement records the refusal so the opener's
+/// rank wait resolves instead of stranding.
+fn attach_expired_error(request: &EffectGroupChildRequest) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RuntimeEffectGroupChildAttachExpired,
+        format!(
+            "effect group {} child {} attached an invocation id the index does not \
+             retain; the retained invocation's retention expired, so the child \
+             settles with this failure rather than re-running under a fresh \
+             identity (ADR 0099 §8)",
+            request.group_key, request.position
+        ),
+    )
+}
+
 /// Records one child's terminal in the index, writing its payload first when
 /// the outcome carries one.
 ///
@@ -721,5 +763,52 @@ async fn record_child_settlement(
             request.group_key, request.position
         ))
         .into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> EffectGroupChildRequest {
+        EffectGroupChildRequest {
+            group_key: "group-1".to_owned(),
+            shape: EffectGroupShape {
+                wake: lash_core::GroupWakePolicy::All,
+                loser_disposition: LoserPolicy::RunToCompletion,
+                replay_keys: vec!["child-0".to_owned()],
+                wait_scope: ExecutionScope::runtime_operation("group"),
+                membership: vec!["{}".to_owned()],
+            },
+            position: 0,
+            envelope: RuntimeEffectEnvelope::new(
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(
+                        ExecutionScope::runtime_operation("group"),
+                        "group-1:child:0",
+                    )
+                    .expect("valid child address"),
+                    lash_core::RuntimeAttribution::none(),
+                    "effect",
+                ),
+                lash_core::RuntimeEffectCommand::LanguageRuntimeValue {
+                    operation: "child".to_owned(),
+                },
+            ),
+        }
+    }
+
+    /// The §8 typed failure is terminal and names the group and position the
+    /// stranded rank wait needs: distinct from an ordinary refusal so the
+    /// opener reads "the retained invocation expired", not "disallowed".
+    #[test]
+    fn attach_expired_error_is_the_typed_attach_expiry() {
+        let error = attach_expired_error(&request());
+        assert_eq!(
+            error.code,
+            RuntimeErrorCode::RuntimeEffectGroupChildAttachExpired
+        );
+        let message = error.to_string();
+        assert!(message.contains("group-1"), "{message}");
     }
 }

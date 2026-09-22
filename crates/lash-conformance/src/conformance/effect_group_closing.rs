@@ -76,6 +76,25 @@ async fn lifecycle(
         .expect("a group the suite opened is journaled")
 }
 
+/// Wait until `rank` is durably seated in the group — the barrier a crash
+/// law needs before the runtime dies: a rank still in flight at the crash is
+/// legitimately drained again by the resume's step 1, so "never re-drains"
+/// holds only for settlements the journal already held.
+async fn until_rank_seated(scoped: &crate::ScopedEffectController<'_>, group_key: &str, rank: u64) {
+    let controller = scoped.controller();
+    let group_key = group_key.to_string();
+    until_async(move || {
+        let group_key = group_key.clone();
+        async move {
+            matches!(
+                controller.read_group_settlement(&group_key, rank).await,
+                Ok(Some(_))
+            )
+        }
+    })
+    .await;
+}
+
 /// Wait until the group's durable lifecycle reaches `settled`.
 async fn until_settled(closing: &Arc<dyn StoreEffectGroupClosing>, group_key: &str) {
     let closing = Arc::clone(closing);
@@ -398,6 +417,9 @@ pub async fn a_crash_after_drain_resumes_at_outcome_commit(make: DrainWorldFacto
                 close(&scoped, handle, RUN)
                     .await
                     .expect("the caller closes and releases its loser");
+                // The winner's rank must be durable before the process dies —
+                // see `until_rank_seated`.
+                until_rank_seated(&scoped, &key, 1).await;
                 // The runtime dies here: the parked loser task and the
                 // close-time finalizer waiting on it die with it.
             })
@@ -488,6 +510,10 @@ pub async fn a_crash_after_accounting_resumes_at_parent_end(make: DrainWorldFact
                 close(&scoped, handle, RUN)
                     .await
                     .expect("the caller closes and releases its loser");
+                // Same barrier as W10: the winner's rank must be durable
+                // before the process dies, or the resume legitimately drains
+                // it again.
+                until_rank_seated(&scoped, &key, 1).await;
             })
         }
     })

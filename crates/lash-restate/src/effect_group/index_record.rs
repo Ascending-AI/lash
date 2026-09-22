@@ -70,6 +70,14 @@ pub enum EffectGroupLifecycle {
     },
     Closed {
         effective: EffectGroupCloseDisposition,
+        /// The durable twin of the SQL entries' cleared `closed` flag
+        /// (FIG-3481): a reopen is a new caller interest, so a reopened
+        /// closed entry serves the ranks a still-running loser has yet to
+        /// seat instead of answering `Closed`. The disposition itself stays
+        /// cumulative in `effective`. `#[serde(default)]` because index
+        /// records journaled before the flag existed decode as not reopened.
+        #[serde(default)]
+        reopened: bool,
         #[serde(with = "btree_map_as_pairs")]
         addresses: BTreeMap<usize, String>,
         live: EffectGroupIndexLiveRecord,
@@ -234,4 +242,154 @@ fn retired_index_live_read_is_a_typed_terminal_error() {
             .to_string()
             .contains("has no live state after retirement")
     );
+}
+
+/// The §8 admission decision, pure so its arms are exercisable without an
+/// `ObjectContext`: the index's retained invocation id for a position is the
+/// authority over the id a child invocation presents.
+///
+/// A `Some(_)` mismatch is [`EffectGroupAdmissionResponse::AttachExpired`],
+/// not `Refused`: for the idempotency key to mint a second invocation id,
+/// the retained one's retention expired. `Refused` stays for a position that
+/// was never dispatched and for the `Cancel`/`Refused` close dispositions,
+/// where a late child is simply disallowed.
+pub(crate) fn decide_group_child_admission(
+    lifecycle: &EffectGroupLifecycle,
+    position: usize,
+    invocation_id: &str,
+) -> EffectGroupAdmissionResponse {
+    match lifecycle {
+        EffectGroupLifecycle::Preparing {
+            dispatch: EffectGroupDispatchState::Adopted { dispatched, .. },
+            ..
+        } => match dispatched.get(&position) {
+            None => EffectGroupAdmissionResponse::NotYetRecorded,
+            Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
+            Some(_) => EffectGroupAdmissionResponse::AttachExpired,
+        },
+        EffectGroupLifecycle::Ready { addresses, .. } => match addresses.get(&position) {
+            Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
+            Some(_) => EffectGroupAdmissionResponse::AttachExpired,
+            None => EffectGroupAdmissionResponse::Refused,
+        },
+        EffectGroupLifecycle::Closed {
+            effective,
+            addresses,
+            ..
+        } => match effective {
+            EffectGroupCloseDisposition::RunToCompletion => match addresses.get(&position) {
+                Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
+                Some(_) => EffectGroupAdmissionResponse::AttachExpired,
+                None => EffectGroupAdmissionResponse::Refused,
+            },
+            EffectGroupCloseDisposition::Cancel | EffectGroupCloseDisposition::Refused { .. } => {
+                EffectGroupAdmissionResponse::Refused
+            }
+        },
+        EffectGroupLifecycle::Preparing { .. } => EffectGroupAdmissionResponse::NotYetRecorded,
+        EffectGroupLifecycle::Retired { .. } => EffectGroupAdmissionResponse::Retired,
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    fn live_record() -> EffectGroupIndexLiveRecord {
+        EffectGroupIndexLiveRecord {
+            shape: EffectGroupShape {
+                wake: lash_core::GroupWakePolicy::All,
+                loser_disposition: LoserPolicy::RunToCompletion,
+                replay_keys: vec!["child-0".to_owned()],
+                wait_scope: ExecutionScope::runtime_operation("group"),
+                membership: vec!["{}".to_owned()],
+            },
+            next_rank: 1,
+            next_commit_seq: 1,
+            commit_states: BTreeMap::new(),
+            settlements: BTreeMap::new(),
+            settled_positions: BTreeMap::new(),
+        }
+    }
+
+    fn adopted_dispatch(dispatched: &[usize]) -> EffectGroupDispatchState {
+        EffectGroupDispatchState::Adopted {
+            id: "dispatcher-1".to_owned(),
+            dispatched: dispatched
+                .iter()
+                .map(|position| (*position, format!("child-invocation-{position}")))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_retained_child_id_admits_its_own_invocation() {
+        let lifecycle = EffectGroupLifecycle::Preparing {
+            dispatch: adopted_dispatch(&[0]),
+            live: live_record(),
+        };
+        assert_eq!(
+            decide_group_child_admission(&lifecycle, 0, "child-invocation-0"),
+            EffectGroupAdmissionResponse::Admitted
+        );
+    }
+
+    /// The §8 surface: a successor minted under the idempotency key after the
+    /// retained invocation's retention expired presents a *different* id, and
+    /// the index answers `AttachExpired` — the typed failure the child
+    /// records — rather than the silent `Refused` a cancel disallows.
+    #[test]
+    fn a_successor_with_an_expired_attachment_is_named_attach_expired() {
+        for lifecycle in [
+            EffectGroupLifecycle::Preparing {
+                dispatch: adopted_dispatch(&[0]),
+                live: live_record(),
+            },
+            EffectGroupLifecycle::Ready {
+                addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
+                live: live_record(),
+            },
+            EffectGroupLifecycle::Closed {
+                effective: EffectGroupCloseDisposition::RunToCompletion,
+                reopened: false,
+                addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
+                live: live_record(),
+            },
+        ] {
+            assert_eq!(
+                decide_group_child_admission(&lifecycle, 0, "a-fresh-invocation-id"),
+                EffectGroupAdmissionResponse::AttachExpired,
+                "{lifecycle:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrecorded_position_and_a_cancelled_group_still_refuse() {
+        let preparing = EffectGroupLifecycle::Preparing {
+            dispatch: adopted_dispatch(&[]),
+            live: live_record(),
+        };
+        assert_eq!(
+            decide_group_child_admission(&preparing, 0, "child-invocation-0"),
+            EffectGroupAdmissionResponse::NotYetRecorded
+        );
+        let cancelled = EffectGroupLifecycle::Closed {
+            effective: EffectGroupCloseDisposition::Cancel,
+            reopened: false,
+            addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
+            live: live_record(),
+        };
+        assert_eq!(
+            decide_group_child_admission(&cancelled, 0, "a-fresh-invocation-id"),
+            EffectGroupAdmissionResponse::Refused
+        );
+        let retired = EffectGroupLifecycle::Retired {
+            cleanup: EffectGroupCleanup::Complete,
+        };
+        assert_eq!(
+            decide_group_child_admission(&retired, 0, "child-invocation-0"),
+            EffectGroupAdmissionResponse::Retired
+        );
+    }
 }

@@ -201,6 +201,51 @@ impl<'run> RuntimeExecutionContext<'run> {
                 format!("group {group_key} consumed rank does not fit u64: {error}"),
             )
         })?;
+        self.incorporate_group_prefix_through(group_key, through_rank)
+            .await
+    }
+
+    /// ADR 0099 §7 step 2, as
+    /// [`OpenerFinalizationSteps`](crate::runtime::effect::OpenerFinalizationSteps)
+    /// defines it:
+    /// incorporate *every* settled rank of `group_key`, not just the prefix a
+    /// consumer cursor reached. Step 1 has already ranked every accepted
+    /// child, so the settled ranks are a contiguous `1..=through_rank` whose
+    /// end a scan to the first missing rank names.
+    ///
+    /// The journaled `IncorporateGroupSettlements` record makes the step
+    /// idempotent and cursor-resumable: a re-run whose ranks are already in
+    /// the ledger journals nothing and re-incorporates only what the record
+    /// names.
+    pub async fn incorporate_group_outcome(
+        &self,
+        group_key: &str,
+    ) -> Result<Vec<crate::runtime::effect::IncorporatedGroupRank>, RuntimeEffectControllerError>
+    {
+        let scoped = self.dispatch.effect_controller.scoped();
+        let controller = scoped.controller();
+        let mut through_rank = 0u64;
+        while controller
+            .read_group_settlement(group_key, through_rank + 1)
+            .await?
+            .is_some()
+        {
+            through_rank += 1;
+        }
+        self.incorporate_group_prefix_through(group_key.to_string(), through_rank)
+            .await
+    }
+
+    /// The shared body of [`incorporate_group_prefix`](Self::incorporate_group_prefix)
+    /// and [`incorporate_group_outcome`](Self::incorporate_group_outcome):
+    /// journal the prefix record for `already + 1 ..= through_rank`, then
+    /// apply exactly the ranks the record names.
+    async fn incorporate_group_prefix_through(
+        &self,
+        group_key: String,
+        through_rank: u64,
+    ) -> Result<Vec<crate::runtime::effect::IncorporatedGroupRank>, RuntimeEffectControllerError>
+    {
         // Incorporated ranks of one group are always a contiguous prefix —
         // this method is the only writer and it walks ranks in order — so the
         // count IS the next unincorporated rank minus one.
@@ -344,5 +389,68 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// reach the same `Arc`.
     pub(crate) fn incorporation_ledger(&self) -> &Arc<std::sync::Mutex<IncorporationLedger>> {
         &self.incorporation_ledger
+    }
+}
+
+/// The §7 finalization steps a real opener hands the closing driver
+/// (FIG-3410/FIG-3411): step 2, `commit_outcome_and_accounting`, is
+/// [`RuntimeExecutionContext::incorporate_group_outcome`] — every settled rank
+/// incorporated through the journaled `IncorporateGroupSettlements` record,
+/// which makes the step idempotent and cursor-resumable as
+/// [`OpenerFinalizationSteps`](crate::runtime::effect::OpenerFinalizationSteps)
+/// requires.
+///
+/// Step 3 — the parent's end record — is the exit path's own; when it supplies
+/// `parent_end` this delegates to it, and without one the step is the no-op a
+/// group with no opener record owes.
+#[expect(
+    dead_code,
+    reason = "FIG-3397's exit path constructs this; the seam is delivered ahead of its caller"
+)]
+pub struct ContextFinalizationSteps<'a, 'run> {
+    context: &'a RuntimeExecutionContext<'run>,
+    parent_end: Option<&'a dyn crate::runtime::effect::OpenerFinalizationSteps>,
+}
+
+#[expect(
+    dead_code,
+    reason = "FIG-3397's exit path constructs this; the seam is delivered ahead of its caller"
+)]
+impl<'a, 'run> ContextFinalizationSteps<'a, 'run> {
+    pub fn new(context: &'a RuntimeExecutionContext<'run>) -> Self {
+        Self {
+            context,
+            parent_end: None,
+        }
+    }
+
+    /// Compose the parent's end-record step: the turn or process exit that
+    /// owns the opener's end record (FIG-3397) supplies it here.
+    pub fn with_parent_end(
+        mut self,
+        parent_end: &'a dyn crate::runtime::effect::OpenerFinalizationSteps,
+    ) -> Self {
+        self.parent_end = Some(parent_end);
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::runtime::effect::OpenerFinalizationSteps for ContextFinalizationSteps<'_, '_> {
+    async fn commit_outcome_and_accounting(
+        &self,
+        group_key: &str,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.context
+            .incorporate_group_outcome(group_key)
+            .await
+            .map(|_| ())
+    }
+
+    async fn record_parent_end(&self, group_key: &str) -> Result<(), RuntimeEffectControllerError> {
+        match self.parent_end {
+            Some(parent_end) => parent_end.record_parent_end(group_key).await,
+            None => Ok(()),
+        }
     }
 }

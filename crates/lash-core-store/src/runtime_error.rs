@@ -255,6 +255,10 @@ pub enum RuntimeErrorCode {
     /// linearization point, so its late final record was refused and nothing
     /// was journaled (ADR 0099 §4, W17).
     RuntimeEffectGroupChildCancelDecided,
+    /// A successor attaching a retained child invocation id found the
+    /// original's retention expired; the retained invocation is gone and the
+    /// child is never re-run under a fresh identity (ADR 0099 §8).
+    RuntimeEffectGroupChildAttachExpired,
     /// Drain deferred while this host still works the group or its children.
     /// Retry succeeds once it finishes; permanent refusal uses
     /// `RuntimeEffectGroupShape`.
@@ -567,6 +571,9 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupChildCancelDecided => {
                 "runtime_effect_group_child_cancel_decided"
             }
+            Self::RuntimeEffectGroupChildAttachExpired => {
+                "runtime_effect_group_child_attach_expired"
+            }
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
@@ -800,6 +807,7 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectGroupAwaitCancelled
             | Self::RuntimeEffectGroupChildCancelled
             | Self::RuntimeEffectGroupChildCancelDecided
+            | Self::RuntimeEffectGroupChildAttachExpired
             | Self::RuntimeEffectGroupShape
             | Self::RuntimeEffectInvocationSubject
             | Self::RuntimeEffectScopeMismatch
@@ -1016,6 +1024,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupAwaitCancelled,
         Self::RuntimeEffectGroupChildCancelled,
         Self::RuntimeEffectGroupChildCancelDecided,
+        Self::RuntimeEffectGroupChildAttachExpired,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
         Self::RuntimeEffectToolChildCancellationAuthority,
@@ -1236,6 +1245,9 @@ impl RuntimeErrorCode {
             "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
             "runtime_effect_group_child_cancel_decided" => {
                 Self::RuntimeEffectGroupChildCancelDecided
+            }
+            "runtime_effect_group_child_attach_expired" => {
+                Self::RuntimeEffectGroupChildAttachExpired
             }
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,

@@ -132,6 +132,7 @@ pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     a_child_this_host_cannot_run_is_reported_not_invented(&make, &prefix).await;
     a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(&make, &prefix).await;
     a_reopen_offering_a_retained_key_under_a_different_request_lends_nothing(&make, &prefix).await;
+    a_successor_is_served_the_unconsumed_prefix_without_re_running_a_child(&make, &prefix).await;
     a_settlement_written_by_another_host_wakes_the_parked_awaiter(&make, &prefix).await;
 }
 
@@ -1044,6 +1045,127 @@ async fn a_settlement_written_by_another_host_wakes_the_parked_awaiter(
     close(&scoped_waiter, handle, CANCEL)
         .await
         .expect("the caller closes");
+}
+
+/// §8: a successor that picks the group up at its saved cursor is served the
+/// next rank out of the journal — the retained settlements — not out of any
+/// child running again.
+///
+/// The opener consumes rank 1 of a two-child group and dies with the cursor
+/// there; its children settled before it died, so every fact the successor
+/// needs is already durable. The successor reopens the identical group — the
+/// open replays the retained records rather than dispatching, which the
+/// counting executors assert — and a handle restored at `consumed = 1` is
+/// served rank 2's payload: the surviving child's settlement, not a replay of
+/// the rank the dead process already consumed. Either child can win rank 1,
+/// so the dead process hands the successor the position it consumed through
+/// `consumed_position` — the law's own continuation record.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_successor_is_served_the_unconsumed_prefix_without_re_running_a_child(
+    make: &DrainWorldFactory,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "consumed-prefix");
+    let scope = scope(prefix, "consumed-prefix");
+    // The fact a real continuation would journal: which position the consumed
+    // rank settled. Written by the dying process, read by the successor.
+    let consumed_position = Arc::new(AtomicUsize::new(usize::MAX));
+
+    crashed_process(make, {
+        let key = key.clone();
+        let scope = scope.clone();
+        let consumed_position = Arc::clone(&consumed_position);
+        move |world| {
+            Box::pin(async move {
+                let scoped = world.host.scoped(admit(scope)).expect("scope");
+                let mut handle = open(&scoped, &key, 2, RUN, vec![settles(0), settles(1)]).await;
+                let first = next(&scoped, &mut handle)
+                    .await
+                    .expect("the opener consumes rank 1");
+                consumed_position.store(first.position, Ordering::SeqCst);
+                assert_eq!(handle.consumed(), 1);
+                // Rank 2 durable before the process dies: what the successor
+                // is served must be a retained fact, not a child it ran.
+                tokio::time::timeout(AWAIT_BUDGET, async {
+                    loop {
+                        let settled = scoped
+                            .controller()
+                            .read_group_settlement(&key, 2)
+                            .await
+                            .map(|settled| settled.is_some())
+                            .unwrap_or(false);
+                        if settled {
+                            break;
+                        }
+                        tokio::time::sleep(POLL).await;
+                    }
+                })
+                .await
+                .expect("rank 2 is journaled before the opener dies");
+            })
+        }
+    })
+    .await;
+
+    let successor = make(spec(LIVE_LEASE_MS, &RecordingExecutors::settling())).await;
+    let scoped = successor.host.scoped(admit(scope)).expect("scope");
+
+    // The reopen's executors count what dispatch runs: every child holds a
+    // terminal already, so a replayed record — never an execution — is what
+    // answers each dispatch.
+    let ran = Arc::new(AtomicUsize::new(0));
+    let _reopened = open(
+        &scoped,
+        &key,
+        2,
+        RUN,
+        (0..2)
+            .map(|_| {
+                let ran = Arc::clone(&ran);
+                RuntimeEffectLocalExecutor::testing(move |_| {
+                    let ran = Arc::clone(&ran);
+                    async move {
+                        ran.fetch_add(1, Ordering::SeqCst);
+                        std::future::pending::<
+                            Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+                        >()
+                        .await
+                    }
+                })
+            })
+            .collect(),
+    )
+    .await;
+    assert_eq!(
+        ran.load(Ordering::SeqCst),
+        0,
+        "the successor's reopen replayed the retained records: no child ran again"
+    );
+
+    let consumed = consumed_position.load(Ordering::SeqCst);
+    assert_ne!(consumed, usize::MAX, "the dead process recorded its cursor");
+    let surviving = 1 - consumed;
+    let mut handle = EffectGroupHandle::restored(key.clone(), 2, 1).expect("cursor 1 restores");
+    let settlement = next(&scoped, &mut handle)
+        .await
+        .expect("the successor is served the next rank");
+    assert_eq!(
+        settlement.position, surviving,
+        "the cursor skips the rank the dead process consumed: {settlement:?}"
+    );
+    assert_eq!(handle.consumed(), 2);
+    let outcome = settlement.outcome.expect("the second child settled");
+    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = outcome else {
+        panic!("the journaled payload is the child's own outcome: {outcome:?}")
+    };
+    assert_eq!(
+        value,
+        serde_json::json!({ "position": surviving }),
+        "the payload is the journaled settlement's, not a re-execution's"
+    );
 }
 
 // =============================================================================
