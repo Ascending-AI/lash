@@ -490,7 +490,8 @@ async fn assert_standard_tool_lifecycle(
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("trace-standard-tool-turn"),
                 ),

@@ -517,18 +517,15 @@ fn continue_as_response() -> String {
     "<typescript>\nawait control.continue_as({task: \"next\", seed: {baton: \"switched\", carried: projected_original}});\n</typescript>".to_string()
 }
 
+/// Admitted on the runtime's own host: a group child opened under a foreign
+/// controller resolves no opener/env on the host the turn runs on (ADR 0099).
 fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
-    ScopedEffectController::shared(
-        Arc::new(NativeRuntimeEffectController::default()),
-        AdmittedScope::turn(
-            runtime
-                .read_view()
-                .expect("test runtime frame scope resolves")
-                .session_id(),
-            turn_id,
-        ),
-    )
-    .expect("scope")
+    let session_id = runtime
+        .read_view()
+        .expect("test runtime frame scope resolves")
+        .session_id()
+        .clone();
+    lash_core::testing::runtime_helpers::host_turn_scope(&runtime.host.core, &session_id, turn_id)
 }
 
 /// (a) A follow-on turn fails after an agent-frame switch; the next turn must

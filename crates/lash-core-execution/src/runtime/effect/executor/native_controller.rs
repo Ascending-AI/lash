@@ -101,9 +101,15 @@ pub struct NativeRuntimeEffectController {
 
 impl Default for NativeRuntimeEffectController {
     fn default() -> Self {
+        let groups = Arc::new(NativeEffectGroups::default());
+        eprintln!(
+            "PROBE native-controller-created table={:?}\n{}",
+            Arc::as_ptr(&groups),
+            std::backtrace::Backtrace::force_capture()
+        );
         Self {
             await_events: Arc::new(AwaitEventRegistry::new()),
-            groups: Arc::new(NativeEffectGroups::default()),
+            groups,
             process_lifetime_completion_keys_enabled: false,
         }
     }
@@ -773,6 +779,7 @@ impl NativeEffectGroups {
         &self,
         executors: Arc<dyn GroupExecutors>,
     ) -> Result<(), RuntimeEffectControllerError> {
+        eprintln!("PROBE register-executors table={:?}", self as *const Self);
         let Err(rejected) = self.executors.set(executors) else {
             return Ok(());
         };
@@ -802,6 +809,11 @@ impl NativeEffectGroups {
         &self,
     ) -> Result<Arc<dyn GroupExecutors>, RuntimeEffectControllerError> {
         self.executors.get().cloned().ok_or_else(|| {
+            eprintln!(
+                "PROBE unregistered-native-groups table={:?}\n{}",
+                self as *const Self,
+                std::backtrace::Backtrace::force_capture()
+            );
             RuntimeEffectControllerError::new(
                 RuntimeErrorCode::EffectGroupUnsupported,
                 "this native effect controller has no registered group executor \

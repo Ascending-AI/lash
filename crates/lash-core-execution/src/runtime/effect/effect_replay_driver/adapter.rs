@@ -423,6 +423,17 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         .await
     }
 
+    /// A scoped store controller shares the driver's resolver table: a host
+    /// that is a thin projection over this controller (rather than a
+    /// [`StoreReplayHost`]) registers executors here, and the registration
+    /// must reach the same driver the controller's group methods read.
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn super::super::group_drain::GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.replay_driver().register_group_executors(executors)
+    }
+
     /// The bound-child twin of the host's `scoped_for_group_child`, minted on
     /// the controller for hosts that are thin projections over it: same
     /// driver, same scope, the binding the admission fence arbitrates under

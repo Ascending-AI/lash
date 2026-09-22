@@ -213,7 +213,8 @@ async fn presentation_step_only_changes_model_observation() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("projection-tool-turn"),
             ),
