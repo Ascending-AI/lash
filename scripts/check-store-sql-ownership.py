@@ -255,7 +255,7 @@ def line_of(source: str, offset: int) -> int:
 
 
 def names_table(text: str, table: str) -> bool:
-    return re.search(rf"\b(?:lash_)?{re.escape(table)}\b", text) is not None
+    return table in text and re.search(rf"\b(?:lash_)?{re.escape(table)}\b", text) is not None
 
 
 def is_sql_over(text: str, table: str) -> bool:
