@@ -2,7 +2,6 @@
 
 #![expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "serialization fixture helpers assert that their setup is valid"
 )]
 

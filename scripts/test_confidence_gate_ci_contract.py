@@ -1081,15 +1081,16 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
         self.assertIn("run: just ${{ matrix.recipe }}", functional)
         self.assertIn("workflow-graph-integration-verify:", justfile)
+        self.assertIn('bash "{{repo}}/scripts/workflow-graph-integration-verify.sh"', justfile)
+        integration = (ROOT / "scripts/workflow-graph-integration-verify.sh").read_text()
         self.assertIn(
             "cargo test -p workflow-graph-roundtrip --all-targets --locked",
-            justfile,
+            integration,
         )
-        self.assertIn("run build", justfile)
-        self.assertIn(
-            'npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" test',
-            justfile,
-        )
+        self.assertIn("npm exec -- vite build", integration)
+        self.assertIn("npm exec -- vitest run", integration)
+        self.assertIn("run check:generated-types", integration)
+        self.assertIn("check-schema-contracts.sh --functional-e2e", integration)
 
     def test_asserting_operator_e2es_are_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

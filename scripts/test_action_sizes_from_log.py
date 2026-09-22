@@ -121,7 +121,7 @@ class TestCpuFloorTest(unittest.TestCase):
         self.assertEqual(properties["cpu_count"], str(generator.TEST_CPU_FLOOR))
         # The floor widens the cap, so it may not shrink the cgroup: the pair
         # replaces CI's memory default too (FIG-3310).
-        self.assertEqual(properties["memory_kb"], str(generator.CI_DEFAULT_MEMORY_KB))
+        self.assertEqual(properties["memory_kb"], str(generator.SIZED_MEMORY_FLOOR))
 
     def test_a_measured_test_row_above_the_floor_is_left_alone(self) -> None:
         generator.ACTION_SIZES["floor_probe/test"] = {
@@ -190,7 +190,7 @@ class CpuFloorTest(unittest.TestCase):
         properties = generator.exec_properties("lash", "lib")
         self.assertEqual(properties["cpu_count"], str(generator.CPU_FLOORS["lash/lib"]))
         # An unmeasured floor may not shrink the cgroup it widens the cap of.
-        self.assertEqual(properties["memory_kb"], str(generator.CI_DEFAULT_MEMORY_KB))
+        self.assertEqual(properties["memory_kb"], str(generator.SIZED_MEMORY_FLOOR))
 
     def test_a_floor_never_lowers_a_measured_row(self) -> None:
         for key, floor in generator.CPU_FLOORS.items():
@@ -221,36 +221,18 @@ class CpuFloorTest(unittest.TestCase):
                 self.assertIn(key, emitted, "a floor that names no target is dead")
 
 
-class CiDefaultsTest(unittest.TestCase):
-    """No emitted request may ask the pool for less than CI's own default.
+class SizedResourceFloorsTest(unittest.TestCase):
+    """Explicit target floors remain independent of shared small-action defaults."""
 
-    CI never passes `--config=shared`: `.github/actions/bazel-shared-cache`
-    composes its own flag list, and it sets `cpu_count=4` / `memory_kb=4 GiB`
-    as the remote defaults. An emitted `exec_properties` pair replaces both, so
-    a row that states one or two cores is not "as measured" on CI, it is a cap
-    below what an unsized target gets.
-    """
+    def test_local_and_ci_inherit_the_same_small_action_defaults(self) -> None:
+        action = (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text()
+        rc = (ROOT / ".bazelrc").read_text().splitlines()
+        for name, value in (("cpu_count", generator.DEFAULT_CPU_COUNT),
+                            ("memory_kb", generator.DEFAULT_MEMORY_KB)):
+            self.assertIn(f"build --remote_default_exec_properties={name}={value}", rc)
+            self.assertNotIn(f"--remote_default_exec_properties={name}=", action)
 
-    ACTION = ROOT / ".github/actions/bazel-shared-cache/action.yml"
-
-    def test_the_generator_matches_the_ci_action(self) -> None:
-        action = self.ACTION.read_text(encoding="utf-8")
-        self.assertIn(
-            f"--remote_default_exec_properties=cpu_count={generator.CI_DEFAULT_CPU_COUNT}",
-            action,
-        )
-        self.assertIn(
-            f"--remote_default_exec_properties=memory_kb={generator.CI_DEFAULT_MEMORY_KB}",
-            action,
-        )
-
-    def test_ci_still_composes_its_own_flags_rather_than_config_shared(self) -> None:
-        # The day CI starts passing `--config=shared`, the repository defaults
-        # in `.bazelrc` become the CI defaults too and this floor is the wrong
-        # shape. Fail here rather than silently over-reserving.
-        self.assertNotIn("--config=shared", self.ACTION.read_text(encoding="utf-8"))
-
-    def test_no_generated_target_asks_for_less_than_the_ci_default(self) -> None:
+    def test_no_generated_target_asks_for_less_than_the_safety_floor(self) -> None:
         pattern = re.compile(
             r'exec_properties = \{"cpu_count": "(\d+)", "memory_kb": "(\d+)"\}'
         )
@@ -263,17 +245,17 @@ class CiDefaultsTest(unittest.TestCase):
                 seen += 1
                 self.assertGreaterEqual(
                     int(match.group(1)),
-                    generator.CI_DEFAULT_CPU_COUNT,
-                    f"{path}: a sized target below CI's own default cap",
+                    generator.SIZED_CPU_FLOOR,
+                    f"{path}: a sized target below CPU safety floor",
                 )
                 self.assertGreaterEqual(
                     int(match.group(2)),
-                    generator.CI_DEFAULT_MEMORY_KB,
-                    f"{path}: a sized target below CI's own default cgroup",
+                    generator.SIZED_MEMORY_FLOOR,
+                    f"{path}: a sized target below memory safety floor",
                 )
         self.assertGreater(seen, 0)
 
-    def test_no_emitted_request_states_less_memory_than_the_ci_default(self) -> None:
+    def test_no_emitted_request_states_less_memory_than_the_safety_floor(self) -> None:
         """The function itself, over every key the table carries and one it does not.
 
         The BUILD sweep above only sees what the generator has already written;
@@ -292,10 +274,10 @@ class CiDefaultsTest(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertGreaterEqual(
                     int(properties["memory_kb"]),
-                    generator.CI_DEFAULT_MEMORY_KB,
+                    generator.SIZED_MEMORY_FLOOR,
                     "an emitted request may not shrink the action's cgroup",
                 )
-                if measured > generator.CI_DEFAULT_MEMORY_KB:
+                if measured > generator.SIZED_MEMORY_FLOOR:
                     self.assertEqual(properties["memory_kb"], str(measured))
         self.assertGreater(emitted, 0)
 
