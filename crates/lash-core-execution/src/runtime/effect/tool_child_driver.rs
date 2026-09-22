@@ -61,7 +61,8 @@
 
 use std::sync::Arc;
 
-use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+use lash_sansio::core_support::ModelToolReturnCoreSupport;
+use lash_sansio::sync::MutexExt;
 
 use tokio_util::sync::CancellationToken;
 
@@ -102,11 +103,16 @@ pub struct ToolChildHost {
     /// resolver whose host is gone routes nothing, which is the honest answer.
     host: std::sync::Weak<dyn EffectHost>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    /// The clock a `Sleep`/`AwaitEvent` group child waits on. Mutable because
+    /// the host is installed — get-or-init — before the runtime's configured
+    /// clock is known (`RuntimeHostConfig::with_clock` follows `new`), and a
+    /// second install cannot replace it.
+    clock: Arc<std::sync::Mutex<Arc<dyn crate::Clock>>>,
 }
 
 impl ToolChildHost {
     /// Wires tool-child routing for one effect host, with a fresh live-opener
-    /// registry.
+    /// registry and the system clock.
     ///
     /// The registry is per host and never static: two hosts in one process —
     /// which the conformance suites build routinely — must not see each other's
@@ -125,7 +131,19 @@ impl ToolChildHost {
             openers: Arc::new(LiveOpenerRegistry::new()),
             host: Arc::downgrade(host),
             process_env_store,
+            clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),
         })
+    }
+
+    /// Sets the clock the host's `Sleep`/`AwaitEvent` child executors wait on,
+    /// in place, and returns the same host.
+    ///
+    /// In place rather than rebuilding: the installed host is shared through
+    /// the controller's registered resolver, so a rebuilt host with a fresh
+    /// registry would strand the openers already registered on this one.
+    pub fn with_clock(self: &Arc<Self>, clock: Arc<dyn crate::Clock>) -> Arc<Self> {
+        *self.clock.lock_recover() = clock;
+        Arc::clone(self)
     }
 
     /// The registry the turn and process sites register their openers in.
@@ -216,30 +234,60 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
     ///
     /// Two distinct `None`s, and the distinction is the point:
     ///
-    /// * a command that is not a tool child — this resolver answers for tool
-    ///   children and FIG-3397 extends it, so anything else is honestly "not
-    ///   mine";
+    /// * a command that is not a group child this resolver runs — tool
+    ///   children route to the driver, `Sleep`/`AwaitEvent` children (FIG-3397)
+    ///   route to the in-process wait executors, and anything else is honestly
+    ///   "not mine";
     /// * a tool child whose **opener is not live in this process** — the
     ///   routing fact the registry exists to report. The child is neither run
     ///   nor failed: it stays accepted, and the process whose opener is live —
     ///   or a later incarnation of this one — runs it. Failing instead would
     ///   turn "this worker cannot reach that opener" into a terminal the
     ///   journal keeps forever.
+    ///
+    /// The `Sleep`/`AwaitEvent` executors are built with turn-cancel
+    /// observation off: a group child's cancellation is the group's — the
+    /// group dispatch passes its own token into `execute_effect_cancellable`
+    /// (ADR 0099 §4) — and the wait deadline the group stamps at admission is
+    /// PR C's, when a product producer of such children exists.
     fn executor_for(
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        let RuntimeEffectCommand::ToolInvocation { request } = &envelope.command else {
-            return None;
-        };
-        let live = self.openers.context_for(&request.scope.opener)?;
-        Some(RuntimeEffectLocalExecutor::owned_runner(
-            Box::new(ToolChildRunner {
-                host: self.clone(),
-                live,
-            }),
-            None,
-        ))
+        match &envelope.command {
+            RuntimeEffectCommand::ToolInvocation { request } => {
+                let live = self.openers.context_for(&request.scope.opener)?;
+                Some(RuntimeEffectLocalExecutor::owned_runner(
+                    Box::new(ToolChildRunner {
+                        host: self.clone(),
+                        live,
+                    }),
+                    None,
+                ))
+            }
+            // A group child's cancellation is the group's (ADR 0099 §4: the
+            // group dispatch passes its own token into the child's
+            // `execute_effect_cancellable`), so turn-cancel observation is off
+            // on both arms. The §11 deadline-at-admission rule and the
+            // durable-wait deadline are PR C's, when a product producer of
+            // such children exists.
+            RuntimeEffectCommand::Sleep { .. } => Some(
+                RuntimeEffectLocalExecutor::sleep_with_clock(
+                    CancellationToken::new(),
+                    self.clock.lock_recover().clone(),
+                )
+                .with_turn_cancel_observation(false),
+            ),
+            RuntimeEffectCommand::AwaitEvent { .. } => Some(
+                RuntimeEffectLocalExecutor::await_event_with_clock(
+                    CancellationToken::new(),
+                    None,
+                    self.clock.lock_recover().clone(),
+                )
+                .with_turn_cancel_observation(false),
+            ),
+            _ => None,
+        }
     }
 }
 

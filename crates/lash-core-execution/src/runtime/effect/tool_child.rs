@@ -32,14 +32,17 @@
 //! the disagreement would surface as a child recovered under an authority its
 //! own envelope hash never covered.
 //!
-//! # This module mints the shape; it does not execute it
+//! # This module mints the shape; the group path executes it
 //!
-//! There is no product producer and no consumer yet. The handler-level driver
-//! that runs a `ToolChildRequest` is FIG-2266's, and the group formation that
-//! mints one is FIG-3397's. What this module owes them is a shape that is
-//! frozen, complete and provable now: every field is retained before a group's
-//! open is acknowledged, survives a round trip through both SQL stores, and
-//! reconstructs a byte-identical child envelope out of the journal alone.
+//! The handler-level driver that runs a `ToolChildRequest` is FIG-2266's
+//! [`super::tool_child_driver`], and the group formation that mints one is
+//! FIG-3397's `session::tool_execution::group` — the producer is
+//! `RuntimeExecutionContext::call_tool_batch` and the standard-protocol turn
+//! driver, the consumer the same module's settlement loop. What this module
+//! owes them is a shape that is frozen, complete and provable: every field is
+//! retained before a group's open is acknowledged, survives a round trip
+//! through both SQL stores, and reconstructs a byte-identical child envelope
+//! out of the journal alone.
 //!
 //! # What rides here, and what already rides the envelope
 //!
