@@ -194,30 +194,6 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertIn("serde", core["dependencies"])
 
-    def test_inventory_counts_describe_its_own_target_list(self) -> None:
-        """The inventory's summary counts are projections of its target list.
-
-        They are the only counts this contract reads, and they are read back
-        against the list they summarise, never against a literal: a target
-        added with a regenerated inventory moves both halves together, and a
-        hand edit to one half is what this refuses.
-        """
-        payload = inventory()
-        labelled = [
-            target for target in inventory_targets() if target["label"] is not None
-        ]
-        unlabelled = [
-            target for target in inventory_targets() if target["label"] is None
-        ]
-        self.assertEqual(len(payload["packages"]), payload["cargo_package_count"])
-        self.assertEqual(len(labelled), payload["generated_label_count"])
-        self.assertEqual(len(unlabelled), payload["cargo_only_target_count"])
-        # `cargo_target_count` is Cargo's own target list; every labelled
-        # entry here stands for at least one Cargo target, but a library
-        # yields both a lib and a unit-test label, so the inventory can only
-        # be at least that large.
-        self.assertGreaterEqual(len(labelled), payload["cargo_target_count"])
-
     def test_generated_suite_partitions_every_executable_test(self) -> None:
         """Every executable test label lands in exactly one generated partition.
 

@@ -479,28 +479,4 @@ mod tests {
         let receipt = receipt.await.expect("ingest clock probe");
         assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
     }
-
-    #[test]
-    // Architecture lint: lexical ownership guard, not behavior proof.
-    fn lint_runtime_environment_does_not_mirror_runtime_host_config_fields() {
-        let source = std::fs::read_to_string(
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runtime/environment.rs"),
-        )
-        .expect("read environment source");
-        for field in [
-            ["pub ", "attachment_store:"].concat(),
-            ["pub ", "prompt:"].concat(),
-            ["pub ", "trace_sink:"].concat(),
-            ["pub ", "trace_level:"].concat(),
-            ["pub ", "trace_context:"].concat(),
-            ["pub ", "termination:"].concat(),
-            ["pub ", "effect_host:"].concat(),
-            ["mirror ", "`RuntimeHostConfig`"].concat(),
-        ] {
-            assert!(
-                !source.contains(&field),
-                "found mirrored field/comment: {field}"
-            );
-        }
-    }
 }

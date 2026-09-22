@@ -890,9 +890,6 @@ pub use tool_provider::{
 
 #[doc(hidden)]
 pub mod core_internal {
-    pub const PLUGIN_RUNTIME_HOST_SOURCE: &str = include_str!("plugin/runtime_host.rs");
-    pub const TOOL_DISPATCH_CONTEXT_SOURCE: &str = include_str!("tool_dispatch/context.rs");
-    pub const TOOL_PROVIDER_SOURCE: &str = include_str!("tool_provider.rs");
     pub use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
     pub use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
