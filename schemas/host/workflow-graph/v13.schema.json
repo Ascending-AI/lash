@@ -32,7 +32,6 @@
       ]
     },
     "AssignTarget": {
-      "additionalProperties": false,
       "properties": {
         "root": {
           "type": "string"
@@ -69,7 +68,6 @@
       "type": "string"
     },
     "CatchClause": {
-      "additionalProperties": false,
       "properties": {
         "binding": {
           "type": "string"
@@ -113,7 +111,6 @@
           "additionalProperties": false,
           "properties": {
             "LabelAnnotated": {
-              "additionalProperties": false,
               "properties": {
                 "expr": {
                   "$ref": "#/definitions/Expr"
@@ -224,7 +221,6 @@
           "additionalProperties": false,
           "properties": {
             "ListComprehension": {
-              "additionalProperties": false,
               "properties": {
                 "clauses": {
                   "items": {
@@ -277,7 +273,6 @@
           "additionalProperties": false,
           "properties": {
             "Assign": {
-              "additionalProperties": false,
               "properties": {
                 "expr": {
                   "$ref": "#/definitions/Expr"
@@ -302,7 +297,6 @@
           "additionalProperties": false,
           "properties": {
             "If": {
-              "additionalProperties": false,
               "properties": {
                 "condition": {
                   "$ref": "#/definitions/Expr"
@@ -331,7 +325,6 @@
           "additionalProperties": false,
           "properties": {
             "For": {
-              "additionalProperties": false,
               "properties": {
                 "binding": {
                   "type": "string"
@@ -360,7 +353,6 @@
           "additionalProperties": false,
           "properties": {
             "While": {
-              "additionalProperties": false,
               "properties": {
                 "body": {
                   "$ref": "#/definitions/Expr"
@@ -385,7 +377,6 @@
           "additionalProperties": false,
           "properties": {
             "ProcessRef": {
-              "additionalProperties": false,
               "properties": {
                 "process": {
                   "type": "string"
@@ -406,7 +397,6 @@
           "additionalProperties": false,
           "properties": {
             "HostDescriptorConstructor": {
-              "additionalProperties": false,
               "properties": {
                 "input": {
                   "$ref": "#/definitions/Expr"
@@ -443,7 +433,6 @@
           "additionalProperties": false,
           "properties": {
             "ReceiverCall": {
-              "additionalProperties": false,
               "properties": {
                 "args": {
                   "items": {
@@ -511,7 +500,6 @@
           "additionalProperties": false,
           "properties": {
             "WaitSignal": {
-              "additionalProperties": false,
               "properties": {
                 "name": {
                   "type": "string"
@@ -592,7 +580,6 @@
           "additionalProperties": false,
           "properties": {
             "BuiltinCall": {
-              "additionalProperties": false,
               "properties": {
                 "args": {
                   "items": {
@@ -646,7 +633,6 @@
           "additionalProperties": false,
           "properties": {
             "Call": {
-              "additionalProperties": false,
               "properties": {
                 "args": {
                   "items": {
@@ -675,7 +661,6 @@
           "description": "Calls a declared [`FunctionDecl`] by name.\n\nThe parser never produces this node: source spells a call to a declared function exactly like a builtin call, and the linker is the resolver that rewrites the `BuiltinCall` whose name it recognises. Keeping the resolved shape distinct is what lets the compiler emit a static callee and lets every later pass tell a pure declared call apart from a first-class closure call.",
           "properties": {
             "FunctionCall": {
-              "additionalProperties": false,
               "properties": {
                 "args": {
                   "items": {
@@ -704,7 +689,6 @@
           "description": "AST-only map intrinsic used to exercise builtin-to-VM callbacks.",
           "properties": {
             "Map": {
-              "additionalProperties": false,
               "properties": {
                 "function": {
                   "$ref": "#/definitions/Expr"
@@ -768,7 +752,6 @@
           "additionalProperties": false,
           "properties": {
             "Field": {
-              "additionalProperties": false,
               "properties": {
                 "field": {
                   "type": "string"
@@ -793,7 +776,6 @@
           "additionalProperties": false,
           "properties": {
             "Index": {
-              "additionalProperties": false,
               "properties": {
                 "index": {
                   "$ref": "#/definitions/Expr"
@@ -818,7 +800,6 @@
           "additionalProperties": false,
           "properties": {
             "Unary": {
-              "additionalProperties": false,
               "properties": {
                 "expr": {
                   "$ref": "#/definitions/Expr"
@@ -843,7 +824,6 @@
           "additionalProperties": false,
           "properties": {
             "Binary": {
-              "additionalProperties": false,
               "properties": {
                 "left": {
                   "$ref": "#/definitions/Expr"
@@ -873,7 +853,6 @@
           "description": "An ECMA-262 unary operation whose coercion differs from Lashlang.",
           "properties": {
             "JavaScriptUnary": {
-              "additionalProperties": false,
               "properties": {
                 "expr": {
                   "$ref": "#/definitions/Expr"
@@ -899,7 +878,6 @@
           "description": "An eager ECMA-262 binary operation whose coercion differs from Lashlang.",
           "properties": {
             "JavaScriptBinary": {
-              "additionalProperties": false,
               "properties": {
                 "left": {
                   "$ref": "#/definitions/Expr"
@@ -929,7 +907,6 @@
           "description": "A short-circuiting ECMA-262 logical operation that returns an operand.",
           "properties": {
             "JavaScriptLogical": {
-              "additionalProperties": false,
               "properties": {
                 "left": {
                   "$ref": "#/definitions/Expr"
@@ -969,7 +946,6 @@
       ]
     },
     "FunctionExpr": {
-      "additionalProperties": false,
       "properties": {
         "body": {
           "$ref": "#/definitions/Expr"
@@ -999,7 +975,6 @@
       "type": "object"
     },
     "FunctionParam": {
-      "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string"
@@ -1050,7 +1025,6 @@
       "type": "string"
     },
     "LabelMetadata": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "type": [
@@ -1073,7 +1047,6 @@
           "additionalProperties": false,
           "properties": {
             "For": {
-              "additionalProperties": false,
               "properties": {
                 "binding": {
                   "type": "string"
@@ -1098,7 +1071,6 @@
           "additionalProperties": false,
           "properties": {
             "If": {
-              "additionalProperties": false,
               "properties": {
                 "condition": {
                   "$ref": "#/definitions/Expr"
@@ -1118,7 +1090,6 @@
       ]
     },
     "ProcessLiteralExpr": {
-      "additionalProperties": false,
       "description": "The authored shape of an inline process body, as a dialect lowers it.\n\n`params` carries the parameter names and their declared types, so a TypeScript arrow's annotations reach the lifted declaration's signature instead of widening to `Any`. `body` is the same wrapper a process literal run lowers to: the authored statements inside the process-failure wrapper, with the params passed through by name.",
       "properties": {
         "body": {
@@ -1145,6 +1116,21 @@
       "type": "object"
     },
     "ProcessParam": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "ProcessParamWire": {
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -1161,7 +1147,6 @@
       "type": "object"
     },
     "ProcessSignalDecl": {
-      "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string"
@@ -1207,7 +1192,7 @@
             },
             "params": {
               "items": {
-                "$ref": "#/definitions/ProcessParam"
+                "$ref": "#/definitions/ProcessParamWire"
               },
               "type": "array"
             }
@@ -1222,7 +1207,6 @@
       ]
     },
     "ResourceRefExpr": {
-      "additionalProperties": false,
       "properties": {
         "alias": {
           "type": "string"
@@ -1244,7 +1228,6 @@
       "type": "object"
     },
     "Span": {
-      "additionalProperties": false,
       "properties": {
         "end": {
           "format": "uint",
@@ -1264,7 +1247,6 @@
       "type": "object"
     },
     "TryExpr": {
-      "additionalProperties": false,
       "properties": {
         "body": {
           "$ref": "#/definitions/Expr"
@@ -1440,6 +1422,7 @@
       "items": {
         "$ref": "#/definitions/TypeExpr"
       },
+      "minItems": 2,
       "type": "array"
     },
     "VariableVersion": {
@@ -1519,7 +1502,6 @@
     "WorkflowDeclaration": {
       "oneOf": [
         {
-          "additionalProperties": false,
           "properties": {
             "kind": {
               "enum": [
@@ -1608,7 +1590,6 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "description": "A declared pure function, carried through the document unprojected.\n\nA process becomes a container with a child subgraph because its body is made of durable steps the editor has to show and reorder. A function's body contains no effects by construction, so it contributes no steps and no execution sites: projecting it into nodes would invent graph structure with nothing behind it. It travels verbatim instead, exactly as `Type` does, so a round trip through the document is lossless.",
           "properties": {
             "body": {
@@ -1790,7 +1771,6 @@
       "type": "string"
     },
     "WorkflowExecutionSite": {
-      "additionalProperties": false,
       "description": "Stable source-level location carried by runtime sites for workflow-graph joins.",
       "properties": {
         "kind": {
@@ -2150,142 +2130,76 @@
         },
         {
           "additionalProperties": false,
-          "oneOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "binding": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/definitions/AssignTarget"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "condition": {
-                  "$ref": "#/definitions/Expr"
-                },
-                "container_kind": {
-                  "enum": [
-                    "if"
-                  ],
-                  "type": "string"
-                },
-                "else_graph": {
-                  "$ref": "#/definitions/WorkflowSubgraph"
-                },
-                "else_is_block": {
-                  "description": "Whether the source's else branch is a block rather than a direct value or `else if`.",
-                  "type": "boolean"
-                },
-                "then_graph": {
-                  "$ref": "#/definitions/WorkflowSubgraph"
-                },
-                "then_is_block": {
-                  "description": "Whether the source's then branch is a statement block rather than a value expression.",
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "condition",
-                "container_kind",
-                "else_graph",
-                "else_is_block",
-                "then_graph",
-                "then_is_block"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "binding": {
-                  "type": "string"
-                },
-                "body": {
-                  "$ref": "#/definitions/WorkflowSubgraph"
-                },
-                "container_kind": {
-                  "enum": [
-                    "for"
-                  ],
-                  "type": "string"
-                },
-                "iterable": {
-                  "$ref": "#/definitions/Expr"
-                }
-              },
-              "required": [
-                "binding",
-                "body",
-                "container_kind",
-                "iterable"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "body": {
-                  "$ref": "#/definitions/WorkflowSubgraph"
-                },
-                "condition": {
-                  "$ref": "#/definitions/Expr"
-                },
-                "container_kind": {
-                  "enum": [
-                    "while"
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": [
-                "body",
-                "condition",
-                "container_kind"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "binding": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/definitions/AssignTarget"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "clauses": {
-                  "items": {
-                    "$ref": "#/definitions/WorkflowListComprehensionClause"
-                  },
-                  "type": "array"
-                },
-                "container_kind": {
-                  "enum": [
-                    "list_comprehension"
-                  ],
-                  "type": "string"
-                },
-                "element": {
-                  "$ref": "#/definitions/WorkflowSubgraph"
-                }
-              },
-              "required": [
-                "clauses",
-                "container_kind",
-                "element"
-              ],
-              "type": "object"
-            }
-          ],
           "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "condition": {
+              "$ref": "#/definitions/Expr"
+            },
+            "container_kind": {
+              "enum": [
+                "if"
+              ],
+              "type": "string"
+            },
+            "else_graph": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "else_is_block": {
+              "description": "Whether the source's else branch is a block rather than a direct value or `else if`.",
+              "type": "boolean"
+            },
+            "kind": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            },
+            "then_graph": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "then_is_block": {
+              "description": "Whether the source's then branch is a statement block rather than a value expression.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "condition",
+            "container_kind",
+            "else_graph",
+            "else_is_block",
+            "kind",
+            "then_graph",
+            "then_is_block"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "type": "string"
+            },
+            "body": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "container_kind": {
+              "enum": [
+                "for"
+              ],
+              "type": "string"
+            },
+            "iterable": {
+              "$ref": "#/definitions/Expr"
+            },
             "kind": {
               "enum": [
                 "container"
@@ -2294,6 +2208,83 @@
             }
           },
           "required": [
+            "binding",
+            "body",
+            "container_kind",
+            "iterable",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "condition": {
+              "$ref": "#/definitions/Expr"
+            },
+            "container_kind": {
+              "enum": [
+                "while"
+              ],
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "body",
+            "condition",
+            "container_kind",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clauses": {
+              "items": {
+                "$ref": "#/definitions/WorkflowListComprehensionClause"
+              },
+              "type": "array"
+            },
+            "container_kind": {
+              "enum": [
+                "list_comprehension"
+              ],
+              "type": "string"
+            },
+            "element": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "kind": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "clauses",
+            "container_kind",
+            "element",
             "kind"
           ],
           "type": "object"

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 146,
+  "cargo_target_count": 147,
   "feature_lane_units": [
     {
       "features": [],
@@ -17368,7 +17368,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 201,
+  "generated_label_count": 203,
   "packages": [
     {
       "declared_features": [
@@ -19520,6 +19520,7 @@
       ],
       "dependencies": [
         "futures",
+        "jsonschema",
         "lash-internal-lashlang",
         "lash-internal-sansio",
         "lash-internal-typescript",
@@ -19745,6 +19746,7 @@
         "futures",
         "futures-executor",
         "insta",
+        "jsonschema",
         "lash-internal-core",
         "lash-internal-sansio",
         "lash-internal-typescript",
@@ -20155,6 +20157,7 @@
         "compact_str",
         "lash-runtime",
         "reqwest",
+        "schemars",
         "serde",
         "serde_json",
         "tokio",
@@ -20187,6 +20190,18 @@
           "cargo": "workflow-graph-roundtrip",
           "kind": "bin-unit-test",
           "label": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "workflow_contract_schema",
+          "kind": "bin",
+          "label": "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
+          "tags": []
+        },
+        {
+          "cargo": "workflow_contract_schema",
+          "kind": "bin-unit-test",
+          "label": "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
           "tags": []
         },
         {
@@ -20234,7 +20249,8 @@
         "label": "//examples/workflow-graph-roundtrip:test_batch",
         "members": [
           "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
-          "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test"
+          "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+          "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test"
         ]
       }
     },

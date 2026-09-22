@@ -1344,6 +1344,11 @@ symbols = [
   "Deserialize for ProcessType",
 ]
 
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/ast_string.rs"]
+symbols = ["AstString"]
+
 # The document's value types stay in lashlang. Its identity preimages live in
 # the TypeScript projector and rendering helper, so guard the functions that
 # build those bytes rather than the GraphProjector field list.
@@ -1396,6 +1401,11 @@ symbols = [
   "Serialize for ProcessType",
   "Deserialize for ProcessType",
 ]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/ast_string.rs"]
+symbols = ["AstString"]
 
 [[surface]]
 constant = "LASHLANG_SEMANTIC_HASH_VERSION"

@@ -26,6 +26,13 @@ exports_files([
 ])
 
 filegroup(
+    name = "workflow_graph_schema",
+    srcs = ["schemas/host/workflow-graph/v13.schema.json"],
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
     name = "cargo_metadata",
     srcs = [
         "Cargo.lock",

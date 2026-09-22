@@ -1298,6 +1298,13 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Install Node for workflow graph contract checks
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/workflow-graph-roundtrip/frontend/package-lock.json
+
 
       - name: Restore cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -1424,6 +1431,12 @@ jobs:
 
       - name: Check host contract schema drift
         run: python3 scripts/generate-workflow-schemas.py --check
+
+      - name: Install workflow graph frontend dependencies
+        run: npm --prefix examples/workflow-graph-roundtrip/frontend ci
+
+      - name: Check workflow graph frontend contract types
+        run: npm --prefix examples/workflow-graph-roundtrip/frontend run check:types
 
       # One owner per table across both SQL stores (FIG-3380): no stray
       # statement, no duplicate, no shadowed shared statement, and every

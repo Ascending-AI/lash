@@ -2299,6 +2299,7 @@ dependencies = [
  "futures",
  "futures-executor",
  "insta",
+ "jsonschema",
  "lash-internal-core",
  "lash-internal-sansio",
  "lash-internal-typescript",
@@ -2767,6 +2768,7 @@ name = "lash-internal-typescript"
 version = "0.0.0-dev"
 dependencies = [
  "futures",
+ "jsonschema",
  "lash-internal-lashlang",
  "lash-internal-sansio",
  "lash-internal-typescript",
@@ -6151,6 +6153,7 @@ dependencies = [
  "compact_str 0.9.1",
  "lash-runtime",
  "reqwest 0.13.4",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "tokio",

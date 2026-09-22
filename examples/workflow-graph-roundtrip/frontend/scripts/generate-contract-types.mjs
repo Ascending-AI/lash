@@ -12,16 +12,23 @@ const check = process.argv.slice(2).includes('--check');
 const documents = [
   ['workflow-graph/v13.schema.json', 'workflow-graph.d.ts'],
   ['workflow-type-facets/v3.schema.json', 'workflow-type-facets.d.ts'],
+  [
+    '../../examples/workflow-graph-roundtrip/frontend/src/generated/workflow-document.schema.json',
+    'workflow-document.d.ts',
+  ],
 ];
 
 const stale = [];
 await mkdir(generated, { recursive: true });
 for (const [schemaName, outputName] of documents) {
-  const schema = path.join(repository, 'schemas/host', schemaName);
+  const schema = schemaName.startsWith('../')
+    ? path.resolve(repository, 'schemas/host', schemaName)
+    : path.join(repository, 'schemas/host', schemaName);
   const output = path.join(generated, outputName);
   const contents = await compileFromFile(schema, {
-    bannerComment:
-      '/* Generated from schemas/host by npm run generate:types. Do not edit directly. */',
+    bannerComment: schemaName.startsWith('../')
+      ? '/* Generated from the example Rust WorkflowDocument DTO by npm run generate:types. Do not edit directly. */'
+      : '/* Generated from schemas/host by npm run generate:types. Do not edit directly. */',
     style: { singleQuote: true },
   });
   if (check) {

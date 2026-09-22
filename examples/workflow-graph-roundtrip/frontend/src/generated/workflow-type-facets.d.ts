@@ -36,9 +36,12 @@ export type ProcessType =
   | {
       kind: 'known';
       output: TypeExpr;
-      params: ProcessParam[];
+      params: ProcessParamWire[];
     };
-export type UnionMembers = TypeExpr[];
+/**
+ * @minItems 2
+ */
+export type UnionMembers = [TypeExpr, TypeExpr, ...TypeExpr[]];
 /**
  * Whether a diagnostic blocks save under ADR 0073's gradual typing rule.
  */
@@ -131,7 +134,7 @@ export interface TypeField {
   optional: boolean;
   ty: TypeExpr;
 }
-export interface ProcessParam {
+export interface ProcessParamWire {
   name: string;
   ty: TypeExpr;
 }
@@ -147,6 +150,7 @@ export interface WorkflowTypeDiagnostic {
 export interface Span {
   end: number;
   start: number;
+  [k: string]: unknown;
 }
 export interface WorkflowExpectedArgument {
   slot: WorkflowSlotPathSegment[];

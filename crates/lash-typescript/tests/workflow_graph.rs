@@ -239,10 +239,179 @@ fn workflow_graph_refuses_unknown_variant() {
 }
 
 #[test]
+fn published_schema_accepts_real_graph_with_every_node_and_container_kind() {
+    let source = r#"const child = async () => {
+    return 1;
+  };
+const values = [1, 2];
+await tools.lookup({ query: "x" });
+await sleep("1s");
+1 + 1;
+let count = 0;
+count = count + 1;
+if (true) {
+  console.log("yes");
+} else {
+  console.log("no");
+}
+for (const value of values) {
+  console.log(value);
+}
+while (count < 2) {
+  count = count + 1;
+}
+try {
+  console.log("try");
+} catch (error) {
+  console.log(error);
+}
+finish(values);
+"#;
+    let mut graph = workflow_graph_from_source(source).expect("fixture projects");
+    graph.main.nodes.push(WorkflowNode {
+        id: WorkflowNodeId::new("fixture:list-comprehension".to_string()),
+        name: "list comprehension".to_string(),
+        description: None,
+        name_source: WorkflowNodeNameSource::Derived,
+        kind: WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
+            binding: None,
+            clauses: vec![WorkflowListComprehensionClause::For {
+                binding: "item".to_string(),
+                iterable: ir("values"),
+            }],
+            element: Box::new(WorkflowSubgraph::default()),
+        }),
+        available_variables: Vec::new(),
+        type_facets: None,
+        outputs: Vec::new(),
+        execution_sites: Vec::new(),
+        source_span: None,
+    });
+
+    let kinds = graph
+        .nodes()
+        .map(|node| match &node.kind {
+            WorkflowNodeKind::Data { .. } => "data",
+            WorkflowNodeKind::Call { .. } => "call",
+            WorkflowNodeKind::Effect { .. } => "effect",
+            WorkflowNodeKind::Computation { .. } => "computation",
+            WorkflowNodeKind::StateUpdate { .. } => "state_update",
+            WorkflowNodeKind::Terminal { .. } => "terminal",
+            WorkflowNodeKind::Container(WorkflowContainer::If { .. }) => "if",
+            WorkflowNodeKind::Container(WorkflowContainer::For { .. }) => "for",
+            WorkflowNodeKind::Container(WorkflowContainer::While { .. }) => "while",
+            WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { .. }) => {
+                "list_comprehension"
+            }
+            WorkflowNodeKind::Opaque { .. } => "opaque",
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        kinds,
+        BTreeSet::from([
+            "data",
+            "call",
+            "effect",
+            "computation",
+            "state_update",
+            "terminal",
+            "if",
+            "for",
+            "while",
+            "list_comprehension",
+            "opaque",
+        ])
+    );
+    assert!(
+        graph
+            .declarations
+            .iter()
+            .any(|declaration| matches!(declaration, WorkflowDeclaration::Process(_)))
+    );
+
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../schemas/host/workflow-graph/v13.schema.json"
+    ))
+    .expect("published graph schema parses");
+    let validator = jsonschema::JSONSchema::compile(&schema).expect("graph schema compiles");
+    let value = serde_json::to_value(&graph).expect("real graph serializes");
+    if let Err(errors) = validator.validate(&value) {
+        panic!(
+            "published schema rejected a real graph:\n{}",
+            errors
+                .map(|error| error.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    let mut unknown = value;
+    unknown["main"]["nodes"]
+        .as_array_mut()
+        .expect("nodes")
+        .last_mut()
+        .expect("list-comprehension node")["kind"]["future"] = serde_json::json!(true);
+    assert!(!validator.is_valid(&unknown));
+}
+
+fn populated_facet_graph() -> WorkflowGraph {
+    let graph = workflow_graph_from_source_with_facets(
+        "await tools.lookup({ query: \"x\" });\nfinish(1);\n",
+        Some(&facet_environment()),
+    )
+    .expect("fixture projects with facets");
+    assert_eq!(
+        graph.facet_schema_version,
+        Some(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+    );
+    assert!(graph.nodes().any(|node| {
+        node.type_facets.as_ref().is_some_and(|facets| {
+            !facets.available_variables.is_empty()
+                || !facets.expected_arguments.is_empty()
+                || !facets.diagnostics.is_empty()
+        })
+    }));
+    graph
+}
+
+#[test]
+fn facet_reader_preserves_current_populated_facets() {
+    let graph = populated_facet_graph();
+    let expected = graph
+        .nodes()
+        .map(|node| node.type_facets.clone())
+        .collect::<Vec<_>>();
+
+    let decoded =
+        WorkflowGraph::decode_json_value(serde_json::to_value(graph).expect("graph serializes"))
+            .expect("current facets decode");
+
+    assert_eq!(
+        decoded.facet_schema_version,
+        Some(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+    );
+    assert_eq!(
+        decoded
+            .nodes()
+            .map(|node| node.type_facets.clone())
+            .collect::<Vec<_>>(),
+        expected
+    );
+}
+
+#[test]
 fn facet_reader_requires_exact_version() {
-    let graph = workflow_graph_from_source_with_facets("finish(1);\n", Some(&facet_environment()))
-        .expect("fixture projects with facets");
+    let graph = populated_facet_graph();
     let mut value = serde_json::to_value(graph).expect("graph serializes");
+    assert_eq!(
+        value["facet_schema_version"],
+        serde_json::json!(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+    );
+    assert!(
+        value["main"]["nodes"][0]["type_facets"]
+            .as_object()
+            .is_some_and(|facets| !facets.is_empty())
+    );
     value["facet_schema_version"] = serde_json::json!(WORKFLOW_TYPE_FACET_SCHEMA_VERSION - 1);
     value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
         "kind": "future_diagnostic"
@@ -250,24 +419,32 @@ fn facet_reader_requires_exact_version() {
 
     let decoded = WorkflowGraph::decode_json_value(value)
         .expect("stale optional facets are discarded before their shape is decoded");
+    assert_eq!(decoded.facet_schema_version, None);
     assert!(decoded.nodes().all(|node| node.type_facets.is_none()));
 }
 
 #[test]
 fn facet_reader_tolerates_unknown_field() {
-    let graph = workflow_graph_from_source_with_facets("finish(1);\n", Some(&facet_environment()))
-        .expect("fixture projects with facets");
-    let mut value = serde_json::to_value(graph).expect("graph serializes");
+    let graph = populated_facet_graph();
+    let expected = graph.main.nodes[0]
+        .type_facets
+        .clone()
+        .expect("fixture has facets");
+    let mut value = serde_json::to_value(&graph).expect("graph serializes");
     value["main"]["nodes"][0]["type_facets"]["future"] = serde_json::json!(true);
 
-    WorkflowGraph::decode_json_value(value)
+    let decoded = WorkflowGraph::decode_json_value(value)
         .expect("known facet objects tolerate additive unknown fields");
+    assert_eq!(
+        decoded.facet_schema_version,
+        Some(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+    );
+    assert_eq!(decoded.main.nodes[0].type_facets, Some(expected));
 }
 
 #[test]
 fn facet_reader_refuses_unknown_variant() {
-    let graph = workflow_graph_from_source_with_facets("finish(1);\n", Some(&facet_environment()))
-        .expect("fixture projects with facets");
+    let graph = populated_facet_graph();
     let mut value = serde_json::to_value(graph).expect("graph serializes");
     value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
         "node_id": value["main"]["nodes"][0]["id"].clone(),

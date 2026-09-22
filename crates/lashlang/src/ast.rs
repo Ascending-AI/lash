@@ -1,5 +1,4 @@
 use schemars::JsonSchema;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -1272,7 +1271,12 @@ impl JsonSchema for UnionMembers {
     }
 
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        generator.subschema_for::<Vec<TypeExpr>>()
+        let mut schema = generator.subschema_for::<Vec<TypeExpr>>();
+        let schemars::schema::Schema::Object(object) = &mut schema else {
+            return schema;
+        };
+        object.array.get_or_insert_with(Default::default).min_items = Some(2);
+        schema
     }
 }
 
@@ -1473,43 +1477,30 @@ impl Serialize for ProcessType {
     where
         S: Serializer,
     {
-        match &self.0 {
-            ProcessTypeKind::Unknown => {
-                let mut state = serializer.serialize_struct("ProcessType", 1)?;
-                state.serialize_field("kind", "unknown")?;
-                state.end()
-            }
-            ProcessTypeKind::Known(signature) => {
-                let mut state = serializer.serialize_struct("ProcessType", 3)?;
-                state.serialize_field("kind", "known")?;
-                state.serialize_field("params", signature.params())?;
-                state.serialize_field("output", signature.output())?;
-                state.end()
-            }
-        }
+        let wire = match &self.0 {
+            ProcessTypeKind::Unknown => ProcessTypeWire::Unknown {},
+            ProcessTypeKind::Known(signature) => ProcessTypeWire::Known {
+                params: signature
+                    .params()
+                    .iter()
+                    .map(|param| ProcessParamWire {
+                        name: param.name.clone(),
+                        ty: param.ty.clone(),
+                    })
+                    .collect(),
+                output: signature.output().clone(),
+            },
+        };
+        wire.serialize(serializer)
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ProcessTypeWire {
-    Unknown,
+    Unknown {},
     Known {
         params: Vec<ProcessParamWire>,
-        output: TypeExpr,
-    },
-}
-
-#[derive(JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-#[allow(
-    dead_code,
-    reason = "schema-only mirror of ProcessType's custom wire form"
-)]
-enum ProcessTypeSchema {
-    Unknown,
-    Known {
-        params: Vec<ProcessParam>,
         output: TypeExpr,
     },
 }
@@ -1520,11 +1511,11 @@ impl JsonSchema for ProcessType {
     }
 
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        ProcessTypeSchema::json_schema(generator)
+        ProcessTypeWire::json_schema(generator)
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProcessParamWire {
     name: AstString,
@@ -1537,7 +1528,7 @@ impl<'de> Deserialize<'de> for ProcessType {
         D: Deserializer<'de>,
     {
         match ProcessTypeWire::deserialize(deserializer)? {
-            ProcessTypeWire::Unknown => Ok(Self::unknown()),
+            ProcessTypeWire::Unknown {} => Ok(Self::unknown()),
             ProcessTypeWire::Known { params, output } => ProcessSignature::try_new(
                 params
                     .into_iter()

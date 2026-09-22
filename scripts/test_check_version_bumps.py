@@ -606,6 +606,96 @@ class VersionBumpFixtureTest(unittest.TestCase):
         self.assertEqual(result.errors, ())
         self.assertEqual(len(result.failures), 1)
 
+    def test_only_allowlisted_derives_are_exempt(self) -> None:
+        cases = (
+            (
+                "wire derive",
+                "#[derive(Clone, Serialize)]\npub struct WireMessage { value: String }\n",
+                "#[derive(Clone, serde_repr::Serialize_repr)]\npub struct WireMessage { value: String }\n",
+            ),
+            (
+                "unknown derive",
+                "#[derive(Clone, Serialize, WireV1)]\npub struct WireMessage { value: String }\n",
+                "#[derive(Clone, Serialize, WireV2)]\npub struct WireMessage { value: String }\n",
+            ),
+            (
+                "namespaced attribute",
+                "#[x::derive(WireV1)]\n" + WIRE_BASE,
+                "#[x::derive(WireV2)]\n" + WIRE_BASE,
+            ),
+            (
+                "macro argument",
+                "#[wire_macro(derive(WireV1))]\n" + WIRE_BASE,
+                "#[wire_macro(derive(WireV2))]\n" + WIRE_BASE,
+            ),
+            (
+                "cfg_attr sibling after commented parenthesis",
+                '#[cfg_attr(all(), derive(Clone /* ( */), serde(rename = "old"))]\n'
+                + WIRE_BASE,
+                '#[cfg_attr(all(), derive(Clone /* ( */), serde(rename = "new"))]\n'
+                + WIRE_BASE,
+            ),
+        )
+        for name, base_wire, head_wire in cases:
+            with self.subTest(name=name):
+                fixture = self.fixture()
+                fixture.write(LIB_V1, base_wire)
+                base = fixture.commit("base")
+                fixture.write(LIB_V1, head_wire)
+                head = fixture.commit("change guarded tokens without bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+
+    def test_ast_string_wire_edit_trips_graph_and_facet_guards(self) -> None:
+        config = """
+        [[surface]]
+        constant = "GRAPH_VERSION"
+        constant_path = "src/lib.rs"
+        description = "graph"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/ast_string.rs"]
+        symbols = ["AstString"]
+
+        [[surface]]
+        constant = "FACET_VERSION"
+        constant_path = "src/lib.rs"
+        description = "facets"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/ast_string.rs"]
+        symbols = ["AstString"]
+        """
+        fixture = FixtureRepository(config)
+        self.addCleanup(fixture.close)
+        fixture.write_file(
+            "src/lib.rs",
+            "pub const GRAPH_VERSION: u32 = 1;\npub const FACET_VERSION: u32 = 1;\n",
+        )
+        fixture.write_file(
+            "src/ast_string.rs",
+            "#[derive(Serialize, Deserialize)]\n#[serde(transparent)]\npub struct AstString(String);\n",
+        )
+        base = fixture.commit("base")
+        fixture.write_file(
+            "src/ast_string.rs",
+            "#[derive(Serialize, Deserialize)]\npub struct AstString { value: String }\n",
+        )
+        head = fixture.commit("change wrapper wire without bumps")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(
+            {failure.surface.constant for failure in result.failures},
+            {"GRAPH_VERSION", "FACET_VERSION"},
+        )
+
     def test_serde_attribute_changes_still_require_a_bump(self) -> None:
         cases = (
             (

@@ -77,6 +77,38 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "workflow_contract_schema__bin",
+    crate_features = [],
+    crate_name = "workflow_contract_schema",
+    crate_root = "src/bin/workflow_contract_schema.rs",
+    declared_features = [],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":workflow-graph-roundtrip",
+    library_crate_name = "workflow_graph_roundtrip",
+    manifest_dir = "examples/workflow-graph-roundtrip",
+    package_name = "workflow-graph-roundtrip",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_unit_test(
+    name = "workflow_contract_schema__bin__unit_test",
+    crate_features = [],
+    crate_name = "workflow_contract_schema",
+    crate_root = "src/bin/workflow_contract_schema.rs",
+    declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    library = ":workflow-graph-roundtrip",
+    library_crate_name = "workflow_graph_roundtrip",
+    manifest_dir = "examples/workflow-graph-roundtrip",
+    package_name = "workflow-graph-roundtrip",
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "authoring__test",
     crate_features = [],
@@ -164,6 +196,7 @@ lash_batch_test(
     tests = [
         ":workflow-graph-roundtrip__bin__unit_test",
         ":workflow-graph-roundtrip__unit_test",
+        ":workflow_contract_schema__bin__unit_test",
     ],
 )
 

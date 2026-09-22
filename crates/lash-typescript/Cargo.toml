@@ -36,6 +36,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
+jsonschema = { workspace = true, default-features = false }
 lashlang = { workspace = true, features = ["testing"] }
 lash-typescript = { package = "lash-internal-typescript", path = ".", features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }

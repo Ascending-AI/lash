@@ -3,11 +3,12 @@ use std::collections::BTreeMap;
 use axum::http::StatusCode;
 use lash::rlm::lang::{Span, WorkflowNodeNameSource};
 use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
+use schemars::JsonSchema;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDocument {
     pub schema_version: u32,
@@ -171,7 +172,7 @@ pub struct ValidationError {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphRoots {
     pub main: Vec<String>,
@@ -179,7 +180,7 @@ pub struct GraphRoots {
     pub processes: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowNode {
     pub id: String,
@@ -190,7 +191,7 @@ pub struct FlowNode {
     pub data: NodeData,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeData {
     pub kind: String,
@@ -241,7 +242,7 @@ pub struct NodeData {
     pub diagnostics: Vec<TypeDiagnostic>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TypedVariable {
     pub name: String,
     #[serde(rename = "type")]
@@ -254,14 +255,14 @@ impl PartialEq<&str> for TypedVariable {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ExpectedArgumentType {
     pub slot: String,
     #[serde(rename = "type")]
     pub expected_type: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TypeDiagnostic {
     pub node_id: String,
@@ -274,7 +275,7 @@ pub struct TypeDiagnostic {
     pub span: Option<Span>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EditableProcessField {
     pub name: String,
     #[serde(rename = "type")]
@@ -291,7 +292,7 @@ pub struct EditableProcessField {
 /// and an unknown tag is a decode error rather than a silent `derived`. The
 /// wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the
 /// browser client already writes on every node.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "nameSource", rename_all = "camelCase")]
 pub enum NodeName {
     /// The author named this node: the title and its optional description are
@@ -344,14 +345,14 @@ impl NodeName {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EditableComprehensionClause {
     For { binding: String, iterable: String },
     If { condition: String },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ChildGroup {
     pub slot: String,
@@ -393,6 +394,19 @@ impl<'de> Deserialize<'de> for EditableValue {
         D: Deserializer<'de>,
     {
         Self::from_json(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for EditableValue {
+    fn schema_name() -> String {
+        "EditableValue".to_string()
+    }
+
+    fn json_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        // The custom codec accepts every JSON value. An object with exactly
+        // one string `$expr` member becomes an expression; every other object
+        // remains a literal map.
+        schemars::schema::Schema::Object(Default::default())
     }
 }
 
@@ -541,7 +555,7 @@ mod node_name_tests {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowEdge {
     pub id: String,
@@ -550,7 +564,7 @@ pub struct FlowEdge {
     pub data: EdgeData,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EdgeData {
     pub kind: String,

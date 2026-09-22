@@ -5,6 +5,7 @@ export type WorkflowDeclaration =
       kind: 'type';
       name: string;
       ty: TypeExpr;
+      [k: string]: unknown;
     }
   | {
       body: WorkflowSubgraph;
@@ -24,6 +25,7 @@ export type WorkflowDeclaration =
       name: string;
       params?: FunctionParam[];
       return_ty: TypeExpr;
+      [k: string]: unknown;
     };
 /**
  * A serialized value-type expression.
@@ -61,9 +63,12 @@ export type ProcessType =
   | {
       kind: 'known';
       output: TypeExpr;
-      params: ProcessParam[];
+      params: ProcessParamWire[];
     };
-export type UnionMembers = TypeExpr[];
+/**
+ * @minItems 2
+ */
+export type UnionMembers = [TypeExpr, TypeExpr, ...TypeExpr[]];
 export type WorkflowEdgeKind =
   | {
       kind: 'data_dependency';
@@ -109,42 +114,42 @@ export type WorkflowNodeKind =
       kind: 'terminal';
       terminal: WorkflowTerminalKind;
     }
-  | ((
-      | {
-          binding?: AssignTarget | null;
-          condition: Expr;
-          container_kind: 'if';
-          else_graph: WorkflowSubgraph;
-          /**
-           * Whether the source's else branch is a block rather than a direct value or `else if`.
-           */
-          else_is_block: boolean;
-          then_graph: WorkflowSubgraph;
-          /**
-           * Whether the source's then branch is a statement block rather than a value expression.
-           */
-          then_is_block: boolean;
-        }
-      | {
-          binding: string;
-          body: WorkflowSubgraph;
-          container_kind: 'for';
-          iterable: Expr;
-        }
-      | {
-          body: WorkflowSubgraph;
-          condition: Expr;
-          container_kind: 'while';
-        }
-      | {
-          binding?: AssignTarget | null;
-          clauses: WorkflowListComprehensionClause[];
-          container_kind: 'list_comprehension';
-          element: WorkflowSubgraph;
-        }
-    ) & {
+  | {
+      binding?: AssignTarget | null;
+      condition: Expr;
+      container_kind: 'if';
+      else_graph: WorkflowSubgraph;
+      /**
+       * Whether the source's else branch is a block rather than a direct value or `else if`.
+       */
+      else_is_block: boolean;
       kind: 'container';
-    })
+      then_graph: WorkflowSubgraph;
+      /**
+       * Whether the source's then branch is a statement block rather than a value expression.
+       */
+      then_is_block: boolean;
+    }
+  | {
+      binding: string;
+      body: WorkflowSubgraph;
+      container_kind: 'for';
+      iterable: Expr;
+      kind: 'container';
+    }
+  | {
+      body: WorkflowSubgraph;
+      condition: Expr;
+      container_kind: 'while';
+      kind: 'container';
+    }
+  | {
+      binding?: AssignTarget | null;
+      clauses: WorkflowListComprehensionClause[];
+      container_kind: 'list_comprehension';
+      element: WorkflowSubgraph;
+      kind: 'container';
+    }
   | {
       kind: 'opaque';
       source: string;
@@ -165,6 +170,7 @@ export type Expr =
       LabelAnnotated: {
         expr: Expr;
         label: LabelMetadata;
+        [k: string]: unknown;
       };
     }
   | 'Undefined'
@@ -190,6 +196,7 @@ export type Expr =
       ListComprehension: {
         clauses: ListComprehensionClause[];
         element: Expr;
+        [k: string]: unknown;
       };
     }
   | {
@@ -199,6 +206,7 @@ export type Expr =
       Assign: {
         expr: Expr;
         target: AssignTarget;
+        [k: string]: unknown;
       };
     }
   | {
@@ -206,6 +214,7 @@ export type Expr =
         condition: Expr;
         else_block: Expr;
         then_block: Expr;
+        [k: string]: unknown;
       };
     }
   | {
@@ -213,23 +222,27 @@ export type Expr =
         binding: string;
         body: Expr;
         iterable: Expr;
+        [k: string]: unknown;
       };
     }
   | {
       While: {
         body: Expr;
         condition: Expr;
+        [k: string]: unknown;
       };
     }
   | {
       ProcessRef: {
         process: string;
+        [k: string]: unknown;
       };
     }
   | {
       HostDescriptorConstructor: {
         input: Expr;
         type_name: string;
+        [k: string]: unknown;
       };
     }
   | {
@@ -240,6 +253,7 @@ export type Expr =
         args: Expr[];
         operation: string;
         receiver: Expr;
+        [k: string]: unknown;
       };
     }
   | {
@@ -254,6 +268,7 @@ export type Expr =
   | {
       WaitSignal: {
         name: string;
+        [k: string]: unknown;
       };
     }
   | {
@@ -275,6 +290,7 @@ export type Expr =
       BuiltinCall: {
         args: Expr[];
         name: string;
+        [k: string]: unknown;
       };
     }
   | {
@@ -287,18 +303,21 @@ export type Expr =
       Call: {
         args: Expr[];
         function: Expr;
+        [k: string]: unknown;
       };
     }
   | {
       FunctionCall: {
         args: Expr[];
         function: string;
+        [k: string]: unknown;
       };
     }
   | {
       Map: {
         function: Expr;
         items: Expr;
+        [k: string]: unknown;
       };
     }
   | {
@@ -314,18 +333,21 @@ export type Expr =
       Field: {
         field: string;
         target: Expr;
+        [k: string]: unknown;
       };
     }
   | {
       Index: {
         index: Expr;
         target: Expr;
+        [k: string]: unknown;
       };
     }
   | {
       Unary: {
         expr: Expr;
         op: UnaryOp;
+        [k: string]: unknown;
       };
     }
   | {
@@ -333,12 +355,14 @@ export type Expr =
         left: Expr;
         op: BinaryOp;
         right: Expr;
+        [k: string]: unknown;
       };
     }
   | {
       JavaScriptUnary: {
         expr: Expr;
         op: JavaScriptUnaryOp;
+        [k: string]: unknown;
       };
     }
   | {
@@ -346,6 +370,7 @@ export type Expr =
         left: Expr;
         op: JavaScriptBinaryOp;
         right: Expr;
+        [k: string]: unknown;
       };
     }
   | {
@@ -353,6 +378,7 @@ export type Expr =
         left: Expr;
         op: JavaScriptLogicalOp;
         right: Expr;
+        [k: string]: unknown;
       };
     }
   | {
@@ -363,11 +389,13 @@ export type ListComprehensionClause =
       For: {
         binding: string;
         iterable: Expr;
+        [k: string]: unknown;
       };
     }
   | {
       If: {
         condition: Expr;
+        [k: string]: unknown;
       };
     };
 export type UnaryOp = 'Negate' | 'Not';
@@ -533,7 +561,7 @@ export interface TypeField {
   optional: boolean;
   ty: TypeExpr;
 }
-export interface ProcessParam {
+export interface ProcessParamWire {
   name: string;
   ty: TypeExpr;
 }
@@ -573,25 +601,30 @@ export interface WorkflowExecutionSite {
   label: string;
   owner: string;
   path?: number[];
+  [k: string]: unknown;
 }
 export interface AssignTarget {
   root: string;
   steps?: AssignPathStep[];
+  [k: string]: unknown;
 }
 export interface LabelMetadata {
   description?: string | null;
   title: string;
+  [k: string]: unknown;
 }
 export interface ResourceRefExpr {
   alias: string;
   path?: string[];
   resource_type: string;
+  [k: string]: unknown;
 }
 export interface FunctionExpr {
   body: Expr;
   captures?: string[];
   name?: string | null;
   params?: string[];
+  [k: string]: unknown;
 }
 /**
  * The authored shape of an inline process body, as a dialect lowers it.
@@ -605,15 +638,23 @@ export interface ProcessLiteralExpr {
    */
   hidden_args?: ProcessParam[];
   params: ProcessParam[];
+  [k: string]: unknown;
+}
+export interface ProcessParam {
+  name: string;
+  ty: TypeExpr;
+  [k: string]: unknown;
 }
 export interface TryExpr {
   body: Expr;
   catch?: CatchClause | null;
   finally?: Expr | null;
+  [k: string]: unknown;
 }
 export interface CatchClause {
   binding: string;
   body: Expr;
+  [k: string]: unknown;
 }
 export interface VariableVersion {
   variable: string;
@@ -622,6 +663,7 @@ export interface VariableVersion {
 export interface Span {
   end: number;
   start: number;
+  [k: string]: unknown;
 }
 export interface WorkflowNodeTypeFacets {
   available_variables?: WorkflowTypedVariable[];
@@ -651,8 +693,10 @@ export interface WorkflowExpectedArgument {
 export interface ProcessSignalDecl {
   name: string;
   ty: TypeExpr;
+  [k: string]: unknown;
 }
 export interface FunctionParam {
   name: string;
   ty: TypeExpr;
+  [k: string]: unknown;
 }

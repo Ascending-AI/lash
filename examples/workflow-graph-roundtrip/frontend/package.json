@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run check:types && vite build",
-    "check:types": "node scripts/generate-contract-types.mjs --check",
-    "generate:types": "node scripts/generate-contract-types.mjs",
+    "check:types": "python3 ../scripts/generate-contract-schema.py --check && node scripts/generate-contract-types.mjs --check && tsc --noEmit",
+    "generate:types": "python3 ../scripts/generate-contract-schema.py && node scripts/generate-contract-types.mjs",
     "preview": "vite preview",
     "test": "npm run check:types && vitest run"
   },
@@ -15,6 +15,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "json-schema-to-typescript": "^16.0.0",
     "svelte": "^5.56.0",
+    "typescript": "^5.9.3",
     "vite": "^8.1.0",
     "vitest": "^4.1.10"
   },

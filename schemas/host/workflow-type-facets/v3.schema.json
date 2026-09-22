@@ -2,7 +2,7 @@
   "$id": "https://lash.dev/schemas/workflow-type-facets/v3",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "ProcessParam": {
+    "ProcessParamWire": {
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -49,7 +49,7 @@
             },
             "params": {
               "items": {
-                "$ref": "#/definitions/ProcessParam"
+                "$ref": "#/definitions/ProcessParamWire"
               },
               "type": "array"
             }
@@ -64,7 +64,6 @@
       ]
     },
     "Span": {
-      "additionalProperties": false,
       "properties": {
         "end": {
           "format": "uint",
@@ -221,6 +220,7 @@
       "items": {
         "$ref": "#/definitions/TypeExpr"
       },
+      "minItems": 2,
       "type": "array"
     },
     "WorkflowDiagnosticClass": {

@@ -33,6 +33,21 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
             {Path("workflow/v7.schema.json"): '{\n  "type": "object"\n}\n'},
         )
 
+    def test_frontend_type_check_is_in_required_ci_and_floor(self) -> None:
+        root = SCRIPT.parent.parent
+        command = (
+            "npm --prefix examples/workflow-graph-roundtrip/frontend run check:types"
+        )
+        workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        justfile = (root / "justfile").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "npm --prefix examples/workflow-graph-roundtrip/frontend ci", workflow
+        )
+        self.assertIn(command, workflow)
+        floor = justfile.split("\nfloor:\n", 1)[1].split("\n# ", 1)[0]
+        self.assertIn(command, floor)
+
     def test_generate_writes_and_check_refuses_drift(self) -> None:
         completed = subprocess.CompletedProcess(
             args=MODULE.command(),

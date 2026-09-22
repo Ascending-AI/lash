@@ -372,6 +372,7 @@ floor:
     'git diff --check' \
     'scripts/ci/repository-gates.sh' \
     'python3 scripts/generate-workflow-schemas.py --check' \
+    'npm --prefix examples/workflow-graph-roundtrip/frontend ci && npm --prefix examples/workflow-graph-roundtrip/frontend run check:types' \
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
     | scripts/gate-table.sh
