@@ -1866,7 +1866,10 @@ lash_conformance::effect_host_cold_await_event_tests!({
             .expect("cold-instance conformance lease timings");
     (dir, move || {
         let path = path.clone();
-        let options = SqliteEffectReplayOptions { lease_timings };
+        let options = SqliteEffectReplayOptions {
+            lease_timings,
+            drain_budget: Default::default(),
+        };
         Arc::new(sync_await(async move {
             SqliteEffectHost::open_with_options(&path, options)
                 .await
@@ -2395,6 +2398,7 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                         SqliteEffectReplayOptions {
                             lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
                                 .expect("conformance lease timings"),
+                            drain_budget: Default::default(),
                         },
                         clock,
                     )

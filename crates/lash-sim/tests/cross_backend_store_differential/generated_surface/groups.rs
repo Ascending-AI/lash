@@ -342,6 +342,7 @@ pub(super) fn sqlite_group_options() -> SqliteEffectReplayOptions {
     SqliteEffectReplayOptions {
         lease_timings: LeaseTimings::new(GROUP_LEASE_TTL, GROUP_LEASE_RENEW)
             .expect("group lease timings keep the 3:1 TTL-to-renew ratio"),
+        drain_budget: Default::default(),
     }
 }
 
@@ -353,6 +354,7 @@ pub(super) fn postgres_group_options() -> PostgresEffectReplayOptions {
     PostgresEffectReplayOptions {
         lease_timings: LeaseTimings::new(GROUP_LEASE_TTL, GROUP_LEASE_RENEW)
             .expect("group lease timings keep the 3:1 TTL-to-renew ratio"),
+        drain_budget: Default::default(),
     }
 }
 

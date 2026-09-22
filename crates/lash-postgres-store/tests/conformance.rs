@@ -1980,6 +1980,7 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                         PostgresEffectReplayOptions {
                             lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
                                 .expect("conformance lease timings"),
+                            drain_budget: Default::default(),
                         },
                         clock,
                     );

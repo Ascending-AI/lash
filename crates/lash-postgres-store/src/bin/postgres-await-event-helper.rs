@@ -133,6 +133,7 @@ async fn run_turn_action(
                 cold_process_effect_driver::RECOVERY_TTL,
                 cold_process_effect_driver::RECOVERY_RENEW,
             )?,
+            drain_budget: Default::default(),
         },
     ));
     lash_conformance::cold_process_real_turn_driver(store, controller, nonce, action, marker).await;
@@ -156,6 +157,7 @@ async fn run_effect_action(
                 cold_process_effect_driver::RECOVERY_TTL,
                 cold_process_effect_driver::RECOVERY_RENEW,
             )?,
+            drain_budget: Default::default(),
         },
     );
     if action == "effect_replay" {

@@ -35,6 +35,7 @@ async fn world(database_url: String, spec: ToolChildWorldSpec) -> ToolChildWorld
     let options = PostgresEffectReplayOptions {
         lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the law asks for a ttl at least three renew intervals wide"),
+        drain_budget: Default::default(),
     };
     let host = PostgresEffectHost::with_options(&storage, options);
     let drain = host.group_drain();

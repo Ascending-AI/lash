@@ -107,6 +107,11 @@ pub struct DrainWorldSpec {
     /// queue to report. A backend must honour it rather than substituting a
     /// resolver of its own.
     pub executors: Option<Arc<dyn GroupExecutors>>,
+    /// The controller's drain budget (ADR 0099 §7): how long a close's
+    /// finalization waits on a cancel-decided child's attempt body after the
+    /// decision commits. `None` means the tier's default; the budget law asks
+    /// for a tiny one.
+    pub drain_budget: Option<Duration>,
 }
 
 /// Callable from any runtime — a crash law calls it from a runtime it is about
@@ -990,7 +995,7 @@ pub(crate) const CRASH_LEASE_MS: u64 = 900;
 
 /// The lease window a live-group law uses: longer than the law, so a lease
 /// expiring mid-test can never be mistaken for the drain honoring it.
-const LIVE_LEASE_MS: u64 = 60_000;
+pub(crate) const LIVE_LEASE_MS: u64 = 60_000;
 
 const POLL: Duration = Duration::from_millis(25);
 
@@ -998,9 +1003,20 @@ const POLL: Duration = Duration::from_millis(25);
 const AWAIT_BUDGET: Duration = Duration::from_secs(60);
 
 pub(crate) fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
+    spec_with_budget(lease_ttl_ms, executors, None)
+}
+
+/// A world whose controller carries an explicit drain budget — the
+/// `closing`-suite laws that assert on the budget ask for one.
+pub(crate) fn spec_with_budget(
+    lease_ttl_ms: u64,
+    executors: &Arc<RecordingExecutors>,
+    drain_budget: Option<Duration>,
+) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
         executors: Some(Arc::clone(executors) as Arc<dyn GroupExecutors>),
+        drain_budget,
     }
 }
 
@@ -1009,6 +1025,7 @@ pub(crate) fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
         executors: None,
+        drain_budget: None,
     }
 }
 
@@ -1225,7 +1242,7 @@ fn child_with_operation(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-fn group(
+pub(crate) fn group(
     execution_scope: &ExecutionScope,
     key: &str,
     children: usize,
@@ -1457,7 +1474,7 @@ pub(crate) fn impostor(
 
 /// What a recording host answers for one child.
 #[derive(Clone)]
-enum ExecutorAnswer {
+pub(crate) enum ExecutorAnswer {
     Settle,
     /// This host cannot run the command.
     Refuse,
@@ -1546,7 +1563,10 @@ impl RecordingExecutors {
         Self::uniform(ExecutorAnswer::Refuse)
     }
 
-    fn by_position(by_position: Vec<ExecutorAnswer>, otherwise: ExecutorAnswer) -> Arc<Self> {
+    pub(crate) fn by_position(
+        by_position: Vec<ExecutorAnswer>,
+        otherwise: ExecutorAnswer,
+    ) -> Arc<Self> {
         Arc::new(Self {
             asked: std::sync::Mutex::new(Vec::new()),
             executed: ExecutionLog::default(),

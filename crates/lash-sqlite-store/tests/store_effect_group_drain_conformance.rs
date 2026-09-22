@@ -31,6 +31,10 @@ async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
     let options = SqliteEffectReplayOptions {
         lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the suite asks for a ttl at least three renew intervals wide"),
+        drain_budget: spec
+            .drain_budget
+            .map(lash_core::EffectGroupDrainBudget::new)
+            .unwrap_or_default(),
     };
     let host = SqliteEffectHost::open_with_options(&path, options)
         .await
@@ -53,6 +57,18 @@ async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
 lash_conformance::store_effect_group_drain_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("effect-group-drain.db");
+    let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {
+        let path = path.clone();
+        Box::pin(async move { world(path, spec).await })
+    });
+    (dir, make)
+});
+
+// The durable SQLite tier answers the §7 durable-closing contract (FIG-3410) —
+// the same world factory, the closing seam beside the drain on the same host.
+lash_conformance::store_effect_group_closing_tests!({
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("effect-group-closing.db");
     let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {
         let path = path.clone();
         Box::pin(async move { world(path, spec).await })
