@@ -481,6 +481,12 @@ IDENTIFIER_RENAME_BASELINES = {
     # field, tag, serialization call or byte expression changes; batch
     # identity stays v1.
     'crates/lash-core/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:3f7b64de0d53961e1c8e33f8ca5f4284c2aca7a3cf364a29b49f5cb299b5767d',
+    # FIG-3460: ToolInvocation gained an issuing workflow-node id used only to
+    # link tool trace events back to the language node. The batch preimage's
+    # exhaustive destructure explicitly ignores it, and
+    # issuing_node_id_does_not_change_tool_batch_identity proves both the raw
+    # preimage and rendered v2 identity remain byte-identical.
+    'crates/lash-core-execution/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:d71ea72d3b80d401109b0ca80de601bc31ff61e813392e822257ac1cda7c9644',
     # FIG-2234 fix 4: the generated schema.sql header comment was aligned to
     # component version 64 (bumped in lib.rs by the BLAKE3 cutover without
     # regenerating the artifact header). Comment-only; the executed DDL is

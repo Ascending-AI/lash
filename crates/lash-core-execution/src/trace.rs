@@ -758,6 +758,7 @@ mod span_identity_tests {
                 call_id: Some("call_abc".to_string()),
                 name: "read_file".to_string(),
                 args: serde_json::json!({}),
+                issuing_node_id: None,
             },
         );
         assert_eq!(context.graph_node_id.as_deref(), Some("tool:call_abc"));
@@ -914,6 +915,7 @@ mod span_identity_tests {
                 call_id: None,
                 name: "read_file".to_string(),
                 args: serde_json::json!({}),
+                issuing_node_id: None,
             },
         );
         assert_eq!(context.graph_node_id, None);

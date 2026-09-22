@@ -36,10 +36,11 @@ use sha2::{Digest, Sha256};
 
 use crate::RestateIngressClient;
 use crate::durable_wait::{
-    LashDurableWaitIndexClient, LashDurableWaitIndexImpl, LashDurableWaitWorkflowClient,
-    LashDurableWaitWorkflowImpl, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
-    RestateDurableWaitGroupChildRequest, RestateDurableWaitResolveRequest,
-    durable_wait_index_key_for_scope, durable_wait_index_object_key, restate_await_event_key,
+    LASH_REPLAY_KEY_HEADER, LashDurableWaitIndexClient, LashDurableWaitIndexImpl,
+    LashDurableWaitWorkflowClient, LashDurableWaitWorkflowImpl, RestateDurableWaitAddress,
+    RestateDurableWaitAwaitRequest, RestateDurableWaitGroupChildRequest,
+    RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
+    durable_wait_index_object_key, restate_await_event_key,
 };
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
@@ -525,6 +526,7 @@ async fn resolve_group_wait(
     value: EffectGroupWaitResolution,
 ) -> Result<(), TerminalError> {
     let key = group_wait_key(scope, group_key, kind)?;
+    let replay_key = key.key_id.clone();
     let address = RestateDurableWaitAddress::for_key(&key);
     let Json(_) = ctx
         .object_client::<LashDurableWaitIndexClient>(durable_wait_index_object_key(&address))
@@ -532,6 +534,7 @@ async fn resolve_group_wait(
             key,
             resolution: wait_resolution(value)?,
         }))
+        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
         .call()
         .await?;
     Ok(())

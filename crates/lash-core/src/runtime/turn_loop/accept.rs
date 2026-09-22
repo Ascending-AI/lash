@@ -7,6 +7,17 @@
 use super::*;
 use crate::TurnId;
 
+fn clear_process_invocation_correlation_for_ordinary_turn(
+    input: &mut TurnInput,
+    execution_scope: &crate::ExecutionScope,
+) {
+    if !matches!(execution_scope, crate::ExecutionScope::Process { .. }) {
+        lash_core_execution::core_internal::clear_process_invocation_correlation(
+            &mut input.turn_context,
+        );
+    }
+}
+
 impl LashRuntime {
     /// Accept `input` as durable admission evidence, then drive it to a terminal turn ([ADR
     /// 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
@@ -152,13 +163,17 @@ impl LashRuntime {
     /// directly; it is the one configuration with no durable ingress at all.
     pub async fn stream_turn_with_agent_frames(
         &mut self,
-        input: TurnInput,
+        mut input: TurnInput,
         opts: TurnOptions<'_>,
     ) -> Result<AgentFrameRun, RuntimeError> {
         // FIG-3353: an enqueue-only (`PreservePersisted`) open may never run a
         // turn — refuse before the acceptance commit becomes admission
         // evidence.
         self.refuse_turn_execution_on_preserved_tool_surface()?;
+        clear_process_invocation_correlation_for_ordinary_turn(
+            &mut input,
+            opts.scoped_effect_controller().execution_scope(),
+        );
         use futures_util::FutureExt;
 
         // Keep the guard outside the unwinding body. Both streamed facade turns
@@ -743,5 +758,66 @@ impl LashRuntime {
         });
         self.settle_session_execution_lease(session_execution_lease.as_ref(), result)
             .await
+    }
+}
+
+#[cfg(test)]
+mod process_invocation_correlation_tests {
+    use super::*;
+
+    fn invocation_id(input: &TurnInput) -> Option<String> {
+        crate::testing::TestExecutionContextBuilder::new()
+            .turn_context(input.turn_context.clone())
+            .build()
+            .into_runtime()
+            .restate_invocation_id()
+            .map(str::to_owned)
+    }
+
+    fn correlated_input() -> TurnInput {
+        let process_id = crate::ProcessId::from("process:subagent:call");
+        let authority = crate::ProcessExecutionWriteAuthority::invocation(
+            process_id.clone(),
+            "invocation:subagent:call",
+        )
+        .bind_attempt(2);
+        let mut input = TurnInput::text("run child");
+        lash_core_execution::core_internal::attach_process_invocation_correlation(
+            &mut input.turn_context,
+            &process_id,
+            &authority,
+        );
+        input
+    }
+
+    #[test]
+    fn ordinary_turn_clears_reused_process_invocation_correlation() {
+        let mut input = correlated_input();
+        assert_eq!(
+            invocation_id(&input).as_deref(),
+            Some("invocation:subagent:call")
+        );
+
+        clear_process_invocation_correlation_for_ordinary_turn(
+            &mut input,
+            &crate::ExecutionScope::turn("session:child", "turn:follow-up"),
+        );
+
+        assert_eq!(invocation_id(&input), None);
+    }
+
+    #[test]
+    fn process_turn_preserves_attached_invocation_correlation() {
+        let mut input = correlated_input();
+
+        clear_process_invocation_correlation_for_ordinary_turn(
+            &mut input,
+            &crate::ExecutionScope::process("process:subagent:call"),
+        );
+
+        assert_eq!(
+            invocation_id(&input).as_deref(),
+            Some("invocation:subagent:call")
+        );
     }
 }

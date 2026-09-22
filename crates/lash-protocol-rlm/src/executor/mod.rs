@@ -912,10 +912,12 @@ fn foreground_lashlang_execution_trace(
                 address,
                 effect_id: effect_id.to_string(),
             },
+            source_identity: lash_lashlang_runtime::trace_lashlang_source_identity(artifact),
             module_ref: artifact.module_ref.to_string(),
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),
+            restate_invocation_id: ctx.restate_invocation_id().map(str::to_string),
         },
     ))
 }

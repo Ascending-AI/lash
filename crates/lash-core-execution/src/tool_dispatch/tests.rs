@@ -1989,6 +1989,7 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
     tracing.emit_tool_call_completed(
         &outcome.record,
         &outcome.attempts,
+        None,
         &crate::facade_support::SystemClock,
     );
     let emitted: lash_trace::TraceRecord = serde_json::from_str(

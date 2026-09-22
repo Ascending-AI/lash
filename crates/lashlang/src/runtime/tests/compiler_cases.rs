@@ -1410,28 +1410,28 @@ fn existing_execution_site_ids_are_unchanged() {
         (
             labeled_spawn_program(),
             &[
-                "resource_operation:73a040c30e9f9729b4ab1204",
-                "terminal:73a4071bf7a1c8d16ed98b55",
+                "node:1de6eca7fbb5c02fa3b32d47",
+                "node:e5da609e1296a1d8e31ae439",
             ][..],
             "9e286714722511639d33657596b77b6d0c09d2a074ffbe2e801cb29dd5448e37",
         ),
         (
             labeled_branch_program(),
             &[
-                "resource_operation:1cb0ce7e5a01032ab0935c82",
-                "branch:025dd501463420f541415f7f",
-                "resource_operation:06a1355ad8e7158222ba3f47",
-                "resource_operation:0faaf5a4a3ad6c368956eb93",
-                "terminal:a082d25e7834a4336778c54c",
+                "node:1de6eca7fbb5c02fa3b32d47",
+                "node:e5da609e1296a1d8e31ae439",
+                "node:9abd5c00875b00cb66b8eace",
+                "node:c0542a493d0c724cb4fc8881",
+                "node:5d5c395c7ff475d867aea1a7",
             ],
             "e228cedab83aeeb459fe65926fefdbe25f168a372cdb549522ed4e9394092929",
         ),
         (
             loop_container_program(),
             &[
-                "loop:e040a92bb019f88c2bd5a86f",
-                "loop:fc41ca13fc6b48882acee36e",
-                "terminal:9ee3f33b020477976d819aaa",
+                "node:1de6eca7fbb5c02fa3b32d47",
+                "node:e5da609e1296a1d8e31ae439",
+                "node:5d5c395c7ff475d867aea1a7",
             ][..],
             "0000000000000000000000000000000000000000000000000000000000000001",
         ),
@@ -1460,22 +1460,21 @@ fn existing_execution_site_ids_are_unchanged() {
         compiled_site_descriptors(&historical),
         "only the recorded execution context may differ"
     );
-    // Re-pinned by FIG-2999: the fixture's `wake result` statement went with
-    // the retired special forms. The resource operation ahead of it keeps its
-    // id, which is the stability this pin is about; the terminal behind it sat
-    // at a statement index the deleted `wake` used to occupy, so its id moved
-    // with the program, not with the id scheme.
+    // Re-pinned by FIG-3460 because the empty path is now reserved for the
+    // non-executable process container. Direct process bodies begin at `[0]`,
+    // so both executable child ids move together while remaining independent
+    // of the recorded module and process context above.
     assert_eq!(
         execution_site_ids(&historical),
         [
-            "resource_operation:a27f5176d6e2e5669b60ff3b",
-            "terminal:7951ccc418aaa1b1fbcc09bb",
+            "node:20b7fff7062b8c5ed89e1c96",
+            "node:20adcad7b99b68a910628f1a",
         ]
     );
 }
 
 #[test]
-fn execution_site_aggregate_resource_sites_preserve_their_compiler_paths() {
+fn aggregate_resource_sites_share_their_structural_node() {
     // `result = await (tools.echo({ value: "left" })?, tools.echo({ value: "right" })?)`
     // / `finish result`
     let tuple = compile_labeled_program(builders::program(vec![
@@ -1498,12 +1497,16 @@ fn execution_site_aggregate_resource_sites_preserve_their_compiler_paths() {
             .iter()
             .map(|site| site.workflow_site.path.clone())
             .collect::<Vec<_>>(),
-        [vec![0, 0, 0, 0], vec![0, 0, 0, 1]]
+        [vec![0], vec![0]]
     );
     assert!(
         tuple_sites
             .iter()
             .all(|site| { site.node_kind == "resource_operation" && site.label == "echo" })
+    );
+    assert_eq!(
+        tuple_sites[0].node_id, tuple_sites[1].node_id,
+        "aggregate leaves are occurrences of one authored workflow node"
     );
 
     // `results = await [tools.echo({ value: id })? for id in ["a", "b"] if id != "c"]`
@@ -1532,7 +1535,7 @@ fn execution_site_aggregate_resource_sites_preserve_their_compiler_paths() {
         .site
         .as_ref()
         .expect("list batch site");
-    assert_eq!(list_site.workflow_site.path, [0, 0, 0, 2, 0]);
+    assert_eq!(list_site.workflow_site.path, [0]);
     assert_eq!(
         (list_site.node_kind.as_str(), list_site.label.as_str()),
         ("resource_operation", "echo")
@@ -1576,12 +1579,12 @@ fn compile_labeled_program_with_historical_context(
     );
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
     let current = crate::compile_linked(&linked);
+    let mut historical_artifact = linked.artifact.clone();
+    historical_artifact.module_ref = historical_module_ref(historical_module_hash);
     let (chunk, compile_stats) = Compiler::compile_linked_program(
         linked.program(),
-        (&linked.artifact).into(),
-        crate::tracking::LashlangExecutionContext::main(historical_module_ref(
-            historical_module_hash,
-        )),
+        (&historical_artifact).into(),
+        crate::tracking::LashlangExecutionContext::main(),
     );
     let historical = CompiledProgram {
         chunk,
@@ -1612,17 +1615,19 @@ fn compile_labeled_process_with_historical_context(
         main: process.body.clone(),
         spans: Default::default(),
     };
+    let mut historical_artifact = linked.artifact.clone();
+    historical_artifact.module_ref = historical_module_ref(historical_module_hash);
+    historical_artifact.exports.processes.insert(
+        process_name.to_string(),
+        crate::ProcessRef::new(
+            crate::ContentHash::new(historical_process_component),
+            historical_process_position,
+        ),
+    );
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
-        (&linked.artifact).into(),
-        crate::tracking::LashlangExecutionContext::process(
-            historical_module_ref(historical_module_hash),
-            crate::ProcessRef::new(
-                crate::ContentHash::new(historical_process_component),
-                historical_process_position,
-            ),
-            process_name,
-        ),
+        (&historical_artifact).into(),
+        crate::tracking::LashlangExecutionContext::process(process_name),
     );
     let historical = CompiledProgram {
         chunk,

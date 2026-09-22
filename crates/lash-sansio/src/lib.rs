@@ -21,6 +21,7 @@ mod tool_intents;
 pub mod tool_output;
 pub mod turn;
 pub mod turn_driver;
+mod workflow;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Identity version mixed into every Lashlang and TypeScript module-artifact hash.
@@ -114,6 +115,7 @@ pub use turn_driver::{
     TurnDriverConfig, TurnDriverPreamble, append_assistant_text_part, normalized_response_parts,
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
+pub use workflow::WorkflowExecutionSite;
 
 pub fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {
     let raw_len = value.chars().count();

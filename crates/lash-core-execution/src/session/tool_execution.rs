@@ -132,6 +132,7 @@ pub struct ToolInvocation {
     pub args: serde_json::Value,
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+    pub issuing_language_node_id: Option<String>,
 }
 
 impl ToolInvocation {
@@ -142,6 +143,7 @@ impl ToolInvocation {
             args,
             execution_grant: None,
             child_execution_trace_hook: None,
+            issuing_language_node_id: None,
         }
     }
 
@@ -155,6 +157,11 @@ impl ToolInvocation {
 
     pub fn with_execution_grant(mut self, grant: crate::ToolExecutionGrant) -> Self {
         self.execution_grant = Some(Box::new(grant));
+        self
+    }
+
+    pub fn with_issuing_language_node_id(mut self, node_id: impl Into<String>) -> Self {
+        self.issuing_language_node_id = Some(node_id.into());
         self
     }
 }
@@ -173,6 +180,7 @@ impl std::fmt::Debug for ToolInvocation {
                 "child_execution_trace_hook",
                 &self.child_execution_trace_hook.as_ref().map(|_| "<hook>"),
             )
+            .field("issuing_language_node_id", &self.issuing_language_node_id)
             .finish()
     }
 }
@@ -225,6 +233,22 @@ mod tests {
         assert_ne!(
             first,
             deterministic_tool_invocation_batch_id(&reordered, ToolBatchOccurrence::Opener(1))
+        );
+    }
+
+    #[test]
+    fn issuing_node_id_does_not_change_tool_batch_identity() {
+        let plain = vec![invocation("a", 1)];
+        let attributed = vec![invocation("a", 1).with_issuing_language_node_id("node:issuer")];
+
+        assert_eq!(
+            tool_invocation_batch_preimage(&plain, ToolBatchOccurrence::Opener(1)),
+            tool_invocation_batch_preimage(&attributed, ToolBatchOccurrence::Opener(1)),
+            "trace attribution must not enter the durable tool-batch preimage"
+        );
+        assert_eq!(
+            deterministic_tool_invocation_batch_id(&plain, ToolBatchOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&attributed, ToolBatchOccurrence::Opener(1)),
         );
     }
 
@@ -448,6 +472,7 @@ fn tool_invocation_batch_preimage(
             args,
             execution_grant,
             child_execution_trace_hook: _,
+            issuing_language_node_id: _,
         } = call;
         identity.string(id);
         identity.string(tool_id.as_str());
@@ -1243,6 +1268,7 @@ impl RuntimeExecutionContext<'_> {
                             crate::RuntimeEffectLocalExecutor::tool_batch(
                                 self.clone(),
                                 trace_hooks.clone(),
+                                HashMap::new(),
                                 completion_key,
                             )
                         },

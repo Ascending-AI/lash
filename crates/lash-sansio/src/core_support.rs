@@ -68,9 +68,11 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-usage-ledger-request/v1",
     "lash-workflow-edge/v2",
     "lash-workflow-node/v2",
+    "lash-workflow-node/v3",
     "lash-workflow-source/v3",
     "lash.agent-frame-key/v2",
     "lashlang-process-start/v2",
+    "lashlang-process-start/v3",
 ];
 
 /// BLAKE3 hasher initialized with Lash's mandatory length-prefixed domain tag.
@@ -396,6 +398,9 @@ mod blake3_domain_tests {
         "lash-runtime-usage-payload/v2",
         "lash-runtime-usage-payload/v3",
         "lash-tool-intent-payload/v2",
+        "lash-lashlang-execution-site/v2",
+        "lash-workflow-node/v2",
+        "lashlang-process-start/v2",
     ];
 
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {

@@ -132,11 +132,13 @@ impl<'run> OrchestrationContext<'run> {
             // front door hands providers replies in input order, so it takes
             // the replies and leaves the order to the runtime seam that needs
             // it.
-            return runtime
-                .with_batch_parent_call_id(self.context.tool_call_id.clone())
-                .call_tool_batch(calls, crate::session::ToolBatchOccurrence::Uncounted)
-                .await
-                .replies;
+            return Box::pin(
+                runtime
+                    .with_batch_parent_call_id(self.context.tool_call_id.clone())
+                    .call_tool_batch(calls, crate::session::ToolBatchOccurrence::Uncounted),
+            )
+            .await
+            .replies;
         }
         // ADR 0099 §2/§6: a group child's orchestrating body holds no runtime
         // execution context — `RuntimeExecutionContext` is never serialized

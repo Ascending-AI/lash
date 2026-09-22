@@ -570,6 +570,7 @@ async fn concurrent_batch_drains_intents_in_call_order_then_intent_index() {
         batch,
         intent_law_batch_parent("intent-order-parent"),
         std::collections::HashMap::new(),
+        Arc::new(std::collections::HashMap::new()),
     ))
     .await
     .expect("execute ordered intent batch");
@@ -628,6 +629,7 @@ async fn controller_abort_during_intent_drain_aborts_the_turn_batch() {
         batch,
         intent_law_batch_parent("replacement-abort-parent"),
         std::collections::HashMap::new(),
+        Arc::new(std::collections::HashMap::new()),
     ))
     .await
     .expect_err("controller abort must escape the intent drain and abort the turn batch");
@@ -727,6 +729,7 @@ async fn cancellation_before_result_commit_executes_no_intents() {
             batch,
             intent_law_batch_parent("pre-result-cancel-parent"),
             std::collections::HashMap::new(),
+            Arc::new(std::collections::HashMap::new()),
         ))
         .await
     });
@@ -778,6 +781,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
             batch,
             intent_law_batch_parent("post-result-cancel-parent"),
             std::collections::HashMap::new(),
+            Arc::new(std::collections::HashMap::new()),
         ))
         .await
     });

@@ -6,6 +6,36 @@
 
 use super::*;
 
+/// Why a process workflow submission did not return an invocation id.
+///
+/// The distinction decides whether the scheduling boundary may compensate. A
+/// `StartFailed` cancellation is terminal on the spot for a row with no
+/// execution and no external reference, so writing one for a submission that
+/// did reach the runtime would terminalise a row whose workflow is running.
+/// The workflow would then do the child's work and fail its own terminal write.
+/// Only a failure that proves the run was never accepted may compensate.
+#[derive(Debug)]
+pub enum ProcessWorkflowStartFailure {
+    /// A reply or journaled terminal failure proves no invocation was accepted.
+    Rejected(TerminalError),
+    /// No proof of non-acceptance exists, so an invocation may be running.
+    Ambiguous(TerminalError),
+}
+
+impl ProcessWorkflowStartFailure {
+    /// The underlying failure, whichever class it is.
+    pub fn error(&self) -> &TerminalError {
+        match self {
+            Self::Rejected(error) | Self::Ambiguous(error) => error,
+        }
+    }
+
+    /// Whether a compensating `StartFailed` cancellation is sound to write.
+    pub fn proves_nothing_is_running(&self) -> bool {
+        matches!(self, Self::Rejected(_))
+    }
+}
+
 pub(super) async fn schedule_restate_process<'ctx, C>(
     registry: Arc<dyn ProcessRegistry>,
     registration: lash_core::ProcessRegistration,

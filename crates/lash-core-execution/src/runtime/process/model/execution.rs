@@ -120,6 +120,20 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
+    /// Returns the durable-substrate invocation ID only after this authority
+    /// is bound to the named process and one execution attempt.
+    pub fn restate_invocation_id(&self, process_id: &ProcessId) -> Option<&str> {
+        match self {
+            Self::Invocation {
+                process_id: authority_process_id,
+                execution_id,
+                attempt: Some(_),
+                ..
+            } if authority_process_id == process_id => Some(execution_id),
+            Self::Lease(_) | Self::Invocation { .. } => None,
+        }
+    }
+
     /// Permits durable handover only when the retained owner incarnation, fencing token, and
     /// attempt exactly match the predecessor captured by invocation authority.
     pub fn permits_owner_bound_resume(&self, retained: &ProcessStarted) -> bool {

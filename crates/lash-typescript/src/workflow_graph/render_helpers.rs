@@ -68,19 +68,6 @@ pub(crate) fn computation_name(expression: &Expr) -> String {
     .to_string()
 }
 
-pub(crate) fn kind_tag(kind: &WorkflowNodeKind) -> &'static str {
-    match kind {
-        WorkflowNodeKind::Data { .. } => "data",
-        WorkflowNodeKind::Call { .. } => "call",
-        WorkflowNodeKind::Effect { .. } => "effect",
-        WorkflowNodeKind::Computation { .. } => "computation",
-        WorkflowNodeKind::StateUpdate { .. } => "state_update",
-        WorkflowNodeKind::Terminal { .. } => "terminal",
-        WorkflowNodeKind::Container(_) => "container",
-        WorkflowNodeKind::Opaque { .. } => "opaque",
-    }
-}
-
 pub(crate) fn hex_digest(domain: &str, bytes: &[u8]) -> String {
     lash_sansio::core_support::blake3_domain_hash_hex(domain, bytes)
 }

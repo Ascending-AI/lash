@@ -11,11 +11,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use lash_core::facade_support::ToolChildExecutionTraceHook;
 use lash_sansio::sync::MutexExt;
 use lash_trace::{
-    TraceBranchSelection, TraceContext, TraceEvent, TraceLabelMetadata,
-    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
-    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeSubject, TraceSink,
+    TraceBranchSelection, TraceContext, TraceEvent, TraceLanguageChildExecution,
+    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
+    TraceLanguageExecutionStatus, TraceRecord, TraceRuntimeScope, TraceRuntimeSubject, TraceSink,
 };
 use lashlang::{ExecutionHost, ExecutionHostError};
 
@@ -73,11 +71,13 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// hand over, so the boundary is a version rather than a defaulted field — a
 /// defaulted empty ledger would let the successor incorporate the same
 /// settlement twice and double-charge its spend.
+/// v14 replaces runtime occurrence-counter keys with the shared workflow node
+/// identity and reserves the process root for the process declaration.
 /// v6 carries run-local child possession across execution segments. A segment
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 13;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 14;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -385,14 +385,24 @@ pub async fn run_lashlang_process(
         context.incarnation(),
     ));
     let session_id = process_trace_session_id(&context.registration().provenance.originator);
+    let restate_invocation_id = context
+        .execution_context()
+        .execution_write_authority
+        .as_ref()
+        .and_then(|authority| authority.restate_invocation_id(&process_id))
+        .map(str::to_string);
     let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
         engine.execution_sink.clone(),
         engine.trace_context.clone(),
-        session_id,
-        process_id.clone(),
-        artifact.module_ref.clone(),
-        input.process_ref.clone(),
-        input.process_name.clone(),
+        LashlangProcessTraceIdentity {
+            session_id,
+            process_id: process_id.clone(),
+            source_identity: trace_lashlang_source_identity(&artifact),
+            module_ref: artifact.module_ref.clone(),
+            process_ref: input.process_ref.clone(),
+            process_name: input.process_name.clone(),
+            restate_invocation_id,
+        },
     );
     if is_initial_segment {
         lashlang_execution_trace.emit_started(&artifact);
@@ -808,12 +818,15 @@ impl LashlangProcessHost<'_> {
         call_site: &lashlang::LashlangExecutionCallSite,
         batch_index: Option<usize>,
     ) -> String {
-        match batch_index {
+        let call_id = match batch_index {
             Some(batch_index) => self
                 .identities
                 .child(host_operation, call_site, batch_index),
             None => self.identities.leaf(host_operation, call_site),
-        }
+        };
+        self.lashlang_execution_trace
+            .record_resource_call(call_site, &call_id);
+        call_id
     }
 
     fn prepare_resource_invocation(
@@ -860,7 +873,8 @@ impl LashlangProcessHost<'_> {
                 })
             })?;
         let mut invocation =
-            lash_core::facade_support::ToolInvocation::new(call_id, manifest.id.clone(), payload);
+            lash_core::facade_support::ToolInvocation::new(call_id, manifest.id.clone(), payload)
+                .with_issuing_language_node_id(call_site.site.node_id.clone());
         if let Some(hook) = self
             .lashlang_execution_trace
             .tool_child_execution_trace_hook(call_site)
@@ -917,13 +931,17 @@ impl LashlangProcessHost<'_> {
             args,
             execution_grant: _,
             child_execution_trace_hook,
+            issuing_language_node_id,
         } = invocation;
+        let tool_ctx = issuing_language_node_id
+            .map(|node_id| self.ctx.clone().with_issuing_language_node_id(node_id))
+            .unwrap_or_else(|| self.ctx.clone());
         let reply = if let Some(call_site) = child_execution_trace_hook {
-            self.ctx
+            tool_ctx
                 .call_tool_by_id_with_child_execution_trace_hook(id, tool_id, args, 0, call_site)
                 .await
         } else {
-            Box::pin(self.ctx.call_tool_by_id(id, tool_id, args, 0)).await
+            Box::pin(tool_ctx.call_tool_by_id(id, tool_id, args, 0)).await
         };
         protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)
     }
@@ -1207,29 +1225,44 @@ struct LashlangProcessExecutionTrace {
     base_context: TraceContext,
     session_id: Option<SessionId>,
     process_id: ProcessId,
+    source_identity: String,
     module_ref: lashlang::ModuleRef,
     process_ref: lashlang::ProcessRef,
     process_name: String,
+    restate_invocation_id: Option<String>,
+    resource_call_ids: Arc<std::sync::Mutex<BTreeMap<(String, u64), String>>>,
+    pending_resource_starts:
+        Arc<std::sync::Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
+}
+
+struct LashlangProcessTraceIdentity {
+    session_id: Option<SessionId>,
+    process_id: ProcessId,
+    source_identity: String,
+    module_ref: lashlang::ModuleRef,
+    process_ref: lashlang::ProcessRef,
+    process_name: String,
+    restate_invocation_id: Option<String>,
 }
 
 impl LashlangProcessExecutionTrace {
     fn new(
         sink: Option<Arc<dyn TraceSink>>,
         base_context: TraceContext,
-        session_id: Option<SessionId>,
-        process_id: ProcessId,
-        module_ref: lashlang::ModuleRef,
-        process_ref: lashlang::ProcessRef,
-        process_name: String,
+        identity: LashlangProcessTraceIdentity,
     ) -> Self {
         Self {
             sink,
             base_context,
-            session_id,
-            process_id,
-            module_ref,
-            process_ref,
-            process_name,
+            session_id: identity.session_id,
+            process_id: identity.process_id,
+            source_identity: identity.source_identity,
+            module_ref: identity.module_ref,
+            process_ref: identity.process_ref,
+            process_name: identity.process_name,
+            restate_invocation_id: identity.restate_invocation_id,
+            resource_call_ids: Arc::default(),
+            pending_resource_starts: Arc::default(),
         }
     }
 
@@ -1248,10 +1281,12 @@ impl LashlangProcessExecutionTrace {
             subject: TraceRuntimeSubject::Process {
                 process_id: self.process_id.clone(),
             },
+            source_identity: self.source_identity.clone(),
             module_ref: self.module_ref.to_string(),
             entry_kind: "process".to_string(),
             entry_ref: Some(lashlang::process_ref_key(&self.process_ref)),
             entry_name: self.process_name.clone(),
+            restate_invocation_id: self.restate_invocation_id.clone(),
         }
     }
 
@@ -1308,6 +1343,14 @@ impl LashlangProcessExecutionTrace {
             return;
         }
         let (suffix, payload) = match observation {
+            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence }
+                if site.node_kind == lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
+            {
+                self.pending_resource_starts
+                    .lock_recover()
+                    .insert((site.node_id.clone(), occurrence), site);
+                return;
+            }
             lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => (
                 format!("node:{}:{occurrence}:started", site.node_id),
                 TraceLanguageExecutionPayload::NodeStarted {
@@ -1315,31 +1358,40 @@ impl LashlangProcessExecutionTrace {
                     node_kind: site.node_kind,
                     label: site.label,
                     occurrence,
+                    call_id: None,
                 },
             ),
-            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence } => (
-                format!("node:{}:{occurrence}:completed", site.node_id),
-                TraceLanguageExecutionPayload::NodeCompleted {
-                    node_id: site.node_id,
-                    node_kind: site.node_kind,
-                    label: site.label,
-                    occurrence,
-                },
-            ),
+            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence } => {
+                let call_id = self.finish_resource_call(&site, occurrence);
+                (
+                    format!("node:{}:{occurrence}:completed", site.node_id),
+                    TraceLanguageExecutionPayload::NodeCompleted {
+                        node_id: site.node_id,
+                        node_kind: site.node_kind,
+                        label: site.label,
+                        occurrence,
+                        call_id,
+                    },
+                )
+            }
             lashlang::LashlangExecutionObservation::NodeFailed {
                 site,
                 occurrence,
                 error,
-            } => (
-                format!("node:{}:{occurrence}:failed", site.node_id),
-                TraceLanguageExecutionPayload::NodeFailed {
-                    node_id: site.node_id,
-                    node_kind: site.node_kind,
-                    label: site.label,
-                    occurrence,
-                    error,
-                },
-            ),
+            } => {
+                let call_id = self.finish_resource_call(&site, occurrence);
+                (
+                    format!("node:{}:{occurrence}:failed", site.node_id),
+                    TraceLanguageExecutionPayload::NodeFailed {
+                        node_id: site.node_id,
+                        node_kind: site.node_kind,
+                        label: site.label,
+                        occurrence,
+                        call_id,
+                        error,
+                    },
+                )
+            }
             lashlang::LashlangExecutionObservation::BranchSelected {
                 site,
                 occurrence,
@@ -1385,6 +1437,58 @@ impl LashlangProcessExecutionTrace {
         });
     }
 
+    fn record_resource_call(&self, call_site: &lashlang::LashlangExecutionCallSite, call_id: &str) {
+        if self.sink.is_none() {
+            return;
+        }
+        let key = (call_site.site.node_id.clone(), call_site.occurrence);
+        self.resource_call_ids
+            .lock_recover()
+            .insert(key.clone(), call_id.to_string());
+        if let Some(site) = self.pending_resource_starts.lock_recover().remove(&key) {
+            self.emit(TraceLanguageExecution {
+                event_key: self.event_key(format!(
+                    "node:{}:{}:started",
+                    site.node_id, call_site.occurrence
+                )),
+                identity: self.identity(),
+                payload: TraceLanguageExecutionPayload::NodeStarted {
+                    node_id: site.node_id,
+                    node_kind: site.node_kind,
+                    label: site.label,
+                    occurrence: call_site.occurrence,
+                    call_id: Some(call_id.to_string()),
+                },
+            });
+        }
+    }
+
+    fn finish_resource_call(
+        &self,
+        site: &lashlang::LashlangExecutionSite,
+        occurrence: u64,
+    ) -> Option<String> {
+        if site.node_kind != lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND {
+            return None;
+        }
+        let key = (site.node_id.clone(), occurrence);
+        let call_id = self.resource_call_ids.lock_recover().remove(&key);
+        if let Some(started) = self.pending_resource_starts.lock_recover().remove(&key) {
+            self.emit(TraceLanguageExecution {
+                event_key: self.event_key(format!("node:{}:{occurrence}:started", started.node_id)),
+                identity: self.identity(),
+                payload: TraceLanguageExecutionPayload::NodeStarted {
+                    node_id: started.node_id,
+                    node_kind: started.node_kind,
+                    label: started.label,
+                    occurrence,
+                    call_id: call_id.clone(),
+                },
+            });
+        }
+        call_id
+    }
+
     fn tool_child_execution_trace_hook(
         &self,
         call_site: lashlang::LashlangExecutionCallSite,
@@ -1424,6 +1528,7 @@ impl LashlangProcessExecutionTrace {
         };
         let mut context = self.base_context.clone();
         context.session_id = self.session_id.clone();
+        context.graph_node_id = language_event_node_id(&event.payload).map(str::to_string);
         let _ = sink.append(&TraceRecord::new(
             context,
             TraceEvent::LanguageExecution {
@@ -1438,106 +1543,6 @@ fn process_trace_session_id(originator: &lash_core::ProcessOriginator) -> Option
     match originator {
         lash_core::ProcessOriginator::Session { session_id, .. } => Some(session_id.clone()),
         lash_core::ProcessOriginator::Host { .. } => None,
-    }
-}
-
-fn trace_lashlang_process_map(
-    artifact: &lashlang::ModuleArtifact,
-    process_name: &str,
-) -> TraceLanguageExecutionMap {
-    let graph =
-        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
-    let Some(process) = graph.process(process_name) else {
-        return TraceLanguageExecutionMap::default();
-    };
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-    let mut primary_runtime_ids = BTreeMap::new();
-    append_trace_workflow_subgraph(
-        artifact,
-        &process.body,
-        &mut nodes,
-        &mut edges,
-        &mut primary_runtime_ids,
-    );
-    TraceLanguageExecutionMap { nodes, edges }
-}
-
-pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecutionMap {
-    let graph =
-        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-    let mut primary_runtime_ids = BTreeMap::new();
-    append_trace_workflow_subgraph(
-        artifact,
-        &graph.main,
-        &mut nodes,
-        &mut edges,
-        &mut primary_runtime_ids,
-    );
-    TraceLanguageExecutionMap { nodes, edges }
-}
-
-fn append_trace_workflow_subgraph(
-    artifact: &lashlang::ModuleArtifact,
-    graph: &lashlang::WorkflowSubgraph,
-    nodes: &mut Vec<TraceLanguageExecutionMapNode>,
-    edges: &mut Vec<TraceLanguageExecutionMapEdge>,
-    primary_runtime_ids: &mut BTreeMap<String, String>,
-) {
-    for node in &graph.nodes {
-        let label_metadata =
-            (node.name_source == lashlang::WorkflowNodeNameSource::Label).then(|| {
-                TraceLabelMetadata {
-                    title: node.name.clone(),
-                    description: node.description.clone(),
-                }
-            });
-        for site in &node.execution_sites {
-            let Some(runtime_site) =
-                lashlang::runtime_execution_site_for_workflow_site(artifact, site)
-            else {
-                continue;
-            };
-            primary_runtime_ids
-                .entry(node.id.to_string())
-                .or_insert_with(|| runtime_site.node_id.clone());
-            if nodes.iter().any(|node| node.id == runtime_site.node_id) {
-                continue;
-            }
-            nodes.push(TraceLanguageExecutionMapNode {
-                id: runtime_site.node_id,
-                kind: runtime_site.node_kind,
-                label: runtime_site.label,
-                label_metadata: label_metadata.clone(),
-            });
-        }
-        if let lashlang::WorkflowNodeKind::Container(container) = &node.kind {
-            for (_, child) in container.child_subgraphs() {
-                append_trace_workflow_subgraph(artifact, child, nodes, edges, primary_runtime_ids);
-            }
-        }
-    }
-    for edge in &graph.edges {
-        let (Some(from), Some(to)) = (
-            primary_runtime_ids.get(edge.from.as_str()),
-            primary_runtime_ids.get(edge.to.as_str()),
-        ) else {
-            continue;
-        };
-        let label = match &edge.kind {
-            lashlang::WorkflowEdgeKind::Sequence => "sequence".to_string(),
-            lashlang::WorkflowEdgeKind::DataDependency { variable, version } => {
-                format!("{variable}@{version}")
-            }
-        };
-        edges.push(TraceLanguageExecutionMapEdge {
-            id: edge.id.clone(),
-            from: from.clone(),
-            to: to.clone(),
-            label,
-        });
     }
 }
 
@@ -1660,6 +1665,11 @@ pub fn lashlang_process_signal_event_types(
 #[path = "process/schema.rs"]
 mod schema;
 pub use schema::lashlang_type_expr_schema;
+
+#[path = "process/trace_map.rs"]
+mod trace_map;
+use trace_map::{language_event_node_id, trace_lashlang_process_map};
+pub use trace_map::{trace_lashlang_main_map, trace_lashlang_source_identity};
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]

@@ -594,7 +594,7 @@ where
         }
         self.require_active_session(key.scope.session_id()).await?;
         self.context
-            .peek_event(RestateDurableWaitAddress::for_key(key))
+            .peek_event(RestateDurableWaitAddress::for_key(key), key.key_id.clone())
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -615,6 +615,7 @@ where
         }
         self.require_active_session(key.scope.session_id()).await?;
         let clock = lash_core::facade_support::SystemClock;
+        let replay_key = key.key_id.clone();
         let request = journaled_restate_durable_wait_request(&self.context, key, deadline, &clock)
             .await
             .map_err(|err| {
@@ -624,7 +625,7 @@ where
                 )
             })?;
         self.context
-            .await_event(request, cancel)
+            .await_event(request, replay_key, cancel)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -771,7 +772,11 @@ where
                 let request = ready_wait_request(&shape.wait_scope, &group_key)?;
                 let resolution = self
                     .context
-                    .await_effect_group_wait(request, tokio_util::sync::CancellationToken::new())
+                    .await_effect_group_wait(
+                        request,
+                        group_key.clone(),
+                        tokio_util::sync::CancellationToken::new(),
+                    )
                     .await
                     .map_err(|error| {
                         effect_group_engine_error(
@@ -842,7 +847,7 @@ where
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
             let Some(resolution) = self
                 .context
-                .await_effect_group_wait(request, cancel)
+                .await_effect_group_wait(request, handle.group_key().to_string(), cancel)
                 .await
                 .map_err(|error| {
                     effect_group_engine_error(
@@ -1272,9 +1277,15 @@ where
                         err.to_string(),
                     )
                 })?;
+                let replay_key = invocation.replay_key().to_string();
                 match self
                     .context
-                    .await_event_or_turn_cancel(request, turn_cancel, cancellation.clone())
+                    .await_event_or_turn_cancel(
+                        request,
+                        replay_key,
+                        turn_cancel,
+                        cancellation.clone(),
+                    )
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {

@@ -1,5 +1,5 @@
 //! The workflow graph's typed document: value types, deterministic node
-//! identity, and the execution-site join used by trace consumers.
+//! identity, and structured execution-site descriptors.
 //!
 //! The graph is deliberately a semantic, canonical view rather than a CST:
 //! comments and authored formatting are discarded. Hosts own graph mutation,
@@ -16,24 +16,30 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::LashlangExecutionSite;
+use lash_sansio::WorkflowExecutionSite;
+use lash_sansio::core_support::Blake3DomainHasher;
+
 use crate::ast::{
     AssignTarget, AstString, Expr, FunctionDecl, ProcessParam, ProcessSignalDecl, TypeDecl,
     TypeExpr,
 };
 use crate::span::Span;
-use crate::tracking::WorkflowExecutionSite;
 
 mod execution_sites;
 mod facets;
+mod ownership;
 
-pub use execution_sites::{execution_sites, runtime_execution_site_for_workflow_site};
+pub use execution_sites::execution_sites;
 pub use facets::*;
+pub(crate) use ownership::main_workflow_projection;
+pub use ownership::{
+    WorkflowNodePath, WorkflowOwnership, WorkflowProjection, process_workflow_projection,
+};
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 13;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 14;
 
-/// A deterministic node identifier minted from canonical source and AST position.
+/// A deterministic node identifier minted from structural owner and AST path.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -44,6 +50,23 @@ impl WorkflowNodeId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Mints the structural identity shared by workflow projection and execution.
+///
+/// The owner and owner-relative AST path are the complete preimage. Artifact
+/// identity belongs to the graph document and execution identity, not to a
+/// node. A lifted process literal remains version-sensitive because its owner
+/// includes the linker's body digest. The process declaration root uses the
+/// empty path and has no runtime execution site.
+pub fn workflow_node_id(owner: &str, path: &[u32]) -> WorkflowNodeId {
+    let mut hasher = Blake3DomainHasher::new("lash-workflow-node/v3");
+    hasher.update(owner.as_bytes());
+    hasher.update([0]);
+    for index in path {
+        hasher.update(index.to_be_bytes());
+    }
+    WorkflowNodeId(format!("node:{}", &hasher.finalize_hex()[..24]))
 }
 
 impl std::fmt::Display for WorkflowNodeId {
@@ -958,22 +981,6 @@ impl WorkflowNodeId {
     pub fn new(id: String) -> Self {
         Self(id)
     }
-}
-
-/// This keeps runtime events unchanged: the host joins an observed site to the
-/// graph using the source-level entry/path descriptor carried by the site.
-pub fn node_id_for_execution_site(
-    graph: &WorkflowGraph,
-    site: &LashlangExecutionSite,
-) -> Option<WorkflowNodeId> {
-    graph
-        .nodes()
-        .find(|node| {
-            node.execution_sites
-                .iter()
-                .any(|candidate| candidate.same_location(&site.workflow_site))
-        })
-        .map(|node| node.id.clone())
 }
 
 fn collect_subgraph_nodes<'a>(graph: &'a WorkflowSubgraph, nodes: &mut Vec<&'a WorkflowNode>) {

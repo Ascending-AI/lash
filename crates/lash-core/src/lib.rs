@@ -865,6 +865,9 @@ pub mod core_internal {
         inherit_process_execution_permit, scope_process_execution_permit,
         scope_queued_work_execution_permit,
     };
+    pub use lash_core_execution::core_internal::{
+        attach_process_invocation_correlation, clear_process_invocation_correlation,
+    };
     pub use lash_core_ids::worker_capacity::{
         DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
         WorkerSlotSupplier,
