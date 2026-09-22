@@ -68,11 +68,14 @@ pub struct RuntimeExecutionContext<'run> {
     /// `to_static`, so a rebound or handed-over context incorporates against
     /// the same set.
     pub(crate) incorporation_ledger: Arc<std::sync::Mutex<crate::session::IncorporationLedger>>,
-    /// The turn-control binding id of the effect host this execution was built
-    /// against, recorded onto a group child's `ProcessLifetime` completion
-    /// routing (ADR 0099 §14). `None` where no host was in scope at context
-    /// construction; a leaf that then needs the issuer is a typed formation
-    /// refusal, never a silent `Inline` downgrade.
+    /// The turn-control binding id of the host the runtime's tool children
+    /// resolve on, recorded onto a group child's `ProcessLifetime` completion
+    /// routing (ADR 0099 §14). That is the host `install_tool_child_host`
+    /// registered — a bound session may re-bind `control.effect_host` to a
+    /// store authority, which must not be mistaken for the issuer. `None`
+    /// where no host was in scope at context construction; a leaf that then
+    /// needs the issuer is a typed formation refusal, never a silent `Inline`
+    /// downgrade.
     pub(crate) tool_child_completion_issuer: Option<crate::TurnControlBindingId>,
     /// Keeps this context's live-opener registration alive for the context's
     /// lifetime: a `LiveOpenerGuard` deregisters on drop, and a test context
@@ -672,9 +675,10 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// The issuer identity recorded onto a group child's `ProcessLifetime`
-    /// completion routing (ADR 0099 §14): the effect host's
-    /// `turn_control_binding_id`, threaded in where the context is built with
-    /// a host in scope.
+    /// completion routing (ADR 0099 §14): the `turn_control_binding_id` of
+    /// the host tool children resolve on (`ToolChildHost::
+    /// tool_child_completion_issuer`), threaded in where the context is built
+    /// with a host in scope.
     pub fn with_tool_child_completion_issuer(
         mut self,
         issuer: crate::TurnControlBindingId,
