@@ -621,94 +621,185 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
     .await;
 }
 
-struct PendingBatchOutcomeController;
-
-impl lash_core::AwaitEventResolver for PendingBatchOutcomeController {}
+/// A controller that hosts groups on an embedded native substrate, so the
+/// turn driver's `ToolInvocation` group children open, defer, and settle
+/// against the same registry the test resolves out of band.
+struct PendingToolResolutionController {
+    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+}
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for PendingBatchOutcomeController {
+impl lash_core::AwaitEventResolver for PendingToolResolutionController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!("pending-resolution-controller:{:p}", self))
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for PendingToolResolutionController {
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        match envelope.command {
-            lash_core::RuntimeEffectCommand::ToolBatch { batch } => {
-                assert_eq!(batch.calls.len(), 1);
-                let call_id = batch.calls[0].call.call_id.clone();
-                let turn_id = envelope
-                    .invocation
-                    .execution_scope()
-                    .turn_id()
-                    .cloned()
-                    .expect("turn-scoped tool batch");
-                Ok(lash_core::RuntimeEffectOutcome::ToolBatch {
-                    launches: vec![lash_core::runtime::ToolCallLaunch::Pending {
-                        key: Box::new(lash_core::AwaitEventKey {
-                            scope: lash_core::ExecutionScope::turn(
-                                envelope
-                                    .invocation
-                                    .execution_scope()
-                                    .session_id()
-                                    .cloned()
-                                    .expect("turn-scoped tool batch"),
-                                turn_id,
-                            ),
-                            wait: lash_core::AwaitEventWaitIdentity::tool_completion(call_id),
-                            key_id: "pending-batch-key".to_string(),
-                            signature: "pending-batch-signature".to_string(),
-                        }),
-                        pending: lash_core::PendingCompletion::default(),
-                        duration_ms: 7,
-                    }],
-                    triggers: Vec::new(),
-                    settlement_order: vec![0],
-                })
-            }
-            lash_core::RuntimeEffectCommand::AwaitEvent { .. } => {
-                Ok(lash_core::RuntimeEffectOutcome::AwaitEvent {
-                    resolution: lash_core::Resolution::Ok(serde_json::json!("resolved")),
-                })
-            }
-            command => {
-                local_executor
-                    .execute(lash_core::RuntimeEffectEnvelope::new(
-                        envelope.invocation,
-                        command,
-                    ))
-                    .await
-            }
-        }
+        local_executor.execute(envelope).await
     }
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "PendingBatchOutcomeController",
-        ))
+        self.inner.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "PendingBatchOutcomeController",
-        ))
+        self.inner.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "PendingBatchOutcomeController",
-        ))
+        self.inner.close_effect_group(handle, disposition).await
     }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
+}
+
+/// An `echo_tool` that parks on its issued completion key and lets the test
+/// resolve it out of band — the group-path shape of "pending then resolved".
+struct PendingEchoTool {
+    resolver: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for PendingEchoTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![pending_echo_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
+    }
+
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        *tool_id == pending_echo_tool_definition().manifest().id
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let key = call
+            .context
+            .completion_key()
+            .expect("the group child carries an issued completion key");
+        let resolver = Arc::clone(&self.resolver);
+        let value = call
+            .args
+            .get("value")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        tokio::task::yield_now().await;
+        let _ = resolver
+            .resolve_await_event(
+                &key,
+                lash_core::Resolution::Ok(serde_json::json!({
+                    "payload": format!("raw:{value}")
+                })),
+            )
+            .await;
+        lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::default())
+    }
+}
+
+fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:echo_tool",
+        "echo_tool",
+        "Return a tool payload",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "value": { "type": "string" } },
+            "required": ["value"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
 }
 
 #[tokio::test]
@@ -737,15 +828,33 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
             .expect("clock")
             .as_nanos()
     ));
+    let inner = Arc::new(
+        lash_core::facade_support::NativeRuntimeEffectController::default()
+            .allow_process_lifetime_completion_keys(),
+    );
+    let controller: Arc<dyn lash_core::RuntimeEffectController> =
+        Arc::new(PendingToolResolutionController {
+            inner: Arc::clone(&inner),
+        });
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(PendingEchoTool {
+        resolver: Arc::clone(&inner),
+    });
+    let mut config = test_runtime_host_config();
+    config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
+        trace_path.clone(),
+    )));
+    config.control.effect_host =
+        crate::runtime_support::effect_recording_authority::controller_effect_host(Arc::clone(
+            &controller,
+        ));
+    crate::runtime_support::effect_recording_authority::reinstall_tool_child_host(&mut config);
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
-        Arc::new(EchoTool),
+        tools,
         transport,
-        test_host_config_with_trace_path(trace_path.clone()),
+        lash_core::EmbeddedRuntimeHost::new(config),
     )
     .await;
-    let controller: Arc<dyn lash_core::RuntimeEffectController> =
-        Arc::new(PendingBatchOutcomeController);
     let turn_events = RecordingTurnEvents::default();
 
     let turn = runtime
