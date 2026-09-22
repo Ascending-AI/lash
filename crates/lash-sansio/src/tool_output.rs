@@ -934,7 +934,7 @@ pub enum ToolControl {
 }
 
 /// Why Lash replaced an attachment with a model-visible placeholder.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentMaterializationReason {
     /// No provider in the shared adapter capability registry accepts this MIME/source pair.
@@ -942,7 +942,7 @@ pub enum AttachmentMaterializationReason {
 }
 
 /// Stable source category carried by an attachment-materialization notice.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentMaterializationSource {
     /// Transient caller bytes.

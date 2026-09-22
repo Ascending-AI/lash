@@ -481,6 +481,28 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Read a page for the exact lifetime named by a remote request.
+    pub async fn events_remote(
+        &self,
+        request: &lash_remote_protocol::RemoteProcessEventsRequest,
+    ) -> Result<lash_remote_protocol::RemoteProcessEventsResponse> {
+        request.validate()?;
+        let process_ref = lash_core::ProcessRef::new(
+            request.process_id.clone(),
+            lash_core::ProcessIncarnation::from_registration_sequence(request.incarnation),
+        );
+        let outcome = self
+            .registry()?
+            .event_page_ref(
+                &process_ref,
+                request.limit,
+                request.mode,
+                request.continuation.clone(),
+            )
+            .await?;
+        Ok((process_ref, outcome).try_into()?)
+    }
+
     pub async fn await_output(
         &self,
         process_id: &ProcessId,

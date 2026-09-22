@@ -961,6 +961,21 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     let decoded: RemoteSessionObservationEventPayload =
         serde_json::from_value(value).expect("deserialize process payload");
     assert_eq!(decoded, process);
+
+    let process_event = RemoteSessionObservationEvent {
+        event: process,
+        ..event
+    };
+    let mut value = serde_json::to_value(&process_event).expect("serialize process event");
+    serde_json::from_value::<RemoteSessionObservationEvent>(value.clone())
+        .expect("flattened process event accepts parent fields");
+    value
+        .as_object_mut()
+        .expect("process event object")
+        .insert("unexpected".to_string(), serde_json::json!(true));
+    let error = serde_json::from_value::<RemoteSessionObservationEvent>(value)
+        .expect_err("unknown process payload field must be refused");
+    assert!(error.to_string().contains("unexpected"), "{error}");
 }
 
 /// Frozen version-41 observation-envelope reader copied from
@@ -1362,12 +1377,20 @@ fn retired_unbounded_process_event_request_is_refused() {
     let legacy = serde_json::json!({
         "process_id": "process:1",
         "incarnation": 1,
+        "limit": 1,
+        "mode": "full",
         "after_sequence": 0
     });
-    assert!(
-        serde_json::from_value::<RemoteProcessEventsRequest>(legacy).is_err(),
-        "the old unbounded request must not silently decode"
-    );
+    let mut current = legacy.clone();
+    current
+        .as_object_mut()
+        .expect("request object")
+        .remove("after_sequence");
+    serde_json::from_value::<RemoteProcessEventsRequest>(current)
+        .expect("required fields form a valid request");
+    let error = serde_json::from_value::<RemoteProcessEventsRequest>(legacy)
+        .expect_err("the retired field must be refused");
+    assert!(error.to_string().contains("after_sequence"), "{error}");
 }
 
 #[test]

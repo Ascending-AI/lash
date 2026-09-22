@@ -423,11 +423,12 @@ impl SessionBuilder {
             runtime,
             Arc::clone(&self.core.live_replay_store),
         );
-        self.core.process_lifecycle_feed.register(&handle);
+        let process_lifecycle_route = self.core.process_lifecycle_feed.register(&handle);
         let recorded_parent_session_id =
             crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
         Ok(LashSession {
             runtime: handle,
+            _process_lifecycle_route: process_lifecycle_route,
             binding,
             parent_session_id: recorded_parent_session_id,
             process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
@@ -635,6 +636,7 @@ impl PromptLayerSink for SessionBuilder {
 #[derive(Clone)]
 pub struct LashSession {
     pub(crate) runtime: RuntimeHandle,
+    pub(crate) _process_lifecycle_route: Arc<crate::process_lifecycle::ProcessLifecycleRoute>,
     pub(crate) binding: Arc<BoundSession>,
     pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,

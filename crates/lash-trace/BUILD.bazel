@@ -126,6 +126,28 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
+    name = "lash-trace__fv_8edd6ab0",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_trace",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_476e1a8f", "//crates/lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-trace__fv_971baab0",
     build_script = None,
     crate_features = [

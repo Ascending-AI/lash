@@ -45,6 +45,8 @@ pub struct LashCore {
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(crate) process_observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
     pub(crate) process_lifecycle_feed: Arc<crate::process_lifecycle::ProcessLifecycleFeed>,
+    pub(crate) _process_lifecycle_registration:
+        Option<Arc<facade_support::ProcessEventSinkRegistration>>,
     /// Whether process lifecycle is available; threaded into rebuilt session plugin hosts.
     pub(crate) process_lifecycle_available: bool,
     /// Base plugin-contributed engines available to host-level process APIs.
@@ -263,11 +265,12 @@ impl LashCore {
             LashRuntime::resume(inner, &env, self.session_execution_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
-        self.process_lifecycle_feed.register(&handle);
+        let process_lifecycle_route = self.process_lifecycle_feed.register(&handle);
         let parent_session_id =
             crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
         Ok(LashSession {
             runtime: handle,
+            _process_lifecycle_route: process_lifecycle_route,
             binding,
             parent_session_id,
             process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
@@ -1113,15 +1116,11 @@ impl LashCoreBuilder {
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 
-        let mut core = self.resolve_runtime_host_config()?;
+        let core = self.resolve_runtime_host_config()?;
         let process_observation_hub =
             Arc::new(crate::process_observation::ProcessObservationHub::default());
         let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
-        let mut sinks = vec![observation_sink];
-        if let Some(host_sink) = core.tracing.trace_sink.take() {
-            sinks.push(host_sink);
-        }
-        core.tracing.trace_sink = Some(Arc::new(lash_trace::TeeTraceSink::new(sinks)));
+        let core = core.with_process_observation_sink(observation_sink);
         let live_replay_clock = Arc::clone(&core.clock);
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(
@@ -1142,6 +1141,14 @@ impl LashCoreBuilder {
             .process_work_source
             .clone()
             .resolve(Arc::clone(&core.clock), process_event_sink.clone());
+        let process_lifecycle_registration =
+            if let ProcessWorkSource::External(wiring) = &process_work_source {
+                process_event_sink
+                    .clone()
+                    .map(|sink| Arc::new(wiring.watched().add_event_sink(sink)))
+            } else {
+                None
+            };
         let plugin_factories = if let Some(plugin_host) = self.plugin_host {
             plugin_host.factories().to_vec()
         } else {
@@ -1288,6 +1295,7 @@ impl LashCoreBuilder {
             live_replay_store,
             process_observation_hub,
             process_lifecycle_feed,
+            _process_lifecycle_registration: process_lifecycle_registration,
             protocol_factory,
             process_lifecycle_available,
             host_process_engines,

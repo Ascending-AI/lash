@@ -321,7 +321,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let execution_sink = match (
             self.lashlang_execution_trace_config.sink.clone(),
-            ctx.trace_sink().cloned(),
+            ctx.process_observation_sink().cloned(),
         ) {
             (Some(configured), Some(runtime)) => {
                 Some(

@@ -41,6 +41,22 @@ pub struct WatchedRegistry {
     sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
 }
 
+/// Detaches an observer from a shared watched registry when the last owner drops.
+pub struct ProcessEventSinkRegistration {
+    sinks: Weak<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
+    sink: Arc<dyn ProcessEventSink>,
+}
+
+impl Drop for ProcessEventSinkRegistration {
+    fn drop(&mut self) {
+        if let Some(sinks) = self.sinks.upgrade() {
+            sinks
+                .lock_recover()
+                .retain(|sink| !Arc::ptr_eq(sink, &self.sink));
+        }
+    }
+}
+
 impl WatchedRegistry {
     fn new(inner: Arc<dyn ProcessRegistry>, sink: Option<Arc<dyn ProcessEventSink>>) -> Self {
         let hub = ProcessChangeHub::new();
@@ -69,8 +85,12 @@ impl WatchedRegistry {
     }
 
     /// Attach a live event observer to this watched registry and its bound port.
-    pub fn add_event_sink(&self, sink: Arc<dyn ProcessEventSink>) {
-        self.sinks.lock_recover().push(sink);
+    pub fn add_event_sink(&self, sink: Arc<dyn ProcessEventSink>) -> ProcessEventSinkRegistration {
+        self.sinks.lock_recover().push(Arc::clone(&sink));
+        ProcessEventSinkRegistration {
+            sinks: Arc::downgrade(&self.sinks),
+            sink,
+        }
     }
 }
 
@@ -175,5 +195,28 @@ impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
                 event_paths: Mutex::new(HashMap::new()),
             }) as Arc<dyn ProcessRegistry>
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestSink;
+
+    #[async_trait::async_trait]
+    impl ProcessEventSink for TestSink {
+        async fn emit(&self, _: &crate::ProcessEvent) {}
+    }
+
+    #[test]
+    fn registration_detaches_its_sink_on_drop() {
+        let registry: Arc<dyn ProcessRegistry> =
+            Arc::new(crate::runtime::process::TestLocalProcessRegistry::default());
+        let watched = watch_process_registry(registry);
+        let registration = watched.add_event_sink(Arc::new(TestSink));
+        assert_eq!(watched.sinks.lock_recover().len(), 1);
+        drop(registration);
+        assert!(watched.sinks.lock_recover().is_empty());
     }
 }

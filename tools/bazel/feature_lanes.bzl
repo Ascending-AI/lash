@@ -300,6 +300,7 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//crates/lash-tool-support:lash-tool-support__fv_dff1c288",
     "//crates/lash-trace:lash-trace",
     "//crates/lash-trace:lash-trace__fv_8ada4082",
+    "//crates/lash-trace:lash-trace__fv_8edd6ab0",
     "//crates/lash-trace:lash-trace__fv_971baab0",
     "//crates/lash-trace:lash-trace__fv_edf563c6",
     "//crates/lash-typescript:lash-typescript__fv_0c0af245",
@@ -1067,6 +1068,7 @@ FEATURE_LANES = {
         "//crates/lash-sansio:lash-sansio",
         "//crates/lash-sansio:lash-sansio__fv_09d91587",
         "//crates/lash-trace:lash-trace",
+        "//crates/lash-trace:lash-trace__fv_8edd6ab0",
     ],
     "runtime-features": [
         "//crates/lash-conformance:lash-conformance__fv_a2a3fc53",

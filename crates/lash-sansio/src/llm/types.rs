@@ -1,4 +1,6 @@
 use crate::SessionId;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -858,9 +860,7 @@ impl GenerationOptions {
 /// pins sampling, extended thinking, or an endpoint with no seed field all
 /// take an option away without failing the call. This names which happened so
 /// a host can tell an honored request from a silently dropped one.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GenerationOptionOutcome {
     /// The caller expressed no preference, so there was nothing to apply.
@@ -937,7 +937,7 @@ impl GenerationOptionOutcome {
 /// about the execution. A host that needs repeatability asserts
 /// [`nothing_omitted`](Self::nothing_omitted) rather than trusting that a
 /// session-wide temperature survived every model it ran against.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GenerationReceipt {
     #[serde(default)]
     pub output_token_cap: GenerationOptionOutcome,

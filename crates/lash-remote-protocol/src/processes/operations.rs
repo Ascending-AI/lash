@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(any(feature = "core-conversions", test))]
 use lash_core::ProcessEventPageTokenStoreExt;
 use lash_sansio::ProcessId;
 
@@ -138,6 +139,7 @@ impl RemoteProcessAwaitOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[cfg(any(feature = "core-conversions", test))]
 pub struct RemoteProcessEventsRequest {
     pub process_id: ProcessId,
     pub incarnation: u64,
@@ -148,6 +150,7 @@ pub struct RemoteProcessEventsRequest {
     pub continuation: Option<lash_core::ProcessEventPageToken>,
 }
 
+#[cfg(any(feature = "core-conversions", test))]
 impl RemoteProcessEventsRequest {
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
@@ -181,6 +184,7 @@ impl RemoteProcessEventsRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[cfg(any(feature = "core-conversions", test))]
 pub struct RemoteProcessEventsResponse {
     pub process_id: ProcessId,
     pub incarnation: u64,
@@ -189,6 +193,7 @@ pub struct RemoteProcessEventsResponse {
     >,
 }
 
+#[cfg(any(feature = "core-conversions", test))]
 impl RemoteProcessEventsResponse {
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()

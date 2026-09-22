@@ -49,12 +49,7 @@ impl ProcessWorkSelection {
                     registry, sink,
                 ))
             }
-            Self::External(wiring) => {
-                if let Some(sink) = sink {
-                    wiring.watched().add_event_sink(sink);
-                }
-                ProcessWorkSource::External(wiring)
-            }
+            Self::External(wiring) => ProcessWorkSource::External(wiring),
         }
     }
 }

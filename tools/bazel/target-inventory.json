@@ -15057,17 +15057,17 @@
       "package": "lash-internal-trace"
     },
     {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-trace:lash-trace__fv_8ada4082",
+      "package": "lash-internal-trace"
+    },
+    {
       "features": [
         "default"
       ],
       "kind": "lib",
-      "label": "//crates/lash-trace:lash-trace",
-      "package": "lash-internal-trace"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-trace:lash-trace__fv_8ada4082",
+      "label": "//crates/lash-trace:lash-trace__fv_8edd6ab0",
       "package": "lash-internal-trace"
     },
     {
@@ -19657,6 +19657,7 @@
         "lash-internal-sansio",
         "opentelemetry",
         "opentelemetry_sdk",
+        "schemars",
         "serde",
         "serde_json",
         "sha2",

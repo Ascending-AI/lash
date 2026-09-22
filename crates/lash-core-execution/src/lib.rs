@@ -266,6 +266,7 @@ pub mod facade_support {
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;
+    pub use crate::runtime::ProcessEventSinkRegistration;
     pub use crate::runtime::ProcessRecoveryAttemptOutcome;
     pub use crate::runtime::ProcessRecoveryOperation;
     pub use crate::runtime::ProcessRuntimeHost;

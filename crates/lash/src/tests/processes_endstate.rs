@@ -1262,6 +1262,9 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         .await?
         .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
 
+    let session = core.session(session_id).open().await?;
+    let lifecycle_cursor = session.observe().current_observation().cursor;
+
     let report = core
         .triggers()
         .emit(
@@ -1304,7 +1307,6 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     );
     let events = registry.full_event_window(process_id, 0).await?;
 
-    let session = core.session(session_id).open().await?;
     let observed = session.admin().processes().list_all().await?;
     let process = observed
         .iter()
@@ -1320,18 +1322,13 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         observers.iter().any(|observer| observer == session_id),
         "completed trigger delivery must retain the registering session edge; observers={observers:?}"
     );
-    let first_started = events
-        .iter()
-        .position(|event| event.event_type == "process.first_started")
-        .unwrap_or_else(|| panic!("missing process.first_started: {events:?}"));
-    let completed = events
-        .iter()
-        .position(|event| event.event_type == "process.completed")
-        .unwrap_or_else(|| panic!("missing process.completed: {events:?}"));
-    assert!(
-        first_started < completed,
-        "process.first_started must precede process.completed: {events:?}"
-    );
+    let SessionResume::Replayed {
+        events: session_events,
+    } = session.observe().resume_from_cursor(&lifecycle_cursor)?
+    else {
+        panic!("lifecycle should replay on the session stream")
+    };
+    lifecycle_observation::assert_working_process_lifecycle(&events, process_id, &session_events);
     Ok(())
 }
 
@@ -2494,6 +2491,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
 
 mod artifact_cleanup_round4;
 mod event_pages;
+mod lifecycle_observation;
 mod native_process_await;
 mod programs;
 mod recovery_dispositions;

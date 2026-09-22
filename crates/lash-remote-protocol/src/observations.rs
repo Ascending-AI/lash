@@ -143,7 +143,7 @@ impl RemoteSessionObservationEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteSessionObservationEventPayload {
     TurnActivity {
         activity: Box<RemoteTurnActivity>,
@@ -264,6 +264,9 @@ pub enum RemoteProcessObservationGapReason {
     ProcessIdReused,
     CrossProcess,
     InvalidCursor,
+    PublisherJoinedMidRun,
+    IncompleteGraph,
+    ProjectionTruncated,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -278,7 +281,6 @@ pub enum RemoteProcessObservationCompleteness {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessObservationProjection {
-    #[schemars(with = "Option<serde_json::Value>")]
     pub graph: Option<lash_trace::TraceLashlangGraph>,
     pub completeness: RemoteProcessObservationCompleteness,
 }
@@ -296,7 +298,6 @@ pub enum RemoteProcessObservationItem {
         process_id: ProcessId,
         incarnation: u64,
         cursor: String,
-        #[schemars(with = "serde_json::Value")]
         record: Box<lash_trace::TraceRecord>,
     },
     Gap {
@@ -370,14 +371,10 @@ impl RemoteProcessObservationItem {
                     message: "node event belongs to another process incarnation".to_string(),
                 });
             }
-            Self::Snapshot { projection, .. }
-                if projection.graph.is_none()
-                    || projection.completeness
-                        != RemoteProcessObservationCompleteness::Complete =>
-            {
+            Self::Snapshot { projection, .. } if projection.graph.is_none() => {
                 return Err(RemoteProtocolError::InvalidEnvelope {
                     type_name: "RemoteProcessObservationItem",
-                    message: "snapshot requires a complete graph".to_string(),
+                    message: "snapshot requires a graph".to_string(),
                 });
             }
             Self::Gap {

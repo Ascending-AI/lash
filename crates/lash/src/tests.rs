@@ -2211,7 +2211,7 @@ fn checkpoint_gated_provider(
         .into_handle()
 }
 
-fn standard_core() -> LashCore {
+pub(crate) fn standard_core() -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
