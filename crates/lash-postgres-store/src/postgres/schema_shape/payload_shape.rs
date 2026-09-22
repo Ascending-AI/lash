@@ -566,8 +566,9 @@ fn render_registered_payload_fingerprints() -> String {
 # A schemars upgrade can change annotations or schema layout and move these\n\
 # hashes without a Rust source change. Regenerate the artifact and advance every\n\
 # owning backend's component schema version whenever that happens.\n\
-# Regenerate with LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS=1 cargo test -p\n\
-# lash-postgres-store committed_fingerprints_match_every_registered_carrier.\n",
+# Regenerate with LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS=1 kiln run\n\
+# //crates/lash-postgres-store:lash-postgres-store__unit_test --\n\
+# committed_fingerprints_match_every_registered_carrier.\n",
     );
     for (carrier, fingerprint) in registered_payload_fingerprints() {
         output.push_str(&format!(
@@ -818,8 +819,11 @@ mod tests {
 
     #[test]
     fn committed_fingerprints_match_every_registered_carrier() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("payload-schema-fingerprints.txt");
+        let manifest_dir = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
+            || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            |root| std::path::PathBuf::from(root).join("crates/lash-postgres-store"),
+        );
+        let path = manifest_dir.join("payload-schema-fingerprints.txt");
         let committed = std::fs::read_to_string(&path).expect("read fingerprint artifact");
         let generated = render_registered_payload_fingerprints();
         if committed != generated

@@ -73,7 +73,7 @@ const fn naming(backend: BackendFaultKind) -> &'static BackendFaultNaming {
 /// The exact `lash-sim` invocation that replays `seed` on `backend`.
 fn exact_replay_command(backend: BackendFaultKind, replay_root: &Path, seed: u64) -> String {
     format!(
-        "cargo run -p lash-sim -- backend-faults {} --out {} --seed {seed}",
+        "kiln run //crates/lash-sim:lash-sim__bin -- backend-faults {} --out {} --seed {seed}",
         backend.replay_backend_argument(),
         replay_root.display()
     )
@@ -749,7 +749,7 @@ async fn run_seed(
     target_state.turn_index = prefix_commits;
     let target_commit = stamped_commit(backend, &target_state, "target")?;
     let replay_command = format!(
-        "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
+        "kiln run //crates/lash-sim:lash-sim__bin -- sqlite-faults --out {} --seed {seed}",
         artifact_root.join("replay").display()
     );
 

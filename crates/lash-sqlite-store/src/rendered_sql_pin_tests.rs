@@ -12,8 +12,8 @@
 //! change, regenerate it in the same commit as the change and read the diff.
 //!
 //! ```text
-//! LASH_UPDATE_RENDERED_SQL_PIN=1 cargo test -p lash-internal-sqlite-store \
-//!     --lib every_converted_statement_keeps_its_rendered_bytes
+//! LASH_UPDATE_RENDERED_SQL_PIN=1 kiln run //crates/lash-sqlite-store:lash-sqlite-store__unit_test -- \
+//!     every_converted_statement_keeps_its_rendered_bytes
 //! ```
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
@@ -114,11 +114,12 @@ const PIN: &str = include_str!("rendered_sql_pin.txt");
 fn every_converted_statement_keeps_its_rendered_bytes() {
     let rendered = rendered_pin();
     if std::env::var_os("LASH_UPDATE_RENDERED_SQL_PIN").is_some() {
-        std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/src/rendered_sql_pin.txt"),
-            &rendered,
-        )
-        .expect("write the rendered-SQL pin");
+        let manifest_dir = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
+            || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            |root| std::path::PathBuf::from(root).join("crates/lash-sqlite-store"),
+        );
+        std::fs::write(manifest_dir.join("src/rendered_sql_pin.txt"), &rendered)
+            .expect("write the rendered-SQL pin");
         return;
     }
     assert_eq!(

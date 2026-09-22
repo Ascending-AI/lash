@@ -333,7 +333,7 @@ pub fn minimize_trace(
         minimized_event_count: best.events.len(),
         operation_family_reductions: operation_family_reductions.clone(),
         replay_command: format!(
-            "cargo run -p lash-sim --locked -- replay {}",
+            "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$(realpath -- {})\"",
             minimized_trace_path.display()
         ),
     };

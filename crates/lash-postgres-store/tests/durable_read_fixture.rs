@@ -973,8 +973,8 @@ fn assert_fixture_version() {
     assert_eq!(
         recorded, current,
         "declared Postgres durable schema version changed without fixture regeneration; run \
-         LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p lash-internal-postgres-store --test \
-         durable_read_fixture regenerate_postgres_durable_fixture -- --ignored --exact"
+         LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run //crates/lash-postgres-store:durable_read_fixture__test -- \
+         regenerate_postgres_durable_fixture --ignored --exact"
     );
 }
 
@@ -1196,12 +1196,41 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
 }
 
 fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/durable-read/v1/postgres")
+    source_manifest_dir().join("../../fixtures/durable-read/v1/postgres")
 }
 
 fn prior_component_fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/checkpoint-component-v1-refusal/postgres")
+    source_manifest_dir().join("../../fixtures/checkpoint-component-v1-refusal/postgres")
+}
+
+fn source_manifest_dir() -> PathBuf {
+    let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
+    if workspace.is_none()
+        && std::env::var(REGENERATE_ENV).as_deref() == Ok("1")
+        && Path::new(env!("CARGO_MANIFEST_DIR")).is_relative()
+    {
+        panic!("Bazel fixture regeneration requires BUILD_WORKSPACE_DIRECTORY");
+    }
+    source_manifest_dir_for(workspace)
+}
+
+fn source_manifest_dir_for(workspace: Option<std::ffi::OsString>) -> PathBuf {
+    workspace.map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        |root| PathBuf::from(root).join("crates/lash-postgres-store"),
+    )
+}
+
+#[test]
+fn fixture_source_dir_resolves_bazel_workspace() {
+    assert_eq!(
+        source_manifest_dir_for(Some("/tmp/lash-fork".into())),
+        PathBuf::from("/tmp/lash-fork/crates/lash-postgres-store")
+    );
+    assert_eq!(
+        source_manifest_dir_for(None),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    );
 }
 
 fn json_with_newline(value: &impl Serialize) -> Vec<u8> {

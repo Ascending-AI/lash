@@ -437,7 +437,7 @@ pub(super) fn scenario_negative_evidence(
         expected_oracle_id: fixture.expected_oracle_id,
         expected_reason_contains: fixture.expected_reason_contains,
         minimize_command: format!(
-            "cargo run -p lash-sim --locked -- minimize {} --out <artifact-root>/{}",
+            "kiln run //crates/lash-sim:lash-sim__bin -- minimize \"$(realpath -- {})\" --out <artifact-root>/{}",
             fixture.fixture_path, fixture.fixture_id
         ),
         minimized_package_path: format!(

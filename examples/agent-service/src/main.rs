@@ -198,7 +198,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     #[cfg(not(feature = "restate"))]
     if durability == AgentServiceDurability::Restate {
         return Err(
-            "AGENT_SERVICE_DURABILITY=restate requires `cargo run -p agent-service --features restate`"
+            "AGENT_SERVICE_DURABILITY=restate requires `kiln run //examples/agent-service:agent-service__fv_be1e6067`"
                 .to_string(),
         );
     }
