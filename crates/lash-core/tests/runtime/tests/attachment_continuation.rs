@@ -158,7 +158,8 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .run_turn_assembled(
             TurnInput::text("fetch the workspace badge"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("unsupported-attachment-turn"),
             ),
@@ -172,7 +173,8 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .run_turn_assembled(
             TurnInput::text("answer this text-only follow-up"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("text-after-unsupported-attachment"),
             ),
@@ -249,7 +251,8 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
         .run_turn_assembled(
             TurnInput::text("fetch the accepted image"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("accepted-attachment-turn"),
             ),

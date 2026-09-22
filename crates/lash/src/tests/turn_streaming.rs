@@ -733,6 +733,12 @@ struct DurableNoopEffectHost {
     /// host cannot mint itself (the recorder's group state lives in the
     /// native substrate underneath it).
     group_host: std::sync::OnceLock<Arc<lash_core::facade_support::NativeEffectHost>>,
+    /// The installed `ToolChildHost` this host owns: it must live here, not on
+    /// the native `group_host`, because a child's recorded cancellation
+    /// authority is derived from *this* host's `turn_control_binding_id` (the
+    /// recorder's durable-journaled authority) and the child-run check
+    /// re-derives it from the host the executors route through.
+    tool_children: std::sync::OnceLock<Arc<lash_core::facade_support::ToolChildHost>>,
 }
 
 impl DurableNoopEffectHost {
@@ -861,19 +867,35 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
     fn scoped_for_group_child(
         &self,
         admitted: lash_core::AdmittedScope,
-        binding: lash_core::GroupChildBinding,
+        _binding: lash_core::GroupChildBinding,
     ) -> std::result::Result<
         Option<lash_core::ScopedEffectController<'static>>,
         lash_core::RuntimeError,
     > {
-        self.group_host().scoped_for_group_child(admitted, binding)
+        // The child must be bound to the recorder, not a native-bound
+        // controller: formation recorded a durable cancellation authority
+        // (the recorder reports DurableJournaled), and a Local participant
+        // bound controller would make that recorded authority unhonourable.
+        // The recorder forwards every group operation to the same native
+        // substrate the group opened on.
+        Ok(Some(
+            ScopedEffectController::shared(
+                Arc::clone(&self.controller) as Arc<dyn lash_core::RuntimeEffectController>,
+                admitted,
+            )
+            .map_err(lash_core::RuntimeError::from)?,
+        ))
     }
 
     fn install_tool_child_host(
         &self,
         candidate: Arc<lash_core::facade_support::ToolChildHost>,
     ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
-        self.group_host().install_tool_child_host(candidate)
+        let installed = self.tool_children.get_or_init(|| candidate);
+        self.controller
+            .register_group_executors(Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>)
+            .ok()?;
+        Some(Arc::clone(installed))
     }
 }
 

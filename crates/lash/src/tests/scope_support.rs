@@ -24,13 +24,22 @@ pub(super) fn native_process_scope(
     ))
 }
 
-pub(super) fn turn_scope(session_id: &SessionId) -> lash_core::ScopedEffectController<'static> {
-    native_scope(lash_core::AdmittedScope::turn(
-        session_id,
-        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-            .0
-            .to_string(),
-    ))
+/// Turn scope admitted on the core's own effect host — a turn's group
+/// children resolve the opener registry and env store the host installed, so
+/// a foreign (bare native) controller leaves them unroutable (ADR 0099 §2,§3).
+pub(super) fn turn_scope(
+    core: &LashCore,
+    session_id: &SessionId,
+) -> lash_core::ScopedEffectController<'static> {
+    core.effect_host()
+        .scoped_static(lash_core::AdmittedScope::turn(
+            session_id,
+            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
+                .0
+                .to_string(),
+        ))
+        .expect("turn scope")
+        .expect("effect host supplies an owned turn scope")
 }
 
 pub(super) fn runtime_operation_scope(

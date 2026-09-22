@@ -331,14 +331,6 @@ impl RuntimeExecutionContext<'_> {
         }
 
         let batch_id = deterministic_tool_invocation_batch_id(&calls, occurrence);
-        let issuing_node_ids = calls
-            .iter()
-            .filter_map(|call| {
-                call.issuing_language_node_id
-                    .clone()
-                    .map(|node_id| (call.id.clone(), node_id))
-            })
-            .collect::<HashMap<_, _>>();
         let mut replies = vec![None; calls.len()];
         // A failed batch reports an empty settlement order by construction: downstream
         // settlement-selecting aggregates treat the order as evidence of what settled.
@@ -548,7 +540,18 @@ impl RuntimeExecutionContext<'_> {
         }
 
         let batch_id = deterministic_tool_invocation_batch_id(&calls, occurrence);
+        let issuing_node_ids = calls
+            .iter()
+            .filter_map(|call| {
+                call.issuing_language_node_id
+                    .clone()
+                    .map(|node_id| (call.id.clone(), node_id))
+            })
+            .collect::<HashMap<_, _>>();
         let mut replies = vec![None; calls.len()];
+        // A failed batch reports an empty settlement order by construction: downstream
+        // settlement-selecting aggregates treat the order as evidence of what settled.
+        // Replies already completed during preparation are preserved.
         let fail_batch =
             |reason: String, replies: &mut Vec<Option<ToolInvocationReply>>| -> ToolBatchReplies {
                 let error = serde_json::json!(format!("tool batch failed: {reason}"));
@@ -565,9 +568,16 @@ impl RuntimeExecutionContext<'_> {
                 }
             };
         let mut prepared_entries = Vec::new();
+        // A call that finishes while being prepared has already settled by the
+        // time the concurrent batch starts, so it leads the settlement order.
         let mut settled_during_preparation = Vec::new();
 
         for (index, mut call) in calls.into_iter().enumerate() {
+            let context = call
+                .issuing_language_node_id
+                .clone()
+                .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
+                .unwrap_or_else(|| self.clone());
             let authorization = ToolCallAuthorization::from_invocation(&mut call);
             let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
                 let outcome = ToolDispatchOutcome {
@@ -588,7 +598,7 @@ impl RuntimeExecutionContext<'_> {
                     captures: Vec::new(),
                     triggers: Vec::new(),
                 };
-                let completed = self
+                let completed = context
                     .complete_undispatched_tool_call(call.id, None, outcome)
                     .await;
                 replies[index] = Some(
@@ -674,10 +684,16 @@ impl RuntimeExecutionContext<'_> {
             // survive both the local run and its replay: the enclosing effect
             // boundary drains this buffer in turn.
             self.restore_tool_trigger_outcomes(std::mem::take(&mut outcome.triggers));
+            // The batch reports settlement in prepared-entry positions; the
+            // caller counts in original call positions.
             let batch_call_indices = prepared_entries
                 .iter()
                 .map(|(index, _, _, _)| *index)
                 .collect::<Vec<_>>();
+            // Dropping an out-of-range position and back-filling the gap would turn any
+            // malformed order into a clean-looking input-order permutation, which is exactly
+            // the rejection selection this field exists to prevent — the defect would be
+            // repaired into invisibility instead of failing closed.
             if let Err(reason) =
                 validate_batch_settlement_order(&outcome.settlement_order, batch_call_indices.len())
             {
@@ -697,6 +713,22 @@ impl RuntimeExecutionContext<'_> {
                     .iter()
                     .map(|position| batch_call_indices[*position]),
             );
+            // This loop looks like it settles parked leaves in input order,
+            // and a reviewer reading it alone would rightly call that a
+            // defect: a deferred leaf that rejects first would not lead the
+            // order. It does not, because a batch leaf never reaches here
+            // parked. `execute_prepared_tool_batch_child` awaits its own
+            // pending completion and always hands back `Done`, and it does
+            // so inside the unordered scheduler, so a deferred leaf's true
+            // completion time is what places it in `settlement_order`.
+            // `ToolBatchEffectOutcome` is crate-private with that one
+            // producer, so no host can supply parked launches either. The
+            // `Pending` arm below is therefore unreachable today and is
+            // kept only so the match stays total.
+            //
+            // `session::settlement_latency_tests` holds this down with two
+            // real deferred tools whose completions race: the fast rejection
+            // leads the order whichever position it was launched in.
             for ((index, prepared, _, _), launch) in
                 prepared_entries.into_iter().zip(outcome.launches)
             {

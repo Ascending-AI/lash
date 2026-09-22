@@ -1704,7 +1704,8 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
         .run_turn_assembled(
             TurnInput::text("use the newly composed tool"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("compose-child"),
                 &TurnId::from("compose-boundary"),
             ),
