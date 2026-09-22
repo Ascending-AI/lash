@@ -465,10 +465,25 @@ def cargo_test_paths(crate_root: Path) -> dict[str, Path]:
 def resolve_bazel_label(crate_root: Path, target: str) -> list[tuple[str, Path]]:
     """A ``<name>__test`` or ``<pkg>__unit_test`` label to (claimant, root)s."""
     if target.endswith("__unit_test"):
+        manifest = crate_manifest(crate_root)
+        unit_roots = {
+            (
+                crate_root
+                / manifest.get("lib", {}).get("path", "src/lib.rs")
+            ).resolve(),
+            (crate_root / "src/main.rs").resolve(),
+        }
+        for section in manifest.get("bin", []):
+            unit_roots.add(
+                (
+                    crate_root
+                    / section.get("path", f"src/bin/{section.get('name')}.rs")
+                ).resolve()
+            )
         return [
             (prefix, root)
             for prefix, root in crate_roots(crate_root)
-            if root.name in ("lib.rs", "main.rs") or "/src/bin/" in str(root)
+            if root.resolve() in unit_roots
         ]
     name = target[: -len("__test")] if target.endswith("__test") else target
     root = cargo_test_paths(crate_root).get(name)

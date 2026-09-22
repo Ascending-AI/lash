@@ -322,6 +322,24 @@ mod sqlite {
         self.assertEqual(twice, {"laws": Counter(PLAIN_SUITE_ROWS)})
 
 
+class BazelLabelResolutionTests(unittest.TestCase):
+    def test_unit_test_label_excludes_tests_main_integration_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            crate = Path(tmp) / "fakepkg"
+            (crate / "src").mkdir(parents=True)
+            (crate / "tests").mkdir()
+            (crate / "Cargo.toml").write_text(
+                '[package]\nname = "fakepkg"\n', encoding="utf-8"
+            )
+            lib = crate / "src" / "lib.rs"
+            lib.write_text("", encoding="utf-8")
+            (crate / "tests" / "main.rs").write_text("", encoding="utf-8")
+
+            roots = MODULE.resolve_bazel_label(crate, "fakepkg__unit_test")
+
+        self.assertEqual(roots, [("fakepkg", lib)])
+
+
 class BazelBatchCensusTests(unittest.TestCase):
     """A `test_batch` target is censused over the union of its members."""
 
