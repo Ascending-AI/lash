@@ -128,7 +128,13 @@ build --@rules_rust//rust/settings:pipelined_compilation=True
 build --remote_cache_compression
 
 build --incompatible_strict_action_env
-build --jobs=8
+# Measured 2026-09-22 on `just floor` after a one-line test edit: at 8 the
+# floor's 74 test actions ran eight at a time while the pool's slots sat
+# idle; at 64 the same run was worse (summed remote queue time 9 s ->
+# 2700-3900 s, the same tests' worker exec times doubled) because 74
+# four-core test actions oversubscribe the pool's 160 CPUs. 16 is shared with
+# CI, which composes its own flag list but inherits `build` lines.
+build --jobs=16
 build --loading_phase_threads=4
 build --local_resources=cpu=8
 build --local_resources=memory=32768

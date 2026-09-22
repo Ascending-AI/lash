@@ -131,6 +131,18 @@
     "peak_bytes": 4563087360,
     "samples": 1
   },
+  "lash_core_execution/lib": {
+    "cpu_count": 4,
+    "memory_kb": 4194304,
+    "peak_bytes": 2807000000,
+    "samples": 1
+  },
+  "lash_core_execution/test": {
+    "cpu_count": 4,
+    "memory_kb": 4194304,
+    "peak_bytes": 2807000000,
+    "samples": 1
+  },
   "lash_core_llm/test": {
     "cpu_count": 2,
     "memory_kb": 2097152,
