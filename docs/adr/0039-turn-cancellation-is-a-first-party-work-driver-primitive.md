@@ -1,12 +1,14 @@
 # Turn cancellation is a first-party work-driver primitive on the keyed-promise seam
 
 Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) §10 applies the
-`undelivered` disposition by author. It covers the host-authored items the
-cancelled turn held and did not deliver; process wakes it held are always
-deferred (claim released in the cancel commit, position kept, floor unchanged).
-Every affected item, deferred or dropped, is recorded with a closed reason. Only
-an explicit host withdrawal may drop a wake. Arbitration on the keyed-promise
-seam is unchanged.
+`undelivered` disposition by author. Its scope is the host-authored items
+addressed to the cancelled turn that it did not deliver. `Defer` no longer
+rewrites them: turn addressing is immutable, and an ended turn's items are
+next-turn items by rule. Process wakes the turn held are always deferred (claim
+released in the cancel commit, position kept, floor unchanged). Every affected
+item, deferred or dropped, is recorded with a closed reason. Only an explicit
+host withdrawal may drop a wake. Arbitration on the keyed-promise seam is
+unchanged.
 
 Foreground turns need a durable, externally addressable stop request without becoming Runtime
 Processes and without adding coordination state to the session store. We therefore define exact

@@ -50,7 +50,8 @@ second copy lags, and the lag has produced confirmed defects:
   without raising the wake redelivery floor.
 * **An identical input retry is refused as a conflict** after its row was
   deferred (FIG-3544): dedup compares the row's *current* delivery, which every
-  final commit may rewrite.
+  final commit and orphan repair rewrite from the addressed turn to the next
+  turn.
 * **The frame handoff lives in the queue** and inherits none of the protections
   it needs. After a crash it can be overtaken by input or commands, deleted by a
   host, stranded by a failed follow-on and later rendered as plain text in the
@@ -84,8 +85,8 @@ composition unit, and it already spans several rows.
 | `item_id` | Kind-derived. Input: the FIG-3513 acceptance-derived id. Wake: from the process and event sequence. Command: from its source key. |
 | `kind` | `input \| process_wake \| session_command`. |
 | `source_key` | One namespace, `UNIQUE(session_id, source_key)` over open and terminal rows alike. |
-| `submitted_delivery`, `submission_digest` | Written once at admission, never updated (§8). |
-| `delivery` | The current `Delivery`. It may change (a final commit re-defers `Turn{t}` items to `NextTurn`); the digest does not. |
+| `delivery` | The submitted `Delivery`: immutable intent, written once at admission and never rewritten (§5.1). |
+| `submission_digest` | Written once at admission, never updated (§8). |
 | `payload` | `Input(TurnInput) \| ProcessWake(ProcessWakeDelivery) \| SessionCommand(SessionCommand)`. The wake payload stays a copy of the process delivery. |
 | `authority`, `merge_key` | Per-item data, nullable where a kind has none. They feed the drain policy and traces. Nothing authorizes on them and nothing gates a claim on them (§5). |
 | `state` | `open \| accepted \| completed \| cancelled`. `held` stays a read projection, as ADR 0010 defined it. |
@@ -128,7 +129,7 @@ cancel by id, source key or suffix, list (with `held`), vacuum and orphan repair
 | Claimed with | Inputs and wakes, as one FIFO prefix | Inputs and wakes, as one FIFO prefix | Nothing, except adjacent `ApplyConfigPatch` commands |
 | Rendered as | Messages; the first input's options win | Wake causes; wakes carry no options | Never rendered |
 | Terminal side-write | None | Floor raise, same transaction (§9) | None |
-| Turn cancel | The accepted request's `undelivered` disposition | Always `Defer` (§10) | Never in a turn's claim |
+| Turn cancel | The accepted request's `undelivered` disposition, for items addressed to the cancelled turn | Always `Defer` (§10) | Never in a turn's claim |
 
 ### 2. What stays separate, and why
 
@@ -198,13 +199,17 @@ PendingFollowOn {
   funnel, so the positional journal cannot mismatch.
 * **Recovery bound.** A drive that recovers the fact raises `recoveries` by one
   in a fenced head write before the follow-on's first effect; on Restate this is
-  the drive's first journaled step. The inline path never raises it. When the
-  raised value would exceed `MAX_FOLLOW_ON_RECOVERIES = 3`, the drive does not
-  run the follow-on: it commits it as a terminal `Failed` turn with cause
-  `FollowOnRecoveryExhausted`, the task as its delivered input, which clears the
-  fact. Nothing resets the count; it lives and dies with the fact. Without a
-  bound, a follow-on that crashes its process before committing would block the
-  session forever.
+  the drive's first journaled step. The inline path never raises it. The bound
+  is host policy: `max_follow_on_recoveries` lives on the same host durability
+  object as the other claim bounds (§5; `QueuedWorkBatchingConfig` today), with
+  a default of 3. When the raised value would exceed it, the drive does not run
+  the follow-on. It commits the follow-on as a terminal `Failed` turn whose
+  failure is the typed error `FollowOnRecoveryExhausted { follow_on_turn_id,
+  recoveries }`, with the task as its delivered input. That turn receipt is the
+  follow-on's terminal record, and the same head CAS clears the fact. The count
+  is never reset: no operator action, reopen or policy change resets it, and it
+  lives and dies with the fact. Without a bound, a follow-on that crashes its
+  process before committing would block the session forever.
 * **Chain bound.** `chain_depth` carries `MAX_AGENT_FRAME_SWITCHES` across a
   crash instead of restarting at zero.
 * **Cancel.** The follow-on is the cancelled logical turn's own continuation,
@@ -224,7 +229,8 @@ adjacent `ApplyConfigPatch` commands coalesce up to the existing 64-command cap.
 **A command at `enqueue_seq = s` that has not settled blocks every idle or
 checkpoint claim of an unaddressed (`AnyBoundary` or `NextTurn`) item with
 seq > s.** Items with seq < s are unaffected. At a checkpoint of turn t,
-`Turn{t}` items still pass (§5). A pending follow-on precedes every command.
+`Turn{t}` items still pass while t runs (§5.1). A pending follow-on precedes
+every command.
 
 **Commands apply only between logical runs** (D8). No config changes between the
 physical turns of one logical run: the claimless pre-turn command drain in
@@ -251,17 +257,38 @@ equals per-session commit order: every producer, the commit path included, takes
 the session lock before it takes the sequence number. Wall-clock time may bound
 how much a claim takes (the maximum pending age); it never decides order.
 
+#### 5.1 Turn addressing is immutable intent
+
+A row's `Delivery::Turn { turn_id: T, min_boundary }` is stored once and never
+rewritten. Its eligibility is derived, not stored:
+
+* **While T is running**, the item is deliverable only into T, at a checkpoint
+  whose boundary is at or after `min_boundary`. It belongs to T, so it passes a
+  pending command barrier: commands never apply mid-turn, so a barrier that held
+  it would keep it from ever entering T.
+* **Once T has ended** (its final commit is recorded, whatever the outcome), the
+  item is treated as `NextTurn` by rule. The row is not updated; the claim
+  statement derives the effective delivery from T's state.
+
+This deletes the re-defer rewrite that every final commit and orphan repair
+perform today (§14). It also removes the root cause of FIG-3544: the stored
+delivery can no longer drift from what was submitted, so an identical retry
+always matches. The immutable submission digest (§8) stays as defence in depth.
+
+#### 5.2 Composition
+
 **One composition rule for idle and checkpoint claims alike:**
 
 1. **Addressed items.** A checkpoint claim of turn t selects the open `Turn{t}`
    items whose `min_boundary` the checkpoint admits, in seq order, by address.
    They belong to the running turn; neither the command barrier nor an earlier
-   row holds them back. An idle claim has no addressed items: every final commit
-   already re-defers items addressed to its turn to `NextTurn`, in-transaction
-   and keeping position.
+   row holds them back. An idle claim has no addressed items: every `Turn{T}`
+   item whose T has ended is `NextTurn` by rule (§5.1) and joins the prefix
+   below at its own position.
 2. **The FIFO prefix of unaddressed turn-producing items** (inputs and wakes).
    Starting at the lowest open unaddressed seq, the prefix extends in seq order
-   and **stops, never skips**, at the first of:
+   and **stops, never skips**, at the first of (a `Turn{T}` item for an ended T
+   counts as `NextTurn`; one for another running turn is not deliverable here):
    * a `session_command` (the barrier; at idle a command at the head is instead
      claimed alone, §4);
    * a **delivery mismatch**: a row this claim mode cannot deliver. At idle both
@@ -314,12 +341,13 @@ checkpoint path commits input first; both become input-then-wake.
 
 ### 8. Dedup, digest and tombstones (D1, D4, D5, D6, D12)
 
-* **Immutable submission digest.** Admission writes `submitted_delivery` and
-  `submission_digest` once. A replay with the same source key compares digests
-  only, never the row's current delivery. Same digest → `Existing`, open or
-  terminal. Different digest → a typed `Conflict` to the submitter, for every
-  kind, never an untyped commit failure and never silent adoption. This fixes
-  FIG-3544 and flips the conformance law that pinned silent adoption.
+* **Immutable submission digest.** Admission writes `submission_digest` once,
+  beside the immutable `delivery` (§5.1). A replay with the same source key
+  compares digests only. Same digest → `Existing`, open or terminal. Different
+  digest → a typed `Conflict` to the submitter, for every kind, never an
+  untyped commit failure and never silent adoption. With delivery immutable the
+  digest is defence in depth for FIG-3544, not its fix. It flips the
+  conformance law that pinned silent adoption.
 * **Wakes.** The wake digest covers the process fact only. The wake sender treats
   `Conflict` as a terminal discard with a non-blocking `ContentConflict` reason,
   so a conflict ends that delivery without stalling later wakes from the same
@@ -328,8 +356,7 @@ checkpoint path commits input first; both become input-then-wake.
   may use `process:…:wake`, only the command kind `command:…`. A host input
   using a system prefix is refused to the host before it can meet a wake.
 * **Tombstones for every kind.** A terminal row stays until `vacuum()` removes it.
-  Its fields: kind, source key, `enqueue_seq`, submitted and final delivery,
-  digest, `terminal_cause`, `terminal_at_ms`. An enqueue that meets a `cancelled`
+  Its fields: kind, source key, `enqueue_seq`, delivery, digest, `terminal_cause`, `terminal_at_ms`. An enqueue that meets a `cancelled`
   tombstone returns `Existing` and never reopens it.
 * **Closed terminal cause.** `Delivered` (input or wake rendered by a committed
   turn), `Applied` (command), `StaleConfigRevision { base, head }`
@@ -350,10 +377,14 @@ floor is absorbed. This fixes FIG-3545.
 ### 10. Cancel by author (E2, D12)
 
 * **A turn cancel** (`Immediate` or `AfterStep`) applies the accepted request's
-  `undelivered` disposition to the **host-authored** items it held and did not
-  deliver. A `process_wake` it held is **always deferred**: the claim is released
-  in the cancel commit, the row keeps its `enqueue_seq`, and the floor is
-  unchanged. A wake's event text cannot be recovered by the model once dropped,
+  `undelivered` disposition to the **host-authored items addressed to the
+  cancelled turn** that it did not deliver, whether it held them or they were
+  still open. `Defer` releases any claim and leaves the row as it is: T has now
+  ended, so the item is `NextTurn` by rule (§5.1), at its own position. `Drop`
+  tombstones it. Items not addressed to the cancelled turn are outside the
+  disposition's scope; any it held are released at their positions. A
+  `process_wake` it held is **always deferred**: the claim is released in the
+  cancel commit, the row keeps its `enqueue_seq`, and the floor is unchanged. A wake's event text cannot be recovered by the model once dropped,
   so a collateral drop at every turn cancel would silently remove facts the
   model was about to see.
 * **A host withdrawal** (by item id, source key or suffix) may cancel any
@@ -429,8 +460,8 @@ and rides the §15 cutover.
   per-row expiry.
 * Enqueue order equals per-session commit order.
 * Order is by sequence only; the wall clock may bound claim size, never order.
-* Items addressed to a finished turn are re-deferred by every final commit,
-  in-transaction, keeping their position.
+* Items addressed to a finished turn are `NextTurn` by rule, at their own
+  position (§5.1). Unlike today, no commit rewrites them.
 
 ### 14. Deletions
 
@@ -456,6 +487,9 @@ and rides the §15 cutover.
   store, the inline exact-claim block for the handoff, and the claimless
   in-memory follow-on branch.
 * The literal `64` checkpoint bound.
+* The re-defer rewrite of `Turn{t}` items to `NextTurn`, performed today by every
+  final commit (`defer_to_next_turn`) and by orphan repair. Delivery is
+  immutable, and an ended turn's items are `NextTurn` by rule (§5.1).
 
 Public API breaks are accepted with no aliases (E4): `BatchId` becomes an item id
 in `QueuedTurnBuilder`, `SessionCommandReceipt` and the queue events, and the
@@ -499,7 +533,10 @@ advisory lock on the merged table.
    seq > s is claimed at idle or at a checkpoint, on either backend, including
    with a locked head row.
 5. **Addressed pass.** A `Turn{t}` item is claimable at t's admitting checkpoints
-   regardless of earlier rows and open commands.
+   regardless of earlier rows and open commands, and never into another turn
+   while t runs. No write after admission changes a row's delivery; after t's
+   final commit a `Turn{t}` item is claimed exactly where a `NextTurn` item at
+   its position would be.
 6. **Coalescing.** Adjacent config patches share one head commit; any other
    command is claimed alone.
 7. **Between runs.** No command applies between the physical turns of one
@@ -511,11 +548,13 @@ advisory lock on the merged table.
 10. **Follow-on frame.** No head write leaves a pending follow-on whose frame is
     not current.
 11. **Follow-on recovery.** A crash after the switch commit runs the follow-on
-    first under `follow_on_turn_id`; the fourth recovery terminalizes it as
-    `FollowOnRecoveryExhausted`; `chain_depth` survives recovery.
+    first under `follow_on_turn_id`; the recovery past the configured bound
+    (default 3) commits the typed `FollowOnRecoveryExhausted` terminal and clears
+    the head; nothing resets the count; `chain_depth` survives recovery.
 12. **Dedup.** Same key and digest → `Existing` while the row or its tombstone
     exists; different digest → typed `Conflict`, for every kind; an identical
-    retry after a defer is `Existing`.
+    retry after its addressed turn ended or was cancelled with `Defer` is
+    `Existing`.
 13. **Prefixes.** A host input with a reserved prefix is refused at admission.
 14. **Tombstones.** Every terminal row survives until `vacuum()`, is never
     claimable, carries no claim and carries a closed cause; a `cancelled`
@@ -523,10 +562,11 @@ advisory lock on the merged table.
 15. **Floor.** Every wake terminal raises the floor in its transaction; `Defer`
     does not; a redelivery at or below the floor is absorbed; vacuum never
     removes a wake tombstone above the floor.
-16. **Cancel by author.** A turn cancel defers every held wake (position kept,
-    floor unchanged) and applies its disposition to host-authored items; every
-    affected item is recorded; a host withdrawal of a wake tombstones it, raises
-    the floor and records it.
+16. **Cancel by author.** A turn cancel applies its disposition to the
+    host-authored items addressed to the cancelled turn and to no other item;
+    it defers every held wake (position kept, floor unchanged); every affected
+    item is recorded; a host withdrawal of a wake tombstones it, raises the
+    floor and records it.
 17. **Delivery evidence.** `Complete` of an unrendered item is refused.
 18. **Render order.** Input then wakes, each in seq order, identical on the idle
     and checkpoint paths.
@@ -587,6 +627,10 @@ advisory lock on the merged table.
   unaddressed prefix on both paths. Addressed `Turn{t}` items are what may pass.
 * **Uniform `Drop` on wakes at turn cancel** (Fable E.2). Rejected (E2): the
   model cannot recover a dropped wake's event text.
+* **Keep re-deferring addressed items on every final commit.** Rejected (owner
+  ruling on turn addressing): a stored delivery that commits rewrite is the
+  root cause of FIG-3544, and "ended turn → next turn" is derivable from the
+  turn's own final commit.
 * **Migrate existing rows.** Rejected: reject-and-recreate is the accepted
   cutover (ADR 0081), and a converter would be the shim this ADR removes.
 * **Aliases for renamed public types.** Rejected (E4): a shim.
@@ -610,8 +654,9 @@ advisory lock on the merged table.
   under ADR 0067, not a second retention model.
 * One cutover invalidates every existing session and store, and in-flight Restate
   invocations must drain first.
-* Two live bugs (FIG-3544, FIG-3545) have standalone fixes now; their digest and
-  floor rules carry into the cutover unchanged.
+* Two live bugs (FIG-3544, FIG-3545) have standalone fixes now. The floor rule
+  carries into the cutover unchanged. For FIG-3544 the cutover removes the root
+  cause (immutable delivery, §5.1) and keeps the digest as defence in depth.
 
 ## Links
 

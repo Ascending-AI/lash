@@ -36,3 +36,9 @@ for every kind: the immutable source key (compared through a submission digest
 written once at admission), typed cancel outcomes, tombstones until `vacuum()`,
 `held` as a read projection rather than a state, suffix cancellation in
 `enqueue_seq` order, and no submission journal.
+
+0101 also tightens one rule here. The submitted ingress is now immutable: a
+row's turn addressing is never rewritten, the re-defer of active-turn input to
+the next turn on every final commit and in orphan repair is deleted, and an
+ended turn's items are next-turn items by rule. The replay comparison therefore
+always sees the submitted delivery.
