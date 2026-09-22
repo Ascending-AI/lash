@@ -77,10 +77,6 @@ async fn lifecycle(
 }
 
 /// Wait until the group's durable lifecycle reaches `settled`.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: the group settles within the suite's hang detector"
-)]
 async fn until_settled(closing: &Arc<dyn StoreEffectGroupClosing>, group_key: &str) {
     let closing = Arc::clone(closing);
     let group_key = group_key.to_string();
