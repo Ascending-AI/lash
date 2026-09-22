@@ -2031,30 +2031,32 @@ macro_rules! store_effect_group_closing_tests {
     };
 }
 
-/// Register the public signal-intent law.
+/// Register the laws that drive a real turn through the tier's
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): the public
+/// signal-intent wake and the turn-cancel laws for tool calls running as
+/// effect-group children.
 ///
 /// The fixture hands back a guard, a session prefix, the tier's effect host, a
-/// process registry, the process-work substrate, the tier's
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) and a post-wake
-/// verification. Restate runs the turn inside a live handler (`#[ignore]`d,
-/// deferred to `effect-group-conformance-e2e`).
+/// process registry, the process-work substrate, the tier's turn runner and a
+/// post-law verification handed the law's name. Restate runs each turn inside a live handler
+/// (`#[ignore]`d, deferred to `effect-group-conformance-e2e`).
 #[macro_export]
-macro_rules! signal_intent_tests {
-    ($fixture:block) => {
-        $crate::signal_intent_tests!(@catalogue [] $fixture);
+macro_rules! turn_runner_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::turn_runner_tests!(@expand [$(#[$attr])*] $fixture; [
+            (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"),
+            (an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration, "tool-child-after-step-retry-sleep"),
+            (a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate, "tool-child-follow-on-cancel-gate"),
+        ]);
     };
-    ($(#[$attr:meta])+ $fixture:block) => {
-        $crate::signal_intent_tests!(@catalogue [$(#[$attr])*] $fixture);
-    };
-    (@catalogue $attrs:tt $fixture:block) => {
-        $crate::__signal_intent_register!($attrs $fixture;
-            (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"));
+    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $($crate::__turn_runner_register!($attrs $fixture; ($law, $label));)*
     };
 }
 
-/// Register one public signal-intent law.
+/// Register one turn-runner law.
 #[macro_export]
-macro_rules! __signal_intent_register {
+macro_rules! __turn_runner_register {
     ([$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2062,7 +2064,7 @@ macro_rules! __signal_intent_register {
             let (_guard, prefix, host, registry, work, runner, verify) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(prefix, host, registry, work, runner).await;
-            verify().await;
+            verify(stringify!($law)).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };

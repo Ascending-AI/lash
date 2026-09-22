@@ -43,7 +43,7 @@ receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law
 [[deferred]]
 file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
 claimant = "lash_restate::tests::conformance_and_poison"
-suite = "signal_intent_tests"
+suite = "turn_runner_tests"
 recipe = "effect-group-conformance-e2e"
 ci_job = "functional-e2e"
 ci_matrix_name = "effect-group-conformance"
