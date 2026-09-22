@@ -1020,20 +1020,30 @@ finish(await handle);
                 .any(|(first_name, _)| first_name == name)
         })
         .collect::<Vec<_>>();
+    // FIG-3420: presentation is a journaled effect, so a call whose attempt
+    // committed before the crash but whose `PresentToolResult` had not yet
+    // landed appends its presentation on the resume — here the `start_process`
+    // and resumed `replay_pending_input` boundaries — before the checkpoint.
     assert_eq!(
         replayed_envelopes.len(),
-        recorded_effect_count + 1,
-        "the resumed invocation may append only its previously uncommitted checkpoint"
+        recorded_effect_count + 3,
+        "the resumed invocation may append only its previously uncommitted effects; appended: {:?}",
+        appended_envelopes
+            .iter()
+            .map(|(name, envelope)| (name, envelope.command.kind()))
+            .collect::<Vec<_>>()
     );
     assert_eq!(
-        appended_envelopes.len(),
-        1,
-        "the replay prefix must consume every pre-crash journal entry"
-    );
-    assert_eq!(
-        appended_envelopes[0].1.command.kind(),
-        RuntimeEffectKind::Checkpoint,
-        "only the post-wait checkpoint is new after the crash"
+        appended_envelopes
+            .iter()
+            .map(|(_, envelope)| envelope.command.kind())
+            .collect::<Vec<_>>(),
+        vec![
+            RuntimeEffectKind::PresentToolResult,
+            RuntimeEffectKind::PresentToolResult,
+            RuntimeEffectKind::Checkpoint,
+        ],
+        "the replay prefix must consume every pre-crash journal entry and append only the uncommitted presentations plus the checkpoint"
     );
     let replayed_scalar = replayed_envelopes
         .iter()
