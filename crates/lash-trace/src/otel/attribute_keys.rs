@@ -47,16 +47,16 @@ pub(super) const LASH_ERROR_RAW: &str = "lash.error.raw";
 pub(super) const LASH_ERROR_RETRYABLE: &str = "lash.error.retryable";
 pub(super) const LASH_LANGUAGE_EXECUTION_BRANCH: &str = "lash.language_execution.branch";
 pub(super) const LASH_LANGUAGE_EXECUTION_CALL_ID: &str = "lash.language_execution.call_id";
-pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_ID: &str =
-    "lash.language_execution.child_effect_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_KIND: &str =
     "lash.language_execution.child_effect_kind";
+pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_ATTEMPT: &str =
+    "lash.language_execution.child_attempt";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY: &str =
     "lash.language_execution.child_graph_key";
+pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_INCARNATION: &str =
+    "lash.language_execution.child_incarnation";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID: &str =
     "lash.language_execution.child_process_id";
-pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE: &str =
-    "lash.language_execution.child_subject_type";
 pub(super) const LASH_LANGUAGE_EXECUTION_EDGE_COUNT: &str = "lash.language_execution.edge_count";
 pub(super) const LASH_LANGUAGE_EXECUTION_EDGE_ID: &str = "lash.language_execution.edge_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_EFFECT_ID: &str = "lash.language_execution.effect_id";

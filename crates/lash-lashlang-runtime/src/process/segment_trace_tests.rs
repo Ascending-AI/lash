@@ -83,6 +83,8 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
             module_ref: lashlang::ModuleRef::new(&hash),
             process_ref: lashlang::ProcessRef::new(hash, 0),
             process_name: "main".to_string(),
+            attempt: 1,
+            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
             restate_invocation_id: None,
         },
     );

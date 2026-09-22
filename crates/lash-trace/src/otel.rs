@@ -1278,31 +1278,25 @@ fn language_execution_attributes(
                 attr::LASH_LANGUAGE_EXECUTION_PARENT_NODE_ID,
                 parent_node_id.clone(),
             ));
+            if let Some(graph_key) = child.graph_key() {
+                attrs.push(KeyValue::new(
+                    attr::LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY,
+                    graph_key,
+                ));
+            }
             attrs.push(KeyValue::new(
-                attr::LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY,
-                child.graph_key(),
+                attr::LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID,
+                child.process_id.to_string(),
             ));
-            match &child.subject {
-                crate::TraceRuntimeSubject::Effect { effect_id, .. } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE,
-                        "effect",
-                    ));
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_ID,
-                        effect_id.clone(),
-                    ));
-                }
-                crate::TraceRuntimeSubject::Process { process_id } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE,
-                        "process",
-                    ));
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID,
-                        process_id.to_string(),
-                    ));
-                }
+            attrs.push(KeyValue::new(
+                attr::LASH_LANGUAGE_EXECUTION_CHILD_INCARNATION,
+                child.incarnation as i64,
+            ));
+            if let Some(attempt) = child.attempt {
+                attrs.push(KeyValue::new(
+                    attr::LASH_LANGUAGE_EXECUTION_CHILD_ATTEMPT,
+                    attempt as i64,
+                ));
             }
         }
         Payload::ExecutionFinished { status, error, .. } => {

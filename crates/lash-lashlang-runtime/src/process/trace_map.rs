@@ -239,7 +239,7 @@ mod tests {
         ));
         let graph = lash_typescript::workflow_graph::workflow_graph_from_program(linked.program());
         let process = graph.process("worker").expect("worker graph");
-        let map = trace_lashlang_process_map(&linked.artifact, "worker");
+        let map = trace_lashlang_process_map(&linked.artifact, "worker").expect("worker map");
         assert_map_contract(&map, &process.body);
     }
 }

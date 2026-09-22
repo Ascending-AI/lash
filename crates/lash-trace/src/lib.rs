@@ -124,7 +124,9 @@ pub use lashlang_graph::{
 /// carries the failure classification OTel `error.type` projects.
 /// Version 27 (FIG-3460) unifies workflow node identity and adds structured
 /// execution sites, language-node/tool cross-links, and Restate correlation.
-pub const TRACE_SCHEMA_VERSION: u32 = 27;
+/// Version 28 (FIG-3461) adds generation-qualified observation identity,
+/// typed child process identity, and replay-stable bounded graph snapshots.
+pub const TRACE_SCHEMA_VERSION: u32 = 28;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

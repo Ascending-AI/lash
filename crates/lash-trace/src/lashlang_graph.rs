@@ -126,7 +126,7 @@ fn resolve_child_graph_keys(graphs: &mut BTreeMap<String, TraceLashlangGraph>) {
             let matches = process_graphs
                 .iter()
                 .filter(|(process_id, incarnation, attempt, _)| {
-                    process_id == &child.child_process_id
+                    process_id == child.child_process_id
                         && *incarnation == child.child_incarnation
                         && child
                             .child_attempt
@@ -246,17 +246,10 @@ pub fn fold_lashlang_graph(
             });
         }
         if let Some((node_id, occurrence)) = node_occurrence(&event_identity)
-            && node_retention
-                .get(node_id)
-                .is_some_and(|retention| occurrence <= retention.truncation_watermark)
+            && let Some(retention) = node_retention.get_mut(node_id)
+            && occurrence <= retention.truncation_watermark
         {
-            merge_late_retained_event(
-                node_retention
-                    .get_mut(node_id)
-                    .expect("retention was checked above"),
-                timestamp,
-                &event,
-            );
+            merge_late_retained_event(retention, timestamp, &event);
             continue;
         }
         let candidate = TraceLashlangGraphHistoryEvent {
@@ -297,7 +290,9 @@ pub fn fold_lashlang_graph(
             if occurrences.len() <= history_limit {
                 break;
             }
-            let occurrence = *occurrences.first().expect("non-empty occurrence set");
+            let Some(&occurrence) = occurrences.first() else {
+                break;
+            };
             let dropped_keys = history
                 .keys()
                 .filter(|identity| {
@@ -741,6 +736,10 @@ fn child_link_key(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the dropped history passed to this function contains an event for node_id"
+)]
 fn merge_node_retention(
     prior: Option<TraceLashlangNodeRetention>,
     node_id: &str,
@@ -787,6 +786,10 @@ fn merge_node_retention(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the watermark history contains the retained node whose matching event was merged"
+)]
 fn merge_late_retained_event(
     retention: &mut TraceLashlangNodeRetention,
     timestamp: DateTime<Utc>,

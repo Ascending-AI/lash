@@ -373,7 +373,7 @@ impl<'a> GraphProjection<'a> {
                 matches!(
                     &graph.subject,
                     TraceRuntimeSubject::Process { process_id }
-                        if process_id == &child.child_process_id
+                        if process_id == child.child_process_id
                 ) && graph.history.first().is_some_and(|event| {
                     event.event.identity.incarnation() == Some(child.child_incarnation)
                         && child

@@ -1005,17 +1005,14 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
         )
         .expect("process scope")
     };
-    let request = lash_core::facade_support::SessionTurnRequest::new_process_backed(
-        "rlm-session",
-        process_id.as_str(),
-        lash_core::TurnInput::text("run the RLM cell"),
+    let mut input = lash_core::TurnInput::text("run the RLM cell");
+    lash_core::core_internal::attach_process_invocation_correlation(
+        &mut input.turn_context,
         &process_id,
         &authority,
-        process_controller(),
-    )
-    .expect("process-backed session turn");
+    );
     let context = lash_core::testing::TestExecutionContextBuilder::new()
-        .turn_context(request.input().turn_context.clone())
+        .turn_context(input.turn_context)
         .borrowed_effect_controller(process_controller())
         .build()
         .into_runtime();

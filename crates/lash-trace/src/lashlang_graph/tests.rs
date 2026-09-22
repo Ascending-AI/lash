@@ -26,6 +26,7 @@ fn identity() -> LanguageIdentity {
             .expect("valid trace test effect address"),
             effect_id: "exec-1".to_string(),
         },
+        source_identity: "source-1".to_string(),
         module_ref: "module-1".to_string(),
         entry_kind: "main".to_string(),
         entry_ref: None,
