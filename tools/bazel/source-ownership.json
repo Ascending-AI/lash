@@ -71,7 +71,14 @@
     "tests": {
       "process_model": [
         "tests/process_model.rs",
-        "tests/runtime/process/lease_serde_tests.rs"
+        "tests/runtime/process/lease_serde_tests.rs",
+        "tests/runtime/process/registry_transitions.rs"
+      ],
+      "effect_model": [
+        "tests/effect_model.rs",
+        "tests/runtime/effect/envelope.rs",
+        "tests/runtime/effect/group.rs",
+        "tests/runtime/effect/tool_child.rs"
       ]
     }
   }

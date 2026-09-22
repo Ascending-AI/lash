@@ -1,4 +1,4 @@
-//! Public process lease wire contracts, with their original unit-test names.
+//! Public process lease and registry contracts, with their original unit-test names.
 
 #![expect(
     clippy::expect_used,
@@ -15,5 +15,6 @@ mod runtime {
         };
 
         mod lease_serde_tests;
+        mod registry_transitions;
     }
 }
