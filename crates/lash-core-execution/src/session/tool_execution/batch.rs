@@ -215,11 +215,11 @@ impl RuntimeExecutionContext<'_> {
                 .parent_invocation(Some(parent_invocation))
                 .child_execution_trace_hook(child_execution_trace_hook)
                 .build();
-            let outcome = crate::tool_dispatch::execute_orchestrating_tool(
+            let outcome = Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
                 self.dispatch.as_ref(),
                 child.call,
                 tool_context,
-            )
+            ))
             .await;
             // An orchestrating body declares no intents to drain, so its slot is
             // discharged as soon as the body returns. Dropping the guard here

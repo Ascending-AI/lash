@@ -1205,11 +1205,11 @@ impl RuntimeExecutionContext<'_> {
                             .child_execution_trace_hook(child_execution_trace_hook.clone())
                             .build();
                     ToolCallLaunch::Done(Box::new(
-                        crate::tool_dispatch::execute_orchestrating_tool(
+                        Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
                             &dispatch,
                             *prepared,
                             tool_context,
-                        )
+                        ))
                         .await,
                     ))
                 } else {

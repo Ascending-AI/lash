@@ -786,11 +786,11 @@ async fn drive(
         super::tool_child::ToolChildAdmission::Catalog { .. }
     ) && dispatch.is_orchestrating_tool(&request.call.tool_id)
     {
-        return Ok(crate::tool_dispatch::execute_orchestrating_tool(
+        return Ok(Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
             dispatch.as_ref(),
             request.call.clone(),
             tool_context,
-        )
+        ))
         .await);
     }
 
