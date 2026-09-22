@@ -31,6 +31,59 @@ use process_lifecycle::{
     record_lifecycle_started, register_lifecycle_row, register_rerunnable_lifecycle_row,
 };
 
+pub(crate) async fn collect_process_events(
+    registry: &dyn ProcessRegistry,
+    process_id: &ProcessId,
+) -> Result<Vec<lash_core::ProcessEvent>, lash_core::PluginError> {
+    let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
+    let mut continuation = None;
+    let mut events = Vec::new();
+    loop {
+        let outcome = registry
+            .event_page(
+                process_id,
+                limit,
+                lash_core::ProcessEventQueryMode::Full,
+                continuation,
+            )
+            .await?;
+        let page = match outcome {
+            lash_core::ProcessEventReadOutcome::Retained(page) => page,
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Pruned {
+                    terminal_label,
+                    pruned_at_ms,
+                },
+            ) => {
+                return Err(lash_core::PluginError::ProcessNoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                });
+            }
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Retired {
+                    requested_incarnation,
+                    current_incarnation,
+                },
+            ) => {
+                return Err(lash_core::PluginError::ProcessIncarnationSuperseded {
+                    process_id: process_id.clone(),
+                    requested_incarnation,
+                    current_incarnation,
+                });
+            }
+        };
+        let lash_core::ProcessEventPageEvents::Full(page_events) = page.events else {
+            unreachable!("full process event query returned a lite page");
+        };
+        events.extend(page_events);
+        continuation = match page.more {
+            lash_core::ProcessEventPageMore::Complete => return Ok(events),
+            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+        };
+    }
+}
+
 pub(crate) const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
 const LEASE_TTL_MS: u64 = 30_000;
 
@@ -1313,8 +1366,7 @@ impl RuntimeBoundaryHarness {
             .complete_process_with_lease(&live_lease, successor_output)
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("replay process B output: {err}")))?;
-        let events = registry
-            .full_event_window(&process_id, 0)
+        let events = collect_process_events(registry.as_ref(), &process_id)
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("read process events: {err}")))?;
         let terminal_event_count = events
@@ -1502,8 +1554,7 @@ async fn terminal_writer(
     registry: &dyn ProcessRegistry,
     process_id: &ProcessId,
 ) -> Result<Option<String>, RuntimeBoundaryError> {
-    let events = registry
-        .full_event_window(process_id, 0)
+    let events = collect_process_events(registry, process_id)
         .await
         .map_err(|err| RuntimeBoundaryError::new(format!("read process events: {err}")))?;
     Ok(terminal_writer_from_events(&events))

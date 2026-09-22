@@ -383,7 +383,7 @@ mod tests {
         PreparedToolCall, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall, ToolProvider,
     };
     use crate::{
-        ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
         ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
     };
     use lash_sansio::sync::MutexExt as _;

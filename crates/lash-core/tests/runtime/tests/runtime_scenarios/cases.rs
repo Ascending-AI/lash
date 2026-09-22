@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 use proptest::prelude::*;
 use std::collections::BTreeSet;
 

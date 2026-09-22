@@ -572,8 +572,10 @@ impl lash_core::ProcessEventLog for SqliteProcessRegistry {
         lash_core::PluginError,
     > {
         let process_id = process_id.clone();
+        #[cfg(feature = "testing")]
+        let read_pause = self.conn.fault_injector();
         self.conn
-            .call(move |conn| {
+            .read(move |conn| {
                 Ok((|| {
                     if let Some(token) = continuation.as_ref() {
                         if token.process_id() != process_id {
@@ -623,9 +625,19 @@ impl lash_core::ProcessEventLog for SqliteProcessRegistry {
                         }
                         Err(error) => return Err(error),
                     };
+                    #[cfg(feature = "testing")]
+                    if let Some(injector) = read_pause.as_ref() {
+                        injector.reach_process_event_page_after_identity();
+                    }
                     let after_sequence = continuation
                         .as_ref()
                         .map_or(0, lash_core::ProcessEventPageToken::after_sequence);
+                    let after_sequence = i64::try_from(after_sequence).map_err(|_| {
+                        lash_core::PluginError::Session(
+                            "process event page token sequence exceeds the SQL cursor range"
+                                .to_string(),
+                        )
+                    })?;
                     let fetch_limit = limit
                         .get()
                         .checked_add(1)
@@ -645,7 +657,7 @@ impl lash_core::ProcessEventLog for SqliteProcessRegistry {
                                     params![
                                         process_id.as_str(),
                                         record.incarnation.registration_sequence() as i64,
-                                        after_sequence as i64,
+                                        after_sequence,
                                         fetch_limit,
                                     ],
                                     |row| row.get::<_, String>(0),
@@ -674,7 +686,7 @@ impl lash_core::ProcessEventLog for SqliteProcessRegistry {
                                     params![
                                         process_id.as_str(),
                                         record.incarnation.registration_sequence() as i64,
-                                        after_sequence as i64,
+                                        after_sequence,
                                         fetch_limit,
                                     ],
                                     |row| {

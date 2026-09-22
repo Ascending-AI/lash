@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 
 #[path = "lease_and_claims/acceptance_window.rs"]
 mod acceptance_window;

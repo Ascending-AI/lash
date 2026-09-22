@@ -426,6 +426,7 @@ macro_rules! process_registry_tests {
                 (producer_terminal_status_must_match_materialized_outcome, "terminal-status-outcome"),
                 (list_filters_match_extracted_and_json_fields, "list-filters"),
                 (process_registry_pagination, "pagination"),
+                (process_event_page_tokens_reject_out_of_range_sql_cursors, "process-event-page-sql-cursor-range"),
                 (waiting_processes_remain_in_the_recovery_worklist, "waiting-worklist"),
                 (list_processes_filters_by_enriched_fields, "enriched-filters"),
                 (list_processes_bounds_retired_rows_without_hiding_live_rows, "retired-bounds"),

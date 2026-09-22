@@ -75,6 +75,24 @@ fn process_event_page_token_rejects_non_ascii_hex_without_panicking() {
 }
 
 #[test]
+fn process_event_page_token_rejects_sequences_outside_the_sql_range() {
+    for after_sequence in [i64::MAX as u64 + 1, u64::MAX] {
+        let encoded = serde_json::to_string(&ProcessEventPageToken::new(
+            ProcessId::from("out-of-range-token-process"),
+            ProcessIncarnation::from_registration_sequence(7),
+            after_sequence,
+            ProcessEventQueryMode::Full,
+        ))
+        .expect("encode out-of-range page token");
+
+        assert!(
+            serde_json::from_str::<ProcessEventPageToken>(&encoded).is_err(),
+            "sequence {after_sequence} must not decode into a SQL-backed cursor"
+        );
+    }
+}
+
+#[test]
 fn process_wake_input_from_event_payload_prefers_text_field() {
     let payload = serde_json::json!({
         "text": "ready",

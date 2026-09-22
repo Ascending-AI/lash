@@ -6,7 +6,7 @@ use super::contracts::{
     assert_no_duplicate_label_step, assert_session_turn_child_graph,
     assert_successful_agent_scenario,
 };
-use lash_core::ProcessEventLog as _;
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::llm::types::LlmUsage;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;

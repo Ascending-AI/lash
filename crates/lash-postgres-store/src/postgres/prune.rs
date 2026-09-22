@@ -48,7 +48,8 @@ pub(super) async fn prune_process_rows_tx(
 mod tests {
     use super::*;
     use lash_core::{
-        ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _,
+        ProcessRegistrar as _,
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

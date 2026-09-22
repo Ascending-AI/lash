@@ -73,6 +73,37 @@ fn registration() -> ProcessRegistration {
     .with_wake_session_id(Some(SessionId::from(SESSION_ID.to_string())))
 }
 
+async fn process_events(
+    registry: &dyn lash_core::ProcessRegistry,
+    process_id: &ProcessId,
+) -> Result<Vec<lash_core::ProcessEvent>> {
+    let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
+    let mut continuation = None;
+    let mut events = Vec::new();
+    loop {
+        let outcome = registry
+            .event_page(
+                process_id,
+                limit,
+                lash_core::ProcessEventQueryMode::Full,
+                continuation,
+            )
+            .await
+            .context("read process event page")?;
+        let lash_core::ProcessEventReadOutcome::Retained(page) = outcome else {
+            bail!("process event history was no longer retained")
+        };
+        let lash_core::ProcessEventPageEvents::Full(page_events) = page.events else {
+            unreachable!("full process event query returned a lite page");
+        };
+        events.extend(page_events);
+        continuation = match page.more {
+            lash_core::ProcessEventPageMore::Complete => return Ok(events),
+            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+        };
+    }
+}
+
 fn wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
     let process_id = wake.process_id.clone();
     let sequence = wake.sequence;
@@ -220,10 +251,8 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         .list_queued_work(&SessionId::from(NEW_SESSION_ID))
         .await
         .context("list new-target receiver rows")?;
-    let audit_present = registry
-        .full_event_window(&ProcessId::from(RETARGET_PROCESS_ID), 0)
-        .await
-        .context("read retarget audit events")?
+    let audit_present = process_events(registry.as_ref(), &ProcessId::from(RETARGET_PROCESS_ID))
+        .await?
         .iter()
         .any(|event| event.event_type == "process.subscription_retargeted");
     anyhow::ensure!(

@@ -843,6 +843,11 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
         let after_sequence = continuation
             .as_ref()
             .map_or(0, lash_core::ProcessEventPageToken::after_sequence);
+        let after_sequence = i64::try_from(after_sequence).map_err(|_| {
+            PluginError::Session(
+                "process event page token sequence exceeds the SQL cursor range".into(),
+            )
+        })?;
         let fetch_limit = limit
             .get()
             .checked_add(1)
@@ -853,7 +858,7 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
                 let rows = sqlx::query(process_sql().event.page_full.sql())
                     .bind(process_id.as_str())
                     .bind(record.incarnation.registration_sequence() as i64)
-                    .bind(after_sequence as i64)
+                    .bind(after_sequence)
                     .bind(fetch_limit)
                     .fetch_all(&mut *tx)
                     .await
@@ -875,7 +880,7 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
                 let rows = sqlx::query(process_sql().event.page_lite.sql())
                     .bind(process_id.as_str())
                     .bind(record.incarnation.registration_sequence() as i64)
-                    .bind(after_sequence as i64)
+                    .bind(after_sequence)
                     .bind(fetch_limit)
                     .fetch_all(&mut *tx)
                     .await

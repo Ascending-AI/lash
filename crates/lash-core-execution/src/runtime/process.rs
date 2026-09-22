@@ -95,7 +95,9 @@ pub use references::ProcessLiveReferenceView;
 #[cfg(any(test, feature = "testing"))]
 pub use registry::reconcile_pruned_trigger_deliveries_interleaved;
 #[cfg(any(test, feature = "testing"))]
-pub use registry::{ConformanceProcessRegistry, ProcessRegistryTestSupport};
+pub use registry::{
+    ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
+};
 pub use registry::{
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ParentEndPlan, ProcessClockRebind, ProcessContinuationStore,
     ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport,

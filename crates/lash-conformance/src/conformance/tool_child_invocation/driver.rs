@@ -1,6 +1,7 @@
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 
 /// The full-lane group: seven children, one per driver lane.
 #[expect(

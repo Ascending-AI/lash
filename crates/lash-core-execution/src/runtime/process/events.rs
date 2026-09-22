@@ -650,6 +650,11 @@ impl<'de> Deserialize<'de> for ProcessEventPageToken {
             })
             .collect::<Result<Vec<_>, D::Error>>()?;
         let wire: Wire = serde_json::from_slice(&bytes).map_err(serde::de::Error::custom)?;
+        i64::try_from(wire.after_sequence).map_err(|_| {
+            serde::de::Error::custom(
+                "process event page token sequence exceeds the SQL cursor range",
+            )
+        })?;
         Ok(Self {
             process_id: wire.process_id,
             process_incarnation: wire.process_incarnation,

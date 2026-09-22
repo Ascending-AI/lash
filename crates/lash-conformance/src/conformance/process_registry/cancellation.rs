@@ -1,4 +1,5 @@
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 use lash_core::{CancelOrigin, CancelRequest};
 use pretty_assertions::assert_eq;
 

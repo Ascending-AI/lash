@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 
 /// Race-free control geometry for the FIG-1293 signal path: the target is
 /// worker-owned (`Rerunnable`), but this focused host deliberately installs no

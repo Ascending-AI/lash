@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::TurnFailureCode;
 
 use lashlang::LashlangArtifactStore as _;

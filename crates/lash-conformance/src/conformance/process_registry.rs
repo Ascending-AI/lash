@@ -21,6 +21,7 @@ mod turn_parent_end;
 use super::process_change_horizon::changes_after_full_relist_if_required;
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 use crate::{
     PluginError, ProcessObserverBy, ProcessRecord, ProcessRef, ProjectionWatermark,
     TestProcessRegistryWriteExt,
@@ -477,6 +478,12 @@ pub async fn refolded_process_record_matches_hot_projection(registry: Arc<dyn Pr
 
 pub async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn ProcessRegistry>) {
     reused_process_ids_refuse_superseded_incarnations_for(registry, "raw").await;
+}
+
+pub async fn process_event_page_tokens_reject_out_of_range_sql_cursors(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    event_paging::assert_out_of_range_tokens_are_rejected(registry).await;
 }
 
 pub async fn watched_process_registry_reused_process_ids_refuse_superseded_incarnations(

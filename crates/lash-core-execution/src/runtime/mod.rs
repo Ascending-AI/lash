@@ -166,9 +166,9 @@ pub use process::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
-    ConformanceProcessRegistry, PROCESS_REFUSAL_FIXTURE_PROCESS_ID, ProcessRegistryTestSupport,
-    TestLocalProcessRegistry, TestProcessRegistryWriteExt, accepted_process_registration,
-    refused_process_registrations,
+    ConformanceProcessRegistry, PROCESS_REFUSAL_FIXTURE_PROCESS_ID, ProcessEventLogTestSupport,
+    ProcessRegistryTestSupport, TestLocalProcessRegistry, TestProcessRegistryWriteExt,
+    accepted_process_registration, refused_process_registrations,
 };
 pub use process::{
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,

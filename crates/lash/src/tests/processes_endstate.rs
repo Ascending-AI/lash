@@ -3,7 +3,8 @@ use super::*;
 use lashlang::testing::ast_builders as b;
 
 use lash_core::{
-    ProcessEngine as _, ProcessQuery as _, ProcessRetention as _, TestProcessRegistryWriteExt,
+    ProcessEngine as _, ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRetention as _,
+    TestProcessRegistryWriteExt,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;

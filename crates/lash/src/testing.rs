@@ -67,6 +67,7 @@ pub mod conformance {
 
     #[cfg(feature = "rlm")]
     mod rlm {
+        use lash_core::ProcessEventLogTestSupport as _;
         use std::sync::Arc;
         use std::time::Duration;
 

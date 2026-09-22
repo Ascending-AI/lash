@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::controller::context::ProcessWorkflowStartFailure;
+use lash_core::ProcessEventLogTestSupport as _;
 
 mod helpers;
 use helpers::{TestTurnCancelWakeStep, test_turn_cancel_wake_step};

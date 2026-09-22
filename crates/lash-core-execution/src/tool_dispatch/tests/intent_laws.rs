@@ -1,7 +1,7 @@
 use super::*;
 use crate::ProcessId;
 use crate::SessionId;
-use crate::{ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _};
+use crate::{ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _};
 
 fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
     crate::ToolIntents::v3(

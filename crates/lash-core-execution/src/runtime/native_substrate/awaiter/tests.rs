@@ -1,6 +1,9 @@
 //! Unit tests for the process awaiter, watched registry, and work driver.
 
-use crate::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
+use crate::{
+    ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessRegistrar as _,
+    ProcessRetention as _,
+};
 use std::sync::{Arc, Mutex};
 
 use super::*;

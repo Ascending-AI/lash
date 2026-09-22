@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessQuery as _, ProcessRegistrar as _};
+use lash_core::{ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRegistrar as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 

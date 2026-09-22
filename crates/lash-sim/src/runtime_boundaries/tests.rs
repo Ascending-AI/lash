@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_sansio::ProcessId;
 
 fn event(kind: BoundaryKind, id: &str, payload: Value) -> BoundaryEvent {

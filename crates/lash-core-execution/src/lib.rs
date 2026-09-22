@@ -723,6 +723,8 @@ pub(crate) use provider::{
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ConformanceProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
+pub use runtime::ProcessEventLogTestSupport;
+#[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessRegistryTestSupport;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestLocalProcessRegistry;

@@ -777,7 +777,9 @@ pub mod process {
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).
     #[cfg(any(test, feature = "testing"))]
-    pub use lash_core::{ConformanceProcessRegistry, ProcessRegistryTestSupport};
+    pub use lash_core::{
+        ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
+    };
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
     /// projected into the wake input ([`ProcessValueSelector`]).

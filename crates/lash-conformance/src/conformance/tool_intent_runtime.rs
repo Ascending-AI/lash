@@ -1,3 +1,4 @@
+use crate::ProcessEventLogTestSupport as _;
 use crate::admit;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;

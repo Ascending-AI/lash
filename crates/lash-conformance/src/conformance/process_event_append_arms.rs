@@ -1,6 +1,7 @@
 //! Cross-backend contract for the two arms of a process-event append.
 
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;

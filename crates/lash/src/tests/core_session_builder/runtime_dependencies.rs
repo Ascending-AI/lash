@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::{
-    ProcessEventLog as _, ProcessObserverRegistry as _, ProcessRetention as _,
-    ProcessWakeOutbox as _,
+    ProcessEventLog as _, ProcessEventLogTestSupport as _, ProcessObserverRegistry as _,
+    ProcessRetention as _, ProcessWakeOutbox as _,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;

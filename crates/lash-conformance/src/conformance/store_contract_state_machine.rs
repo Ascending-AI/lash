@@ -5,6 +5,7 @@
 //! provide fresh handles; they do not carry a `proptest` dependency.
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 use crate::{
     LeaseOwnerIdentity, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome, ProcessObserverBy, ProcessRecord,

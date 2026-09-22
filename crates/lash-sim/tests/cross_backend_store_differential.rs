@@ -2248,6 +2248,7 @@ async fn compare_bounded_process_event_pages(
     postgres: &PostgresStorage,
     run_nonce: &str,
 ) {
+    // The differential verifies ordered Full/Lite pages of at most 127 events over 10,000 rows on both backends; bounded memory is inferred from the limited SQL reads (rendered-SQL pin), not measured.
     const EVENT_COUNT: u64 = 10_000;
     let process_id = lash_sansio::ProcessId::from(format!("event-pages-{run_nonce}"));
     let registration = || {

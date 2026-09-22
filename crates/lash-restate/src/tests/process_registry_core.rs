@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 
 #[tokio::test]
 pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {

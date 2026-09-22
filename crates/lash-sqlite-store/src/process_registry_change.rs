@@ -284,7 +284,8 @@ mod tests {
     use super::*;
     use crate::process_registry::tx_outcome;
     use lash_core::{
-        ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _,
+        ProcessRegistrar as _,
     };
 
     #[tokio::test]
