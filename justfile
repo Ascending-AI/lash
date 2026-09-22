@@ -374,12 +374,11 @@ floor:
   cd "{{repo}}"
   npm --prefix examples/workflow-graph-roundtrip/frontend ci
   printf '%s\n' \
-    'kiln test //:dev_tests //:feature_lane_tests //:workspace_clippy //:feature_lane_clippy' \
+    'kiln test //:dev_tests //:feature_lane_tests //:workspace_clippy //:feature_lane_clippy //:schema_checks' \
     'kiln fmt -- --check' \
     'git diff --check' \
     'scripts/ci/repository-gates.sh' \
-    'python3 scripts/generate-workflow-schemas.py --check' \
-    'npm --prefix examples/workflow-graph-roundtrip/frontend run check:types' \
+    'npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types' \
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
     | scripts/gate-table.sh
