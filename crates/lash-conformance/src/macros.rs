@@ -2063,14 +2063,8 @@ macro_rules! store_effect_group_closing_tests {
 /// deferred to `effect-group-conformance-e2e`).
 #[macro_export]
 macro_rules! signal_intent_tests {
-    ($fixture:block) => {
-        $crate::signal_intent_tests!(@catalogue [] $fixture);
-    };
-    ($(#[$attr:meta])+ $fixture:block) => {
-        $crate::signal_intent_tests!(@catalogue [$(#[$attr])*] $fixture);
-    };
-    (@catalogue $attrs:tt $fixture:block) => {
-        $crate::__signal_intent_register!($attrs $fixture;
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::__signal_intent_register!([$(#[$attr])*] $fixture;
             (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"));
     };
 }
@@ -2244,19 +2238,9 @@ macro_rules! __tool_child_invocation_register {
 /// differentiate.
 #[macro_export]
 macro_rules! tool_batch_group_tests {
-    ($fixture:block) => {
-        $crate::tool_batch_group_tests!(@catalogue [] $fixture);
-    };
-    ($(#[$attr:meta])+ $fixture:block) => {
-        $crate::tool_batch_group_tests!(@catalogue [$(#[$attr])*] $fixture);
-    };
-    (@catalogue $attrs:tt $fixture:block) => {
-        $crate::__tool_child_invocation_register!($attrs $fixture;
-            (
-                an_all_group_of_tool_children_yields_the_batch_replies,
-                "tool-batch-group-differential"
-            )
-        );
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
+            (an_all_group_of_tool_children_yields_the_batch_replies, "tool-batch-group-differential"));
     };
 }
 
