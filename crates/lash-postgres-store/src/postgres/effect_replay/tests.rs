@@ -116,6 +116,7 @@ impl GroupFixture {
             loser_disposition: lash_core::LoserPolicy::RunToCompletion,
             expected_children: 2,
             created_at_ms: 1_000,
+            lifecycle: lash_core::runtime::effect_replay_driver::EffectGroupLifecycle::Live,
         }
     }
 
