@@ -55,10 +55,16 @@ delegate_process_registrar!(
     inner,
     registration | _watched,
     _process_id,
-    forwarded | { forwarded.await },
+    forwarded | {
+        let record = forwarded.await?;
+        Ok(record)
+    },
     event | _watched,
     _process_id,
-    forwarded | { forwarded.await }
+    forwarded | {
+        let record = forwarded.await?;
+        Ok(record)
+    }
 );
 
 delegate_process_observer_registry!(ParentEndFault, inner);
@@ -68,7 +74,10 @@ delegate_process_event_log!(
     inner,
     event | _watched,
     _process_id,
-    forwarded | { forwarded.await }
+    forwarded | {
+        let receipt = forwarded.await?;
+        Ok(receipt)
+    }
 );
 
 delegate_process_tool_intents!(ParentEndFault, inner);
