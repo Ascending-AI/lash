@@ -70,6 +70,14 @@ pub enum EffectGroupLifecycle {
     },
     Closed {
         effective: EffectGroupCloseDisposition,
+        /// The durable twin of the SQL entries' cleared `closed` flag
+        /// (FIG-3481): a reopen is a new caller interest, so a reopened
+        /// closed entry serves the ranks a still-running loser has yet to
+        /// seat instead of answering `Closed`. The disposition itself stays
+        /// cumulative in `effective`. `#[serde(default)]` because index
+        /// records journaled before the flag existed decode as not reopened.
+        #[serde(default)]
+        reopened: bool,
         #[serde(with = "btree_map_as_pairs")]
         addresses: BTreeMap<usize, String>,
         live: EffectGroupIndexLiveRecord,
@@ -343,6 +351,7 @@ mod admission_tests {
             },
             EffectGroupLifecycle::Closed {
                 effective: EffectGroupCloseDisposition::RunToCompletion,
+                reopened: false,
                 addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
                 live: live_record(),
             },
@@ -367,6 +376,7 @@ mod admission_tests {
         );
         let cancelled = EffectGroupLifecycle::Closed {
             effective: EffectGroupCloseDisposition::Cancel,
+            reopened: false,
             addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
             live: live_record(),
         };

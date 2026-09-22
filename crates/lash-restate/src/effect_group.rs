@@ -621,7 +621,7 @@ impl EffectGroupIndex {
         Json(request): Json<EffectGroupOpenRequest>,
     ) -> HandlerResult<Json<EffectGroupOpenResponse>> {
         request.shape.validate_wire()?;
-        let Some(record) = load_index(&ctx).await? else {
+        let Some(mut record) = load_index(&ctx).await? else {
             let shape_digest = request.shape.digest()?;
             store_index(
                 &ctx,
@@ -652,14 +652,32 @@ impl EffectGroupIndex {
         if !record.live()?.shape.fences_equivalent(&request.shape) {
             return Ok(Json(EffectGroupOpenResponse::ShapeMismatch));
         }
-        Ok(Json(match record.lifecycle {
+        // A reopen is a new caller interest (FIG-3481): a non-refused Closed
+        // entry keeps its cumulative disposition but its reopened marker
+        // re-enables rank reads — the flag clear the SQL entries take.
+        let mut marked = false;
+        let response = match &mut record.lifecycle {
             EffectGroupLifecycle::Preparing { .. } => EffectGroupOpenResponse::ReopenedPreparing,
             EffectGroupLifecycle::Ready { .. } => EffectGroupOpenResponse::ReopenedReady,
-            EffectGroupLifecycle::Closed { effective, .. } => {
-                EffectGroupOpenResponse::ReopenedClosed { effective }
+            EffectGroupLifecycle::Closed {
+                effective,
+                reopened,
+                ..
+            } => {
+                if !matches!(effective, EffectGroupCloseDisposition::Refused { .. }) && !*reopened {
+                    *reopened = true;
+                    marked = true;
+                }
+                EffectGroupOpenResponse::ReopenedClosed {
+                    effective: effective.clone(),
+                }
             }
             EffectGroupLifecycle::Retired { .. } => EffectGroupOpenResponse::Retired,
-        }))
+        };
+        if marked {
+            store_index(&ctx, record);
+        }
+        Ok(Json(response))
     }
 
     #[handler]
@@ -836,6 +854,7 @@ impl EffectGroupIndex {
                     effective: EffectGroupCloseDisposition::Refused {
                         reason: request.reason.clone(),
                     },
+                    reopened: false,
                     addresses: BTreeMap::new(),
                     live: live.clone(),
                 };
@@ -1181,8 +1200,19 @@ impl EffectGroupIndex {
                 child_replay_key,
             }));
         }
-        Ok(Json(match record.lifecycle {
-            EffectGroupLifecycle::Closed { .. } => EffectGroupReadRankResponse::Closed,
+        Ok(Json(match &record.lifecycle {
+            // `Closed` answers a caller whose interest predates the close —
+            // a restored cursor — and any rank read on a refused close. A
+            // reopened caller parks like a live group: an RTC loser still
+            // lands, and a committed child under Cancel seats its rank when
+            // the drain finishes (FIG-3481).
+            EffectGroupLifecycle::Closed {
+                effective,
+                reopened,
+                ..
+            } if !reopened || matches!(effective, EffectGroupCloseDisposition::Refused { .. }) => {
+                EffectGroupReadRankResponse::Closed
+            }
             _ => EffectGroupReadRankResponse::NotSettled,
         }))
     }
@@ -1264,6 +1294,7 @@ impl EffectGroupIndex {
         let live = record.live()?.clone();
         record.lifecycle = EffectGroupLifecycle::Closed {
             effective: effective.into(),
+            reopened: false,
             addresses: addresses.clone(),
             live,
         };
