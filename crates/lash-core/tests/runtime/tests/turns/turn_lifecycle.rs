@@ -2020,3 +2020,147 @@ pub(super) async fn enqueue_config_patch_command(
     .await
     .expect("enqueue config patch command")
 }
+
+/// Scalar twin of the group-child presentation laws (FIG-3420): the ungrouped
+/// `complete_tool_call` path journals `PresentToolResult` under
+/// `{call_id}:present`, so a redriven turn serves the recorded
+/// `ToolPresentation` and the registered step never re-runs.
+#[tokio::test]
+pub(super) async fn a_presented_tool_result_replays_from_the_journal_on_redrive() {
+    let turn_id = TurnId::from("presentation-redrive");
+    let store = Arc::new(RecordingStore::default());
+    let controller: Arc<dyn lash_core::RuntimeEffectController> =
+        Arc::new(JournalReplayEffectController::default());
+    let step_runs = Arc::new(AtomicUsize::new(0));
+    let step: lash_core::facade_support::ToolPresentationStep = {
+        let step_runs = Arc::clone(&step_runs);
+        Arc::new(move |input: lash_core::plugin::ToolPresentationInput| {
+            step_runs.fetch_add(1, Ordering::SeqCst);
+            let mut next = input.previous;
+            next.parts
+                .push(lash_sansio::tool_output::ModelToolReturnPart::text(
+                    "[recorded]",
+                ));
+            Box::pin(async move { Ok::<_, lash_core::PluginError>(next) })
+        })
+    };
+    let plugin = Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(move |_| {
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                presentation_steps: vec![Arc::clone(&step)],
+                runtime_event: None,
+                external_registrar: None,
+            }))
+        }),
+    });
+    let transport = mock_provider(vec![
+        MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::ToolCall {
+                    call_id: "present-1".to_string(),
+                    tool_name: "echo_tool".to_string(),
+                    input_json: r#"{"value":"sample"}"#.to_string(),
+                    replay: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+        MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "done".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+    ]);
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![Arc::clone(&plugin) as Arc<dyn lash_core::facade_support::PluginFactory>],
+        Arc::new(EchoTool),
+        transport,
+        journal_replay_host(Arc::clone(&controller)),
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+    )
+    .await;
+    let input = TurnInput::text("run the tool");
+    let first = runtime
+        .run_turn_assembled(
+            input.clone(),
+            CancellationToken::new(),
+            lash_core::ScopedEffectController::shared(
+                Arc::clone(&controller),
+                lash_core::AdmittedScope::turn("root", &turn_id),
+            )
+            .expect("scope the first run"),
+        )
+        .await
+        .expect("the first run commits");
+    assert_eq!(
+        step_runs.load(Ordering::SeqCst),
+        1,
+        "the presentation step ran once on the first execution"
+    );
+    assert!(
+        active_conversation_messages(&first.state)
+            .iter()
+            .any(|message| {
+                message
+                    .parts
+                    .iter()
+                    .any(|part| part.content().contains("[recorded]"))
+            }),
+        "the presented text reached the conversation"
+    );
+
+    // The redrive: a fresh runtime over the same store and the same journaled
+    // controller, with an empty provider queue — every journaled effect,
+    // including `PresentToolResult`, replays from its record.
+    let replay_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(JournalRedriveStore {
+        inner: Arc::clone(&store),
+        application_history_available: true,
+        foreign_checkpoint_application: None,
+    });
+    let mut redriven = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![plugin as Arc<dyn lash_core::facade_support::PluginFactory>],
+        Arc::new(EchoTool),
+        mock_provider(Vec::new()),
+        journal_replay_host(Arc::clone(&controller)),
+        replay_store,
+    )
+    .await;
+    let replayed = redriven
+        .run_turn_assembled(
+            input,
+            CancellationToken::new(),
+            lash_core::ScopedEffectController::shared(
+                Arc::clone(&controller),
+                lash_core::AdmittedScope::turn("root", &turn_id),
+            )
+            .expect("scope the redrive"),
+        )
+        .await
+        .expect("the redrive replays the journaled turn");
+    assert!(
+        active_conversation_messages(&replayed.state)
+            .iter()
+            .any(|message| {
+                message
+                    .parts
+                    .iter()
+                    .any(|part| part.content().contains("[recorded]"))
+            }),
+        "the recorded presentation is served on replay"
+    );
+    assert_eq!(
+        step_runs.load(Ordering::SeqCst),
+        1,
+        "replay served the recorded presentation; the step did not re-run"
+    );
+}

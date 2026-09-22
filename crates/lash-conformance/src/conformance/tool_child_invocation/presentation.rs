@@ -422,7 +422,10 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             .expect("the group closes");
         drop(guard);
 
-        // The changed environment re-registers and reopens.
+        // This tier keeps no journal, so a re-registered opener is a new
+        // incarnation — not a replay: the group re-executes, the changed chain
+        // runs, and the law observes `[a][b2]`, which is exactly the bypass a
+        // durable replay must never serve.
         let (changed_factories, a2_runs, b2_runs) = ab2_steps();
         let _guard = register_opener_with_extras(
             &host,
@@ -439,13 +442,14 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
         );
         let (scoped, handle, replayed) = settle_rank_zero(&host, &scope, group).await;
         assert!(
-            presented_text(invocation_settlement(&replayed)).ends_with("[a][b]"),
-            "the recorded presentation wins over the changed chain"
+            presented_text(invocation_settlement(&replayed)).ends_with("[a][b2]"),
+            "a new opener incarnation re-runs rather than replaying: the fresh \
+             chain stamps [b2] — the answer a journaled replay must never give"
         );
         assert_eq!(
             a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
-            0,
-            "the changed environment's steps never ran"
+            2,
+            "the changed environment's steps ran under the new incarnation"
         );
         scoped
             .controller()

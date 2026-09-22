@@ -1103,6 +1103,15 @@ impl RuntimeEffectController for RecordingEffectController {
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await
             }
+            // The recorded presentation boundary (FIG-3420): delegated like
+            // every other command this double journals — the local executor
+            // runs the step chain once and the record above is what replay
+            // serves.
+            command @ RuntimeEffectCommand::PresentToolResult { .. } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
+                    .await
+            }
             RuntimeEffectCommand::Sleep { .. } => Ok(RuntimeEffectOutcome::Sleep),
             RuntimeEffectCommand::AwaitEvent { .. } => Ok(RuntimeEffectOutcome::AwaitEvent {
                 resolution: lash_core::Resolution::Ok(serde_json::json!(null)),

@@ -756,7 +756,7 @@ mod tests {
         }
     }
 
-    async fn project_tool_result(
+    async fn present_tool_result(
         budget: &Budget,
         ctx: ToolResultProjectionContext,
     ) -> Result<ModelToolReturn, PluginError> {
@@ -950,7 +950,7 @@ mod tests {
             retain_full_output: true,
             ..ToolOutputBudgetConfig::default()
         };
-        let projected = project_tool_result(&Budget::from(&config), ctx)
+        let projected = present_tool_result(&Budget::from(&config), ctx)
             .await
             .expect("project tool result");
         let output = render_model_return_parts(&projected.parts);
@@ -980,7 +980,7 @@ mod tests {
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
             retain_full_output: false,
         };
-        let projected = project_tool_result(
+        let projected = present_tool_result(
             &Budget::from(&config),
             test_context(
                 "search_tools",
@@ -997,7 +997,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_model_projection_preserves_projected_child_payloads() {
-        let projected = project_tool_result(
+        let projected = present_tool_result(
             &Budget::from(ToolOutputBudgetConfig::default()),
             test_context(
                 "batch",
@@ -1028,7 +1028,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_history_projection_recursively_projects_child_payloads() {
-        let projected = project_tool_result(
+        let projected = present_tool_result(
             &Budget::from(ToolOutputBudgetConfig {
                 limit: 8,
                 ..ToolOutputBudgetConfig::default()
@@ -1063,7 +1063,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_projection_decode_names_missing_required_row_field() {
-        let error = project_tool_result(
+        let error = present_tool_result(
             &Budget::from(ToolOutputBudgetConfig::default()),
             test_context(
                 "batch",
