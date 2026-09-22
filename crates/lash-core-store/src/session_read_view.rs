@@ -211,7 +211,7 @@ impl SessionReadView {
     /// The pinned basis may be `None`.
     /// Current-call feedback is available through
     /// `ProtocolBeforeLlmCallContext.latest_prompt_usage`.
-    pub fn last_prompt_usage(&self) -> Option<&crate::runtime::PromptUsage> {
+    pub fn last_prompt_usage(&self) -> Option<&crate::TokenUsage> {
         self.0.meta.last_prompt_usage.as_ref()
     }
 
@@ -241,7 +241,7 @@ pub struct SessionReadMeta {
     policy: SessionPolicy,
     turn_index: usize,
     token_usage: crate::TokenUsage,
-    last_prompt_usage: Option<crate::runtime::PromptUsage>,
+    last_prompt_usage: Option<crate::TokenUsage>,
     protocol_turn_options: crate::ProtocolTurnOptions,
 }
 impl SessionReadMeta {

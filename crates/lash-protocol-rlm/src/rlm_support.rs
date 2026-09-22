@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
-use lash_core::{PromptUsage, TextProjectionMetadata};
+use lash_core::{TextProjectionMetadata, TokenUsage};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 use lashlang::{
     BudgetedJsonProjectionConfig, BudgetedJsonProjector, Value as FlowValue, ValueProjectionContext,
@@ -74,7 +74,7 @@ pub(crate) fn decode_rlm_termination_options(
 /// does not have to expose the internal vocabulary type.
 pub fn format_budget_suffix(
     turn_index: usize,
-    usage: Option<&PromptUsage>,
+    usage: Option<&TokenUsage>,
     max_budget_tokens: Option<usize>,
 ) -> Option<String> {
     format_budget_suffix_with_vocabulary(
@@ -97,14 +97,14 @@ pub(crate) fn effective_budget_tokens(
 
 pub(crate) fn format_budget_suffix_with_vocabulary(
     turn_index: usize,
-    usage: Option<&PromptUsage>,
+    usage: Option<&TokenUsage>,
     max_budget_tokens: Option<usize>,
     vocabulary: crate::dialect::DialectPromptVocabulary,
     decomposition: bool,
 ) -> Option<String> {
     let max = max_budget_tokens?;
     let usage = usage?;
-    let used = usage.context_budget_tokens;
+    let used = usage.total().max(0) as usize;
     if used == 0 {
         return None;
     }

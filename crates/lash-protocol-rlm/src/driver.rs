@@ -9,7 +9,7 @@ use lash_core::llm::types::{LlmContentBlock, LlmMessage};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
-    LlmRequest, ProjectorContext, PromptUsage, ProtocolBuildInput, TurnDriverConfig,
+    LlmRequest, ProjectorContext, ProtocolBuildInput, TokenUsage, TurnDriverConfig,
     TurnDriverPreamble,
 };
 use lash_lashlang_runtime::LashlangSurface;
@@ -29,14 +29,14 @@ use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 /// from `TurnTransformContext` each turn and stores it here so the
 /// projector can render the budget suffix into the volatile turn-tail
 /// message — keeping the cached system prefix byte-stable.
-pub type SharedPromptUsage = Arc<RwLock<Option<PromptUsage>>>;
+pub type SharedUsage = Arc<RwLock<Option<TokenUsage>>>;
 
 #[derive(Clone)]
 pub struct RlmProjectorConfig {
     pub discovery: Option<lash_core::ToolDiscovery>,
     pub max_output_chars: usize,
     pub max_budget_tokens: Option<usize>,
-    pub last_prompt_usage: SharedPromptUsage,
+    pub last_prompt_usage: SharedUsage,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub lashlang_surface: LashlangSurface,
 }
@@ -45,7 +45,7 @@ pub(crate) struct RlmPreambleConfig {
     pub(crate) discovery: Option<lash_core::ToolDiscovery>,
     pub(crate) max_output_chars: usize,
     pub(crate) max_budget_tokens: Option<usize>,
-    pub(crate) last_prompt_usage: SharedPromptUsage,
+    pub(crate) last_prompt_usage: SharedUsage,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
 }
 
@@ -286,7 +286,7 @@ struct RlmContextProjector {
     prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
-    last_prompt_usage: SharedPromptUsage,
+    last_prompt_usage: SharedUsage,
     bound_variables_prompt: SharedBoundVariablesPrompt,
     dialect: Arc<TypescriptDialect>,
 }

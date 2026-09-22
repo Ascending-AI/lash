@@ -124,8 +124,7 @@ pub(super) const LASH_REQUEST_BODY_JSON_OMITTED_REASON: &str =
 pub(super) const LASH_REQUEST_BODY_LEN: &str = "lash.request.body_len";
 pub(super) const LASH_REQUEST_BODY_SHA256: &str = "lash.request.body_sha256";
 pub(super) const LASH_RETRY_ATTEMPTS_JSON: &str = "lash.retry.attempts_json";
-pub(super) const LASH_COMPACTION_CONTEXT_BUDGET_TOKENS: &str =
-    "lash.compaction.context_budget_tokens";
+pub(super) const LASH_COMPACTION_USED_TOKENS: &str = "lash.compaction.used_tokens";
 pub(super) const LASH_COMPACTION_DROPPED_PREFIX_MESSAGES: &str =
     "lash.compaction.dropped_prefix_messages";
 pub(super) const LASH_COMPACTION_INSTRUCTIONS_PRESENT: &str =

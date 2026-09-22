@@ -22487,9 +22487,9 @@
           "last_prompt_usage": {
             "cache_read_input_tokens": 0,
             "cache_write_input_tokens": 0,
-            "context_budget_tokens": 7,
             "input_tokens": 5,
-            "prompt_context_tokens": 5
+            "output_tokens": 2,
+            "reasoning_output_tokens": 0
           },
           "protocol_turn_options": {
             "payload": {},
@@ -22620,9 +22620,9 @@
             "last_prompt_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
-              "context_budget_tokens": 7,
               "input_tokens": 5,
-              "prompt_context_tokens": 5
+              "output_tokens": 2,
+              "reasoning_output_tokens": 0
             },
             "protocol_turn_options": {
               "payload": {},
@@ -22792,9 +22792,9 @@
           "last_prompt_usage": {
             "cache_read_input_tokens": 0,
             "cache_write_input_tokens": 0,
-            "context_budget_tokens": 7,
             "input_tokens": 5,
-            "prompt_context_tokens": 5
+            "output_tokens": 2,
+            "reasoning_output_tokens": 0
           },
           "protocol_turn_options": {
             "payload": {},
@@ -22980,9 +22980,9 @@
             "last_prompt_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
-              "context_budget_tokens": 7,
               "input_tokens": 5,
-              "prompt_context_tokens": 5
+              "output_tokens": 2,
+              "reasoning_output_tokens": 0
             },
             "protocol_turn_options": {
               "payload": {},
@@ -23223,9 +23223,9 @@
           "last_prompt_usage": {
             "cache_read_input_tokens": 0,
             "cache_write_input_tokens": 0,
-            "context_budget_tokens": 11,
             "input_tokens": 7,
-            "prompt_context_tokens": 7
+            "output_tokens": 4,
+            "reasoning_output_tokens": 0
           },
           "protocol_turn_options": {
             "payload": {},
@@ -23346,9 +23346,9 @@
             "last_prompt_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
-              "context_budget_tokens": 11,
               "input_tokens": 7,
-              "prompt_context_tokens": 7
+              "output_tokens": 4,
+              "reasoning_output_tokens": 0
             },
             "protocol_turn_options": {
               "payload": {},
@@ -23498,9 +23498,9 @@
           "last_prompt_usage": {
             "cache_read_input_tokens": 0,
             "cache_write_input_tokens": 0,
-            "context_budget_tokens": 11,
             "input_tokens": 7,
-            "prompt_context_tokens": 7
+            "output_tokens": 4,
+            "reasoning_output_tokens": 0
           },
           "protocol_turn_options": {
             "payload": {},
@@ -23666,9 +23666,9 @@
             "last_prompt_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
-              "context_budget_tokens": 11,
               "input_tokens": 7,
-              "prompt_context_tokens": 7
+              "output_tokens": 4,
+              "reasoning_output_tokens": 0
             },
             "protocol_turn_options": {
               "payload": {},
@@ -23889,9 +23889,9 @@
           "last_prompt_usage": {
             "cache_read_input_tokens": 0,
             "cache_write_input_tokens": 0,
-            "context_budget_tokens": 10,
             "input_tokens": 6,
-            "prompt_context_tokens": 6
+            "output_tokens": 4,
+            "reasoning_output_tokens": 0
           },
           "protocol_turn_options": {
             "payload": {},
@@ -24012,9 +24012,9 @@
             "last_prompt_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
-              "context_budget_tokens": 10,
               "input_tokens": 6,
-              "prompt_context_tokens": 6
+              "output_tokens": 4,
+              "reasoning_output_tokens": 0
             },
             "protocol_turn_options": {
               "payload": {},
@@ -24164,9 +24164,9 @@
           "last_prompt_usage": {
             "cache_read_input_tokens": 0,
             "cache_write_input_tokens": 0,
-            "context_budget_tokens": 10,
             "input_tokens": 6,
-            "prompt_context_tokens": 6
+            "output_tokens": 4,
+            "reasoning_output_tokens": 0
           },
           "protocol_turn_options": {
             "payload": {},
@@ -24332,9 +24332,9 @@
             "last_prompt_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
-              "context_budget_tokens": 10,
               "input_tokens": 6,
-              "prompt_context_tokens": 6
+              "output_tokens": 4,
+              "reasoning_output_tokens": 0
             },
             "protocol_turn_options": {
               "payload": {},
@@ -24513,9 +24513,9 @@
           "last_prompt_usage": {
             "cache_read_input_tokens": 0,
             "cache_write_input_tokens": 0,
-            "context_budget_tokens": 10,
             "input_tokens": 6,
-            "prompt_context_tokens": 6
+            "output_tokens": 4,
+            "reasoning_output_tokens": 0
           },
           "protocol_turn_options": {
             "payload": {},
@@ -24726,9 +24726,9 @@
             "last_prompt_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
-              "context_budget_tokens": 10,
               "input_tokens": 6,
-              "prompt_context_tokens": 6
+              "output_tokens": 4,
+              "reasoning_output_tokens": 0
             },
             "protocol_turn_options": {
               "payload": {},

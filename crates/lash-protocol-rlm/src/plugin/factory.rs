@@ -14,7 +14,7 @@ use lash_lashlang_runtime::{
 use super::registration::register_rlm_protocol_plugin;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
 use crate::dialect::{RlmDialectServices, TypescriptDialect};
-use crate::driver::SharedPromptUsage;
+use crate::driver::SharedUsage;
 use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::{ProjectionRegistry, ProjectionResolver};
 
@@ -425,7 +425,7 @@ pub type ModuleCompileOutput = lashlang::ModuleCompileOutput;
 struct RlmProtocolPlugin {
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedPromptUsage,
+    last_prompt_usage: SharedUsage,
 }
 
 impl SessionPlugin for RlmProtocolPlugin {

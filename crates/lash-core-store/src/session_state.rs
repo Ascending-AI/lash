@@ -6,7 +6,6 @@
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
-use lash_sansio::PromptUsage;
 
 use crate::session_model::{Message, SessionPolicy, TokenUsage, plugin_message_to_message};
 use crate::{PersistedTurnState, SessionSnapshot};
@@ -619,7 +618,7 @@ pub struct RuntimeSessionState {
     #[serde(default)]
     pub token_usage: TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_usage: Option<PromptUsage>,
+    pub last_prompt_usage: Option<TokenUsage>,
     #[serde(default)]
     pub protocol_turn_options: crate::ProtocolTurnOptions,
     /// Durable authority used to rebuild the session's Tool Catalog policy.

@@ -126,7 +126,10 @@ pub use lashlang_graph::{
 /// execution sites, language-node/tool cross-links, and Restate correlation.
 /// Version 28 (FIG-3461) adds generation-qualified observation identity,
 /// typed child process identity, and replay-stable bounded graph snapshots.
-pub const TRACE_SCHEMA_VERSION: u32 = 28;
+/// Version 29 (FIG-1961) renames the compaction decision fields from
+/// `context_budget_tokens` to `used_tokens`: the value is now the checked
+/// provider-reported usage, not a derived budget snapshot.
+pub const TRACE_SCHEMA_VERSION: u32 = 29;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -408,7 +411,7 @@ pub enum TraceEvent {
         tool_schemas: Vec<TraceToolSpec>,
     },
     CompactionNeeded {
-        context_budget_tokens: usize,
+        used_tokens: usize,
         max_context_tokens: usize,
         threshold_tokens: usize,
     },
@@ -420,7 +423,7 @@ pub enum TraceEvent {
         summary_nodes: usize,
     },
     PromptViewPruned {
-        context_budget_tokens: usize,
+        used_tokens: usize,
         max_context_tokens: usize,
         dropped_prefix_messages: usize,
         retained_messages: usize,

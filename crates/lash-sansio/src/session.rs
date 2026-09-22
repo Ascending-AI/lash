@@ -178,16 +178,6 @@ pub struct ExecResponse {
     pub terminal_finish: Option<serde_json::Value>,
 }
 
-/// Exact prompt-usage snapshot from the most recent completed LLM call.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct PromptUsage {
-    pub prompt_context_tokens: usize,
-    pub input_tokens: usize,
-    pub cache_read_input_tokens: usize,
-    pub cache_write_input_tokens: usize,
-    pub context_budget_tokens: usize,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -294,8 +294,8 @@ fn assembled_prompt_fragments_with_projection(
 
     // The budget escalation tails, at each of the three thresholds.
     for used in [600usize, 950, 1_200] {
-        let usage = lash_core::PromptUsage {
-            context_budget_tokens: used,
+        let usage = lash_core::TokenUsage {
+            input_tokens: used as i64,
             ..Default::default()
         };
         if let Some(suffix) = crate::rlm_support::format_budget_suffix_with_vocabulary(

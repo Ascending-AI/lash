@@ -39,7 +39,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// The turn pipeline retains the projection basis captured before the
     /// logical turn began so a persisted continuation cannot rebuild history
     /// from a later call in the same turn.
-    pub(super) latest_prompt_usage: Option<crate::PromptUsage>,
+    pub(super) latest_prompt_usage: Option<crate::TokenUsage>,
     pub(super) llm_stream_summaries: HashMap<usize, LlmStreamSummary>,
     /// Reasoning parts published by the current live LLM effect.
     ///
