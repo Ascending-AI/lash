@@ -270,6 +270,16 @@ rewritten. Its eligibility is derived, not stored:
   item is treated as `NextTurn` by rule. The row is not updated; the claim
   statement derives the effective delivery from T's state.
 
+**Admission validates the address.** At admission, under the session lock, a
+`Delivery::Turn { turn_id: T, .. }` item is accepted only if T is the session's
+running turn, or a turn of this session whose final commit is already recorded.
+The second case behaves as `NextTurn` from the moment it is stored, by the rule
+above. An address to a turn unknown to the session is refused with the typed
+error `TurnAddressUnknown { turn_id }` and is never stored. Today admission does
+not check the address at all (the host injection path enqueues
+`active_turn(turn_id, AfterWork)` for any id). Without the check, a row
+addressed to a turn that never runs would never become deliverable.
+
 This deletes the re-defer rewrite that every final commit and orphan repair
 perform today (§14). It also removes the root cause of FIG-3544: the stored
 delivery can no longer drift from what was submitted, so an identical retry
@@ -537,6 +547,10 @@ advisory lock on the merged table.
    while t runs. No write after admission changes a row's delivery; after t's
    final commit a `Turn{t}` item is claimed exactly where a `NextTurn` item at
    its position would be.
+   Admission of a `Turn{T}` item succeeds only when T is the session's running
+   turn or a turn whose final commit is recorded (then deliverable as
+   `NextTurn` at once). An unknown T is refused with `TurnAddressUnknown`, and
+   no row, tombstone or sequence number is written.
 6. **Coalescing.** Adjacent config patches share one head commit; any other
    command is claimed alone.
 7. **Between runs.** No command applies between the physical turns of one
