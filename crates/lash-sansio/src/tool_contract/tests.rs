@@ -406,7 +406,7 @@ fn static_output_contract_keeps_existing_compact_docs_and_serde_shape() {
     assert_eq!(tool.compact_contract().returns, "str");
 
     let serialized = serde_json::to_value(&tool).expect("serialize");
-    assert!(serialized.get("output_contract").is_none());
+    assert!(serialized["contract"].get("output_contract").is_none());
     let deserialized: ToolDefinition = serde_json::from_value(serialized).expect("deserialize");
     assert!(deserialized.contract.output_contract.is_static());
 }
@@ -472,125 +472,129 @@ fn dynamic_output_contract_renders_default_schema() {
 #[test]
 fn json_schema_loaded_contract_matches_hardcoded_renderer() {
     let tool: ToolDefinition = serde_json::from_value(serde_json::json!({
-        "id": "tool:mcp__appworld__spotify_search_songs",
-        "name": "mcp__appworld__spotify_search_songs",
-        "description": "[MCP appworld] Search for songs with a query.",
-        "examples": ["search songs by genre"],
-        "input_schema": {
-            "canonical": {
-            "type": "object",
-            "properties": {
-                "access_token": {
-                    "type": "string",
-                    "description": "Access token obtained from spotify app login."
+        "manifest": {
+            "id": "tool:mcp__appworld__spotify_search_songs",
+            "name": "mcp__appworld__spotify_search_songs",
+            "description": "[MCP appworld] Search for songs with a query.",
+        },
+        "contract": {
+            "examples": ["search songs by genre"],
+            "input_schema": {
+                "canonical": {
+                "type": "object",
+                "properties": {
+                    "access_token": {
+                        "type": "string",
+                        "description": "Access token obtained from spotify app login."
+                    },
+                    "genre": {
+                        "type": ["string", "null"],
+                        "description": "Only include songs from this genre.",
+                        "default": null
+                    },
+                    "page_limit": {
+                        "type": "integer",
+                        "description": "Maximum number of songs to return.",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 5
+                    },
+                    "sort_by": {
+                        "type": ["string", "null"],
+                        "description": "Field to sort by. Prefix with '-' for descending order.",
+                        "default": null
+                    }
                 },
-                "genre": {
-                    "type": ["string", "null"],
-                    "description": "Only include songs from this genre.",
-                    "default": null
-                },
-                "page_limit": {
-                    "type": "integer",
-                    "description": "Maximum number of songs to return.",
-                    "minimum": 1,
-                    "maximum": 20,
-                    "default": 5
-                },
-                "sort_by": {
-                    "type": ["string", "null"],
-                    "description": "Field to sort by. Prefix with '-' for descending order.",
-                    "default": null
+                "required": ["access_token"],
+                "additionalProperties": false
                 }
             },
-            "required": ["access_token"],
-            "additionalProperties": false
-            }
-        },
-        "output_schema": {
-            "canonical": {
-            "anyOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "response": {
-                            "type": "array",
-                            "description": "Matched songs.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "album_id": {
-                                        "type": ["integer", "null"],
-                                        "description": "Album identifier when the song belongs to an album."
-                                    },
-                                    "album_title": { "type": ["string", "null"] },
-                                    "artists": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "id": { "type": "integer" },
-                                                "name": { "type": "string" }
-                                            },
-                                            "required": ["id", "name"]
+            "output_schema": {
+                "canonical": {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "response": {
+                                "type": "array",
+                                "description": "Matched songs.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "album_id": {
+                                            "type": ["integer", "null"],
+                                            "description": "Album identifier when the song belongs to an album."
+                                        },
+                                        "album_title": { "type": ["string", "null"] },
+                                        "artists": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "id": { "type": "integer" },
+                                                    "name": { "type": "string" }
+                                                },
+                                                "required": ["id", "name"]
+                                            }
+                                        },
+                                        "duration": { "type": "integer" },
+                                        "genre": { "type": "string" },
+                                        "like_count": { "type": "integer" },
+                                        "play_count": {
+                                            "type": "integer",
+                                            "description": "Number of times the song was played.",
+                                            "minimum": 0
+                                        },
+                                        "rating": { "type": "number" },
+                                        "release_date": {
+                                            "type": "string",
+                                            "description": "Song release date in YYYY-MM-DD format."
+                                        },
+                                        "song_id": {
+                                            "type": "integer",
+                                            "description": "Stable song identifier."
+                                        },
+                                        "title": {
+                                            "type": "string",
+                                            "description": "Song title."
                                         }
                                     },
-                                    "duration": { "type": "integer" },
-                                    "genre": { "type": "string" },
-                                    "like_count": { "type": "integer" },
-                                    "play_count": {
-                                        "type": "integer",
-                                        "description": "Number of times the song was played.",
-                                        "minimum": 0
-                                    },
-                                    "rating": { "type": "number" },
-                                    "release_date": {
+                                    "required": [
+                                        "album_id",
+                                        "album_title",
+                                        "artists",
+                                        "duration",
+                                        "genre",
+                                        "like_count",
+                                        "play_count",
+                                        "rating",
+                                        "release_date",
+                                        "song_id",
+                                        "title"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": ["response"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "response": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {
                                         "type": "string",
-                                        "description": "Song release date in YYYY-MM-DD format."
-                                    },
-                                    "song_id": {
-                                        "type": "integer",
-                                        "description": "Stable song identifier."
-                                    },
-                                    "title": {
-                                        "type": "string",
-                                        "description": "Song title."
+                                        "description": "Failure or status message."
                                     }
                                 },
-                                "required": [
-                                    "album_id",
-                                    "album_title",
-                                    "artists",
-                                    "duration",
-                                    "genre",
-                                    "like_count",
-                                    "play_count",
-                                    "rating",
-                                    "release_date",
-                                    "song_id",
-                                    "title"
-                                ]
+                                "required": ["message"]
                             }
-                        }
-                    },
-                    "required": ["response"]
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "response": {
-                            "type": "object",
-                            "properties": {
-                                "message": {
-                                    "type": "string",
-                                    "description": "Failure or status message."
-                                }
-                            },
-                            "required": ["message"]
-                        }
-                    },
-                    "required": ["response"]
+                        },
+                        "required": ["response"]
+                    }
+                ]
                 }
-            ]
             }
         }
     }))
@@ -759,86 +763,90 @@ fn json_schema_loaded_contract_matches_hardcoded_renderer() {
 #[test]
 fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
     let tool: ToolDefinition = serde_json::from_value(serde_json::json!({
-        "id": "tool:mcp__appworld__spotify_show_album_library",
-        "name": "mcp__appworld__spotify_show_album_library",
-        "description": "[MCP appworld] Search or show a list of albums in your album library.",
-        "examples": ["show album library"],
-        "input_schema": {
-            "canonical": {
-            "type": "object",
-            "properties": {
-                "access_token": {
-                    "type": "string",
-                    "description": "Access token obtained from spotify app login."
+        "manifest": {
+            "id": "tool:mcp__appworld__spotify_show_album_library",
+            "name": "mcp__appworld__spotify_show_album_library",
+            "description": "[MCP appworld] Search or show a list of albums in your album library.",
+        },
+        "contract": {
+            "examples": ["show album library"],
+            "input_schema": {
+                "canonical": {
+                "type": "object",
+                "properties": {
+                    "access_token": {
+                        "type": "string",
+                        "description": "Access token obtained from spotify app login."
+                    },
+                    "page_index": {
+                        "type": "integer",
+                        "description": "The index of the page to return.",
+                        "minimum": 0,
+                        "default": 0
+                    },
+                    "page_limit": {
+                        "type": "integer",
+                        "description": "The maximum number of results to return per page.",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 5
+                    }
                 },
-                "page_index": {
-                    "type": "integer",
-                    "description": "The index of the page to return.",
-                    "minimum": 0,
-                    "default": 0
-                },
-                "page_limit": {
-                    "type": "integer",
-                    "description": "The maximum number of results to return per page.",
-                    "minimum": 1,
-                    "maximum": 20,
-                    "default": 5
+                "required": ["access_token"]
                 }
             },
-            "required": ["access_token"]
-            }
-        },
-        "output_schema": {
-            "canonical": {
-            "type": "object",
-            "properties": {
-                "response": {
-                    "anyOf": [
-                        {
-                            "type": "array",
-                            "description": "Albums in the user's library.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "added_at": {
-                                        "description": "When the album was added to the library.",
-                                        "anyOf": [
-                                            { "type": "string" },
-                                            { "type": "null" }
-                                        ]
+            "output_schema": {
+                "canonical": {
+                "type": "object",
+                "properties": {
+                    "response": {
+                        "anyOf": [
+                            {
+                                "type": "array",
+                                "description": "Albums in the user's library.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "added_at": {
+                                            "description": "When the album was added to the library.",
+                                            "anyOf": [
+                                                { "type": "string" },
+                                                { "type": "null" }
+                                            ]
+                                        },
+                                        "album_id": { "type": "integer" },
+                                        "genre": {
+                                            "type": "string",
+                                            "description": "Album genre.",
+                                            "minLength": 1
+                                        },
+                                        "song_ids": {
+                                            "type": "array",
+                                            "items": { "type": "integer" }
+                                        },
+                                        "title": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
                                     },
-                                    "album_id": { "type": "integer" },
-                                    "genre": {
-                                        "type": "string",
-                                        "description": "Album genre.",
-                                        "minLength": 1
-                                    },
-                                    "song_ids": {
-                                        "type": "array",
-                                        "items": { "type": "integer" }
-                                    },
-                                    "title": {
-                                        "type": "string",
-                                        "minLength": 1
-                                    }
-                                },
-                                "required": ["added_at", "album_id", "genre", "song_ids", "title"]
-                            }
-                        },
-                        {
-                            "type": "object",
-                            "properties": {
-                                "message": {
-                                    "type": "string",
-                                    "description": "Failure or status message."
+                                    "required": ["added_at", "album_id", "genre", "song_ids", "title"]
                                 }
                             },
-                            "required": ["message"]
-                        }
-                    ]
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "message": {
+                                        "type": "string",
+                                        "description": "Failure or status message."
+                                    }
+                                },
+                                "required": ["message"]
+                            }
+                        ]
+                    }
+                },
+                "required": ["response"]
                 }
-            },
-            "required": ["response"]
             }
         }
     }))
@@ -944,9 +952,12 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
 #[test]
 fn tool_bindings_serde_defaults_are_empty() {
     let tool: ToolDefinition = serde_json::from_value(serde_json::json!({
-        "id": "tool:read_file",
-        "name": "read_file",
-        "description": "Read a file"
+        "manifest": {
+            "id": "tool:read_file",
+            "name": "read_file",
+            "description": "Read a file"
+        },
+        "contract": {}
     }))
     .unwrap();
     assert!(tool.manifest.bindings.is_empty());
@@ -967,7 +978,10 @@ fn tool_bindings_round_trip_as_opaque_metadata() {
     );
 
     let encoded = serde_json::to_value(&with_metadata).expect("tool json");
-    assert_eq!(encoded["bindings"]["example.binding"]["name"], "read");
+    assert_eq!(
+        encoded["manifest"]["bindings"]["example.binding"]["name"],
+        "read"
+    );
     let decoded: ToolDefinition = serde_json::from_value(encoded).expect("round trip");
     assert_eq!(decoded.manifest.bindings["example.binding"]["name"], "read");
 }

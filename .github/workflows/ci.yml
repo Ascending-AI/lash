@@ -487,6 +487,7 @@ jobs:
           python3 scripts/test_schema_validation.py
           python3 scripts/test_dev_test.py
           python3 scripts/test_launcher_test_sandbox.py
+          python3 scripts/test_check_checkpoint_component_flatten.py
           python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_check_facade_only_examples.py
@@ -1515,6 +1516,9 @@ jobs:
 
       - name: Check production file-size budget
         run: bash scripts/check-production-file-size.sh
+
+      - name: Check checkpoint-component flatten boundary
+        run: python3 scripts/check_checkpoint_component_flatten.py
 
   unicode-tests:
     name: Test deferred Unicode suites

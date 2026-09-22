@@ -239,8 +239,8 @@ fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
 /// Refusal witness (FIG-1123): the immediate predecessor head is refused by
 /// the strict schema-version fence every store backend decodes through.
 #[test]
-fn immediate_predecessor_head_meta_v9_is_refused() {
-    const PREDECESSOR: u32 = 9;
+fn immediate_predecessor_head_meta_v10_is_refused() {
+    const PREDECESSOR: u32 = 10;
     assert_eq!(
         PREDECESSOR + 1,
         SESSION_HEAD_META_SCHEMA_VERSION,

@@ -91,7 +91,7 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::LanguageRuntimeValue {
-                operation: "deferred_tool_resolution:v1:[\"web.fetch\"]".to_string(),
+                operation: "deferred_tool_resolution:v2:[\"web.fetch\"]".to_string(),
             },
             // FIG-2910 intentionally consumes one Restate journal ordinal
             // before any dependent effect in a resource-bearing ExecCode body.

@@ -7,6 +7,10 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v22 nests ToolDefinition's manifest and contract under named fields instead
+// of `serde(flatten)`, so the canonical pre-pass can declare field order
+// through the whole envelope (FIG-1210). A pre-cutover flat definition fails
+// decode rather than being normalized, so the boundary is a version.
 // v21 carries VM continuation v14 and bytecode v15. TypeScript is the only RLM
 // language (ADR 0096), so the instruction set loses the deep-copy instructions
 // the retired surface compiled to: a snapshot written before the cutover parks
@@ -43,7 +47,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 21;
+pub const RLM_SNAPSHOT_VERSION: u32 = 22;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
