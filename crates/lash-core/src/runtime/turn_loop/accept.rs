@@ -670,7 +670,7 @@ impl LashRuntime {
     pub async fn stream_prepared_turn(
         &mut self,
         messages: crate::MessageSequence,
-        previous_prompt_usage: Option<PromptUsage>,
+        previous_prompt_usage: Option<TokenUsage>,
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
         protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
         turn_context: crate::TurnContext,

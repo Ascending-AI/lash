@@ -746,7 +746,7 @@ pub use runtime::{
     ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone, ProcessToolIntents,
     ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
     ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
-    ProjectionWatermark, PromptUsage, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
+    ProjectionWatermark, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
     ProtocolTurnExtension, ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy,
     QueuedDrainRequest, QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt,
     QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority,

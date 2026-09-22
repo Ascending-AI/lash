@@ -239,7 +239,7 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
             last_prompt_context_tokens: ctx
                 .prompt_usage
                 .as_ref()
-                .map(|usage: &lash::runtime::PromptUsage| usage.prompt_context_tokens),
+                .map(|usage: &lash::usage::TokenUsage| usage.input_total().max(0) as usize),
         };
         *self.observed.lock_recover() = Some(observation.clone());
 

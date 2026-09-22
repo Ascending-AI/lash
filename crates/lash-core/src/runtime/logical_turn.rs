@@ -148,7 +148,7 @@ pub(super) struct LogicalTurnCommitEffects {
 
 pub(super) struct PreparedLogicalTurn {
     pub(super) messages: crate::MessageSequence,
-    pub(super) previous_prompt_usage: Option<PromptUsage>,
+    pub(super) previous_prompt_usage: Option<TokenUsage>,
     pub(super) protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     pub(super) protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
     pub(super) turn_context: crate::TurnContext,

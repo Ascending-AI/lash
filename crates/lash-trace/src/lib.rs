@@ -371,7 +371,7 @@ pub enum TraceEvent {
         tool_schemas: Vec<TraceToolSpec>,
     },
     ContextCompactionNeeded {
-        context_budget_tokens: usize,
+        used_tokens: usize,
         max_context_tokens: usize,
         threshold_tokens: usize,
     },
@@ -383,7 +383,7 @@ pub enum TraceEvent {
         summary_nodes: usize,
     },
     PromptViewPruned {
-        context_budget_tokens: usize,
+        used_tokens: usize,
         max_context_tokens: usize,
         dropped_prefix_messages: usize,
         retained_messages: usize,

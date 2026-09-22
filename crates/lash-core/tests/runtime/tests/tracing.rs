@@ -1451,7 +1451,7 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
 }
 
 #[test]
-fn normalize_prompt_usage_uses_prompt_total() {
+fn nonzero_usage_carries_the_last_call_verbatim() {
     let usage = TokenUsage {
         input_tokens: 80,
         output_tokens: 0,
@@ -1459,7 +1459,9 @@ fn normalize_prompt_usage_uses_prompt_total() {
         cache_write_input_tokens: 0,
         reasoning_output_tokens: 0,
     };
-    let prompt_usage = normalize_prompt_usage(&usage).expect("prompt usage");
-    assert_eq!(prompt_usage.prompt_context_tokens, 100);
-    assert_eq!(prompt_usage.context_budget_tokens, 100);
+    let carried = nonzero_usage(usage.clone()).expect("nonzero usage is carried");
+    assert_eq!(carried, usage);
+    assert_eq!(carried.input_total(), 100);
+    assert_eq!(carried.total(), 100);
+    assert_eq!(nonzero_usage(TokenUsage::default()), None);
 }

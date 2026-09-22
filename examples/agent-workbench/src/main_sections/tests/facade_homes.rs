@@ -428,12 +428,9 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
         let ctx = lash::plugins::TurnTransformContext {
             session_id: state.session_id.clone(),
             state: state.read_view().expect("snapshot frame scope resolves"),
-            prompt_usage: Some(lash::runtime::PromptUsage {
-                prompt_context_tokens: 30_000,
+            prompt_usage: Some(lash::usage::TokenUsage {
                 input_tokens: 30_000,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                context_budget_tokens: 30_000,
+                ..lash::usage::TokenUsage::default()
             }),
             max_context_tokens: Some(context_window_tokens),
             sessions: manager.clone(),

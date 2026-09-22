@@ -8,7 +8,7 @@ use crate::session_graph_integrity::{
     ancestry_indices, graph_node_indices, validate_graph_parent_topology,
 };
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
-use crate::{BaseRenderCache, ClockWallTime, Message, PromptUsage, TokenUsage};
+use crate::{BaseRenderCache, ClockWallTime, Message, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_sansio::core_support::MessageCoreSupport;
 
@@ -449,7 +449,7 @@ pub struct PersistedTurnState {
     #[serde(default)]
     pub token_usage: TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_usage: Option<PromptUsage>,
+    pub last_prompt_usage: Option<TokenUsage>,
     #[serde(default)]
     pub protocol_turn_options: crate::ProtocolTurnOptions,
 }

@@ -24,9 +24,7 @@ use lash_core::plugin::{
     PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin, TurnContextTransform,
     TurnTransformContext,
 };
-use lash_core::{
-    Message, MessageOrigin, MessageRole, Part, PartKind, PromptUsage, SessionSnapshot,
-};
+use lash_core::{Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot, TokenUsage};
 
 const PRUNE_RECENT_USER_TURNS: usize = 2;
 pub const ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS: usize = 20_000;
@@ -190,28 +188,27 @@ pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize)
 /// so it carries no pressure at all — the same filter the sans-io section builder applies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ContextPressure {
-    context_budget_tokens: usize,
+    used_tokens: usize,
     max_context_tokens: usize,
 }
 
 impl ContextPressure {
     fn derive(
-        prompt_usage: Option<&PromptUsage>,
+        prompt_usage: Option<&TokenUsage>,
         max_context_tokens: Option<usize>,
     ) -> Option<Self> {
         Some(Self {
-            context_budget_tokens: prompt_usage?.context_budget_tokens,
+            used_tokens: prompt_usage?.total().max(0) as usize,
             max_context_tokens: max_context_tokens.filter(|value| *value > 0)?,
         })
     }
 
     fn pruning_needed(&self) -> bool {
-        (self.context_budget_tokens as f64 / self.max_context_tokens as f64)
-            >= PRUNE_CONTEXT_THRESHOLD
+        (self.used_tokens as f64 / self.max_context_tokens as f64) >= PRUNE_CONTEXT_THRESHOLD
     }
 
     fn compaction_needed(&self) -> bool {
-        self.context_budget_tokens >= compaction_threshold(self.max_context_tokens)
+        self.used_tokens >= compaction_threshold(self.max_context_tokens)
     }
 }
 
@@ -277,7 +274,7 @@ struct CompactionSnapshotIdentity<'a> {
     current_frame: Option<CompactionGraphAddress<'a>>,
     turn_index: usize,
     token_usage: &'a lash_core::TokenUsage,
-    last_prompt_usage: &'a Option<PromptUsage>,
+    last_prompt_usage: &'a Option<TokenUsage>,
     protocol_turn_options: &'a lash_core::ProtocolTurnOptions,
     tool_state_ref: &'a Option<lash_core::store::BlobRef>,
     tool_state_generation: Option<u64>,
@@ -780,7 +777,7 @@ impl TurnContextTransform for RollingTurnTransform {
                 .emit_trace_event(
                     trace_context.clone(),
                     lash_core::TraceEvent::ContextCompactionNeeded {
-                        context_budget_tokens: pressure.context_budget_tokens,
+                        used_tokens: pressure.used_tokens,
                         max_context_tokens: pressure.max_context_tokens,
                         threshold_tokens: compaction_threshold(pressure.max_context_tokens),
                     },
@@ -806,7 +803,7 @@ impl TurnContextTransform for RollingTurnTransform {
                 .emit_trace_event(
                     trace_context,
                     lash_core::TraceEvent::PromptViewPruned {
-                        context_budget_tokens: pressure.context_budget_tokens,
+                        used_tokens: pressure.used_tokens,
                         max_context_tokens: pressure.max_context_tokens,
                         dropped_prefix_messages: 0,
                         retained_messages: messages.len(),
@@ -825,7 +822,7 @@ impl TurnContextTransform for RollingTurnTransform {
             .emit_trace_event(
                 trace_context,
                 lash_core::TraceEvent::PromptViewPruned {
-                    context_budget_tokens: pressure.context_budget_tokens,
+                    used_tokens: pressure.used_tokens,
                     max_context_tokens: pressure.max_context_tokens,
                     dropped_prefix_messages,
                     retained_messages,

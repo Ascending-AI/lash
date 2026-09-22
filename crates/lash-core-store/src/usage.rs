@@ -7,7 +7,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::session_model::TokenUsage;
-use lash_sansio::PromptUsage;
 
 /// A single row in the token cost ledger. One per unique
 /// `(source, model)` pair — accumulated, not per-call.
@@ -721,32 +720,9 @@ pub fn merge_ledger_entry_saturating(
     }
 }
 
-pub fn normalize_prompt_usage(usage: &TokenUsage) -> Option<PromptUsage> {
-    let input_tokens = usage.input_tokens.max(0) as usize;
-    let output_tokens = usage.output_tokens.max(0) as usize;
-    let cache_read_input_tokens = usage.cache_read_input_tokens.max(0) as usize;
-    let cache_write_input_tokens = usage.cache_write_input_tokens.max(0) as usize;
-    if input_tokens == 0
-        && cache_read_input_tokens == 0
-        && cache_write_input_tokens == 0
-        && output_tokens == 0
-    {
-        return None;
-    }
-
-    let prompt_context_tokens = input_tokens
-        .saturating_add(cache_read_input_tokens)
-        .saturating_add(cache_write_input_tokens);
-    let context_budget_tokens = input_tokens
-        .saturating_add(output_tokens)
-        .saturating_add(cache_read_input_tokens)
-        .saturating_add(cache_write_input_tokens);
-
-    Some(PromptUsage {
-        prompt_context_tokens,
-        input_tokens,
-        cache_read_input_tokens,
-        cache_write_input_tokens,
-        context_budget_tokens,
-    })
+/// The last call's usage, `Some` only when the call reported any nonzero
+/// counter. A fully zeroed report carries no prompt-side information and is
+/// stored as `None`, the same as no completed call.
+pub fn nonzero_usage(usage: TokenUsage) -> Option<TokenUsage> {
+    (!usage.is_zero()).then_some(usage)
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::dialect::TypescriptDialect;
-use crate::driver::SharedPromptUsage;
+use crate::driver::SharedUsage;
 use crate::plugin::RlmProtocolPluginConfig;
 use crate::plugin::budget_warning::BudgetUsageObserver;
 use crate::plugin::protocol_session::RlmProtocolSession;
@@ -14,7 +14,7 @@ pub(super) fn register_native_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedPromptUsage,
+    last_prompt_usage: SharedUsage,
 ) -> Result<(), PluginError> {
     // The catalog contribution carries the dialect so the neutrality guard
     // knows the words model-facing tool prose may not spell literally.
@@ -123,7 +123,7 @@ fn register_projected_bindings_prompt_contributor(
 pub struct RlmNativeToolPlugin {
     pub(crate) config: RlmProtocolPluginConfig,
     pub(crate) dialect: Arc<TypescriptDialect>,
-    pub(crate) last_prompt_usage: SharedPromptUsage,
+    pub(crate) last_prompt_usage: SharedUsage,
 }
 impl lash_core::plugin::SessionPlugin for RlmNativeToolPlugin {
     fn id(&self) -> &'static str {
@@ -147,7 +147,7 @@ impl lash_core::plugin::AssistantProseProjectorPlugin for NativeProseProjector {
 struct NativeProtocolDriver {
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedPromptUsage,
+    last_prompt_usage: SharedUsage,
     bound_variables_prompt: crate::rlm_support::SharedBoundVariablesPrompt,
 }
 impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
