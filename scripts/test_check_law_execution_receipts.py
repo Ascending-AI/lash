@@ -506,7 +506,7 @@ class RealTreeTests(unittest.TestCase):
     """The real macros.rs keeps its delegation invariants under the census."""
 
     def test_reopenable_inherits_shared_catalogue_only(self) -> None:
-        macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
+        macros = MODULE.macro_blocks(MODULE.macro_catalogue_text())
         plain = MODULE.suite_expected(macros, "runtime_persistence_tests")
         reopenable = MODULE.suite_expected(
             macros, "runtime_persistence_reopenable_tests"
@@ -519,7 +519,7 @@ class RealTreeTests(unittest.TestCase):
         self.assertTrue(reopenable - plain, "reopenable must keep its own rows")
 
     def test_process_registry_reopen_law_is_a_catalogue_row(self) -> None:
-        macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
+        macros = MODULE.macro_blocks(MODULE.macro_catalogue_text())
         reopenable = MODULE.suite_expected(
             macros, "process_registry_reopenable_tests"
         )
@@ -547,7 +547,7 @@ class RealTreeTests(unittest.TestCase):
         dropping one suite's rows fails naming that suite's laws -- the
         entries share one file and claimant, so this pins the deferred
         claim resolving each entry to its own real invocation."""
-        macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
+        macros = MODULE.macro_blocks(MODULE.macro_catalogue_text())
         errors: list[str] = []
         index = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])

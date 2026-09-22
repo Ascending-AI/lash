@@ -76,6 +76,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = ROOT / "crates/lash-conformance/src/macros.rs"
+# Catalogue files split from macros.rs to stay inside the line budget.
+MACRO_MODULES = ROOT / "crates/lash-conformance/src/macros"
 WORKSPACE_TARGETS = ROOT / "tools/bazel/workspace_targets.bzl"
 DEFERRED_MANIFEST = ROOT / "scripts/deferred-law-invocations.toml"
 RECEIPT_NAME = "law-receipts.txt"
@@ -168,6 +170,12 @@ def split_top_level(text: str) -> list[str]:
         arms.append(text[i : k + 1])
         i = k + 1
     return arms
+
+
+def macro_catalogue_text() -> str:
+    """macros.rs followed by every catalogue file under macros/, in name order."""
+    sources = [MACROS, *sorted(MACRO_MODULES.glob("*.rs"))]
+    return "\n".join(source.read_text(encoding="utf-8") for source in sources)
 
 
 def macro_blocks(text: str) -> dict[str, Macro]:
@@ -825,7 +833,7 @@ def main() -> int:
     parser.add_argument("--bazel-testlogs", action="append", default=[], metavar="DIR")
     args = parser.parse_args()
 
-    macros = macro_blocks(MACROS.read_text(encoding="utf-8"))
+    macros = macro_blocks(macro_catalogue_text())
 
     errors: list[str] = []
     manifest_set = manifest_check(errors)
