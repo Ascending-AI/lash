@@ -94,3 +94,46 @@ lash_conformance::tool_child_invocation_tests!({
         },
     )
 });
+
+// The batch-group differential answers on the same substrate (FIG-3397).
+lash_conformance::tool_batch_group_tests!({
+    let Some(url) = database_url() else {
+        eprintln!(
+            "skipping Postgres tool-batch-group conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let database_lock = SharedDatabaseLock::acquire(&url).await;
+    reset(
+        PostgresStorage::connect(&url)
+            .await
+            .expect("PostgreSQL tool-batch-group reset storage")
+            .pool(),
+    )
+    .await;
+    let world_url = url.clone();
+    let make_world: lash_conformance::ToolChildWorldFactory =
+        Arc::new(move |spec: ToolChildWorldSpec| {
+            let url = world_url.clone();
+            Box::pin(async move { world(url, spec).await })
+        });
+    let registry_url = url.clone();
+    let make_registry: lash_conformance::ToolChildRegistryFactory = Arc::new(move || {
+        let url = registry_url.clone();
+        Box::pin(async move {
+            let storage = PostgresStorage::connect(&url)
+                .await
+                .expect("PostgreSQL tool-batch-group process registry storage");
+            Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>
+        })
+    });
+    (
+        database_lock,
+        "postgres",
+        ToolChildLawFixture {
+            make_world,
+            make_registry,
+            deferrable_routing: ToolChildDeferrableRouting::Durable,
+        },
+    )
+});

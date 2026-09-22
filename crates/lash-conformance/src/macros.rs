@@ -2216,6 +2216,32 @@ macro_rules! __tool_child_invocation_register {
     };
 }
 
+/// Register the tool-batch group differential law (FIG-3397, ADR 0099 §5):
+/// the effect-group `call_tool_batch` path answers the same replies the
+/// pre-group `ToolBatch` effect produced.
+///
+/// The fixture hands back a guard, a session prefix and a
+/// [`ToolChildLawFixture`], the same shape `tool_child_invocation_tests!`
+/// takes — the law needs a world factory over the tier's substrate and a
+/// process-registry factory, nothing more. Restate is deliberately absent:
+/// its deployment host executes no effects, so there is no batch consumer to
+/// differentiate.
+#[macro_export]
+macro_rules! tool_batch_group_tests {
+    ($fixture:block) => {
+        $crate::tool_batch_group_tests!(@catalogue [] $fixture);
+    };
+    ($(#[$attr:meta])+ $fixture:block) => {
+        $crate::tool_batch_group_tests!(@catalogue [$(#[$attr])*] $fixture);
+    };
+    (@catalogue $attrs:tt $fixture:block) => {
+        $crate::__tool_child_invocation_register!($attrs $fixture;
+            an_all_group_of_tool_children_yields_the_batch_replies,
+            "tool-batch-group-differential"
+        );
+    };
+}
+
 /// Register atomic runtime-operation effect-group retirement.
 #[macro_export]
 macro_rules! effect_group_runtime_retirement_tests {
