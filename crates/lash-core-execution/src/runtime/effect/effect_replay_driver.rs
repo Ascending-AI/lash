@@ -91,6 +91,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::{RuntimeError, RuntimeErrorCode};
@@ -1152,6 +1153,25 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         group_key: &str,
         rank: usize,
     ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError>;
+
+    /// The settlement notifier for `group_key`: one shared `Arc<Notify>` per
+    /// (store, group) that every committed rank write —
+    /// [`discharge_child`](Self::discharge_child),
+    /// [`decide_cancel`](Self::decide_cancel), and a grouped
+    /// [`finalize`](Self::finalize) — wakes after its commit lands, and that a
+    /// peer driver over the same database wakes the same way.
+    ///
+    /// The caller enables [`Notify::notified`] *before* its journal read and
+    /// parks on it afterwards, so a settlement committed between the read and
+    /// the park is caught rather than slept through. Acquiring the notifier is
+    /// async so a backend whose wake-up rides an external subscription
+    /// (PostgreSQL `LISTEN`) can await the subscription's installation before
+    /// the caller's first read — the ordering the same guarantee needs across
+    /// processes.
+    async fn settlement_notifier(
+        &self,
+        group_key: &str,
+    ) -> Result<Arc<Notify>, RuntimeEffectControllerError>;
 
     /// The exact complement of [`read_group_settlement`](Self::read_group_settlement):
     /// that read filters `settlement_seq IS NOT NULL`, this one

@@ -107,16 +107,6 @@ impl EffectGroupRecordAccessor for EffectGroupRecord {
     }
 }
 
-/// How long a caller parked on rank `n` waits before re-reading the journal.
-///
-/// A settlement written by *another* process reaches this one only by being
-/// read, so the wait is a poll and not purely a notification. The in-process
-/// [`Notify`] shortens it to nothing for the common case where the settling
-/// child is one of this host's own tasks; the interval is what bounds the
-/// cross-process case. It matches [`BUSY_POLL`], the same trade-off the claim
-/// loop already makes for the same reason.
-const SETTLEMENT_POLL: Duration = BUSY_POLL;
-
 /// Every group this driver has open, keyed exactly as ADR 0065 keys them.
 ///
 /// A read-mostly index of per-group states: siblings of *different* groups have
@@ -769,15 +759,26 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         if handle.is_exhausted() {
             return Err(exhausted_group_error(handle));
         }
+        // The store's notifier — shared with every driver over this database —
+        // is what turns a settlement committed by *another* host into a wake
+        // here; `state.settled` still answers for the process-local signals a
+        // commit does not produce (a child task finishing, the group closing).
+        let settlement_notify = self
+            .row_store
+            .settlement_notifier(handle.group_key())
+            .await?;
         loop {
-            let notified = state.settled.notified();
+            let notified = settlement_notify.notified();
             tokio::pin!(notified);
+            let settled = state.settled.notified();
+            tokio::pin!(settled);
             // Enabled *before* the journal read, so a sibling that settles
             // between the read and the park is caught by this future rather
             // than slept through: `Notify::notified()` only starts listening
             // when it is first polled, and `notify_waiters` wakes listeners,
             // not arrivals.
             notified.as_mut().enable();
+            settled.as_mut().enable();
             let closed = state.state.lock_recover().closed;
             if closed {
                 return Err(closed_group_error(handle.group_key()));
@@ -797,7 +798,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     return Err(await_cancelled_error(handle.group_key(), rank));
                 }
                 () = &mut notified => {}
-                () = self.clock.sleep(SETTLEMENT_POLL) => {}
+                () = &mut settled => {}
             }
         }
     }
@@ -830,13 +831,34 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     ),
                 )
             })?;
-        let outcome = match stored.state {
+        let outcome = self.decode_group_terminal(group_key, &stored)?;
+        Ok(GroupSettlement {
+            position,
+            sequence: stored.sequence,
+            outcome,
+        })
+    }
+
+    /// Decode the recorded terminal of a settled group row — the shared half
+    /// of [`decode_settlement`](Self::decode_settlement) and
+    /// [`read_recorded_group_settlement`](Self::read_recorded_group_settlement),
+    /// which differ only in whether the caller needs the declared position.
+    fn decode_group_terminal(
+        &self,
+        group_key: &str,
+        stored: &StoredGroupSettlement,
+    ) -> Result<
+        Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+        RuntimeEffectControllerError,
+    > {
+        let vocabulary = self.vocabulary();
+        let outcome = match &stored.state {
             EffectRowState::Settled(EffectTerminal::Completed { outcome_json }) => {
-                Ok(serde_json::from_str::<RuntimeEffectOutcome>(&outcome_json)
+                Ok(serde_json::from_str::<RuntimeEffectOutcome>(outcome_json)
                     .map_err(|err| vocabulary.decode_error(err))?)
             }
             EffectRowState::Settled(EffectTerminal::Failed { error_json }) => Err(
-                serde_json::from_str::<RuntimeEffectControllerError>(&error_json)
+                serde_json::from_str::<RuntimeEffectControllerError>(error_json)
                     .map_err(|err| vocabulary.decode_error(err))?,
             ),
             EffectRowState::Corrupt(defect) => {
@@ -860,11 +882,39 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 ));
             }
         };
-        Ok(GroupSettlement {
-            position,
+        Ok(outcome)
+    }
+
+    /// Read the group's settlement at `rank` without touching any caller
+    /// cursor (ADR 0099 §8): the incorporation prefix record reads the journal
+    /// through this seam, so it names the settled child by its replay key and
+    /// needs no position map — an opener that never opened the group
+    /// in-process still incorporates the recorded prefix.
+    pub async fn read_recorded_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
+    {
+        let rank = usize::try_from(rank).map_err(|_| {
+            self.vocabulary().error(
+                EffectReplayFailure::CorruptRow,
+                format!("durable effect group {group_key} was asked for rank {rank}, which no journal can hold"),
+            )
+        })?;
+        let Some(stored) = self
+            .row_store
+            .read_group_settlement(group_key, rank)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let outcome = self.decode_group_terminal(group_key, &stored)?;
+        Ok(Some(crate::runtime::effect::RankedGroupSettlement {
             sequence: stored.sequence,
+            child_replay_key: stored.replay_key,
             outcome,
-        })
+        }))
     }
 
     /// Release the caller's interest in the group, recording the close durably

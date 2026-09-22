@@ -5,6 +5,7 @@
 //! type and the driver/host open paths.
 
 use super::*;
+use tokio::sync::Notify;
 
 mod tx;
 
@@ -23,6 +24,18 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         }
     }
 
+    /// The process-wide notifier for this file and group: SQLite has no
+    /// `NOTIFY`, so two hosts over the same database file share one
+    /// [`Notify`] through the registry the canonical path keys.
+    async fn settlement_notifier(
+        &self,
+        group_key: &str,
+    ) -> Result<Arc<Notify>, RuntimeEffectControllerError> {
+        Ok(settlement_notify::settlement_notifier(
+            &self.settlement_key,
+            group_key,
+        ))
+    }
     async fn claim(
         &self,
         request: &EffectClaimRequest,
@@ -119,7 +132,8 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         let outcome_json = terminal.outcome_json().map(str::to_string);
         let error_json = terminal.error_json().map(str::to_string);
         let clock = Arc::clone(&self.clock);
-        self.conn
+        let (settled_group, outcome) = self
+            .conn
             .write_flow(move |tx| {
                 let now = clock.timestamp_ms();
                 let claimed: Option<Option<String>> = tx
@@ -150,13 +164,14 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     // loss. Either way the transaction wrote nothing, so it
                     // rolls back: reporting an observation commits no writes,
                     // and no counter burned.
-                    return Ok(TxOutcome::Rollback(
+                    return Ok(TxOutcome::Rollback((
+                        None,
                         if finalize_miss_cancel_decided(tx, &fence)? {
                             EffectFinalizeOutcome::CancelDecided
                         } else {
                             EffectFinalizeOutcome::FenceMoved
                         },
-                    ));
+                    )));
                 };
                 let Some(group_key) = group_key else {
                     // No group to contest: the final record still wins the
@@ -167,9 +182,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         effect_sql(Schema::Main).replay.commit_ungrouped.sql(),
                         params![fence.scope_id.as_str(), fence.replay_key.as_str()],
                     )?;
-                    return Ok(TxOutcome::Commit(EffectFinalizeOutcome::Written {
-                        commit_seq: None,
-                    }));
+                    return Ok(TxOutcome::Commit((
+                        None,
+                        EffectFinalizeOutcome::Written { commit_seq: None },
+                    )));
                 };
                 // The group row, then the replay row's commit-state CAS —
                 // the shared lock order — so the position the winning CAS
@@ -218,18 +234,25 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                                 )));
                             }
                         };
-                    return Ok(TxOutcome::Rollback(outcome));
+                    return Ok(TxOutcome::Rollback((None, outcome)));
                 }
-                Ok(TxOutcome::Commit(EffectFinalizeOutcome::Written {
-                    commit_seq: Some(u64_from_sql(
-                        "RuntimeEffectGroup",
-                        "next_commit_seq",
-                        commit_seq,
-                    )?),
-                }))
+                Ok(TxOutcome::Commit((
+                    Some(group_key),
+                    EffectFinalizeOutcome::Written {
+                        commit_seq: Some(u64_from_sql(
+                            "RuntimeEffectGroup",
+                            "next_commit_seq",
+                            commit_seq,
+                        )?),
+                    },
+                )))
             })
             .await
-            .map_err(effect_sqlite_error)
+            .map_err(effect_sqlite_error)?;
+        if let Some(group_key) = settled_group {
+            self.notify_group_settled(&group_key);
+        }
+        Ok(outcome)
     }
 
     /// Commits the cancel disposition at the §4 point, or reports the state
@@ -247,8 +270,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         request: &EffectCancelRequest,
     ) -> Result<EffectCancelOutcome, RuntimeEffectControllerError> {
         let request = request.clone();
+        let group_key = request.group_key.clone();
         let clock = Arc::clone(&self.clock);
-        self.conn
+        let outcome = self
+            .conn
             .write_flow(move |tx| {
                 let now = clock.timestamp_ms();
                 match select_child_commit_state(tx, &request.group_key, &request.replay_key)? {
@@ -384,7 +409,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 }))
             })
             .await
-            .map_err(effect_sqlite_error)
+            .map_err(effect_sqlite_error)?;
+        if matches!(outcome, EffectCancelOutcome::Decided { .. }) {
+            self.notify_group_settled(&group_key);
+        }
+        Ok(outcome)
     }
 
     /// Discharges a committed child's §5 drain: the `drained` state and the
@@ -394,8 +423,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         request: &EffectDischargeRequest,
     ) -> Result<EffectDischargeOutcome, RuntimeEffectControllerError> {
         let request = request.clone();
+        let group_key = request.group_key.clone();
         let clock = Arc::clone(&self.clock);
-        self.conn
+        let outcome = self
+            .conn
             .write_flow(move |tx| {
                 let now = clock.timestamp_ms();
                 // Replay row first — the shared lock order — then group.
@@ -523,7 +554,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 }))
             })
             .await
-            .map_err(effect_sqlite_error)
+            .map_err(effect_sqlite_error)?;
+        if matches!(outcome, EffectDischargeOutcome::Discharged { .. }) {
+            self.notify_group_settled(&group_key);
+        }
+        Ok(outcome)
     }
 
     async fn drain_blocked(

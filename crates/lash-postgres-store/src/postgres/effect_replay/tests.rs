@@ -76,6 +76,7 @@ impl GroupFixture {
             _database_lock: database_lock,
             store: PostgresEffectReplayRowStore {
                 pool: storage.pool().clone(),
+                notify_hub: group_notify::GroupNotifyHub::spawn(storage.pool()),
             },
             storage,
             scope_id,

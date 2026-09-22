@@ -304,6 +304,10 @@ pub struct EffectGroupDrainBlockedRequest {
 pub enum EffectGroupReadRankResponse {
     Settled {
         settlement: EffectGroupSettlementRecord,
+        /// The settled child's durable identity — the replay key a §6 prefix
+        /// record or a §8 attach names, derived from the retained shape rather
+        /// than stored twice on the settlement record.
+        child_replay_key: String,
     },
     NotSettled,
     Closed,
@@ -1190,7 +1194,15 @@ impl EffectGroupIndex {
         }
         let settlement = record.live()?.settlements.get(&request.rank).cloned();
         if let Some(settlement) = settlement {
-            return Ok(Json(EffectGroupReadRankResponse::Settled { settlement }));
+            let child_replay_key = record
+                .live()?
+                .shape
+                .replay_key(settlement.position)?
+                .to_string();
+            return Ok(Json(EffectGroupReadRankResponse::Settled {
+                settlement,
+                child_replay_key,
+            }));
         }
         Ok(Json(match record.lifecycle {
             EffectGroupLifecycle::Closed { .. } => EffectGroupReadRankResponse::Closed,

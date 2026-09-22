@@ -59,8 +59,8 @@ pub use executor::{
 };
 pub use group::{
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,
-    GroupSettlement, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup,
-    refuse_unhonored_group_membership,
+    GroupSettlement, GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement,
+    RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
 pub use group_closing::{
     GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,

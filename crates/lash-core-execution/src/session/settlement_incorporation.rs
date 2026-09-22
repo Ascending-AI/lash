@@ -176,6 +176,169 @@ impl<'run> RuntimeExecutionContext<'run> {
         })
     }
 
+    /// ADR 0099 §6/§8: journals the opener's incorporated settlement prefix
+    /// of `handle`'s group — ranks `already + 1 ..= handle.consumed()` — and
+    /// applies each settled rank's facts through
+    /// [`incorporate_tool_settlement`](Self::incorporate_tool_settlement).
+    ///
+    /// The journaled outcome records exactly which ranks were incorporated,
+    /// so a replay re-incorporates the recorded prefix and never a rank that
+    /// settled after the record was cut: a late settlement is not early
+    /// possession. A call whose `consumed` adds no new rank journals nothing
+    /// and returns empty — the ledger already names the prefix.
+    ///
+    /// Non-tool children carry no settlement facts; their rank is still
+    /// recorded in the ledger so the prefix stays contiguous.
+    pub async fn incorporate_group_prefix(
+        &self,
+        handle: &crate::EffectGroupHandle,
+    ) -> Result<Vec<crate::runtime::effect::IncorporatedGroupRank>, RuntimeEffectControllerError>
+    {
+        let group_key = handle.group_key().to_string();
+        let through_rank = u64::try_from(handle.consumed()).map_err(|error| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                format!("group {group_key} consumed rank does not fit u64: {error}"),
+            )
+        })?;
+        // Incorporated ranks of one group are always a contiguous prefix —
+        // this method is the only writer and it walks ranks in order — so the
+        // count IS the next unincorporated rank minus one.
+        let already = {
+            let ledger = self.incorporation_ledger().lock_recover();
+            u64::try_from(
+                ledger
+                    .incorporated
+                    .iter()
+                    .filter(|source| {
+                        matches!(
+                            source,
+                            SettlementSource::GroupRank {
+                                group_key: key,
+                                ..
+                            } if *key == group_key
+                        )
+                    })
+                    .count(),
+            )
+            .map_err(|error| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!("group {group_key} incorporated count does not fit u64: {error}"),
+                )
+            })?
+        };
+        if through_rank <= already {
+            return Ok(Vec::new());
+        }
+        // The effect id names the rank range it covers, so each prefix
+        // extension is a distinct journaled record and a replay derives the
+        // same id from the same ledger state.
+        let effect_id = format!(
+            "effect-group-incorporate:{group_key}:{}-{through_rank}",
+            already + 1
+        );
+        let invocation = self.language_runtime_invocation(&effect_id);
+        let scoped = self.dispatch.effect_controller.scoped();
+        let controller = scoped.controller();
+        let read_group_key = group_key.clone();
+        let local_executor =
+            crate::RuntimeEffectLocalExecutor::language_runtime_value_with(move |envelope| {
+                let group_key = read_group_key;
+                async move {
+                    crate::runtime::effect::refuse_unhonored_group_membership(
+                        envelope.group.as_deref(),
+                        "group settlement incorporation",
+                    )?;
+                    let crate::RuntimeEffectCommand::IncorporateGroupSettlements {
+                        through_rank,
+                        ..
+                    } = envelope.command
+                    else {
+                        return Err(RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                            format!(
+                                "group incorporation executor cannot execute {} command",
+                                envelope.command.kind().as_str()
+                            ),
+                        ));
+                    };
+                    let mut incorporated = Vec::new();
+                    for rank in (already + 1)..=through_rank {
+                        let settlement = controller
+                            .read_group_settlement(&group_key, rank)
+                            .await?
+                            .ok_or_else(|| {
+                                RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                    format!(
+                                        "effect group {group_key} rank {rank} was inside the \
+                                         consumed prefix but has no recorded settlement"
+                                    ),
+                                )
+                            })?;
+                        incorporated.push(crate::runtime::effect::IncorporatedGroupRank {
+                            rank,
+                            child_replay_key: settlement.child_replay_key,
+                        });
+                    }
+                    Ok(crate::RuntimeEffectOutcome::IncorporateGroupSettlements { incorporated })
+                }
+            });
+        let outcome = scoped
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::IncorporateGroupSettlements {
+                        group_key: group_key.clone(),
+                        through_rank,
+                    },
+                ),
+                local_executor,
+            )
+            .await?;
+        // Live and replay converge here: the recorded outcome names exactly
+        // the ranks to apply, so the live run and every replay incorporate
+        // the same prefix — a settlement that landed after the record is not
+        // in `incorporated` and is never read.
+        let incorporated = outcome.into_incorporate_group_settlements()?;
+        for entry in &incorporated {
+            let settlement = controller
+                .read_group_settlement(&group_key, entry.rank)
+                .await?
+                .ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        format!(
+                            "effect group {group_key} rank {} was recorded as incorporated but \
+                             no longer has a settlement",
+                            entry.rank
+                        ),
+                    )
+                })?;
+            let source = SettlementSource::GroupRank {
+                group_key: group_key.clone(),
+                rank: entry.rank,
+                child_replay_key: entry.child_replay_key.clone(),
+            };
+            match settlement.outcome {
+                Ok(crate::RuntimeEffectOutcome::ToolInvocation { settlement, .. }) => {
+                    self.incorporate_tool_settlement(source, &settlement)?;
+                }
+                // A non-tool child, or a child whose terminal is a recorded
+                // error, carries no settlement facts; the rank still joins
+                // the incorporated prefix so the next record starts after it.
+                _ => {
+                    self.incorporation_ledger()
+                        .lock_recover()
+                        .incorporated
+                        .insert(source);
+                }
+            }
+        }
+        Ok(incorporated)
+    }
+
     /// The once-only ledger this context incorporates against. Behind a
     /// method so `incorporate_tool_settlement` and the handover carriage both
     /// reach the same `Arc`.

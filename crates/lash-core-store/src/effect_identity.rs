@@ -40,6 +40,10 @@ pub enum RuntimeEffectKind {
     /// the atomic body of one attempt, and from [`ToolBatch`](Self::ToolBatch),
     /// which is the whole batch a group replaces.
     ToolInvocation,
+    /// The opener-journaled record of a group's incorporated settlement prefix
+    /// (ADR 0099 §6): which ranks the opener applied before an externally
+    /// effective step, so replay restores exactly that mapping.
+    IncorporateGroupSettlements,
     ToolParentEnd,
     Trigger,
     Process,
@@ -64,6 +68,7 @@ impl RuntimeEffectKind {
             Self::ToolAttempt => "tool_attempt",
             Self::ToolBatch => "tool_batch",
             Self::ToolInvocation => "tool_invocation",
+            Self::IncorporateGroupSettlements => "incorporate_group_settlements",
             Self::ToolParentEnd => "tool_parent_end",
             Self::Trigger => "trigger",
             Self::Process => "process",

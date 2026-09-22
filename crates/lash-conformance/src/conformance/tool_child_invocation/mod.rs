@@ -1904,6 +1904,7 @@ mod commit_boundary;
 mod driver;
 mod foreign_opener;
 mod incarnation;
+mod incorporation;
 mod recovery;
 mod usage;
 
@@ -1913,5 +1914,6 @@ pub use commit_boundary::*;
 pub use driver::*;
 pub use foreign_opener::*;
 pub use incarnation::*;
+pub use incorporation::*;
 pub use recovery::*;
 pub use usage::*;

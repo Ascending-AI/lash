@@ -9,6 +9,7 @@
 use lash_sansio::SessionId;
 pub(crate) mod context;
 mod group_commit;
+mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 mod scope_recording;
@@ -18,6 +19,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
+use lash_core::runtime::effect::RankedGroupSettlement;
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
     EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, PluginError,
@@ -882,7 +884,7 @@ where
                 .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
         }
         let record = match read {
-            EffectGroupReadRankResponse::Settled { settlement } => settlement,
+            EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
             EffectGroupReadRankResponse::NotSettled => {
                 return Err(group_shape_error(format!(
                     "effect group {} rank {rank} remained unsettled after its notification",
@@ -938,6 +940,16 @@ where
         let settlement = settlement_from_payload(record, payload)?;
         handle.advance()?;
         Ok(settlement)
+    }
+
+    /// The cursorless rank read the §6 incorporation record needs (ADR 0099
+    /// §8); the body lives in [`group_read`] for the file-size budget.
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        group_read::read_group_settlement(&self.context, group_key, rank).await
     }
 
     async fn close_effect_group(
@@ -1616,6 +1628,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
+        | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
             RestateEffectExecution::JournaledRun {
                 envelope: RuntimeEffectEnvelope {

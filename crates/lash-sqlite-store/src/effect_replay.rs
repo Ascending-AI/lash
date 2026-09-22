@@ -46,6 +46,7 @@ use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events, wait_sql}
 use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
 
 mod row_store;
+mod settlement_notify;
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
@@ -475,9 +476,15 @@ impl SqliteEffectHost {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
+        // Opening creates the database before the host is returned, so the
+        // canonical path is a stable identity across relative paths and
+        // symlinked deployment configuration. Fall back only for platforms
+        // that cannot canonicalize an already-open file.
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let registry = Arc::new(RegistryAttachment::default());
         let inner = open_effect_replay_driver(
             path,
+            &binding_path,
             StoreBacking::File,
             options,
             clock,
@@ -486,11 +493,6 @@ impl SqliteEffectHost {
         .await?;
         let closure_lifecycle = SqliteConnection::open(path).await?;
         let closure_registry = Arc::new(RegistryAttachment::default());
-        // Opening creates the database before the host is returned, so the
-        // canonical path is a stable identity across relative paths and
-        // symlinked deployment configuration. Fall back only for platforms
-        // that cannot canonicalize an already-open file.
-        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
             inner,
             fence_database: Some(path.to_path_buf()),
@@ -582,9 +584,11 @@ impl SqliteRuntimeEffectController {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
             inner: open_effect_replay_driver(
                 path,
+                &binding_path,
                 StoreBacking::File,
                 options,
                 clock,
@@ -592,12 +596,7 @@ impl SqliteRuntimeEffectController {
             )
             .await?,
             scope,
-            turn_control_binding_id: Arc::from(format!(
-                "sqlite:{}",
-                std::fs::canonicalize(path)
-                    .unwrap_or_else(|_| path.to_path_buf())
-                    .display()
-            )),
+            turn_control_binding_id: Arc::from(format!("sqlite:{}", binding_path.display())),
         })
     }
 
@@ -665,6 +664,7 @@ fn validate_effect_host_path(path: &Path) -> tokio_rusqlite::Result<()> {
 
 async fn open_effect_replay_driver(
     path: &Path,
+    binding_path: &Path,
     backing: StoreBacking,
     options: SqliteEffectReplayOptions,
     clock: Arc<dyn lash_core::Clock>,
@@ -692,6 +692,7 @@ async fn open_effect_replay_driver(
         signing_secret,
         CompletionKeys::Issued,
         registry,
+        settlement_notify::SettlementNotifierKey::for_file(binding_path),
     )))
 }
 
@@ -722,6 +723,7 @@ async fn open_effect_replay_memory_driver(
         signing_secret,
         CompletionKeys::Unsupported,
         Arc::new(RegistryAttachment::default()),
+        settlement_notify::SettlementNotifierKey::for_memory(),
     )))
 }
 
@@ -732,6 +734,7 @@ fn build_effect_replay_driver(
     signing_secret: Vec<u8>,
     completion_keys: CompletionKeys,
     registry: Arc<RegistryAttachment>,
+    settlement_key: settlement_notify::SettlementNotifierKey,
 ) -> SqliteEffectReplay {
     let await_events = sqlite_await_events(
         conn.clone(),
@@ -745,6 +748,7 @@ fn build_effect_replay_driver(
             conn,
             clock: Arc::clone(&clock),
             registry,
+            settlement_key,
         },
         await_events,
         clock,
@@ -767,6 +771,10 @@ pub struct SqliteEffectReplayRowStore {
     clock: Arc<dyn lash_core::Clock>,
     /// The bound process registry whose file holds process-scope fences.
     registry: Arc<RegistryAttachment>,
+    /// This store's identity in the process-wide settlement-notifier registry:
+    /// the canonical database path for a file journal, so two hosts over one
+    /// file wake each other's parked settlement readers.
+    settlement_key: settlement_notify::SettlementNotifierKey,
 }
 
 impl SqliteEffectReplayRowStore {
@@ -775,6 +783,13 @@ impl SqliteEffectReplayRowStore {
             .ensure_attached(&self.conn)
             .await
             .map_err(effect_sqlite_error)
+    }
+
+    /// Wake every waiter parked on `group_key`'s next settlement — this
+    /// host's own awaiter or another host's over the same file. Called after
+    /// a rank write's commit has landed.
+    fn notify_group_settled(&self, group_key: &str) {
+        settlement_notify::notify_group_settled(&self.settlement_key, group_key);
     }
 }
 

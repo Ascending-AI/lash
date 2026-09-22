@@ -132,6 +132,7 @@ pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     a_child_this_host_cannot_run_is_reported_not_invented(&make, &prefix).await;
     a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(&make, &prefix).await;
     a_reopen_offering_a_retained_key_under_a_different_request_lends_nothing(&make, &prefix).await;
+    a_settlement_written_by_another_host_wakes_the_parked_awaiter(&make, &prefix).await;
 }
 
 /// The drain reclaims groups whose caller is gone, and this process can see
@@ -977,6 +978,70 @@ async fn a_reopen_offering_a_retained_key_under_a_different_request_lends_nothin
     );
 
     close(&scoped, handle, RUN)
+        .await
+        .expect("the caller closes");
+}
+
+/// The wake is the store's, not the host's: a settlement committed by a
+/// *different* host over the same database reaches a caller parked here.
+///
+/// The await loop has no poll arm — a `SETTLEMENT_POLL` would be the only
+/// other thing that could deliver this settlement, and it is gone — so the
+/// `AWAIT_BUDGET` timeout inside [`next`] is what a missing notification
+/// costs. The waiter parks first (its child is claimed and running, so the
+/// rank cannot already exist), then the second host reopens the identical
+/// group and closes it under `Cancel`, which journals the cancel decision —
+/// and its rank — from the retained membership, on a connection the waiter
+/// does not share.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_settlement_written_by_another_host_wakes_the_parked_awaiter(
+    make: &DrainWorldFactory,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "cross-host-wake");
+    let scope = scope(prefix, "cross-host-wake");
+
+    let waiter = make(spec(LIVE_LEASE_MS, &RecordingExecutors::settling())).await;
+    let scoped_waiter = waiter.host.scoped(admit(scope.clone())).expect("scope");
+    let entered = Arc::new(AtomicUsize::new(0));
+    let mut handle = open(&scoped_waiter, &key, 1, RUN, vec![blocking(&entered)]).await;
+    // The child's claim is committed before the law parks: the rank genuinely
+    // does not exist yet, so a settlement delivered now can only have come
+    // from the wake, never from the first read.
+    until(|| entered.load(Ordering::SeqCst) == 1).await;
+
+    let writer = make(spec(LIVE_LEASE_MS, &RecordingExecutors::settling())).await;
+    let scoped_writer = writer.host.scoped(admit(scope)).expect("scope");
+
+    let write = async {
+        // Let the awaiter reach its park before the write lands; the read
+        // after `enable()` is the race the ordering already owns, so a fixed
+        // beat here is plenty.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let writer_handle = open(&scoped_writer, &key, 1, RUN, vec![never()]).await;
+        close(&scoped_writer, writer_handle, CANCEL)
+            .await
+            .expect("the second host's cancel close commits the decision");
+    };
+
+    let (settlement, ()) = tokio::join!(next(&scoped_waiter, &mut handle), write);
+    let settlement =
+        settlement.unwrap_or_else(|err| panic!("the parked await is served rank 1: {err}"));
+    assert_eq!(settlement.position, 0);
+    let error = settlement.outcome.expect_err(
+        "the settlement the second host wrote is the disposition's cancelled \
+         terminal, not an outcome an execution produced",
+    );
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+        "the wake carried exactly the rank the other host committed: {error}"
+    );
+
+    close(&scoped_waiter, handle, CANCEL)
         .await
         .expect("the caller closes");
 }

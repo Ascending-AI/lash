@@ -396,6 +396,16 @@ pub enum RuntimeEffectCommand {
     ToolInvocation {
         request: Box<super::tool_child::ToolChildRequest>,
     },
+    /// Record the opener's incorporated settlement prefix of a durable effect
+    /// group (ADR 0099 §6): the journaled mapping from group identity to the
+    /// ranks the opener applied, written before an externally effective step
+    /// that reads those facts. Replay restores exactly the recorded ranks and
+    /// never a later one. `through_rank` is the prefix bound the opener chose
+    /// at record time; the outcome lists what was actually incorporated.
+    IncorporateGroupSettlements {
+        group_key: String,
+        through_rank: u64,
+    },
     Trigger {
         command: Box<crate::TriggerCommand>,
     },
@@ -457,6 +467,9 @@ impl RuntimeEffectCommand {
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
             Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
+            Self::IncorporateGroupSettlements { .. } => {
+                RuntimeEffectKind::IncorporateGroupSettlements
+            }
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
@@ -1062,6 +1075,13 @@ pub enum RuntimeEffectOutcome {
         /// produced a settled presentation.
         settlement: Box<ToolSettlement>,
     },
+    /// The group-settlement prefix an
+    /// [`IncorporateGroupSettlements`](RuntimeEffectCommand::IncorporateGroupSettlements)
+    /// command incorporated: the recorded mapping replay re-applies, rank by
+    /// rank, and nothing past it (ADR 0099 §6).
+    IncorporateGroupSettlements {
+        incorporated: Vec<super::group::IncorporatedGroupRank>,
+    },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
     },
@@ -1313,6 +1333,19 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Unpacks the recorded incorporation prefix of a durable effect group.
+    pub fn into_incorporate_group_settlements(
+        self,
+    ) -> Result<Vec<super::group::IncorporatedGroupRank>, RuntimeEffectControllerError> {
+        match self {
+            Self::IncorporateGroupSettlements { incorporated } => Ok(incorporated),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::IncorporateGroupSettlements,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_tool_batch_effect(
         self,
     ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
@@ -1461,6 +1494,9 @@ impl RuntimeEffectOutcome {
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
             Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
+            Self::IncorporateGroupSettlements { .. } => {
+                RuntimeEffectKind::IncorporateGroupSettlements
+            }
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,

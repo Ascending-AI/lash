@@ -48,6 +48,7 @@ async fn row_store() -> SqliteEffectReplayRowStore {
         conn,
         clock: Arc::new(lash_core::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
+        settlement_key: super::settlement_notify::SettlementNotifierKey::for_memory(),
     }
 }
 
@@ -985,6 +986,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
         vec![0; 32],
         CompletionKeys::Issued,
         std::sync::Arc::new(crate::scope_fence::RegistryAttachment::default()),
+        super::settlement_notify::SettlementNotifierKey::for_file(&path),
     );
     let pause = injector.pause(SqliteFaultPoint::AfterBegin);
     let completing = tokio::spawn(async move {
@@ -1046,6 +1048,9 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
             conn,
             clock: clock.clone(),
             registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
+            settlement_key: super::settlement_notify::SettlementNotifierKey::for_file(
+                &dir.path().join("effects.db"),
+            ),
         });
         let mut request = claim("queued-write", "owner");
         request.lease_ttl_ms = 300;
@@ -1334,6 +1339,7 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
             .expect("open the staging connection"),
         clock: Arc::new(lash_core::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
+        settlement_key: super::settlement_notify::SettlementNotifierKey::for_file(&path),
     };
     store
         .open_group(&group_record(), &membership())
