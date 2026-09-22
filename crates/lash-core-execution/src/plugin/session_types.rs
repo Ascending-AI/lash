@@ -222,9 +222,13 @@ pub struct SessionCreateRequest {
 }
 
 impl SessionCreateRequest {
+    /// The session id is deliberately left unset: it is the durable record's
+    /// own key, so the caller must supply it through [`Self::with_session_id`]
+    /// (or an explicit field) rather than letting a freshly minted value
+    /// diverge from any journaled copy on replay (FIG-1278).
     pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
         Self {
-            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
+            session_id: None,
             relation: SessionRelation::Root,
             start,
             policy: None,
@@ -245,7 +249,7 @@ impl SessionCreateRequest {
         plugin_options: PluginOptions,
     ) -> Self {
         Self {
-            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
+            session_id: None,
             relation: SessionRelation::Child {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,
@@ -270,7 +274,7 @@ impl SessionCreateRequest {
         plugin_options: PluginOptions,
     ) -> Self {
         Self {
-            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
+            session_id: None,
             relation: SessionRelation::Child {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,

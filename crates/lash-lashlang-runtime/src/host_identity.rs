@@ -106,7 +106,7 @@ impl LashlangHostIdentities {
     /// the program wrote.
     ///
     /// The index is the leaf's position in the aggregate as written, not the
-    /// order it settled in: it has to be the same on a replay that settles the
+    /// order it settles in: it has to be the same on a replay that settles the
     /// leaves in another order.
     pub fn child(
         &self,
@@ -117,6 +117,24 @@ impl LashlangHostIdentities {
         format!(
             "{}:child:{leaf_index}",
             self.leaf(host_operation, call_site)
+        )
+    }
+
+    /// The identity of the `ordinal`-th dispatch of `host_operation` in this
+    /// execution, for operations the program does not site.
+    ///
+    /// `await` carries no call site — the awaited handle is a runtime value,
+    /// not a syntax node — so the caller supplies an ordinal drawn from a
+    /// replay-stable counter (the cell's dispatch index, or a journaled
+    /// process ordinal). The ordinal is what keeps two unsited dispatches of
+    /// one operation apart on a re-executed run.
+    pub fn sequenced(&self, host_operation: &str, ordinal: u64) -> String {
+        format!(
+            "lashlang:{}:sequenced:{}:{}:{}",
+            self.scope(),
+            host_operation.len(),
+            host_operation,
+            ordinal,
         )
     }
 }

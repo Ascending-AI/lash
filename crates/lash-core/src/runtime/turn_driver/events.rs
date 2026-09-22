@@ -139,6 +139,7 @@ async fn send_independent_turn_event(
 ) {
     send_turn_activity(
         event_tx,
+        // durable-entropy: live-stream correlation id; never journaled
         TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
         event,
     )

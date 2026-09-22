@@ -111,7 +111,7 @@ impl LashRuntime {
             .await;
         let durable_patch = ApplyConfigPatch::between(&previous, &candidate);
         if !durable_patch.is_empty() {
-            self.settle_config_patch(durable_patch).await?;
+            Box::pin(self.settle_config_patch(durable_patch)).await?;
         }
         // These fields are explicitly live policy, not part of the durable
         // session-head config. Publish them only after the durable-classified
@@ -287,10 +287,10 @@ impl LashRuntime {
         if self.state.protocol_turn_options == options {
             return Ok(Ok(false));
         }
-        self.settle_config_patch(ApplyConfigPatch {
+        Box::pin(self.settle_config_patch(ApplyConfigPatch {
             protocol_turn_options: Some(options),
             ..ApplyConfigPatch::default()
-        })
+        }))
         .await?;
         Ok(Ok(true))
     }
@@ -307,10 +307,10 @@ impl LashRuntime {
         if self.state.authority.tool_access == access {
             return Ok(());
         }
-        self.settle_config_patch(ApplyConfigPatch {
+        Box::pin(self.settle_config_patch(ApplyConfigPatch {
             tool_access: Some(access),
             ..ApplyConfigPatch::default()
-        })
+        }))
         .await
     }
 

@@ -866,12 +866,15 @@ finish("registered");
             let registration = worker_registration(
                 lash_core::ProcessInput::SessionTurn {
                     definition_key: "lash-testing-session-turn:v1".to_string(),
-                    create_request: Box::new(lash_core::SessionCreateRequest::child(
-                        SESSION_ID,
-                        lash_core::SessionStartPoint::Empty,
-                        child_policy,
-                        lash_core::PluginOptions::default(),
-                    )),
+                    create_request: Box::new(
+                        lash_core::SessionCreateRequest::child(
+                            SESSION_ID,
+                            lash_core::SessionStartPoint::Empty,
+                            child_policy,
+                            lash_core::PluginOptions::default(),
+                        )
+                        .with_session_id("proc-session-turn-child"),
+                    ),
                     turn_input: Box::new(lash_core::TurnInput::text("run child")),
                     output_contract: lash_core::ToolOutputContract::Static,
                 },

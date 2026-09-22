@@ -662,7 +662,7 @@ impl InMemoryLiveReplayStore {
 
     pub fn with_clock(config: InMemoryLiveReplayStoreConfig, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
-            replay_incarnation_id: uuid::Uuid::new_v4().to_string(),
+            replay_incarnation_id: crate::runtime::lifecycle::mint_incarnation_nonce(),
             config,
             clock,
             sessions: Arc::new(StdMutex::new(HashMap::new())),
@@ -937,6 +937,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 .map(Arc::new)
             })
             .collect::<Result<Vec<_>, SessionCursorError>>()?;
+        // durable-entropy: in-process publication bookkeeping; never journaled
         let reservation_id = uuid::Uuid::new_v4().to_string();
         buffer.tail_position = end_position;
         buffer.reservations.insert(

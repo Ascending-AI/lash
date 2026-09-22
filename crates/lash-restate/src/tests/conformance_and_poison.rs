@@ -1531,11 +1531,14 @@ pub(super) fn rerunnable_session_turn_registration(id: &str) -> ProcessRegistrat
         id,
         ProcessInput::SessionTurn {
             definition_key: "test-session-turn:v1".to_string(),
-            create_request: Box::new(lash_core::SessionCreateRequest::child_session(
-                "test-parent",
-                lash_core::SessionStartPoint::Empty,
-                lash_core::PluginOptions::default(),
-            )),
+            create_request: Box::new(
+                lash_core::SessionCreateRequest::child_session(
+                    "test-parent",
+                    lash_core::SessionStartPoint::Empty,
+                    lash_core::PluginOptions::default(),
+                )
+                .with_session_id(format!("test-child-{id}")),
+            ),
             turn_input: Box::new(lash_core::TurnInput::text("test child turn")),
             output_contract: lash_core::ToolOutputContract::Static,
         },

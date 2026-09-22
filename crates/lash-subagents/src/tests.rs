@@ -137,6 +137,7 @@ impl Capability for CustomRequestCapability {
             ctx.base_policy(),
             lash_core::PluginOptions::default(),
         )
+        .with_session_id("test-child-session")
         .with_plugin_source(lash_core::SessionPluginSource::CurrentHostFresh)
         .with_tool_access(tool_access);
         ctx.finalize_request(request, self.name())

@@ -327,6 +327,7 @@ pub(in crate::runtime) async fn send_queued_work_started_event(
 ) {
     send_turn_activity(
         event_tx,
+        // durable-entropy: live-stream correlation id; never journaled
         TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
         TurnEvent::QueuedWorkStarted {
             boundary,

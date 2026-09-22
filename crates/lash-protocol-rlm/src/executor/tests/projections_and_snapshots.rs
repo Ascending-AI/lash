@@ -302,7 +302,7 @@ pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_r
 
         let registry = Arc::new(ProjectionRegistry::new());
         let descriptor = Arc::new(SnapshotProjectedToolText::default());
-        let reference = registry.register_memory(descriptor.clone());
+        let reference = registry.register_memory("doc", descriptor.clone());
         state
             .insert_global(
                 "doc",
@@ -386,7 +386,7 @@ pub(super) fn restored_projection_degradation_fixture()
 -> (RlmExecutionState, Arc<ProjectionRegistry>) {
     let registry = Arc::new(ProjectionRegistry::new());
     let descriptor = Arc::new(SnapshotProjectedToolText::default());
-    let healthy_reference = registry.register_memory(descriptor.clone());
+    let healthy_reference = registry.register_memory("healthy", descriptor.clone());
     let dead_reference =
         ProjectionRef::new("memory", serde_json::json!("missing")).with_descriptor_type("string");
     let mut source = RlmExecutionState::new();

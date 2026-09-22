@@ -854,6 +854,7 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
         .with_adapter_code(TurnFailureCode::TaskJoinFailed)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable);
     let record = synthetic_terminal_call_record(
+        crate::LlmCallId("scope-request-id".to_string()),
         7,
         Duration::from_millis(11),
         AttemptOutcome::Interrupted,

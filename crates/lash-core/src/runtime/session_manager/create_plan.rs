@@ -20,11 +20,19 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
     current: &CurrentSessionCapability,
     mut request: SessionCreateRequest,
 ) -> Result<SessionCreatePlan, crate::PluginError> {
+    // The session id is the durable record's own key: it must arrive with the
+    // request, derived from the caller's replayable context, rather than be
+    // minted here where a re-executed create would journal a different id
+    // (FIG-1278).
     let session_id = request
         .session_id
         .take()
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| SessionId::from(uuid::Uuid::new_v4().to_string()));
+        .ok_or_else(|| {
+            crate::PluginError::Session(
+                "session create requires a caller-supplied session_id".to_string(),
+            )
+        })?;
     request.session_id = Some(session_id.clone());
     if session_id == current.session_id || managed.registry.lock().await.contains_key(&session_id) {
         return Err(crate::PluginError::Session(format!(

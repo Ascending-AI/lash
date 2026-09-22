@@ -114,6 +114,8 @@ fn emit_direct_llm_trace_started(
     caused_by: Option<&CausalRef>,
 ) -> Option<String> {
     current.host.core.tracing.trace_sink.as_ref()?;
+    // durable-entropy: trace-sink correlation id; the durable call record's
+    // id comes from the request scope, not this value
     let llm_call_id = uuid::Uuid::new_v4().to_string();
     emit_llm_trace_started(
         &current.host.core.tracing.trace_sink,

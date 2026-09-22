@@ -750,6 +750,8 @@ pub(super) fn apply_in_memory_trigger_command(
     now: u64,
 ) -> TriggerEffectResult {
     apply_in_memory_trigger_command_with_incarnation(state, command, now, &mut || {
+        // durable-entropy: in-memory store incarnation fence; this store is
+        // not durable, so nothing replays it
         uuid::Uuid::new_v4().to_string()
     })
 }

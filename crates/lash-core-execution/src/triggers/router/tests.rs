@@ -190,10 +190,13 @@ fn trigger_definition_identity_golden_corpus() {
         },
         crate::ProcessInput::SessionTurn {
             definition_key: "golden-session-turn:v1".to_string(),
-            create_request: Box::new(crate::SessionCreateRequest::root(
-                crate::SessionStartPoint::Empty,
-                crate::PluginOptions::default(),
-            )),
+            create_request: Box::new(
+                crate::SessionCreateRequest::root(
+                    crate::SessionStartPoint::Empty,
+                    crate::PluginOptions::default(),
+                )
+                .with_session_id("golden-session-turn"),
+            ),
             turn_input: Box::new(crate::TurnInput::empty()),
             output_contract: crate::ToolOutputContract::FromInputSchema {
                 input_field: "field".to_string(),
@@ -205,10 +208,13 @@ fn trigger_definition_identity_golden_corpus() {
         },
         crate::ProcessInput::SessionTurn {
             definition_key: "golden-session-turn-static:v1".to_string(),
-            create_request: Box::new(crate::SessionCreateRequest::root(
-                crate::SessionStartPoint::Empty,
-                crate::PluginOptions::default(),
-            )),
+            create_request: Box::new(
+                crate::SessionCreateRequest::root(
+                    crate::SessionStartPoint::Empty,
+                    crate::PluginOptions::default(),
+                )
+                .with_session_id("golden-session-turn-static"),
+            ),
             turn_input: Box::new(crate::TurnInput::empty()),
             output_contract: crate::ToolOutputContract::Static,
         },

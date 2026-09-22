@@ -326,10 +326,15 @@ impl InternalProcessAdmin<'_> {
         signal_name: &str,
         payload: serde_json::Value,
     ) -> Result<crate::ProcessEvent, PluginError> {
-        let signal_id = self
-            .tool_call_id
-            .clone()
-            .unwrap_or_else(|| format!("adhoc-{}", uuid::Uuid::new_v4()));
+        // The signal id rides into the journaled ProcessEvent, so it must come
+        // from the ambient journaled call — minting one here would diverge
+        // from the durable record on replay (FIG-1278). Callers without a
+        // tool-call context use `signal_with_id`.
+        let Some(signal_id) = self.tool_call_id.clone() else {
+            return Err(PluginError::Session(
+                "process signal outside a tool-call context must use signal_with_id".to_string(),
+            ));
+        };
         self.processes
             .validate_visible(
                 &self.session_id,

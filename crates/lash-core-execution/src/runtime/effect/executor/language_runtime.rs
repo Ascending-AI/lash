@@ -35,6 +35,9 @@ impl RuntimeEffectLocalRunner for LanguageRuntimeValueRunner {
             "random" => {
                 // UUID v4 fixes high-order version/variant bits. The low 53 bits
                 // remain random and map exactly onto JavaScript's unit interval.
+                // durable-entropy: journaled effect outcome — the executor runs
+                // once and replay serves the recorded value, so the minted
+                // bits are produced once and never recomputed
                 let bits = (uuid::Uuid::new_v4().as_u128() & ((1_u128 << 53) - 1)) as u64;
                 serde_json::json!(bits as f64 / ((1_u64 << 53) as f64))
             }

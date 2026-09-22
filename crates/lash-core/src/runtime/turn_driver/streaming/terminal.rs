@@ -1,6 +1,8 @@
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn synthesize_protocol_abort(
+    call_id: crate::LlmCallId,
     stream_accumulator: &LlmStreamAccumulator,
     streamed_usage: LlmUsage,
     stream_evidence: &crate::LlmStreamEvidence,
@@ -38,7 +40,7 @@ pub(super) fn synthesize_protocol_abort(
     let usage_disposition =
         crate::AttemptUsageDisposition::for_attempt(crate::AttemptOutcome::Aborted, usage.as_ref());
     let call_record = crate::LlmCallRecord {
-        call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
+        call_id,
         label: None,
         replay_drops,
         attempts: vec![crate::AttemptRecord {

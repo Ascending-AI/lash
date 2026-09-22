@@ -168,7 +168,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             request.code = "finish(restored.length);".to_string();
             let registry = Arc::new(ProjectionRegistry::new());
             let descriptor = Arc::new(SnapshotProjectedToolText::default());
-            let reference = registry.register_memory(descriptor.clone());
+            let reference = registry.register_memory("restored-doc", descriptor.clone());
             state
                 .rlm
                 .insert_global(

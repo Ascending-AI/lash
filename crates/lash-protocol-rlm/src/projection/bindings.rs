@@ -59,9 +59,16 @@ impl ProjectionRegistry {
         Self::default()
     }
 
-    pub fn register_memory(&self, value: Arc<dyn ProjectedHostDescriptor>) -> ProjectionRef {
+    /// The caller supplies the key: a `Ref` binding minted here can land in a
+    /// journaled seed snapshot, so the key must be a host-chosen, replayable
+    /// identity — never a freshly minted one.
+    pub fn register_memory(
+        &self,
+        key: impl Into<String>,
+        value: Arc<dyn ProjectedHostDescriptor>,
+    ) -> ProjectionRef {
         let descriptor_type = value.type_name().to_string();
-        let key = uuid::Uuid::new_v4().to_string();
+        let key = key.into();
         self.memory.write_recover().insert(key.clone(), value);
         ProjectionRef::new("memory", serde_json::Value::String(key))
             .with_descriptor_type(descriptor_type)
@@ -321,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn bind_lazy_resolves_memory_projection_ref() {
         let registry = Arc::new(ProjectionRegistry::new());
-        let reference = registry.register_memory(Arc::new(TestProjectedValue));
+        let reference = registry.register_memory("doc", Arc::new(TestProjectedValue));
         let bindings = RlmProjectedBindings::new()
             .bind_lazy("doc", reference.clone())
             .expect("lazy bind");

@@ -81,6 +81,12 @@ impl crate::SessionStoreFactory for InMemorySessionStoreFactory {
     async fn fork_points(&self) -> Result<Vec<crate::ForkPoint>, crate::StoreError> {
         InMemorySessionStoreFactory::fork_points(self).await
     }
+    async fn fork_point_observer_sources(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<crate::SessionId>, crate::StoreError> {
+        InMemorySessionStoreFactory::fork_point_observer_sources(self, node_id).await
+    }
     async fn fork_at(
         &self,
         request: &crate::ForkSessionRequest,

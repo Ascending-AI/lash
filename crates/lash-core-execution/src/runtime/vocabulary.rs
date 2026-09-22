@@ -202,6 +202,8 @@ pub struct TurnActivity {
 impl TurnActivity {
     pub fn new(correlation_id: TurnActivityId, event: TurnEvent) -> Self {
         Self {
+            // durable-entropy: live-stream activity id; emitted on the event
+            // channel only, never journaled
             id: TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
             correlation_id,
             event,
@@ -209,6 +211,7 @@ impl TurnActivity {
     }
 
     pub fn independent(event: TurnEvent) -> Self {
+        // durable-entropy: live-stream correlation id; never journaled
         let correlation_id = TurnActivityId::new(uuid::Uuid::new_v4().to_string());
         Self::new(correlation_id, event)
     }

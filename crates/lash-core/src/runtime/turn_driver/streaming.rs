@@ -270,6 +270,10 @@ impl RuntimeTurnDriver<'_> {
         let mut call_provider = self.policy.provider().clone();
         let completion_sideband = call_provider.prepare_completion(&mut llm_request);
         let task_sideband = completion_sideband.clone();
+        // The journaled call id is the request scope's caller-derived request
+        // id; synthesized terminal records must carry the same identity so a
+        // replayed call does not mint a divergent one.
+        let durable_call_id = crate::LlmCallId(llm_request.scope.request_id.clone());
         let charge_safety = self.policy.charge_safety.clone();
         let mut llm_task = crate::task::spawn(async move {
             let result = call_provider
@@ -321,6 +325,7 @@ impl RuntimeTurnDriver<'_> {
                         crate::llm::transport::TransportRetryVerdict::NotRetryable,
                     );
                     call_record = Some(crate::provider::synthetic_terminal_call_record(
+                        durable_call_id.clone(),
                         attempt_started_at,
                         self.host
                             .core
@@ -402,6 +407,7 @@ impl RuntimeTurnDriver<'_> {
                                         );
                                     }
                                     let (resp, _) = synthesize_protocol_abort(
+                                        durable_call_id.clone(),
                                         stream_state.stream_accumulator,
                                         stream_state.streamed_usage.clone(),
                                         stream_state.stream_evidence,
@@ -418,6 +424,7 @@ impl RuntimeTurnDriver<'_> {
                             }
                         }
                         let (resp, aborted_call_record) = synthesize_protocol_abort(
+                            durable_call_id.clone(),
                             stream_state.stream_accumulator,
                             stream_state.streamed_usage.clone(),
                             stream_state.stream_evidence,
@@ -459,7 +466,7 @@ impl RuntimeTurnDriver<'_> {
                             let payload = e.into_panic();
                             let message = crate::panic_containment::payload_message(payload.as_ref());
                             call_record = Some(crate::LlmCallRecord {
-                                call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
+                                call_id: durable_call_id.clone(),
                                 label: None,
                                 replay_drops: completion_sideband.replay_drops(),
                                 attempts: vec![crate::AttemptRecord {
@@ -515,6 +522,7 @@ impl RuntimeTurnDriver<'_> {
                                 crate::llm::transport::TransportRetryVerdict::NotRetryable,
                             );
                             call_record = Some(crate::provider::synthetic_terminal_call_record(
+                                durable_call_id.clone(),
                                 attempt_started_at,
                                 self.host
                                     .core
@@ -1057,6 +1065,7 @@ impl RuntimeTurnDriver<'_> {
                 // correlation lists are therefore meaningful host evidence.
                 forwarder
                     .send_semantic_turn_activity(
+                        // durable-entropy: live-stream correlation id; never journaled
                         TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
                         TurnEvent::ModelAttemptReset {
                             assistant_prose_correlation_ids,

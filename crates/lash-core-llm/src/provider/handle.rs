@@ -330,6 +330,7 @@ impl ProviderHandle {
                 .with_retry_verdict(TransportRetryVerdict::Forbidden);
             return Err(ProviderCompletionError {
                 call_record: Box::new(synthetic_terminal_call_record(
+                    LlmCallId(request.scope.request_id.clone()),
                     self.components.rate_limiter.clock().timestamp_ms(),
                     Duration::ZERO,
                     AttemptOutcome::Failed,
@@ -344,7 +345,9 @@ impl ProviderHandle {
         let reliability = self.options().reliability;
         let attempts = reliability.retry.attempts();
         let mut budget = RetryBudget::default();
-        let call_id = LlmCallId(uuid::Uuid::new_v4().to_string());
+        // The journaled call id is the request scope's caller-derived
+        // request id, so a replayed call re-derives the same record identity.
+        let call_id = LlmCallId(request.scope.request_id.clone());
         let mut records = Vec::new();
         loop {
             let _permit = self
@@ -1079,7 +1082,12 @@ fn charge_safety_refusal(
     failure
 }
 
+/// The caller passes the request-scope call id so the synthesized record
+/// carries the same identity the journaled call would have used; minting a
+/// fresh id here would diverge from the durable record on replay.
+#[allow(clippy::too_many_arguments)]
 pub fn synthetic_terminal_call_record(
+    call_id: LlmCallId,
     started_at: u64,
     duration: Duration,
     outcome: AttemptOutcome,
@@ -1099,7 +1107,7 @@ pub fn synthetic_terminal_call_record(
     );
     attempt.outcome = outcome;
     LlmCallRecord {
-        call_id: LlmCallId(uuid::Uuid::new_v4().to_string()),
+        call_id,
         label: None,
         replay_drops,
         attempts: vec![attempt],

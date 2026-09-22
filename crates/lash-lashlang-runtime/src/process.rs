@@ -1028,13 +1028,17 @@ impl LashlangProcessHost<'_> {
         &self,
         handle: lashlang::Value,
     ) -> Result<lashlang::Value, ExecutionHostError> {
+        // `await` has no call site, so the journaled call id derives from the
+        // journaled event ordinal — restored with the segment, so a redrive
+        // re-derives the same identity. Sharing `event_sequence` is safe: the
+        // ordinal is an opaque per-incarnation counter and the `sequenced`
+        // key prefix keeps awaits and events in disjoint namespaces.
+        let ordinal = self.ordinals.event_sequence.fetch_add(1, Ordering::Relaxed);
+        let call_id = self.identities.sequenced("await_handle", ordinal);
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             self.ctx
-                .await_tool_handle(
-                    uuid::Uuid::new_v4().to_string(),
-                    lashlang_value_to_json(&handle)?,
-                )
+                .await_tool_handle(call_id, lashlang_value_to_json(&handle)?)
                 .await
         };
         protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)

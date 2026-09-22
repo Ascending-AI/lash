@@ -1393,6 +1393,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         let sequence = EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
         let owner_id = format!(
             "pid{}-{sequence}-{}",
+            // durable-entropy: lease-owner fencing id — per-incarnation
+            // freshness is the contract; the row store compares, never replays
             std::process::id(),
             clock.timestamp_ms()
         );

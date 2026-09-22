@@ -466,6 +466,7 @@ jobs:
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_conformance_law_registration.py
+          python3 scripts/test_check_durable_entropy.py
           python3 scripts/test_check_law_execution_receipts.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_gate_scope.py
@@ -1440,6 +1441,12 @@ jobs:
       # and simply never runs on any backend; this names it before merge.
       - name: Check conformance law registration
         run: python3 scripts/check_conformance_law_registration.py
+
+      # FIG-1278: entropy may never produce a value that lands in a durable
+      # record; every swept mint must be test-only or carry an inline
+      # `durable-entropy:` justification.
+      - name: Check durable entropy
+        run: python3 scripts/check_durable_entropy.py
 
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh

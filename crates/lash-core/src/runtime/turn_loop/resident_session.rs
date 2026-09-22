@@ -200,6 +200,7 @@ impl ResidentSessionContinuity {
                 decision_id: format!(
                     "resident-session-reload:{}:{}",
                     session_id,
+                    // durable-entropy: in-memory validity marker; never journaled
                     uuid::Uuid::new_v4()
                 ),
             };

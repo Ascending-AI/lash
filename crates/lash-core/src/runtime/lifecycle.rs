@@ -1,5 +1,18 @@
 use super::*;
 
+/// A per-incarnation fencing nonce: the one place fresh entropy is legitimate
+/// in durable reach.
+///
+/// The nonce lands in durable lease/incarnation rows so that a dead executor's
+/// claim can never be confused with a live one's. Freshness is the contract —
+/// replay never needs to re-derive it — so this is minted once per runtime
+/// incarnation, not derived (FIG-1278). Every other value that lands in a
+/// durable record must come from replayable inputs or the host.
+pub(crate) fn mint_incarnation_nonce() -> String {
+    // durable-entropy: fencing nonce — per-incarnation freshness is the contract
+    uuid::Uuid::new_v4().to_string()
+}
+
 pub(in crate::runtime) fn initial_park_preview(
     state: &crate::RuntimeSessionState,
     pending_usage: &[crate::TokenLedgerEntry],
@@ -124,7 +137,7 @@ impl RuntimeSessionAssembly {
             state,
             relation,
             runtime_lease_owner,
-            runtime_lease_executor_id: uuid::Uuid::new_v4().to_string(),
+            runtime_lease_executor_id: mint_incarnation_nonce(),
         }
     }
 
@@ -357,7 +370,7 @@ impl LashRuntime {
             services,
             state,
             runtime_lease_owner,
-            uuid::Uuid::new_v4().to_string(),
+            mint_incarnation_nonce(),
         )
         .await
     }
@@ -375,7 +388,7 @@ impl LashRuntime {
             services,
             state,
             runtime_lease_owner,
-            uuid::Uuid::new_v4().to_string(),
+            mint_incarnation_nonce(),
         )
         .await
     }
@@ -400,7 +413,7 @@ impl LashRuntime {
             services.into_runtime_services(),
             state,
             runtime_lease_owner,
-            uuid::Uuid::new_v4().to_string(),
+            mint_incarnation_nonce(),
         )
         .await
     }
@@ -425,7 +438,7 @@ impl LashRuntime {
             services.into_runtime_services(),
             state,
             runtime_lease_owner,
-            uuid::Uuid::new_v4().to_string(),
+            mint_incarnation_nonce(),
         )
         .await
     }
@@ -544,7 +557,7 @@ impl LashRuntime {
             store,
             plugin_options,
             runtime_lease_owner,
-            uuid::Uuid::new_v4().to_string(),
+            mint_incarnation_nonce(),
         )
         .await
     }

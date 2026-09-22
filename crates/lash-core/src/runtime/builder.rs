@@ -312,7 +312,7 @@ impl EmbeddedRuntimeBuilder {
                     store.as_ref(),
                     &recovery_session_id,
                     &self.runtime_lease_owner,
-                    &uuid::Uuid::new_v4().to_string(),
+                    &crate::runtime::lifecycle::mint_incarnation_nonce(),
                     self.core.control.lease_timings.ttl_ms(),
                 )
                 .await

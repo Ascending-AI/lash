@@ -939,6 +939,8 @@ impl LashRuntime {
         else {
             let receipt = crate::SessionCommandReceipt {
                 session_id,
+                // durable-entropy: receipt correlation for the caller; the
+                // inline path journals no batch row, so nothing replays it
                 batch_id: crate::BatchId::new(format!("inline-command:{}", uuid::Uuid::new_v4())),
                 source_key,
             };
@@ -973,9 +975,21 @@ impl LashRuntime {
         &mut self,
         patch: super::ApplyConfigPatch,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
+        // The key derives from the patch bytes so the same patch resubmitted
+        // after a crash dedups against the journaled key instead of minting a
+        // second queued batch (FIG-1278).
+        let encoded = serde_json::to_vec(&patch).map_err(|err| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                format!("config patch did not serialize for key derivation: {err}"),
+            )
+        })?;
         self.submit_apply_config_patch_with_idempotency_key(
             patch,
-            format!("config-patch:{}", uuid::Uuid::new_v4()),
+            format!(
+                "config-patch:{}",
+                lash_core_ids::stable_hash::blake3_hex("lash-config-patch/v1", &encoded)
+            ),
         )
         .await
     }

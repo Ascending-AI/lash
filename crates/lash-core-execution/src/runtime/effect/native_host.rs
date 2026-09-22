@@ -116,6 +116,8 @@ impl NativeEffectHost {
     /// visible to it.
     pub fn new(controller: Arc<dyn RuntimeEffectController>) -> Self {
         Self {
+            // durable-entropy: fencing nonce — host-incarnation freshness is the
+            // contract; scopes derived from it are compared, never replayed
             turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller,
             await_event_admin: None,
@@ -136,6 +138,8 @@ impl NativeEffectHost {
         let await_event_admin = Some(controller.await_event_registry());
         let groups_admin = Some(controller.groups());
         Self {
+            // durable-entropy: fencing nonce — host-incarnation freshness is the
+            // contract; scopes derived from it are compared, never replayed
             turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller,
             await_event_admin,

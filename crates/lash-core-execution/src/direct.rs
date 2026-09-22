@@ -244,6 +244,7 @@ impl DirectLlmClient {
         let llm_request = build_llm_request(&self.provider, request, model)?;
         let request_model = llm_request.model.clone();
         let llm_call_id = if self.trace_sink.is_some() {
+            // durable-entropy: trace-sink correlation id; never journaled
             let id = uuid::Uuid::new_v4().to_string();
             crate::runtime::effect::emit_llm_trace_started(
                 &self.trace_sink,
@@ -401,6 +402,8 @@ pub fn build_llm_request(
             format!("{session_id}:direct"),
         ),
         None => {
+            // durable-entropy: session-less transport scope — no session
+            // journal exists for this path to diverge from
             let request_id = uuid::Uuid::new_v4().to_string();
             LlmRequestScope::new(
                 format!("direct:{request_id}"),

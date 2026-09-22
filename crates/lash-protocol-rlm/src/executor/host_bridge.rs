@@ -705,13 +705,17 @@ impl HostBridge<'_> {
 
     async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
         let index = self.next_index();
+        // `await` has no call site, so the journaled call id derives from the
+        // execution's replay-stable dispatch index rather than a fresh uuid.
+        let call_id = self
+            .identities
+            .as_ref()
+            .map_err(|error| ExecutionHostError::new(error.to_string()))?
+            .sequenced("await_handle", index as u64);
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             self.ctx
-                .await_tool_handle(
-                    uuid::Uuid::new_v4().to_string(),
-                    handle_to_json(&handle).await?,
-                )
+                .await_tool_handle(call_id, handle_to_json(&handle).await?)
                 .await
         };
         self.consume_recorded_reply(index, "await_handle", reply)
