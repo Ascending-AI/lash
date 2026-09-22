@@ -1047,18 +1047,29 @@ impl SessionCommitStore for Store {
         binding: &lash_core::SessionBinding,
     ) -> Result<lash_core::SessionAdmission, StoreError> {
         binding.validate()?;
-        self.bind_session(&binding.session_id)?;
         let session_id = binding.session_id.clone();
+        // The tombstone outranks the handle's own binding: a bound handle
+        // asked to admit a deleted session answers SessionDeleted, not
+        // SessionBindingMismatch (FIG-1282). The binding decision is made
+        // inside the write transaction, between the tombstone check and the
+        // metadata write: the connection thread serializes these closures,
+        // and the `OnceLock` covers binders outside a transaction, so a
+        // competing admission that loses the bind rolls its creation back
+        // rather than committing a session it is then refused for. The lock
+        // crosses the closure's 'static bound as a shared `Arc`.
+        let bound = Arc::clone(&self.session_id);
         let created_at_ms = self.clock.timestamp_ms();
         let meta = SessionMeta {
             session_id: session_id.clone(),
             relation: binding.relation.clone(),
             pending_observer_intents: Vec::new(),
         };
-        self.conn
+        let admission = self
+            .conn
             .write_flow(move |tx| {
                 let outcome: Result<lash_core::SessionAdmission, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
+                    crate::bind_session_lock(&bound, &session_id)?;
                     let inserted = crate::session_meta::write_session_meta(
                         tx,
                         &meta,
@@ -1085,7 +1096,8 @@ impl SessionCommitStore for Store {
                 })
             })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)??;
+        Ok(admission)
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {

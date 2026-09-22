@@ -937,7 +937,6 @@ impl SessionCommitStore for PostgresSessionStore {
     ) -> Result<lash_core::SessionAdmission, StoreError> {
         binding.validate()?;
         let session_id = &binding.session_id;
-        self.bind_session_id(session_id)?;
         let meta = SessionMeta {
             session_id: SessionId::from(session_id.to_string()),
             relation: binding.relation.clone(),
@@ -949,7 +948,11 @@ impl SessionCommitStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
+        // The tombstone outranks the handle's own binding: a bound handle
+        // asked to admit a deleted session answers SessionDeleted, not
+        // SessionBindingMismatch (FIG-1282).
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        self.bind_session_id(session_id)?;
         let inserted = crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,
