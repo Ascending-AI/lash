@@ -101,6 +101,9 @@ const FLEETING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const EXPIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-101-f2a4770bd/sqlite-expected.json",
 ];
+const SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-103-constraint-predecessor/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];
@@ -256,7 +259,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 73"),
+        message.contains("supports schema version 74"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -281,12 +284,72 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 73"),
+        message.contains("supports schema version 74"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
         message.contains("reports version 38"),
         "open refusal must name the stale v38 fixture: {message}"
+    );
+}
+
+/// FIG-1949 layer 2: the durable artifact-blob envelope dropped its
+/// `descriptor` field under durable-core schema 74. A pre-74 database — one
+/// whose blob rows still carry the field — must be refused at the version
+/// boundary; new code never decodes the retired shape.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_v73_envelope_database_is_refused_before_blob_decode() {
+    let fixture_dir = fixture_dir();
+    let temp = tempfile::tempdir().expect("SQLite fixture tempdir");
+    copy_sqlite_fixture(&fixture_dir, temp.path());
+    let durable_core = temp.path().join("durable-core.db");
+    let connection = rusqlite::Connection::open(&durable_core).expect("open copied fixture");
+
+    // A blob row in the retired pre-74 envelope shape: the payload family was
+    // restated inside the envelope before the pointer-table namespace became
+    // its sole owner.
+    #[derive(serde::Serialize)]
+    struct PreBoundaryDescriptor {
+        kind: &'static str,
+    }
+    #[derive(serde::Serialize)]
+    struct PreBoundaryEnvelope {
+        descriptor: PreBoundaryDescriptor,
+        compression: &'static str,
+        #[serde(with = "serde_bytes")]
+        content: Vec<u8>,
+    }
+    let legacy_blob = rmp_serde::to_vec_named(&PreBoundaryEnvelope {
+        descriptor: PreBoundaryDescriptor {
+            kind: "CheckpointManifest",
+        },
+        compression: "None",
+        content: b"legacy payload".to_vec(),
+    })
+    .expect("encode a pre-74 artifact-blob envelope");
+    connection
+        .execute(
+            "INSERT OR REPLACE INTO blobs (hash, content) VALUES ('pre-74-blob', ?1)",
+            rusqlite::params![legacy_blob],
+        )
+        .expect("insert pre-74 envelope blob");
+    connection
+        .pragma_update(None, "user_version", 73)
+        .expect("stamp the pre-envelope-removal v73 boundary");
+    drop(connection);
+
+    let open_error = match Store::open(&durable_core).await {
+        Err(error) => error,
+        Ok(_) => panic!("a pre-74 durable core must be refused at the schema boundary"),
+    };
+    let message = open_error.to_string();
+    assert!(
+        message.contains("supports schema version 74"),
+        "open refusal must name the current reject-and-recreate boundary: {message}"
+    );
+    assert!(
+        message.contains("reports version 73"),
+        "open refusal must name the pre-74 database: {message}"
     );
 }
 

@@ -510,9 +510,8 @@ enum BlobCompression {
     Zlib,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlobArtifactDescriptor {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hints: Vec<BlobStorageHint>,
 }
 
@@ -572,9 +571,11 @@ pub struct StoreOptions {
     pub connection_policy: SqliteConnectionPolicy,
 }
 
+/// The durable artifact-blob envelope. It carries no payload-family field:
+/// the pointer table's namespace key owns that fact, so a stored envelope can
+/// never disagree with the row that names it (FIG-1949).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct StoredBlobEnvelope {
-    descriptor: BlobArtifactDescriptor,
     compression: BlobCompression,
     #[serde(with = "serde_bytes")]
     content: Vec<u8>,
