@@ -170,6 +170,12 @@ impl RuntimeHostConfig {
             ));
         if let Some(tool_children) = &tool_children {
             tool_children.with_clock(Arc::clone(&clock));
+            // The install is get-or-init: a host that already routed tool
+            // children answers with the resolver it built earlier, which may
+            // carry a different env store. The runtime's store is the one
+            // executions publish to, so propagate it the same way
+            // `with_process_env_store` does on a later swap.
+            tool_children.with_process_env_store(Arc::clone(&process_env_store));
         }
         Self {
             durability: RuntimeDurabilityConfig {

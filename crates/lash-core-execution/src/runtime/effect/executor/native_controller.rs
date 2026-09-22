@@ -221,6 +221,10 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         self.groups.register_executors(executors)
     }
 
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        Some(Arc::clone(&self.groups) as Arc<dyn std::any::Any + Send + Sync>)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

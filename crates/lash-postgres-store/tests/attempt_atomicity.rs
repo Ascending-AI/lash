@@ -332,6 +332,27 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
         self.0.controller().open_effect_group(group).await
     }
 
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.0.controller().register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.0.controller().native_effect_groups_substrate()
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.0
+            .controller()
+            .group_child_scoped_controller(admitted, binding)
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
@@ -519,6 +540,18 @@ impl lash_core::RuntimeEffectController for CrossingController {
         executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.inner.native_effect_groups_substrate()
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.group_child_scoped_controller(admitted, binding)
     }
 
     async fn await_next_settlement(

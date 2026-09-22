@@ -527,6 +527,10 @@ impl lash_core::RuntimeEffectController for CountingEffectController {
         self.native.register_group_executors(executors)
     }
 
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.native.native_effect_groups_substrate()
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
@@ -789,7 +793,7 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
     assert!(saw_batch_result.load(Ordering::SeqCst));
     assert_eq!(
         controller.group_open_count(),
-        2,
+        1,
         "each batch is a durable effect group now (FIG-3397)"
     );
     assert_eq!(

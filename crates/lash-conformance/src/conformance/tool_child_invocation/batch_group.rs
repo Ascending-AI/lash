@@ -145,10 +145,6 @@ fn normalize_session(value: &mut serde_json::Value, session_id: &crate::SessionI
 /// consumer preserves preparation-prefix settlement (ADR 0099 §10 L5),
 /// per-leaf replies keyed by input index, and the settlement-order contract:
 /// a permutation of `0..n` whose preparation-settled positions lead.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
     fixture: &ToolChildLawFixture,
     prefix: &str,
