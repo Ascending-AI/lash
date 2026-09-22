@@ -893,4 +893,15 @@ pub mod core_internal {
     pub use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
     pub use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
+    pub fn attach_process_invocation_correlation(
+        turn_context: &mut crate::TurnContext,
+        process_id: &crate::ProcessId,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) {
+        crate::session::attach_process_invocation_correlation(turn_context, process_id, authority);
+    }
+
+    pub fn clear_process_invocation_correlation(turn_context: &mut crate::TurnContext) {
+        crate::session::clear_process_invocation_correlation(turn_context);
+    }
 }

@@ -985,6 +985,43 @@ impl lash_core::facade_support::TraceSink for NoopTraceSink {
     }
 }
 
+#[test]
+pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation() {
+    let process_id = lash_core::ProcessId::from("rlm-session-turn");
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        "invocation-rlm-cell",
+    )
+    .bind_attempt(2);
+    let mut input = lash_core::TurnInput::text("run the RLM cell");
+    lash_core::core_internal::attach_process_invocation_correlation(
+        &mut input.turn_context,
+        &process_id,
+        &authority,
+    );
+    let context = lash_core::testing::TestExecutionContextBuilder::new()
+        .turn_context(input.turn_context)
+        .build()
+        .into_runtime();
+    let program = lash_typescript::parse("finish(1);").expect("valid fixture source");
+    let artifact = lashlang::ModuleArtifact::from_program(program).expect("valid fixture module");
+    let trace = foreground_lashlang_execution_trace(
+        &context,
+        &artifact,
+        &RlmLashlangExecutionTraceConfig {
+            sink: Some(Arc::new(NoopTraceSink)),
+            trace_context: TraceContext::default(),
+        },
+        "typescript",
+    )
+    .expect("foreground trace");
+
+    assert_eq!(
+        trace.identity().restate_invocation_id.as_deref(),
+        Some("invocation-rlm-cell")
+    );
+}
+
 pub(super) async fn execute_continue_as_with_trace_sink(
     trace_sink: Option<Arc<dyn lash_core::facade_support::TraceSink>>,
 ) -> lash_core::ToolCallRecord {
@@ -1079,13 +1116,13 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:43:resource_operation:e5d8677e32201f4992b63760:1"
+                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:29:node:1de6eca7fbb5c02fa3b32d47:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:43:resource_operation:e5d8677e32201f4992b63760:1"
+                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:29:node:1de6eca7fbb5c02fa3b32d47:1"
             )
         );
 
@@ -1099,11 +1136,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/288912bdc05f6baa573f2aaec7e929c7d20f0a03dbe1b6e6b9822bacf7996c48"
+            "frame-key/v2/24682960bee1ace2b8718fc0d09ae16a618d89a8686b9128311c5fa8ef9c65c3"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/288912bdc05f6baa573f2aaec7e929c7d20f0a03dbe1b6e6b9822bacf7996c48"
+            "frame-key/v2/24682960bee1ace2b8718fc0d09ae16a618d89a8686b9128311c5fa8ef9c65c3"
         );
     });
 }

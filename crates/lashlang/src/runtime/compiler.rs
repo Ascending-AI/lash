@@ -85,10 +85,11 @@ struct PendingFunction {
 
 struct LashlangExecutionCompileContext {
     context: LashlangExecutionContext,
-    /// `main`-rooted node paths mapped to their execution-site identity.
+    /// `main`-rooted AST paths mapped to the workflow node that owns each
+    /// execution site below them.
     /// Declaration bodies carry no sites, so only [`AstRoot::Main`] paths are
     /// populated.
-    paths: FxHashMap<AstPath, LashlangAstPath>,
+    node_paths: FxHashMap<AstPath, LashlangAstPath>,
     sites: Vec<Option<LashlangExecutionSite>>,
 }
 
@@ -136,4 +137,5 @@ mod helpers;
 pub(crate) use helpers::*;
 pub use helpers::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
+    lowered_for_of_parts,
 };

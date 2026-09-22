@@ -44,6 +44,8 @@ use sha2::{Digest, Sha256};
 
 use crate::ingress::RestateAuthorityId;
 
+pub(crate) const LASH_REPLAY_KEY_HEADER: &str = "x-lash-replay-key";
+
 pub(crate) fn restate_await_event_key(
     scope: &ExecutionScope,
     wait: AwaitEventWaitIdentity,
@@ -533,9 +535,11 @@ where
     C: ContextClient<'ctx>,
 {
     let entry = RestateDurableWaitAwakeableRequest { key, awakeable_id };
+    let replay_key = entry.key.key_id.clone();
     let register = context
         .object_client::<LashDurableWaitIndexClient>(session_id)
-        .register_awakeable(Json(entry.clone()));
+        .register_awakeable(Json(entry.clone()))
+        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(registration) = register.call().await?;
     Ok(match registration {
         RestateDurableWaitRegistration::Revoked => RestateTurnCancelGate::Revoked,
@@ -556,9 +560,11 @@ pub(crate) async fn retire_turn_cancel_gate<'ctx, C>(
 where
     C: ContextClient<'ctx>,
 {
+    let replay_key = entry.key.key_id.clone();
     let unregister = context
         .object_client::<LashDurableWaitIndexClient>(session_id)
-        .unregister_awakeable(Json(entry));
+        .unregister_awakeable(Json(entry))
+        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(()) = unregister.call().await?;
     Ok(())
 }
@@ -605,11 +611,13 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         }
         let address = verify_durable_wait_workflow_key(ctx.key(), &request.key)?;
         let index_key = durable_wait_index_object_key(&address);
+        let replay_key = request.key.key_id.clone();
         let registration = ctx
             .object_client::<LashDurableWaitIndexClient>(index_key.clone())
             .register(Json(RestateDurableWaitIndexRequest {
                 key: request.key.clone(),
-            }));
+            }))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
         let Json(registration) = registration.call().await?;
         match registration {
             RestateDurableWaitRegistration::Resolved(resolution) => {
@@ -667,7 +675,8 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
             .settle(Json(RestateDurableWaitSettleRequest {
                 key: request.key,
                 resolution: resolution.clone(),
-            }));
+            }))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
         let Json(()) = settle.call().await?;
         Ok(Json(resolution))
     }
@@ -998,6 +1007,7 @@ async fn resolve_indexed_waits(
     mirror_outcomes: bool,
 ) -> HandlerResult<()> {
     for key in waits {
+        let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
         let workflow_key = address.workflow_key.clone();
         let resolution = Resolution::Cancelled;
@@ -1006,7 +1016,8 @@ async fn resolve_indexed_waits(
             .resolve(Json(RestateDurableWaitResolveRequest {
                 key,
                 resolution: resolution.clone(),
-            }));
+            }))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
         let Json(outcome) = resolve.call().await?;
         if mirror_outcomes {
             mirror_resolve_outcome(ctx, &address, resolution, &outcome);
@@ -1190,9 +1201,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
         let _metadata = load_durable_wait_index_metadata(&ctx).await?;
         let workflow_key = address.workflow_key.clone();
+        let replay_key = request.key.key_id.clone();
         let Json(_) = ctx
             .workflow_client::<LashDurableWaitWorkflowClient>(workflow_key)
             .resolve(Json(request.clone()))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
             .await?;
         // Retirement is a fence, not another first-write notification. Keep
@@ -1226,7 +1239,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         }
         let peek = ctx
             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
-            .peek();
+            .peek()
+            .header(
+                LASH_REPLAY_KEY_HEADER.to_string(),
+                request.key.key_id.clone(),
+            );
         let Json(resolution) = peek.call().await?;
         if let Some(resolution) = resolution {
             resolve_durable_wait_awakeable(&ctx, &request, &resolution);
@@ -1270,9 +1287,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             return Ok(Json(ResolveOutcome::AlreadyResolved { terminal }));
         }
         let resolution = request.resolution.clone();
+        let replay_key = request.key.key_id.clone();
         let resolve = ctx
             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key.clone())
-            .resolve(Json(request.clone()));
+            .resolve(Json(request.clone()))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
         let Json(outcome) = resolve.call().await?;
         // Wake with the terminal the gate actually holds: a request that lost
         // to an earlier writer must not report its own mode to the waiter.

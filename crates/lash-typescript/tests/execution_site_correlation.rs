@@ -21,7 +21,7 @@ use lashlang::testing::harness::{
 use lashlang::{
     AbilityOp, AbilityResult, AstRoot, Declaration, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, LashlangExecutionObservation, Program, State, Value, WorkflowEffectKind,
-    WorkflowNodeKind, node_id_for_execution_site,
+    WorkflowNodeKind,
 };
 
 /// A `(kind, label, path)` triple for every execution site the compiler emitted,
@@ -56,6 +56,72 @@ fn graph_site_descriptors(program: &Program) -> Vec<(String, String, Vec<u32>)> 
 
 fn parse_program(source: &str) -> Program {
     parse(source).expect("fixture parses")
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn real_run_observations_use_projected_workflow_node_ids_directly() {
+    #[derive(Default)]
+    struct ObservationHost {
+        node_ids: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl ExecutionHost for ObservationHost {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+            EchoHost.perform(op).await
+        }
+
+        fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
+            let site = match observation {
+                LashlangExecutionObservation::NodeStarted { site, .. }
+                | LashlangExecutionObservation::NodeCompleted { site, .. }
+                | LashlangExecutionObservation::NodeFailed { site, .. }
+                | LashlangExecutionObservation::BranchSelected { site, .. }
+                | LashlangExecutionObservation::ChildStarted { site, .. } => site,
+            };
+            self.node_ids
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(site.node_id);
+        }
+    }
+
+    let source = r#"const first = await tools.echo({ value: "first" });
+if (true) {
+  await tools.echo({ value: first });
+}
+for (const item of [first]) {
+  await tools.echo({ value: item });
+  await tools.echo({ value: "second" });
+}
+finish(first);
+"#;
+    let linked = link_labeled(parse_program(source));
+    let graph_node_ids = workflow_graph_from_program(linked.program())
+        .nodes()
+        .map(|node| node.id.to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    let compiled = compile_labeled_program(linked.program().clone());
+    let host = ObservationHost::default();
+
+    let outcome = lashlang::execute(&compiled, &mut State::new(), &host)
+        .await
+        .expect("workflow invocation should run");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(Value::String("first".into()))
+    );
+
+    let observed_node_ids = host
+        .node_ids
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(!observed_node_ids.is_empty(), "the run must observe nodes");
+    assert!(
+        observed_node_ids
+            .iter()
+            .all(|node_id| graph_node_ids.contains(node_id)),
+        "every observed node id must already be a projected graph node id; graph={graph_node_ids:?}, observed={observed_node_ids:?}"
+    );
 }
 
 /// The one process a fixture lifts.
@@ -94,6 +160,7 @@ fn only_lifted_process(linked: &lashlang::LinkedModule) -> String {
 #[test]
 fn process_resource_operation_site_correlates_to_workflow_node() {
     let source = r#"const searchTest = async () => {
+  /** @label Lookup app state */
   const result = await tools.echo({ value: { ok: true } });
   await processes.emit({ value: result });
   return result;
@@ -109,14 +176,24 @@ finish(1);
         .expect("resource operation execution site");
 
     let graph = workflow_graph_from_program(linked.program());
-    let graph_node_id = node_id_for_execution_site(&graph, site)
-        .expect("runtime site should correlate to a workflow node");
     let graph_node = graph
         .nodes()
-        .find(|node| node.id == graph_node_id)
-        .expect("correlated graph node");
+        .find(|node| node.id.as_str() == site.node_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "runtime site {site:?} does not match graph nodes {:?}",
+                graph
+                    .nodes()
+                    .map(|node| (&node.id, &node.name, &node.execution_sites))
+                    .collect::<Vec<_>>()
+            )
+        });
 
-    assert_eq!(graph_node.name, "echo");
+    assert_eq!(graph_node.name, "Lookup app state");
+    assert_eq!(
+        graph_node.name_source,
+        lashlang::WorkflowNodeNameSource::Label
+    );
     assert!(
         matches!(
             &graph_node.kind,
@@ -243,8 +320,7 @@ finish(selected);
                         site, occurrence, ..
                     } => (site, *occurrence),
                 };
-                let node_id = node_id_for_execution_site(&graph, site)
-                    .expect("every observed runtime site should resolve to the workflow graph");
+                let node_id = lashlang::WorkflowNodeId::new(site.node_id.clone());
                 assert!(
                     graph.nodes().any(|node| node.id == node_id),
                     "correlated node id must belong to the projected graph"
@@ -365,8 +441,8 @@ finish(identity(1));
     let linked = link_labeled(parse_program(source));
     let compiled = compile_labeled_program(linked.program().clone());
     let expected = vec![
+        ("call".to_string(), "function call".to_string(), vec![1]),
         ("terminal".to_string(), "result".to_string(), vec![1]),
-        ("call".to_string(), "function call".to_string(), vec![1, 0]),
     ];
     assert_eq!(compiled_site_descriptors(&compiled), expected);
     assert_eq!(graph_site_descriptors(linked.program()), expected);
@@ -445,16 +521,9 @@ finish(result);
         "workflow graph descriptor vocabulary drifted"
     );
 
-    // The compiler emits one descriptor the projector cannot: the
-    // process-literal wrapper's generated catch, which fails the process on an
-    // uncaught error. It has no authored spelling, so the lens projects the
-    // inner `run` body and never mints a node for it (FIG-3057).
-    let mut expected_compiler = expected.clone();
-    expected_compiler.push(("terminal".to_string(), "failure".to_string()));
-    expected_compiler.sort();
     assert_eq!(
-        compiler, expected_compiler,
-        "compiler descriptor vocabulary drifted"
+        compiler, expected,
+        "compiler must emit sites only for the authored process body the graph projects"
     );
 
     let branch = compiled_execution_sites(&main)

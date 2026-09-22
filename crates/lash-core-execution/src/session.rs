@@ -22,6 +22,9 @@ pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutio
 pub use settlement_incorporation::{
     Incorporated, IncorporationLedger, SettlementSource, UsageChargeSink, UsageDeltaIdentity,
 };
+pub(crate) use execution_context::{
+    attach_process_invocation_correlation, clear_process_invocation_correlation,
+};
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
     ToolBatchOccurrence, ToolBatchReplies, ToolInvocation, ToolInvocationReply,

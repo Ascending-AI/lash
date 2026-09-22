@@ -359,7 +359,7 @@ impl<'a> GraphProjector<'a> {
             versions.seed(param.name.as_str());
         }
         WorkflowProcess {
-            id: self.node_id(&owner, &[], "process"),
+            id: self.node_id(&owner, &[]),
             name: process.name.to_string(),
             display_name,
             description,
@@ -523,7 +523,7 @@ impl<'a> GraphProjector<'a> {
         let available_variables: Vec<String> = versions.known.iter().cloned().collect();
         let (kind, derived_name, outputs) =
             self.project_kind(expression, owner, path, &facts_path, versions);
-        let id = self.node_id(owner, path, kind_tag(&kind));
+        let id = self.node_id(owner, path);
         let (name, description, name_source) = match label {
             Some(label) => (
                 label.title.to_string(),
@@ -840,20 +840,8 @@ impl<'a> GraphProjector<'a> {
         }
     }
 
-    fn node_id(&self, owner: &str, path: &[u32], kind: &str) -> WorkflowNodeId {
-        let path = if path.is_empty() {
-            "root".to_string()
-        } else {
-            path.iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(".")
-        };
-        let material = format!("{}\0{owner}\0{path}\0{kind}", self.source_identity);
-        WorkflowNodeId::new(format!(
-            "{kind}:{}",
-            &hex_digest("lash-workflow-node/v2", material.as_bytes())[..24]
-        ))
+    fn node_id(&self, owner: &str, path: &[u32]) -> WorkflowNodeId {
+        lashlang::workflow_node_id(owner, path)
     }
 }
 

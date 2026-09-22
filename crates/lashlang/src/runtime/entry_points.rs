@@ -55,7 +55,7 @@ pub fn compile_linked(linked: &LinkedModule) -> CompiledProgram {
     let (chunk, compile_stats) = Compiler::compile_linked_program(
         linked.program(),
         (&linked.artifact).into(),
-        LashlangExecutionContext::main(linked.artifact.module_ref.clone()),
+        LashlangExecutionContext::main(),
     );
     CompiledProgram {
         chunk,
@@ -103,21 +103,15 @@ pub fn compile_linked_process(
         main: process.body.clone(),
         spans: Default::default(),
     };
-    let process_ref = linked
-        .artifact
-        .process_ref(process_name)
-        .cloned()
-        .ok_or_else(|| RuntimeError::ProcessNotExported {
+    if linked.artifact.process_ref(process_name).is_none() {
+        return Err(RuntimeError::ProcessNotExported {
             name: process_name.to_string(),
-        })?;
+        });
+    }
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
         (&linked.artifact).into(),
-        LashlangExecutionContext::process(
-            linked.artifact.module_ref.clone(),
-            process_ref,
-            process_name,
-        ),
+        LashlangExecutionContext::process(process_name),
     );
     Ok(CompiledProgram {
         chunk,
@@ -149,11 +143,7 @@ pub fn compile_module_artifact_process(
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
         artifact.into(),
-        LashlangExecutionContext::process(
-            artifact.module_ref.clone(),
-            process_ref.clone(),
-            process_name,
-        ),
+        LashlangExecutionContext::process(process_name),
     );
     Ok(CompiledProgram {
         chunk,

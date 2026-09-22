@@ -25,6 +25,7 @@ pub struct TestExecutionContextBuilder<'run> {
     direct_completions: Option<crate::DirectCompletionClient<'run>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
+    turn_context: crate::TurnContext,
     session_host_mode: TestSessionHostMode,
     session_lifecycle: Option<Arc<dyn crate::plugin::SessionLifecycleService>>,
     effect_controller: TestEffectController<'run>,
@@ -53,6 +54,7 @@ pub struct BuiltTestExecutionContext<'run> {
     pub dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub execution_env_spec: crate::ProcessExecutionEnvSpec,
+    pub turn_context: crate::TurnContext,
     pub runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     /// Which cell of the turn this context executes; see
     /// [`TestExecutionContextBuilder::protocol_iteration`].
@@ -82,6 +84,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
+            turn_context: crate::TurnContext::default(),
             session_host_mode: TestSessionHostMode::Independent,
             session_lifecycle: None,
             effect_controller: TestEffectController::Shared(Arc::new(
@@ -161,6 +164,11 @@ impl<'run> TestExecutionContextBuilder<'run> {
         execution_env_spec: crate::ProcessExecutionEnvSpec,
     ) -> Self {
         self.execution_env_spec = execution_env_spec;
+        self
+    }
+
+    pub fn turn_context(mut self, turn_context: crate::TurnContext) -> Self {
+        self.turn_context = turn_context;
         self
     }
 
@@ -334,13 +342,14 @@ impl<'run> TestExecutionContextBuilder<'run> {
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-            turn_context: crate::TurnContext::default(),
+            turn_context: self.turn_context.clone(),
             clock: self.clock,
         });
         BuiltTestExecutionContext {
             dispatch,
             process_env_store: self.process_env_store,
             execution_env_spec: self.execution_env_spec,
+            turn_context: self.turn_context,
             runtime_parent_invocation: self.runtime_parent_invocation,
             protocol_iteration: self.protocol_iteration,
         }
@@ -358,7 +367,7 @@ impl<'run> BuiltTestExecutionContext<'run> {
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
             None,
-            crate::TurnContext::default(),
+            self.turn_context,
         )
         .with_execution_env_spec(self.execution_env_spec);
         let parent_invocation = self

@@ -141,6 +141,7 @@ pub(super) struct RestateCallFrame {
     pub frame: Bytes,
     pub service: String,
     pub handler: String,
+    pub headers: Vec<(String, String)>,
     pub key: String,
     pub result_completion_id: u32,
 }
@@ -167,6 +168,31 @@ fn protobuf_len_field(input: &[u8], target: u64) -> Option<&[u8]> {
         }
     }
     None
+}
+
+fn protobuf_len_fields(input: &[u8], target: u64) -> Option<Vec<&[u8]>> {
+    let mut cursor = 0;
+    let mut values = Vec::new();
+    while cursor < input.len() {
+        let key = decode_varint(input, &mut cursor)?;
+        let field = key >> 3;
+        match key & 7 {
+            0 => {
+                let _ = decode_varint(input, &mut cursor)?;
+            }
+            2 => {
+                let len = usize::try_from(decode_varint(input, &mut cursor)?).ok()?;
+                let end = cursor.checked_add(len)?;
+                let value = input.get(cursor..end)?;
+                if field == target {
+                    values.push(value);
+                }
+                cursor = end;
+            }
+            _ => return None,
+        }
+    }
+    Some(values)
 }
 
 fn protobuf_varint_field(input: &[u8], target: u64) -> Option<u64> {
@@ -196,10 +222,20 @@ fn protobuf_varint_field(input: &[u8], target: u64) -> Option<u64> {
 
 fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
     let payload = frame.get(8..)?;
+    let headers = protobuf_len_fields(payload, 4)?
+        .into_iter()
+        .map(|header| {
+            Some((
+                String::from_utf8(protobuf_len_field(header, 1)?.to_vec()).ok()?,
+                String::from_utf8(protobuf_len_field(header, 2)?.to_vec()).ok()?,
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
     Some(RestateCallFrame {
         frame: Bytes::copy_from_slice(frame),
         service: String::from_utf8(protobuf_len_field(payload, 1)?.to_vec()).ok()?,
         handler: String::from_utf8(protobuf_len_field(payload, 2)?.to_vec()).ok()?,
+        headers,
         key: String::from_utf8(protobuf_len_field(payload, 5).unwrap_or_default().to_vec()).ok()?,
         result_completion_id: u32::try_from(protobuf_varint_field(payload, 11)?).ok()?,
     })

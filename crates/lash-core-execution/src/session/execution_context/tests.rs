@@ -541,6 +541,35 @@ async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
     );
 }
 
+#[test]
+fn native_authority_clears_turn_invocation_correlation() {
+    let process_id = crate::ProcessId::from("native-process");
+    let authority = crate::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        "foreign-restate-invocation",
+    )
+    .bind_attempt(1);
+    let mut turn_context = crate::TurnContext::default();
+    super::attach_process_invocation_correlation(&mut turn_context, &process_id, &authority);
+    let native_authority = crate::ProcessExecutionWriteAuthority::lease(crate::ProcessLease {
+        schema_version: crate::PROCESS_LEASE_SCHEMA_VERSION,
+        process_id: process_id.clone(),
+        owner: crate::LeaseOwnerIdentity::opaque("native-worker", "attempt"),
+        lease_token: "native-worker-lease".to_string(),
+        fencing_token: 1,
+        claimed_at_epoch_ms: 0,
+        expires_at_epoch_ms: u64::MAX,
+    });
+    super::attach_process_invocation_correlation(&mut turn_context, &process_id, &native_authority);
+    let context = crate::testing::TestExecutionContextBuilder::new()
+        .turn_context(turn_context)
+        .plugin_factories(vec![])
+        .build()
+        .into_runtime();
+
+    assert_eq!(context.restate_invocation_id(), None);
+}
+
 /// A queued-work drain admits a host lifecycle parent until FIG-3419 lands the
 /// drain-end protocol that lets a drain own durable children — the derivation
 /// must not silently borrow the session's current turn.

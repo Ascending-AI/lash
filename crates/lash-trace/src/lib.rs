@@ -118,7 +118,9 @@ pub use lashlang_graph::{
 /// `code_namespace` and adds `failure_kind`: `code` now carries the
 /// failure code's spelling alone, never the namespaced form, and the kind
 /// carries the failure classification OTel `error.type` projects.
-pub const TRACE_SCHEMA_VERSION: u32 = 26;
+/// Version 27 (FIG-3460) unifies workflow node identity and adds structured
+/// execution sites, language-node/tool cross-links, and Restate correlation.
+pub const TRACE_SCHEMA_VERSION: u32 = 27;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -433,6 +435,8 @@ pub enum TraceEvent {
         call_id: Option<String>,
         name: String,
         args: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        issuing_node_id: Option<String>,
     },
     ToolCallCompleted {
         call_id: Option<String>,
@@ -440,6 +444,8 @@ pub enum TraceEvent {
         args: Value,
         output: TraceToolCallOutput,
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        issuing_node_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempts: Option<Vec<TraceRetryAttempt>>,
     },
@@ -1439,6 +1445,8 @@ pub struct TraceLanguageExecutionIdentity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_ref: Option<String>,
     pub entry_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restate_invocation_id: Option<String>,
 }
 
 impl TraceLanguageExecutionIdentity {
@@ -1471,18 +1479,24 @@ pub enum TraceLanguageExecutionPayload {
         node_kind: String,
         label: String,
         occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
     },
     NodeCompleted {
         node_id: String,
         node_kind: String,
         label: String,
         occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
     },
     NodeFailed {
         node_id: String,
         node_kind: String,
         label: String,
         occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
         error: String,
     },
     BranchSelected {
@@ -1547,6 +1561,7 @@ pub struct TraceLanguageExecutionMap {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLanguageExecutionMapNode {
     pub id: String,
+    pub site: lash_sansio::WorkflowExecutionSite,
     pub kind: String,
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

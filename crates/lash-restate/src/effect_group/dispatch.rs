@@ -152,6 +152,7 @@ impl EffectGroupDispatch {
         let mut addresses = BTreeMap::new();
         let mut calls = Vec::with_capacity(children.len());
         for (position, envelope) in children.into_iter().enumerate() {
+            let replay_key = shape.replay_key(position)?.to_string();
             let call = ctx
                 .workflow_client::<EffectGroupDispatchClient>(request.group_key.clone())
                 .child(Json(EffectGroupChildRequest {
@@ -160,7 +161,8 @@ impl EffectGroupDispatch {
                     position,
                     envelope,
                 }))
-                .idempotency_key(shape.replay_key(position)?)
+                .idempotency_key(replay_key.clone())
+                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .call();
             let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
             let Json(recorded) = ctx
@@ -271,6 +273,7 @@ impl EffectGroupDispatch {
                     &request.group_key,
                     EffectGroupWaitKind::Admit(request.position),
                 )?;
+                let replay_key = key.key_id.clone();
                 let address = RestateDurableWaitAddress::for_key(&key);
                 let Json(_) = ctx
                     .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
@@ -281,6 +284,7 @@ impl EffectGroupDispatch {
                         }
                         .into(),
                     ))
+                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                     .call()
                     .await?;
                 // ADMIT is notification only. Authorization always comes from
@@ -313,14 +317,16 @@ impl EffectGroupDispatch {
         // `group_key` column — never from a caller's assertion. A revoked
         // scope index refuses the record, and a child whose scope is gone
         // settles nowhere.
+        let child_replay_key = request.envelope.invocation.replay_key().to_string();
         let Json(membership_admitted) = ctx
             .object_client::<LashDurableWaitIndexClient>(durable_wait_index_key_for_scope(
                 request.envelope.invocation.execution_scope(),
             ))
             .record_group_child(Json(RestateDurableWaitGroupChildRequest {
-                replay_key: request.envelope.invocation.replay_key().to_string(),
+                replay_key: child_replay_key.clone(),
                 group_key: request.group_key.clone(),
             }))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), child_replay_key)
             .call()
             .await?;
         if !membership_admitted {
@@ -539,6 +545,7 @@ impl EffectGroupDispatch {
             )
         })) {
             let key = group_wait_key(&cleanup.wait_scope, &group_key, kind)?;
+            let replay_key = key.key_id.clone();
             let address = RestateDurableWaitAddress::for_key(&key);
             let Json(()) = ctx
                 .object_client::<LashDurableWaitIndexClient>(durable_wait_index_object_key(
@@ -548,6 +555,7 @@ impl EffectGroupDispatch {
                     key,
                     resolution: wait_resolution(resolution)?,
                 }))
+                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .call()
                 .await?;
         }
@@ -642,6 +650,7 @@ async fn record_child_settlement(
             &request.group_key,
             EffectGroupWaitKind::Drained(position),
         )?;
+        let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
         let Json(_) = ctx
             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
@@ -652,6 +661,7 @@ async fn record_child_settlement(
                 }
                 .into(),
             ))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
             .await?;
     }

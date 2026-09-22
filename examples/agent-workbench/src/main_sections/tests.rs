@@ -200,6 +200,7 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         entry_kind: graph.entry_kind.clone(),
         entry_ref: graph.entry_ref.clone(),
         entry_name: graph.entry_name.clone(),
+        restate_invocation_id: None,
     };
     let context = TraceContext {
         session_id: graph.scope.session_id.clone(),
@@ -311,6 +312,7 @@ fn lashlang_graph_store_builds_graph_state() {
         entry_kind: "process".to_string(),
         entry_ref: Some("r1:0".to_string()),
         entry_name: "main".to_string(),
+        restate_invocation_id: None,
     };
     let append = |event: TraceLanguageExecution| {
         store
@@ -331,6 +333,7 @@ fn lashlang_graph_store_builds_graph_state() {
             execution_map: TraceLanguageExecutionMap {
                 nodes: vec![TraceLanguageExecutionMapNode {
                     id: "branch".to_string(),
+                    site: lashlang::WorkflowExecutionSite::new("main", [0], "branch", "if"),
                     kind: "branch".to_string(),
                     label: "if".to_string(),
                     label_metadata: None,

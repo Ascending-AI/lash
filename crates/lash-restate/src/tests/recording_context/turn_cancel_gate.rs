@@ -218,6 +218,7 @@ pub(crate) fn test_await_event_or_turn_cancel<'run, 'ctx, C>(
     context: &'run C,
     gate: &'run TestTurnCancelGate,
     request: RestateDurableWaitAwaitRequest,
+    replay_key: String,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
     cancellation: tokio_util::sync::CancellationToken,
 ) -> TestTurnCancelRaceFuture<'run, Resolution>
@@ -228,7 +229,7 @@ where
     Box::pin(async move {
         let Some(turn_cancel) = turn_cancel else {
             return context
-                .await_event(request, cancellation)
+                .await_event(request, replay_key, cancellation)
                 .await
                 .map(RestateTurnCancelRaceOutcome::Completed);
         };
@@ -249,7 +250,7 @@ where
         };
         let event_key = request.key.clone();
         let mut escalated = false;
-        let guarded = context.await_event(request, cancellation);
+        let guarded = context.await_event(request, replay_key, cancellation);
         tokio::pin!(guarded);
         loop {
             tokio::select! {

@@ -1057,6 +1057,7 @@ pub struct TurnContext {
     plugin_inputs: LiveTurnInputs,
     provider: Option<crate::ProviderHandle>,
     prompt: crate::PromptLayer,
+    runtime_correlation: Option<Arc<dyn Any + Send + Sync>>,
     local_cancel_origin: TurnCancelOriginHint,
     queued_work_drain: QueuedWorkDrainMode,
 }
@@ -1066,6 +1067,7 @@ impl Default for TurnContext {
             plugin_inputs: LiveTurnInputs::default(),
             provider: None,
             prompt: crate::PromptLayer::default(),
+            runtime_correlation: None,
             local_cancel_origin: TurnCancelOriginHint::default(),
             queued_work_drain: QueuedWorkDrainMode::Automatic,
         }
@@ -1145,6 +1147,34 @@ impl TurnContext {
 
     pub fn prompt_layer(&self) -> &crate::PromptLayer {
         &self.prompt
+    }
+
+    /// Installs one live runtime-owned correlation value.
+    ///
+    /// The value's private concrete type is its authority boundary: callers
+    /// cannot fabricate or read a correlation type owned by another crate.
+    #[doc(hidden)]
+    pub fn set_runtime_correlation<T>(&mut self, value: T)
+    where
+        T: Any + Send + Sync,
+    {
+        self.runtime_correlation = Some(Arc::new(value));
+    }
+
+    #[doc(hidden)]
+    pub fn runtime_correlation<T: Any>(&self) -> Option<&T> {
+        self.runtime_correlation.as_ref()?.downcast_ref()
+    }
+
+    #[doc(hidden)]
+    pub fn clear_runtime_correlation<T: Any>(&mut self) {
+        if self
+            .runtime_correlation
+            .as_ref()
+            .is_some_and(|value| value.is::<T>())
+        {
+            self.runtime_correlation = None;
+        }
     }
 }
 impl facade_ops::TurnContextFacadeOps for TurnContext {

@@ -25,13 +25,13 @@ use lash_trace::{
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_26() {
+fn trace_schema_version_is_pinned_at_27() {
     // This is the current on-disk trace schema version.
     // Every reader (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level doc comment and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy.
     // If this fails, read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 26);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 27);
 }
 
 #[test]
@@ -41,20 +41,31 @@ fn predecessor_trace_schema_is_refused_before_event_decode() {
         .expect_err("schema-19 records must be refused before event decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 19; expected 26"
+        "unsupported trace schema version 19; expected 27"
     );
 }
 
 /// FIG-1272: schema 20 is the generation before the context-overflow turn
 /// failure reason, and is refused by the same gate.
 #[test]
-fn immediate_predecessor_trace_schema_20_is_refused_before_event_decode() {
+fn trace_schema_20_is_refused_before_event_decode() {
     let predecessor = r#"{"schema_version":20,"id":"v20","timestamp":"2026-09-13T00:00:00+00:00","context":{},"type":"turn_started"}"#;
     let error = serde_json::from_str::<TraceRecord>(predecessor)
         .expect_err("schema-20 records must be refused before event decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 20; expected 26"
+        "unsupported trace schema version 20; expected 27"
+    );
+}
+
+#[test]
+fn immediate_predecessor_trace_schema_26_is_refused_before_event_decode() {
+    let predecessor = r#"{"schema_version":26,"id":"v26","timestamp":"2026-09-22T00:00:00+00:00","context":{},"type":"turn_started"}"#;
+    let error = serde_json::from_str::<TraceRecord>(predecessor)
+        .expect_err("schema-26 records must be refused before event decode");
+    assert_eq!(
+        error.to_string(),
+        "unsupported trace schema version 26; expected 27"
     );
 }
 
@@ -62,7 +73,7 @@ fn immediate_predecessor_trace_schema_20_is_refused_before_event_decode() {
 fn schema_14_trace_is_refused_before_typed_cell_failure_decode() {
     assert_eq!(
         lash_trace::TRACE_SCHEMA_VERSION,
-        26,
+        27,
         "current trace schema pin"
     );
     let predecessor = r#"{"schema_version":14,"id":"v14-cell-failure","timestamp":"2026-09-02T09:00:00+00:00","context":{},"type":"exec_code_completed","duration_ms":12,"output":"","output_chars":0,"observation_count":0,"observation_projections":[],"error":"host unavailable","terminal_finish":null,"tool_calls":[]}"#;
@@ -70,7 +81,7 @@ fn schema_14_trace_is_refused_before_typed_cell_failure_decode() {
         .expect_err("schema-14 string failures must be refused before payload decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 14; expected 26"
+        "unsupported trace schema version 14; expected 27"
     );
 }
 
@@ -80,7 +91,7 @@ fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
         lash_trace::ensure_trace_schema_version(3),
         Err(lash_trace::TraceSchemaVersionError {
             actual: 3,
-            expected: 26,
+            expected: 27,
         })
     );
 }
@@ -92,7 +103,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("schema-3 trace records must be refused during typed decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 26"
+        "unsupported trace schema version 3; expected 27"
     );
 
     let stale_and_malformed = r#"{"schema_version":3,"payload":"not a current event"}"#;
@@ -100,7 +111,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("the version refusal must precede current-shape validation");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 26"
+        "unsupported trace schema version 3; expected 27"
     );
 }
 
@@ -114,7 +125,7 @@ fn new_records_stamp_the_schema_version() {
     );
     assert_eq!(record.schema_version, lash_trace::TRACE_SCHEMA_VERSION);
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["schema_version"], 26);
+    assert_eq!(json["schema_version"], 27);
 }
 
 #[test]
@@ -124,7 +135,7 @@ fn schema_8_exec_protocol_record_is_refused_before_old_envelope_interpretation()
         .expect_err("schema-8 trace records must be refused before decoding the old envelope");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 8; expected 26"
+        "unsupported trace schema version 8; expected 27"
     );
 }
 
@@ -136,7 +147,7 @@ fn schema_9_exec_completion_record_is_refused_before_old_projection_interpretati
     );
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 9; expected 26"
+        "unsupported trace schema version 9; expected 27"
     );
 }
 
@@ -147,7 +158,7 @@ fn schema_10_retry_attempt_record_is_refused_before_charge_safety_interpretation
         .expect_err("schema-10 trace records must be refused before decoding charge safety");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 10; expected 26"
+        "unsupported trace schema version 10; expected 27"
     );
 }
 
@@ -158,7 +169,7 @@ fn schema_11_retry_attempt_record_is_refused_before_attempt_evidence_interpretat
         .expect_err("schema-11 trace records must be refused before decoding version 13 evidence");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 11; expected 26"
+        "unsupported trace schema version 11; expected 27"
     );
 }
 
@@ -169,7 +180,7 @@ fn schema_12_record_is_refused_before_attachment_event_interpretation() {
         .expect_err("schema-12 records must be refused before decoding version 13 events");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 12; expected 26"
+        "unsupported trace schema version 12; expected 27"
     );
 }
 
@@ -180,7 +191,7 @@ fn schema_12_llm_completion_record_is_refused_before_response_interpretation() {
         .expect_err("schema-12 trace records must be refused before decoding the response");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 12; expected 26"
+        "unsupported trace schema version 12; expected 27"
     );
 }
 
@@ -191,7 +202,7 @@ fn schema_13_llm_completion_without_request_model_is_refused_before_response_int
         .expect_err("schema-13 trace records must be refused before decoding the response");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 13; expected 26"
+        "unsupported trace schema version 13; expected 27"
     );
 }
 
@@ -215,6 +226,7 @@ fn lashlang_identity() -> TraceLanguageExecutionIdentity {
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
+        restate_invocation_id: None,
     }
 }
 
@@ -380,6 +392,7 @@ fn event_samples() -> Vec<TraceEvent> {
             call_id: Some("call-1".to_string()),
             name: "read_file".to_string(),
             args: json!({ "path": "README.md" }),
+            issuing_node_id: None,
         },
         TraceEvent::ToolCallCompleted {
             call_id: Some("call-1".to_string()),
@@ -390,6 +403,7 @@ fn event_samples() -> Vec<TraceEvent> {
                 control: None,
             },
             duration_ms: 3,
+            issuing_node_id: None,
             attempts: None,
         },
         TraceEvent::ExecCodeStarted {
@@ -575,7 +589,7 @@ fn composition_change_is_a_complete_snapshot_at_schema_version_five() {
     );
     let mut json = serde_json::to_value(&record).expect("serialize composition snapshot");
 
-    assert_eq!(json["schema_version"], 26);
+    assert_eq!(json["schema_version"], 27);
     json["schema_version"] = json!(5);
     assert_eq!(json["schema_version"], 5);
     assert_eq!(json["type"], "composition_changed");
@@ -650,7 +664,7 @@ fn historical_v4_reader_refuses_v5_before_interpreting_new_closed_enum_variant()
         },
     );
     let current_wire = serde_json::to_string(&record).expect("serialize composition event");
-    let wire = current_wire.replacen("\"schema_version\":26", "\"schema_version\":5", 1);
+    let wire = current_wire.replacen("\"schema_version\":27", "\"schema_version\":5", 1);
     assert_eq!(
         read_with_historical_v4_reader(&wire),
         Err(HistoricalV4ReadError::UnsupportedVersion {
@@ -722,7 +736,7 @@ fn historical_v5_reader_refuses_v6_provider_replay_dropped_before_interpreting_v
         },
     );
     let current_wire = serde_json::to_string(&record).expect("serialize replay-drop event");
-    let wire = current_wire.replacen("\"schema_version\":26", "\"schema_version\":6", 1);
+    let wire = current_wire.replacen("\"schema_version\":27", "\"schema_version\":6", 1);
     assert_eq!(
         read_with_historical_v5_reader(&wire),
         Err(HistoricalV5ReadError::UnsupportedVersion {
@@ -794,6 +808,7 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
                     entry_kind: "program".to_string(),
                     entry_ref: None,
                     entry_name: "main".to_string(),
+                    restate_invocation_id: None,
                 },
                 payload: TraceLanguageExecutionPayload::ExecutionFinished {
                     status: TraceLanguageExecutionStatus::Completed,
@@ -804,7 +819,7 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
     );
     let current_wire =
         serde_json::to_string(&record).expect("serialize current language-execution event");
-    let wire = current_wire.replacen("\"schema_version\":26", "\"schema_version\":7", 1);
+    let wire = current_wire.replacen("\"schema_version\":27", "\"schema_version\":7", 1);
     assert_eq!(
         read_with_historical_v6_reader(&wire),
         Err(HistoricalV6ReadError::UnsupportedVersion {
@@ -880,7 +895,7 @@ fn historical_v7_reader_refuses_v8_turn_outcome_before_interpreting_payload() {
         },
     );
     let current_wire = serde_json::to_string(&record).expect("serialize current turn_completed");
-    let wire = current_wire.replacen("\"schema_version\":26", "\"schema_version\":8", 1);
+    let wire = current_wire.replacen("\"schema_version\":27", "\"schema_version\":8", 1);
     assert_eq!(
         read_with_historical_v7_reader(&wire),
         Err(HistoricalV7ReadError::UnsupportedVersion {
@@ -909,7 +924,7 @@ fn current_reader_refuses_a_stored_v7_turn_completed_record() {
         .expect_err("v7 trace records must be refused by the current decoder");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 7; expected 26",
+        "unsupported trace schema version 7; expected 27",
         "the version refusal must precede payload interpretation"
     );
 
@@ -917,7 +932,7 @@ fn current_reader_refuses_a_stored_v7_turn_completed_record() {
     // independent reason: the current schema has no flat `status`/`done_reason` pair. The
     // version gate is what keeps that shape error from ever being the message a
     // stale reader sees.
-    let forced_current = stored_v7.replacen("\"schema_version\":7", "\"schema_version\":26", 1);
+    let forced_current = stored_v7.replacen("\"schema_version\":7", "\"schema_version\":27", 1);
     let error = serde_json::from_str::<TraceRecord>(&forced_current)
         .expect_err("without the version gate, the v7 payload shape is undecodable");
     assert!(
@@ -1197,6 +1212,12 @@ fn execution_started_map_carries_no_identity_copy() {
                 execution_map: TraceLanguageExecutionMap {
                     nodes: vec![TraceLanguageExecutionMapNode {
                         id: "n1".to_string(),
+                        site: lash_sansio::WorkflowExecutionSite::new(
+                            "main",
+                            [0],
+                            "resource_operation",
+                            "read_file",
+                        ),
                         kind: "resource_operation".to_string(),
                         label: "read_file".to_string(),
                         label_metadata: None,
@@ -1226,6 +1247,12 @@ fn execution_started_map_carries_no_identity_copy() {
                 "execution_map": {
                     "nodes": [{
                         "id": "n1",
+                        "site": {
+                            "owner": "main",
+                            "path": [0],
+                            "kind": "resource_operation",
+                            "label": "read_file",
+                        },
                         "kind": "resource_operation",
                         "label": "read_file",
                     }],
@@ -1304,6 +1331,7 @@ fn tool_call_started_full_shape() {
         call_id: Some("call-1".to_string()),
         name: "read_file".to_string(),
         args: json!({ "path": "README.md" }),
+        issuing_node_id: None,
     };
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
@@ -1337,6 +1365,7 @@ fn tool_call_completed_pins_outcome_vocabulary() {
                 control: None,
             },
             duration_ms: 3,
+            issuing_node_id: None,
             attempts: None,
         };
         let json = serde_json::to_value(&event).unwrap();
@@ -1469,6 +1498,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
             control: None,
         },
         duration_ms: 280,
+        issuing_node_id: None,
         attempts,
     };
     let json = serde_json::to_value(event).expect("serialize retry ladder");
@@ -1499,7 +1529,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
     assert!(json["attempts"][1].get("delay_ms").is_none());
     assert!(json["attempts"][1].get("generation_disposition").is_none());
     assert!(json["attempts"][1].get("usage").is_none());
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 26);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 27);
 }
 
 #[test]
@@ -1624,6 +1654,12 @@ fn language_execution_all_seven_payload_variants_round_trip() {
             execution_map: TraceLanguageExecutionMap {
                 nodes: vec![TraceLanguageExecutionMapNode {
                     id: "n1".to_string(),
+                    site: lash_sansio::WorkflowExecutionSite::new(
+                        "main",
+                        [0],
+                        "resource_operation",
+                        "read_file",
+                    ),
                     kind: "resource_operation".to_string(),
                     label: "read_file".to_string(),
                     label_metadata: None,
@@ -1645,18 +1681,21 @@ fn language_execution_all_seven_payload_variants_round_trip() {
             node_kind: "resource_operation".to_string(),
             label: "read_file".to_string(),
             occurrence: 1,
+            call_id: Some("call-1".to_string()),
         },
         TraceLanguageExecutionPayload::NodeCompleted {
             node_id: "n1".to_string(),
             node_kind: "resource_operation".to_string(),
             label: "read_file".to_string(),
             occurrence: 1,
+            call_id: Some("call-1".to_string()),
         },
         TraceLanguageExecutionPayload::NodeFailed {
             node_id: "n1".to_string(),
             node_kind: "resource_operation".to_string(),
             label: "read_file".to_string(),
             occurrence: 1,
+            call_id: Some("call-1".to_string()),
             error: "failed to read file".to_string(),
         },
         TraceLanguageExecutionPayload::BranchSelected {
@@ -1754,6 +1793,7 @@ fn jsonl_round_trip_preserves_records() {
                 call_id: Some("call-1".to_string()),
                 name: "read_file".to_string(),
                 args: json!({ "path": "README.md" }),
+                issuing_node_id: None,
             },
         ),
         TraceRecord::new(
@@ -1784,7 +1824,7 @@ fn jsonl_round_trip_preserves_records() {
 
     assert_eq!(parsed, records, "JSONL round-trip must preserve records");
     for record in &parsed {
-        assert_eq!(record.schema_version, 26);
+        assert_eq!(record.schema_version, 27);
     }
 
     // Pin the diagnostic's `tool_calls` entry fields explicitly on the parsed
@@ -1843,7 +1883,7 @@ fn durable_step_events_round_trip_at_schema_version_six() {
         let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 26);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 27);
         assert_eq!(json["type"], expected_kind);
         let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
         assert_eq!(decoded.event.kind(), expected_kind);

@@ -5,8 +5,8 @@
 
 use super::{
     EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
-    LashlangSegmentState, LashlangSegmentStateError, ReplayOrdinalsState,
-    SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
+    LashlangProcessTraceIdentity, LashlangSegmentState, LashlangSegmentStateError,
+    ReplayOrdinalsState, SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
     process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
     resolve_child_max_attempts, validate_lashlang_program_hash,
 };
@@ -25,11 +25,14 @@ fn process_trace_session_attribution_comes_only_from_a_session_originator() {
         LashlangProcessExecutionTrace::new(
             None,
             lash_trace::TraceContext::default().for_session("ambient-capability"),
-            process_trace_session_id(&originator),
-            lash_core::ProcessId::from("process"),
-            lashlang::ModuleRef::new(&hash),
-            lashlang::ProcessRef::new(hash, 0),
-            "main".to_string(),
+            LashlangProcessTraceIdentity {
+                session_id: process_trace_session_id(&originator),
+                process_id: lash_core::ProcessId::from("process"),
+                module_ref: lashlang::ModuleRef::new(&hash),
+                process_ref: lashlang::ProcessRef::new(hash, 0),
+                process_name: "main".to_string(),
+                restate_invocation_id: None,
+            },
         )
         .identity()
     };
@@ -389,20 +392,20 @@ fn durable_exhaustion_has_a_typed_process_failure_surface() {
 }
 
 #[test]
-fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejection() {
-    // The shipped v10 VM fixture was re-pinned to the current envelope version,
-    // so it no longer exercises the envelope mismatch. Synthesize the immediate
-    // predecessor instead: a v6 payload is exactly a v7 payload with the
-    // attempt bound absent.
+fn predecessor_segment_with_old_node_id_occurrence_counters_is_refused() {
     let program = lashlang::compile_ast(&finish_null()).expect("compile predecessor program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
     let mut vm = lashlang::Vm::from_state(&program, &mut state, &environment)
         .expect("construct predecessor VM");
+    let mut continuation = vm.suspend().expect("capture predecessor VM continuation");
+    continuation
+        .occurrence_counters
+        .insert("resource_operation:old-node-id".to_string(), 7);
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: vm.suspend().expect("capture predecessor VM continuation"),
+        vm: continuation,
         ordinals: ReplayOrdinalsState {
             sleep_sequence: 0,
             event_sequence: 0,
@@ -413,18 +416,20 @@ fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejecti
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
     };
     let mut wire = serde_json::to_value(segment_state).expect("serialize predecessor writer");
-    let object = wire
-        .as_object_mut()
-        .expect("segment state is a JSON object");
-    object.remove("child_max_attempts");
-    object.insert(
-        "version".to_string(),
-        serde_json::json!(LASHLANG_SEGMENT_STATE_VERSION - 1),
+    wire.as_object_mut()
+        .expect("segment state is a JSON object")
+        .insert(
+            "version".to_string(),
+            serde_json::json!(LASHLANG_SEGMENT_STATE_VERSION - 1),
+        );
+    assert_eq!(
+        wire["vm"]["occurrence_counters"]["resource_operation:old-node-id"], 7,
+        "the predecessor witness must carry a counter keyed by the retired node-id family"
     );
-    let encoded = serde_json::to_vec(&wire).expect("serialize v6 predecessor");
+    let encoded = serde_json::to_vec(&wire).expect("serialize predecessor");
 
     let Err(error) = decode_lashlang_segment_state(&encoded) else {
-        panic!("a v6 handover must not decode against the v7 envelope");
+        panic!("an old-id handover must not decode against the new node-id generation");
     };
     assert!(
         matches!(

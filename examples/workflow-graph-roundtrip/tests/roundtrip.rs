@@ -1048,7 +1048,18 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
         assert!(
             events
                 .iter()
-                .all(|event| { document.nodes.iter().any(|node| node.id == event.node_id) })
+                .all(|event| { document.nodes.iter().any(|node| node.id == event.node_id) }),
+            "{} emitted nodes outside its document: events={:?}, nodes={:?}",
+            entry.id,
+            events
+                .iter()
+                .map(|event| &event.node_id)
+                .collect::<Vec<_>>(),
+            document
+                .nodes
+                .iter()
+                .map(|node| &node.id)
+                .collect::<Vec<_>>(),
         );
         assert!(
             !events.iter().any(|event| event.status == RunStatus::Failed),
@@ -1524,7 +1535,17 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
     assert!(
         for_events
             .iter()
-            .all(|event| { saved_for.nodes.iter().any(|node| node.id == event.node_id) })
+            .all(|event| { saved_for.nodes.iter().any(|node| node.id == event.node_id) }),
+        "edited for run emitted nodes outside its document: events={:?}, nodes={:?}",
+        for_events
+            .iter()
+            .map(|event| &event.node_id)
+            .collect::<Vec<_>>(),
+        saved_for
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>(),
     );
     assert!(
         !for_events

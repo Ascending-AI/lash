@@ -26,38 +26,7 @@ use restate_sdk::context::{
 use restate_sdk::errors::{HandlerError, TerminalError};
 use restate_sdk::serde::Json;
 
-/// Why a process workflow submission did not return an invocation id.
-///
-/// The distinction decides whether the scheduling boundary may compensate. A
-/// `StartFailed` cancellation is terminal on the spot for a row with no
-/// execution and no external reference, so writing one for a submission that
-/// *did* reach the runtime would terminalise a row whose workflow is running —
-/// the workflow would then do the child's work and fail its own terminal write.
-/// Only a failure that proves the run was never accepted may compensate.
-#[derive(Debug)]
-pub enum ProcessWorkflowStartFailure {
-    /// The submission was decided against: a reply, or a journaled terminal
-    /// failure, proves no invocation was accepted. Nothing is running.
-    Rejected(TerminalError),
-    /// The submission's fate is unknown — a connection error, a timeout, or any
-    /// failure carrying no proof of non-acceptance. An invocation may be
-    /// running, so the row must be left alive and sweep-owned.
-    Ambiguous(TerminalError),
-}
-
-impl ProcessWorkflowStartFailure {
-    /// The underlying failure, whichever class it is.
-    pub fn error(&self) -> &TerminalError {
-        match self {
-            Self::Rejected(error) | Self::Ambiguous(error) => error,
-        }
-    }
-
-    /// Whether a compensating `StartFailed` cancellation is sound to write.
-    pub fn proves_nothing_is_running(&self) -> bool {
-        matches!(self, Self::Rejected(_))
-    }
-}
+pub use super::process_scheduling::ProcessWorkflowStartFailure;
 
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -87,6 +56,7 @@ mod wake;
 pub(crate) use wake::{
     ClosureWakeRelay, guard_restate_context_future, guard_restate_run_future, relay_closure_wakes,
 };
+pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
 
 /// The future every turn-cancel race returns across this seam.
 ///
@@ -354,6 +324,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn await_event<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
     where
@@ -362,6 +333,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn await_event_or_turn_cancel<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> TurnCancelRaceFuture<'run, Resolution>
@@ -389,6 +361,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn peek_event<'run>(
         &'run self,
         address: RestateDurableWaitAddress,
+        replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run;
@@ -662,6 +635,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn await_effect_group_wait<'run>(
         &'run self,
         _request: RestateDurableWaitAwaitRequest,
+        _replay_key: String,
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
     where
@@ -911,6 +885,7 @@ macro_rules! impl_restate_controller_context {
                 fn await_event<'run>(
                     &'run self,
                     request: RestateDurableWaitAwaitRequest,
+                    replay_key: String,
                     _cancellation: tokio_util::sync::CancellationToken,
                 ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
                 where
@@ -922,7 +897,8 @@ macro_rules! impl_restate_controller_context {
                             .workflow_client::<LashDurableWaitWorkflowClient>(
                                 address.workflow_key.clone(),
                             )
-                            .await_resolution(Json(request.clone().into()));
+                            .await_resolution(Json(request.clone().into()))
+                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
                         let call = start.call();
                         restate_sdk::select! {
                             result = call => {
@@ -937,7 +913,8 @@ macro_rules! impl_restate_controller_context {
                                     .resolve(Json(RestateDurableWaitResolveRequest {
                                         key: request.key,
                                         resolution: Resolution::Cancelled,
-                                    }));
+                                    }))
+                                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                                 let Json(outcome) = resolve_request.call().await?;
                                 Ok(match outcome {
                                     ResolveOutcome::AlreadyResolved { terminal } => terminal,
@@ -953,6 +930,7 @@ macro_rules! impl_restate_controller_context {
                 fn await_event_or_turn_cancel<'run>(
                     &'run self,
                     request: RestateDurableWaitAwaitRequest,
+                    replay_key: String,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     cancellation: tokio_util::sync::CancellationToken,
                 ) -> TurnCancelRaceFuture<'run, Resolution>
@@ -962,7 +940,7 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Some(turn_cancel) = turn_cancel else {
                             return self
-                                .await_event(request, cancellation)
+                                .await_event(request, replay_key, cancellation)
                                 .await
                                 .map(RestateTurnCancelRaceOutcome::Completed);
                         };
@@ -982,7 +960,8 @@ macro_rules! impl_restate_controller_context {
                             .workflow_client::<LashDurableWaitWorkflowClient>(
                                 event_address.workflow_key.clone(),
                             )
-                            .await_resolution(Json(request.into()));
+                            .await_resolution(Json(request.into()))
+                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
                         let event = erase_gate_wait(event.call());
                         match race_turn_cancel_gate(
                             self,
@@ -1009,7 +988,8 @@ macro_rules! impl_restate_controller_context {
                                     .resolve(Json(RestateDurableWaitResolveRequest {
                                         key: event_key,
                                         resolution: Resolution::Cancelled,
-                                    }));
+                                    }))
+                                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                                 let Json(_) = resolve.call().await?;
                                 Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
                             }
@@ -1023,13 +1003,15 @@ macro_rules! impl_restate_controller_context {
                 fn peek_event<'run>(
                     &'run self,
                     address: RestateDurableWaitAddress,
+                    replay_key: String,
                 ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
                 where
                     'ctx: 'run,
                 {
                     let request = self
                         .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
-                        .peek();
+                        .peek()
+                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                     Box::pin(async move {
                         let Json(resolution) = request.call().await?;
                         Ok(resolution)
@@ -1148,12 +1130,14 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     Box::pin(async move {
+                        let replay_key = request.key.key_id.clone();
                         let address = RestateDurableWaitAddress::for_key(&request.key);
                         let resolve = self
                             .object_client::<LashDurableWaitIndexClient>(
                                 durable_wait_index_object_key(&address),
                             )
-                            .resolve(Json(request));
+                            .resolve(Json(request))
+                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                         let Json(outcome) = resolve.call().await?;
                         Ok(outcome)
                     })
@@ -1452,6 +1436,7 @@ macro_rules! impl_restate_controller_context {
                 fn await_effect_group_wait<'run>(
                     &'run self,
                     request: RestateDurableWaitAwaitRequest,
+                    replay_key: String,
                     cancellation: tokio_util::sync::CancellationToken,
                 ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
                 where
@@ -1462,6 +1447,7 @@ macro_rules! impl_restate_controller_context {
                         let call = self
                             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
                             .await_resolution(Json(request.into()))
+                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                             .call();
                         let wait = guard_restate_context_future(call);
                         let cancelled = cancellation.cancelled();

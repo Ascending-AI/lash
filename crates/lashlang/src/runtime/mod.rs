@@ -19,6 +19,7 @@ mod cache;
 mod compiler;
 pub use compiler::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
+    lowered_for_of_parts,
 };
 mod entry_points;
 mod error;

@@ -1438,15 +1438,15 @@ mod seed_tests {
     fn determinism_projection_canonicalizes_blake3_identity_entropy() {
         let first = canonicalize_embedded_hashes(
             &mut BTreeMap::new(),
-            &format!("process:lashlang:v2:blake3:{}", "a".repeat(64)),
+            &format!("process:lashlang:v3:blake3:{}", "a".repeat(64)),
         );
         let rerun = canonicalize_embedded_hashes(
             &mut BTreeMap::new(),
-            &format!("process:lashlang:v2:blake3:{}", "b".repeat(64)),
+            &format!("process:lashlang:v3:blake3:{}", "b".repeat(64)),
         );
 
         assert_eq!(first, rerun);
-        assert_eq!(first, "process:lashlang:v2:blake3:<blake3-001>");
+        assert_eq!(first, "process:lashlang:v3:blake3:<blake3-001>");
     }
 
     #[test]

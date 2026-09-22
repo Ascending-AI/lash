@@ -1,6 +1,53 @@
 use super::*;
 
 #[tokio::test]
+pub(super) async fn execute_await_event_forwards_the_invocation_replay_key() {
+    assert_eq!(
+        crate::controller::context::LASH_REPLAY_KEY_HEADER,
+        "x-lash-replay-key"
+    );
+
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let invocation = runtime_invocation(RuntimeEffectKind::AwaitEvent, "correlated-await");
+    let expected_replay_key = invocation.replay_key().to_owned();
+    let key = test_restate_await_event_key(
+        &durable_turn_scope("session", "turn"),
+        AwaitEventWaitIdentity::Custom {
+            key: "correlated-await".to_owned(),
+        },
+    )
+    .expect("correlated await-event key");
+    let expected_resolution = Resolution::Ok(serde_json::json!({ "ready": true }));
+    context.resolve_durable_event(RestateDurableWaitResolveRequest {
+        key: key.clone(),
+        resolution: expected_resolution.clone(),
+    });
+
+    let outcome = controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
+            RuntimeEffectLocalExecutor::await_event(
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            )
+            .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
+        )
+        .await
+        .expect("pre-resolved await-event effect");
+
+    assert!(matches!(
+        outcome,
+        RuntimeEffectOutcome::AwaitEvent { resolution }
+            if resolution == expected_resolution
+    ));
+    assert_eq!(
+        *context.awaited_replay_keys.lock_recover(),
+        vec![expected_replay_key]
+    );
+}
+
+#[tokio::test]
 pub(super) async fn execute_await_event_rejects_foreign_authority_before_context_work() {
     let context = Arc::new(RecordingContext::default());
     let owner = RestateAuthorityId::new("execute-await-owner").expect("valid owner authority");

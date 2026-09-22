@@ -108,10 +108,10 @@ pub use span::Span;
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
 pub const BYTECODE_FORMAT_VERSION: u32 = 18;
+pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangExecutionCallSite, LashlangExecutionChild,
-    LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection,
-    WorkflowExecutionSite, process_ref_key,
+    LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection, process_ref_key,
 };
 pub use trigger::{
     HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, TRIGGER_MODULE_ALIAS,
@@ -134,10 +134,9 @@ pub use workflow_graph::{
     WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowProcess,
     WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
     WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path,
-    execution_sites, node_id_for_execution_site, projected_node_type_facets, reconcile,
-    runtime_execution_site_for_workflow_site, workflow_call_from_ir, workflow_call_to_ir,
-    workflow_effect_from_ir, workflow_effect_to_ir, workflow_slot_accepts_value,
-    workflow_slot_value,
+    execution_sites, projected_node_type_facets, reconcile, workflow_call_from_ir,
+    workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id,
+    workflow_slot_accepts_value, workflow_slot_value,
 };
 
 /// Internals the workflow-graph projector needs.
@@ -148,6 +147,7 @@ pub use workflow_graph::{
 pub use linker::{WorkflowLinkAnalysis, analyze_workflow_program};
 pub use runtime::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
+    lowered_for_of_parts,
 };
 
 pub fn format_runtime_diagnostic(source: &str, error: &RuntimeError, span: Option<Span>) -> String {

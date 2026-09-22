@@ -438,10 +438,9 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             "each leaf of each aggregate needs its own identity: {call_ids:?}"
         );
 
-        // The leaf position within the batch separates the two leaves of one
-        // pass, and the site occurrence separates the two passes. Both halves
-        // are asserted so a future derivation cannot drop either and still
-        // pass on distinctness alone.
+        // Both leaves belong to one structural workflow node. The leaf
+        // position within the batch and that node's increasing occurrence
+        // still give each call a distinct identity.
         let first_pass = call_ids
             .iter()
             .filter(|id| id.ends_with(":child:0"))
@@ -455,21 +454,15 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             (2, 2),
             "two leaf positions, reached twice: {call_ids:?}"
         );
-        assert_eq!(
-            call_ids
-                .iter()
-                .filter(|id| id.contains(":1:child:"))
-                .count(),
-            2,
-            "the first pass carries occurrence 1: {call_ids:?}"
-        );
-        assert_eq!(
-            call_ids
-                .iter()
-                .filter(|id| id.contains(":2:child:"))
-                .count(),
-            2,
-            "the second pass carries occurrence 2: {call_ids:?}"
-        );
+        for occurrence in 1..=4 {
+            assert_eq!(
+                call_ids
+                    .iter()
+                    .filter(|id| id.contains(&format!(":{occurrence}:child:")))
+                    .count(),
+                1,
+                "the shared node assigns one occurrence per leaf call: {call_ids:?}"
+            );
+        }
     });
 }

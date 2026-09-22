@@ -9,7 +9,7 @@ use lash::rlm::lang::{
     LashlangAbilities, LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment,
     LashlangLanguageFeatures, LinkedModule, OperationContract, ResourceOperation,
     ResourceOperationBatchResult, ResourceOperationResult, Sleep, State, Value, WorkflowGraph,
-    compile_linked_process, from_json, node_id_for_execution_site,
+    compile_linked_process, from_json,
 };
 use tokio::sync::mpsc;
 
@@ -31,7 +31,6 @@ impl Default for RunTiming {
 }
 
 pub(crate) struct PreparedRun {
-    graph: WorkflowGraph,
     compiled: lash::rlm::lang::CompiledProgram,
     workflow_version: u64,
     run_id: String,
@@ -54,7 +53,6 @@ impl PreparedRun {
         let compiled = compile_linked_process(&linked, process_name)
             .context("compile saved workflow process")?;
         Ok(Self {
-            graph,
             compiled,
             workflow_version,
             run_id: uuid::Uuid::new_v4().to_string(),
@@ -62,13 +60,7 @@ impl PreparedRun {
     }
 
     pub(crate) async fn execute(self, sender: mpsc::Sender<RunEvent>, timing: RunTiming) {
-        let host = RunHost::new(
-            self.graph,
-            sender,
-            self.run_id,
-            self.workflow_version,
-            timing,
-        );
+        let host = RunHost::new(sender, self.run_id, self.workflow_version, timing);
         let environment = ExecutionEnvironment::new(&host).process();
         let result =
             lash::rlm::lang::execute(&self.compiled, &mut State::new(), &environment).await;
@@ -147,7 +139,6 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
 }
 
 struct RunHost {
-    graph: WorkflowGraph,
     sender: mpsc::Sender<RunEvent>,
     run_id: String,
     workflow_version: u64,
@@ -160,14 +151,12 @@ struct RunHost {
 
 impl RunHost {
     fn new(
-        graph: WorkflowGraph,
         sender: mpsc::Sender<RunEvent>,
         run_id: String,
         workflow_version: u64,
         timing: RunTiming,
     ) -> Self {
         Self {
-            graph,
             sender,
             run_id,
             workflow_version,
@@ -177,10 +166,6 @@ impl RunHost {
             current_node: Mutex::new(None),
             timing,
         }
-    }
-
-    fn correlated_node(&self, site: &lash::rlm::lang::LashlangExecutionSite) -> Option<String> {
-        node_id_for_execution_site(&self.graph, site).map(|id| id.to_string())
     }
 
     fn emit(&self, node_id: String, status: RunStatus, delta: DisplayDelta, error: Option<String>) {
@@ -271,37 +256,32 @@ impl ExecutionHost for RunHost {
     fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
         match observation {
             LashlangExecutionObservation::NodeStarted { site, .. } => {
-                if let Some(node_id) = self.correlated_node(&site) {
-                    *self.current_node.lock_recover() = Some(node_id.clone());
-                    self.emit(node_id, RunStatus::Started, DisplayDelta::default(), None);
-                }
+                let node_id = site.node_id;
+                *self.current_node.lock_recover() = Some(node_id.clone());
+                self.emit(node_id, RunStatus::Started, DisplayDelta::default(), None);
             }
             LashlangExecutionObservation::NodeCompleted { site, .. } => {
-                if let Some(node_id) = self.correlated_node(&site) {
-                    let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
-                    self.emit(node_id.clone(), RunStatus::Succeeded, delta, None);
-                    let mut current = self.current_node.lock_recover();
-                    if current.as_deref() == Some(node_id.as_str()) {
-                        *current = None;
-                    }
+                let node_id = site.node_id;
+                let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
+                self.emit(node_id.clone(), RunStatus::Succeeded, delta, None);
+                let mut current = self.current_node.lock_recover();
+                if current.as_deref() == Some(node_id.as_str()) {
+                    *current = None;
                 }
             }
             LashlangExecutionObservation::NodeFailed { site, error, .. } => {
-                if let Some(node_id) = self.correlated_node(&site) {
-                    let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
-                    self.emit(node_id, RunStatus::Failed, delta, Some(error));
-                }
+                let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
+                self.emit(site.node_id, RunStatus::Failed, delta, Some(error));
             }
             LashlangExecutionObservation::BranchSelected { site, .. } => {
-                if let Some(node_id) = self.correlated_node(&site) {
-                    self.emit(
-                        node_id.clone(),
-                        RunStatus::Started,
-                        DisplayDelta::default(),
-                        None,
-                    );
-                    self.emit(node_id, RunStatus::Succeeded, DisplayDelta::default(), None);
-                }
+                let node_id = site.node_id;
+                self.emit(
+                    node_id.clone(),
+                    RunStatus::Started,
+                    DisplayDelta::default(),
+                    None,
+                );
+                self.emit(node_id, RunStatus::Succeeded, DisplayDelta::default(), None);
             }
             LashlangExecutionObservation::ChildStarted { .. } => {}
         }

@@ -15,6 +15,7 @@ impl RuntimeSessionServices {
         registration: crate::ProcessRegistration,
         mut create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<crate::ProcessAwaitOutput, crate::ProcessInfraError> {
@@ -36,6 +37,7 @@ impl RuntimeSessionServices {
             &registration.id,
             child_turn_id,
             turn_input,
+            &execution_write_authority,
             scoped_effect_controller,
             cancellation,
         ))

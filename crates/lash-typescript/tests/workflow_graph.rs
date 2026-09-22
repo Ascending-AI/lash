@@ -17,15 +17,14 @@ use lash_typescript::workflow_graph::{
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
-    LashlangAbilities, LashlangExecutionSite, LashlangHostCatalog, LashlangHostEnvironment,
-    TypeExpr, TypeField, VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION,
-    WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument, WorkflowContainer, WorkflowDeclaration,
-    WorkflowDiagnosticClass, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind,
-    WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide,
+    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
+    VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
+    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClass,
+    WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowExpectedArgument,
+    WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide,
     WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
     WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSlotPath, WorkflowSlotPathSegment,
-    WorkflowSubgraph, WorkflowTypeDiagnostic, node_id_for_execution_site, reconcile,
-    workflow_call_to_ir, workflow_slot_value,
+    WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile, workflow_call_to_ir, workflow_slot_value,
 };
 
 /// The one process a fixture lifts.
@@ -560,7 +559,7 @@ fn workflow_graph_ir_json_golden_is_exact() {
     let graph =
         workflow_graph_from_source("await tools.lookup({ query: \"x\" });\nawait sleep(\"1s\");\n")
             .expect("fixture projects");
-    assert_eq!(graph.schema_version, 13);
+    assert_eq!(graph.schema_version, 14);
     let kinds = serde_json::Value::Array(
         graph
             .main
@@ -1203,15 +1202,7 @@ finish(1);
     for (node, sites) in reprojected.main.nodes[..2].iter().zip(original_sites) {
         assert_eq!(node.execution_sites, sites);
         for workflow_site in sites {
-            let runtime_site = LashlangExecutionSite {
-                node_id: "runtime-site".to_string(),
-                node_kind: workflow_site.kind.clone(),
-                label: workflow_site.label.clone(),
-                branch: None,
-                workflow_site,
-            };
-            let correlated = node_id_for_execution_site(&reprojected, &runtime_site)
-                .expect("edited execution site should resolve after reprojection");
+            let correlated = lashlang::workflow_node_id(&workflow_site.owner, &workflow_site.path);
             assert_eq!(correlated, node.id);
             assert!(
                 reprojected

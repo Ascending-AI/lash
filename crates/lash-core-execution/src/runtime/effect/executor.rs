@@ -272,6 +272,7 @@ pub(super) struct LocalDirectEffectRunner {
 struct LocalToolBatchEffectRunner<'run> {
     context: crate::RuntimeExecutionContext<'run>,
     child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+    issuing_node_ids: Arc<HashMap<String, String>>,
     completion_key: Option<crate::AwaitEventKey>,
 }
 
@@ -699,15 +700,18 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub(crate) fn tool_batch(
         context: crate::RuntimeExecutionContext<'run>,
         child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+        issuing_node_ids: HashMap<String, String>,
         completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = context.replay_validation_trace();
+        let issuing_node_ids = Arc::new(issuing_node_ids);
         if let Some(context) = context.to_static() {
             return Self {
                 state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                     LocalToolBatchEffectRunner {
                         context,
                         child_trace_hooks,
+                        issuing_node_ids,
                         completion_key,
                     },
                 ))),
@@ -718,6 +722,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Runner(Box::new(LocalToolBatchEffectRunner {
                 context,
                 child_trace_hooks,
+                issuing_node_ids,
                 completion_key,
             })),
             replay_trace,
@@ -1140,6 +1145,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                     batch,
                     envelope.invocation.into_runtime_invocation(),
                     self.child_trace_hooks,
+                    Arc::clone(&self.issuing_node_ids),
                 ))
                 .await?;
                 Ok(RuntimeEffectOutcome::ToolBatch {

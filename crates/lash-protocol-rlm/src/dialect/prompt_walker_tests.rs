@@ -116,7 +116,7 @@ const RETIRED_SURFACE_MARKERS: &[&str] = &[
 /// 0063 hides it from the prompt instead of carving it out.
 /// The second carve-out is a durable process identity. A TypeScript session's
 /// processes are compiled against the Lashlang VM substrate and their ids are
-/// `process:lashlang:v2:blake3:…` — journal identity, visible to a host through
+/// `process:lashlang:v3:blake3:…` — journal identity, visible to a host through
 /// `/api/work`. Renaming them would move a durable id for a cosmetic gain, so
 /// the id stays and the *label* half of the same defect is what got fixed
 /// (transcript badges read the recorded dialect).

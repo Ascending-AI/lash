@@ -275,11 +275,11 @@ view. Sleep and `wait_signal` emit `waiting`. The host auto-fires the declared
 Stream EOF means the run is complete; the correlated
 terminal node's `succeeded` event is the final normal event.
 
-Every emitted event has a `nodeId` obtained through
-`node_id_for_execution_site` and refers to a node in the exact saved graph
-version identified by `workflowVersion`. A preparation failure before SSE
-starts is JSON with HTTP `500`; an execution failure is a correlated `failed`
-event before EOF.
+Every emitted event carries the runtime site's `nodeId` directly. That id
+refers to a node in the exact saved graph version identified by
+`workflowVersion`; no pairing map or join helper is involved. A preparation
+failure before SSE starts is JSON with HTTP `500`; an execution failure is a
+correlated `failed` event before EOF.
 
 ## Toy display tools
 

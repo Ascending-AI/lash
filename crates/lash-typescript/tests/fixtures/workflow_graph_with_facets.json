@@ -1,12 +1,12 @@
 {
-  "schema_version": 13,
+  "schema_version": 14,
   "source_identity": "193717879dc3001c17bf012f74f773dd5541591172311f5845a6d9fc49ec8d4a",
   "facet_schema_version": 3,
   "declarations": [],
   "main": {
     "nodes": [
       {
-        "id": "call:46f2e659755fd9aeb120fcfc",
+        "id": "node:1de6eca7fbb5c02fa3b32d47",
         "name": "lookup",
         "name_source": "derived",
         "kind": {
@@ -83,9 +83,6 @@
           {
             "owner": "main",
             "path": [
-              0,
-              0,
-              0,
               0
             ],
             "kind": "resource_operation",
@@ -98,7 +95,7 @@
         }
       },
       {
-        "id": "terminal:8d0b97becc84b22d9b9865cb",
+        "id": "node:e5da609e1296a1d8e31ae439",
         "name": "finish",
         "name_source": "derived",
         "kind": {
@@ -147,9 +144,9 @@
     ],
     "edges": [
       {
-        "id": "edge:e5ceac0c0f9b66ffca5d6c7f",
-        "from": "call:46f2e659755fd9aeb120fcfc",
-        "to": "terminal:8d0b97becc84b22d9b9865cb",
+        "id": "edge:40198ae72035692a1480797f",
+        "from": "node:1de6eca7fbb5c02fa3b32d47",
+        "to": "node:e5da609e1296a1d8e31ae439",
         "kind": {
           "kind": "data_dependency",
           "variable": "answer",
@@ -157,9 +154,9 @@
         }
       },
       {
-        "id": "edge:89589d610f80fffe2ae259d0",
-        "from": "call:46f2e659755fd9aeb120fcfc",
-        "to": "terminal:8d0b97becc84b22d9b9865cb",
+        "id": "edge:619cabcf6d84f58966e9d18d",
+        "from": "node:1de6eca7fbb5c02fa3b32d47",
+        "to": "node:e5da609e1296a1d8e31ae439",
         "kind": {
           "kind": "sequence"
         }

@@ -1055,26 +1055,7 @@ pub(super) fn for_of_sugar<'a>(
     iterable: &'a Expr,
     body: &'a Expr,
 ) -> Option<(&'a str, &'a Expr, &'a [Expr])> {
-    if !binding.starts_with(GENERATED_BINDING_PREFIX) {
-        return None;
-    }
-    let [source] = stdlib_call(iterable, "Lash.ArrayFromIterable")? else {
-        return None;
-    };
-    let Expr::Block(statements) = body else {
-        return None;
-    };
-    let [Expr::Assign { target, expr }, rest @ ..] = statements.as_slice() else {
-        return None;
-    };
-    if !target.is_simple() {
-        return None;
-    }
-    match expr.as_ref() {
-        Expr::Variable(name) if name.as_str() == binding => {}
-        _ => return None,
-    }
-    Some((target.root.as_str(), source, rest))
+    lashlang::lowered_for_of_parts(binding, iterable, body)
 }
 
 fn strip_completion_value(body: &Expr) -> &Expr {

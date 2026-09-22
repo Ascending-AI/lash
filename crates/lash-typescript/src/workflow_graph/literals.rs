@@ -46,7 +46,7 @@ impl GraphProjector<'_> {
         let mut facts_base = lashlang::AstPath::main(path.to_vec()).child(0);
         facts_base.steps.extend(wrapper_path.iter().copied());
         WorkflowProcess {
-            id: self.node_id(&owner, &[], "process"),
+            id: self.node_id(&owner, &[]),
             name: name.clone(),
             display_name: name,
             description: None,

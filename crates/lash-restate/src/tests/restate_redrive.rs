@@ -126,6 +126,9 @@ pub(super) async fn fig1128_deadline_wait_redrive_reuses_the_first_payload() {
         .build();
     let workflow_key = "fig1128-deadline-redrive";
     let input = Fig1128DeadlineRedriveInput;
+    let expected_replay_key = runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline")
+        .replay_key()
+        .to_owned();
 
     let first = invoke_endpoint_with_named_call_responses(
         &endpoint,
@@ -142,6 +145,11 @@ pub(super) async fn fig1128_deadline_wait_redrive_reuses_the_first_payload() {
         panic!("the first attempt must emit exactly one durable-wait call");
     };
     assert_eq!(first_wait.handler, "await_resolution");
+    assert_eq!(
+        first_wait.headers,
+        vec![(LASH_REPLAY_KEY_HEADER.to_string(), expected_replay_key)],
+        "the journaled CallCommand must carry the wait identity as its replay key"
+    );
 
     // A replacement process starts later and spends a different amount of
     // monotonic time building the same logical wait. The captured command is

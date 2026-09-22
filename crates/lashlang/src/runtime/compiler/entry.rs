@@ -45,7 +45,7 @@ impl Compiler {
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
-            paths: lashlang_execution_paths(program),
+            node_paths: workflow_node_paths(program),
             sites: Vec::new(),
         });
         compiler.expression_source_spans = expression_source_spans(program);
@@ -68,7 +68,7 @@ impl Compiler {
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
-            paths: lashlang_execution_paths(program),
+            node_paths: workflow_node_paths_for_process(program),
             sites: Vec::new(),
         });
         compiler.expression_source_spans = expression_source_spans(program);
@@ -588,7 +588,7 @@ impl Compiler {
         descriptor_expression: &Expr,
     ) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
-        let path = tracking.paths.get(path)?;
+        let path = tracking.node_paths.get(path)?;
         let (kind, label) = execution_site_descriptor(descriptor_expression)?;
         Some(if kind == BRANCH_EXECUTION_SITE_KIND {
             tracking.context.builder().branch_site(path)
@@ -603,7 +603,7 @@ impl Compiler {
         label: &str,
     ) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
-        let path = tracking.paths.get(path)?;
+        let path = tracking.node_paths.get(path)?;
         Some(
             tracking
                 .context
@@ -626,7 +626,7 @@ impl Compiler {
         let Some(tracking) = self.lashlang_execution.as_ref() else {
             return;
         };
-        let Some(path) = tracking.paths.get(path) else {
+        let Some(path) = tracking.node_paths.get(path) else {
             return;
         };
         let site = tracking
