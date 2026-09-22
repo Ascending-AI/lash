@@ -145,11 +145,8 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
         code: "approval_denied".into(),
         message: "denied".into(),
         replay_key: "effect-1".into(),
-        retry_policy: lash_sansio::ToolRetryPolicy::Safe {
-            max_attempts: 3,
-            base_delay_ms: 10,
-            max_delay_ms: 100,
-        },
+        source: lash_sansio::ToolFailureSource::Policy,
+        retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
     });
     let attrs = event_attributes(&effect, &OtelTraceOptions::default());
     for (key, expected) in [
@@ -158,7 +155,8 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
         ("lash.language_execution.failure.code", "approval_denied"),
         ("lash.language_execution.failure.message", "denied"),
         ("lash.language_execution.failure.replay_key", "effect-1"),
-        ("lash.language_execution.failure.retry_policy", "safe"),
+        ("lash.language_execution.failure.source", "policy"),
+        ("lash.language_execution.failure.retry", "exhausted"),
     ] {
         assert_eq!(
             attribute_value(&attrs, key),
@@ -166,19 +164,8 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
         );
     }
     assert_eq!(
-        attribute_value(&attrs, "lash.language_execution.failure.retry_max_attempts"),
+        attribute_value(&attrs, "lash.language_execution.failure.retry_attempts"),
         &OtelValue::I64(3)
-    );
-    assert_eq!(
-        attribute_value(
-            &attrs,
-            "lash.language_execution.failure.retry_base_delay_ms"
-        ),
-        &OtelValue::I64(10)
-    );
-    assert_eq!(
-        attribute_value(&attrs, "lash.language_execution.failure.retry_max_delay_ms"),
-        &OtelValue::I64(100)
     );
     assert_eq!(
         attribute_value(&attrs, "lash.language_execution.attempt"),
@@ -205,7 +192,7 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
     assert!(
         !attrs
             .iter()
-            .any(|attr| attr.key.as_str() == "lash.language_execution.failure.retry_policy")
+            .any(|attr| attr.key.as_str() == "lash.language_execution.failure.retry")
     );
 }
 

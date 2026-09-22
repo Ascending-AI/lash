@@ -51,13 +51,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Box::pin(self.resolve_effect_inner(effect, active.as_ref(), instruction_ip)).await;
         match (&result, active.as_ref()) {
             (Ok(Some(VmOutcome::ProcessFailed(value))), Some(active)) => {
-                self.fail_lashlang_execution(active, "ProcessFailed", value.to_string());
+                self.emit_lashlang_execution_failure(
+                    active,
+                    crate::LashlangExecutionFailure::Runtime {
+                        code: RuntimeError::PROCESS_FAILED_CODE.to_owned(),
+                        message: value.to_string(),
+                    },
+                );
             }
             (Ok(_), Some(active)) => {
                 self.complete_lashlang_execution(active);
             }
             (Err(error), Some(active)) => {
-                self.fail_lashlang_execution(active, error.code(), error.to_string());
+                self.fail_lashlang_execution(active, error);
             }
             _ => {}
         }
@@ -497,7 +503,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         error: RuntimeError,
     ) -> RuntimeError {
         for active in active_nodes.iter().flatten() {
-            self.fail_lashlang_execution_runtime(active, &error);
+            self.fail_lashlang_execution(active, &error);
         }
         error
     }
@@ -535,8 +541,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         if let Some(active) = active {
                             self.fail_lashlang_execution(
                                 active,
-                                "UnwrappedModuleOperationFailed",
-                                error.to_string(),
+                                &RuntimeError::UnwrappedModuleOperationFailed {
+                                    source: error.clone(),
+                                },
                             );
                         }
                         leaf_values.push(Value::Null);

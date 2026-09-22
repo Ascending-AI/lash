@@ -10,7 +10,8 @@ pub fn trace_failure(
                 code: effect.code,
                 message: effect.message,
                 replay_key: effect.replay_key,
-                retry_policy: effect.retry_policy,
+                source: effect.source,
+                retry: effect.retry,
             }
         }
         lashlang::LashlangExecutionFailure::Runtime { code, message } => {
@@ -162,12 +163,5 @@ where
             },
         };
         (self.observer)(&self.host, payload);
-    }
-
-    fn take_lashlang_effect_failure(
-        &self,
-        call_site: &lashlang::LashlangExecutionCallSite,
-    ) -> Option<lashlang::LashlangEffectFailure> {
-        self.host.take_lashlang_effect_failure(call_site)
     }
 }

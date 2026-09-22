@@ -483,18 +483,6 @@ pub trait ExecutionHost: Sync {
     fn observe_profile(&self, _profile: ProfileReport) {}
 
     fn observe_lashlang_execution(&self, _observation: LashlangExecutionObservation) {}
-
-    /// Takes typed failure provenance recorded while resolving `call_site`.
-    ///
-    /// The default covers hosts with no external tool bridge. Production tool
-    /// bridges override it with a remove-on-read map so completed and handled
-    /// calls cannot leak provenance into a later observation.
-    fn take_lashlang_effect_failure(
-        &self,
-        _call_site: &LashlangExecutionCallSite,
-    ) -> Option<LashlangEffectFailure> {
-        None
-    }
 }
 
 pub struct ExecutionEnvironment<'host, H: ExecutionHost> {
@@ -629,13 +617,6 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
     fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
         self.host.observe_lashlang_execution(observation);
     }
-
-    fn take_lashlang_effect_failure(
-        &self,
-        call_site: &LashlangExecutionCallSite,
-    ) -> Option<LashlangEffectFailure> {
-        self.host.take_lashlang_effect_failure(call_site)
-    }
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -660,7 +641,7 @@ impl ExecutionHostError {
     /// execution-host error contract. Callers can inspect the stable failure
     /// classification without treating foreign JSON as structured control
     /// data.
-    pub fn from_tool_failure(failure: &ToolFailure) -> Self {
+    pub fn from_tool_failure(failure: &ToolFailure, replay_key: impl Into<String>) -> Self {
         Self {
             message: failure.message.clone(),
             tool_failure: Some(ExecutionHostToolFailure {
@@ -668,8 +649,22 @@ impl ExecutionHostError {
                 code: failure.code.clone(),
                 source: failure.source.clone(),
                 retry: failure.retry.clone(),
+                replay_key: replay_key.into(),
             }),
         }
+    }
+
+    /// The recorded tool failure attached to this host error, if any.
+    pub fn tool_failure(&self) -> Option<LashlangEffectFailure> {
+        let failure = self.tool_failure.as_ref()?;
+        Some(LashlangEffectFailure {
+            class: failure.class.clone(),
+            code: failure.code.clone(),
+            message: self.message.clone(),
+            replay_key: failure.replay_key.clone(),
+            source: failure.source.clone(),
+            retry: failure.retry.clone(),
+        })
     }
 
     pub fn message(&self) -> &str {

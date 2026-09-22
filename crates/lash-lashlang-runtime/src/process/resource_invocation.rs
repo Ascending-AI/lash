@@ -7,10 +7,7 @@ pub(super) enum PreparedResourceInvocation {
         payload: serde_json::Value,
         effect_id: String,
     },
-    Tool {
-        invocation: lash_core::facade_support::ToolInvocation,
-        retry_policy: lash_core::ToolRetryPolicy,
-    },
+    Tool(lash_core::facade_support::ToolInvocation),
 }
 
 impl LashlangProcessHost<'_> {
@@ -66,9 +63,6 @@ impl LashlangProcessHost<'_> {
         {
             invocation = invocation.with_child_execution_trace_hook(hook);
         }
-        Ok(PreparedResourceInvocation::Tool {
-            invocation,
-            retry_policy: manifest.retry_policy,
-        })
+        Ok(PreparedResourceInvocation::Tool(invocation))
     }
 }

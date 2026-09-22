@@ -199,14 +199,17 @@ fn awaited_settled_value_survives_a_finally_origin_wire_roundtrip() {
 
 #[test]
 fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
-    let source = ExecutionHostError::from_tool_failure(&lash_sansio::ToolFailure {
-        class: lash_sansio::ToolFailureClass::PermissionDenied,
-        code: "approval_denied".to_string(),
-        message: "approval was denied".to_string(),
-        source: lash_sansio::ToolFailureSource::Policy,
-        retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
-        raw: None,
-    });
+    let source = ExecutionHostError::from_tool_failure(
+        &lash_sansio::ToolFailure {
+            class: lash_sansio::ToolFailureClass::PermissionDenied,
+            code: "approval_denied".to_string(),
+            message: "approval was denied".to_string(),
+            source: lash_sansio::ToolFailureSource::Policy,
+            retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
+            raw: None,
+        },
+        "test-effect-key",
+    );
     let origin = VmPendingErrorOriginContinuation {
         error: RuntimeError::UnwrappedHostToolResultFailed { source },
         instruction_pointer: 0,

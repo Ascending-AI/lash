@@ -107,12 +107,7 @@ must_cover = [
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-sansio/src/tool_output.rs"]
-symbols = ["ToolFailureClass"]
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-sansio/src/tool_contract.rs"]
-symbols = ["ToolRetryPolicy"]
+symbols = ["ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"]
 
 [[surface.guard]]
 kind = "rust_items"

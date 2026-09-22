@@ -185,7 +185,8 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 code: failure_code,
                 message,
                 replay_key,
-                retry_policy,
+                source,
+                retry,
             } = failed.1
             else {
                 panic!("failed effect lost its typed provenance: {:?}", failed.1);
@@ -193,7 +194,8 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
             assert_eq!(*class, lash_core::ToolFailureClass::PermissionDenied);
             assert_eq!(failure_code, "approval_denied");
             assert_eq!(message, "approval was denied");
-            assert_eq!(*retry_policy, lash_core::ToolRetryPolicy::safe(3, 10, 100));
+            assert_eq!(*source, lash_core::ToolFailureSource::Policy);
+            assert_eq!(*retry, lash_core::ToolRetryStatus::Never);
             assert_eq!(failed.0.as_deref(), Some(replay_key.as_str()));
             assert!(replay_key.starts_with("lashlang:"), "{replay_key}");
             assert!(

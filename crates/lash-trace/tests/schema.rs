@@ -70,7 +70,7 @@ fn immediate_predecessor_trace_schema_28_is_refused_before_event_decode() {
 }
 
 #[test]
-fn node_failure_requires_typed_provenance_and_preserves_effect_policy() {
+fn node_failure_requires_typed_provenance_and_preserves_recorded_retry() {
     let legacy = json!({
         "kind": "node_failed",
         "node_id": "node-1",
@@ -94,11 +94,8 @@ fn node_failure_requires_typed_provenance_and_preserves_effect_policy() {
             code: "approval_denied".to_owned(),
             message: "permission denied".to_owned(),
             replay_key: "effect-1".to_owned(),
-            retry_policy: lash_sansio::ToolRetryPolicy::Safe {
-                max_attempts: 3,
-                base_delay_ms: 10,
-                max_delay_ms: 100,
-            },
+            source: lash_sansio::ToolFailureSource::Policy,
+            retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
         },
     };
     let wire = serde_json::to_value(&payload).expect("encode typed failure");
@@ -110,15 +107,17 @@ fn node_failure_requires_typed_provenance_and_preserves_effect_policy() {
             "code": "approval_denied",
             "message": "permission denied",
             "replay_key": "effect-1",
-            "retry_policy": {
-                "type": "safe",
-                "max_attempts": 3,
-                "base_delay_ms": 10,
-                "max_delay_ms": 100
-            }
+            "source": "policy",
+            "retry": { "type": "exhausted", "attempts": 3 }
         })
     );
     assert!(wire.get("error").is_none());
+    let mut unknown_kind = wire.clone();
+    unknown_kind["failure"]["kind"] = json!("unknown");
+    assert!(serde_json::from_value::<TraceLanguageExecutionPayload>(unknown_kind).is_err());
+    let mut unknown_class = wire.clone();
+    unknown_class["failure"]["class"] = json!("unknown");
+    assert!(serde_json::from_value::<TraceLanguageExecutionPayload>(unknown_class).is_err());
     assert_eq!(
         serde_json::from_value::<TraceLanguageExecutionPayload>(wire).expect("decode failure"),
         payload
@@ -1800,7 +1799,8 @@ fn language_execution_all_seven_payload_variants_round_trip() {
                 code: "read_failed".to_string(),
                 message: "failed to read file".to_string(),
                 replay_key: "call-1".to_string(),
-                retry_policy: lash_sansio::ToolRetryPolicy::Never,
+                source: lash_sansio::ToolFailureSource::Tool,
+                retry: lash_sansio::ToolRetryStatus::Never,
             },
         },
         TraceLanguageExecutionPayload::BranchSelected {

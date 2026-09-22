@@ -440,7 +440,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     }
                     Err(error) => {
                         if let Some(active) = &active {
-                            self.fail_lashlang_execution(active, error.code(), error.to_string());
+                            self.fail_lashlang_execution(active, &error);
                         }
                         return Err(error);
                     }

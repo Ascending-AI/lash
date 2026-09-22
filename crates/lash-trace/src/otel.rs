@@ -1338,7 +1338,8 @@ fn language_execution_attributes(
         if let Failure::Effect {
             class,
             replay_key,
-            retry_policy,
+            source,
+            retry,
             ..
         } = failure
         {
@@ -1361,40 +1362,42 @@ fn language_execution_attributes(
                 attr::LASH_LANGUAGE_EXECUTION_FAILURE_REPLAY_KEY,
                 replay_key.clone(),
             ));
-            let (policy, limits) = match retry_policy {
-                lash_sansio::ToolRetryPolicy::Never => ("never", None),
-                lash_sansio::ToolRetryPolicy::Safe {
-                    max_attempts,
-                    base_delay_ms,
-                    max_delay_ms,
-                } => ("safe", Some((*max_attempts, *base_delay_ms, *max_delay_ms))),
-                lash_sansio::ToolRetryPolicy::Idempotent {
-                    max_attempts,
-                    base_delay_ms,
-                    max_delay_ms,
-                } => (
-                    "idempotent",
-                    Some((*max_attempts, *base_delay_ms, *max_delay_ms)),
-                ),
+            let source = match source {
+                lash_sansio::ToolFailureSource::Runtime => "runtime",
+                lash_sansio::ToolFailureSource::Tool => "tool",
+                lash_sansio::ToolFailureSource::Plugin => "plugin",
+                lash_sansio::ToolFailureSource::Policy => "policy",
+                lash_sansio::ToolFailureSource::Cancellation => "cancellation",
+                lash_sansio::ToolFailureSource::UnknownLegacy => "unknown_legacy",
             };
             attrs.push(KeyValue::new(
-                attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_POLICY,
-                policy,
+                attr::LASH_LANGUAGE_EXECUTION_FAILURE_SOURCE,
+                source,
             ));
-            if let Some((max_attempts, base_delay_ms, max_delay_ms)) = limits {
-                attrs.push(KeyValue::new(
-                    attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_MAX_ATTEMPTS,
-                    i64::from(max_attempts),
-                ));
-                attrs.push(KeyValue::new(
-                    attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_BASE_DELAY_MS,
-                    base_delay_ms as i64,
-                ));
-                attrs.push(KeyValue::new(
-                    attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_MAX_DELAY_MS,
-                    max_delay_ms as i64,
-                ));
-            }
+            let retry_name = match retry {
+                lash_sansio::ToolRetryStatus::Never => "never",
+                lash_sansio::ToolRetryStatus::Safe { after_ms } => {
+                    if let Some(after_ms) = after_ms {
+                        attrs.push(KeyValue::new(
+                            attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_AFTER_MS,
+                            *after_ms as i64,
+                        ));
+                    }
+                    "safe"
+                }
+                lash_sansio::ToolRetryStatus::Exhausted { attempts } => {
+                    attrs.push(KeyValue::new(
+                        attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_ATTEMPTS,
+                        i64::from(*attempts),
+                    ));
+                    "exhausted"
+                }
+                lash_sansio::ToolRetryStatus::UnknownLegacy => "unknown_legacy",
+            };
+            attrs.push(KeyValue::new(
+                attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY,
+                retry_name,
+            ));
         }
     }
 }

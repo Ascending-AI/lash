@@ -21,7 +21,7 @@ use crate::{
     LASHLANG_ENGINE_KIND, LashlangHostEnvironmentCheck, LashlangHostError, LashlangProcessEngine,
     LashlangProcessFailureCode, LashlangProcessInput,
     bridge::{
-        lashlang_value_to_json, observed_effect_failure, process_event_payload, process_sleep,
+        lashlang_value_to_json, process_event_payload, process_sleep,
         protocol_tool_reply_to_lashlang_value,
     },
     resolve_lashlang_module_operation, validate_lashlang_process_admission,
@@ -451,7 +451,6 @@ pub async fn run_lashlang_process(
         process_id: process_id.clone(),
         identities,
         lashlang_execution_trace: lashlang_execution_trace.clone(),
-        effect_failures: std::sync::Mutex::new(BTreeMap::new()),
         ordinals,
         child_max_attempts,
         cancellation: cancellation.clone(),
@@ -627,7 +626,6 @@ struct LashlangProcessHost<'run> {
     /// the scope its first segment used.
     identities: crate::LashlangHostIdentities,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
-    effect_failures: std::sync::Mutex<BTreeMap<(String, u64), lashlang::LashlangEffectFailure>>,
     /// The replay ordinals this segment is consuming: restored from the
     /// handover that resumed the run (or zeroed for a first segment) and
     /// snapshotted into the next boundary's envelope.
@@ -852,10 +850,9 @@ impl LashlangProcessHost<'_> {
             .await
             .expect("TypeScript runtime receiver checked above");
         }
-        let observed_site = call_site.clone();
         let invocation =
             self.prepare_resource_invocation(operation, receiver, args, call_site, None)?;
-        let (invocation, retry_policy) = match invocation {
+        let invocation = match invocation {
             PreparedResourceInvocation::Trigger {
                 operation,
                 payload,
@@ -870,10 +867,7 @@ impl LashlangProcessHost<'_> {
                 )
                 .await;
             }
-            PreparedResourceInvocation::Tool {
-                invocation,
-                retry_policy,
-            } => (invocation, retry_policy),
+            PreparedResourceInvocation::Tool(invocation) => invocation,
         };
         let lash_core::facade_support::ToolInvocation {
             id,
@@ -894,16 +888,7 @@ impl LashlangProcessHost<'_> {
         } else {
             Box::pin(tool_ctx.call_tool_by_id(id, tool_id, args, 0)).await
         };
-        if let (Some(call_site), Some(failure)) = (
-            observed_site.as_ref(),
-            observed_effect_failure(&reply.output, &replay_key, retry_policy),
-        ) {
-            self.effect_failures.lock_recover().insert(
-                (call_site.site.node_id.clone(), call_site.occurrence),
-                failure,
-            );
-        }
-        protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)
+        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
     }
 
     #[expect(
@@ -918,8 +903,6 @@ impl LashlangProcessHost<'_> {
         let mut results = vec![None; batch.operations.len()];
         let mut positions = Vec::new();
         let mut invocations = Vec::new();
-        let mut observed_sites = Vec::new();
-        let mut retry_policies = Vec::new();
         for (index, operation) in batch.operations.into_iter().enumerate() {
             if crate::is_typescript_runtime_receiver(&operation.receiver) {
                 let result = match operation.call_site.as_ref() {
@@ -946,7 +929,6 @@ impl LashlangProcessHost<'_> {
                 results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
                 continue;
             }
-            let observed_site = operation.call_site.clone();
             match self.prepare_resource_invocation(
                 operation.operation,
                 operation.receiver,
@@ -969,13 +951,8 @@ impl LashlangProcessHost<'_> {
                     .await;
                     results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
                 }
-                Ok(PreparedResourceInvocation::Tool {
-                    invocation,
-                    retry_policy,
-                }) => {
+                Ok(PreparedResourceInvocation::Tool(invocation)) => {
                     positions.push(index);
-                    observed_sites.push(observed_site);
-                    retry_policies.push(retry_policy);
                     invocations.push(invocation);
                 }
                 Err(error) => {
@@ -995,24 +972,14 @@ impl LashlangProcessHost<'_> {
                 lash_core::session::ToolBatchOccurrence::Opener(occurrence),
             )
             .await;
-        for ((((index, call_site), retry_policy), replay_key), reply) in positions
+        for ((index, replay_key), reply) in positions
             .iter()
             .copied()
-            .zip(observed_sites)
-            .zip(retry_policies)
             .zip(replay_keys)
             .zip(batch.replies)
         {
-            if let (Some(call_site), Some(failure)) = (
-                call_site,
-                observed_effect_failure(&reply.output, &replay_key, retry_policy),
-            ) {
-                self.effect_failures
-                    .lock_recover()
-                    .insert((call_site.site.node_id, call_site.occurrence), failure);
-            }
             results[index] = Some(lashlang::ResourceOperationResult::from_result(
-                protocol_tool_reply_to_lashlang_value(reply, &self.cancellation),
+                protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation),
             ));
         }
 
@@ -1045,16 +1012,14 @@ impl LashlangProcessHost<'_> {
         &self,
         handle: lashlang::Value,
     ) -> Result<lashlang::Value, ExecutionHostError> {
+        let replay_key = uuid::Uuid::new_v4().to_string();
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             self.ctx
-                .await_tool_handle(
-                    uuid::Uuid::new_v4().to_string(),
-                    lashlang_value_to_json(&handle)?,
-                )
+                .await_tool_handle(replay_key.clone(), lashlang_value_to_json(&handle)?)
                 .await
         };
-        protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)
+        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
     }
 
     async fn process_event(&self, event: lashlang::ProcessEvent) -> Result<(), ExecutionHostError> {
@@ -1203,15 +1168,6 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
 
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
         self.lashlang_execution_trace.emit_observation(observation);
-    }
-
-    fn take_lashlang_effect_failure(
-        &self,
-        call_site: &lashlang::LashlangExecutionCallSite,
-    ) -> Option<lashlang::LashlangEffectFailure> {
-        self.effect_failures
-            .lock_recover()
-            .remove(&(call_site.site.node_id.clone(), call_site.occurrence))
     }
 }
 

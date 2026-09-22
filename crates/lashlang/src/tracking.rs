@@ -129,16 +129,15 @@ pub struct LashlangExecutionCallSite {
 
 /// Typed provenance for a failed external effect.
 ///
-/// This is transient VM/host coordination, not part of the durable VM
-/// continuation: the host records it while resolving the effect and the VM
-/// consumes it before emitting the node terminal observation.
+/// This is projected from the VM's host error when emitting a node terminal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LashlangEffectFailure {
     pub class: lash_sansio::ToolFailureClass,
     pub code: String,
     pub message: String,
     pub replay_key: String,
-    pub retry_policy: lash_sansio::ToolRetryPolicy,
+    pub source: lash_sansio::ToolFailureSource,
+    pub retry: lash_sansio::ToolRetryStatus,
 }
 
 /// Why one observed Lashlang node failed.

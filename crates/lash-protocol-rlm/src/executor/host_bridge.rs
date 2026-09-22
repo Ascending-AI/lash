@@ -32,7 +32,6 @@ pub(super) struct HostBridge<'run> {
     identities: Result<lash_lashlang_runtime::LashlangHostIdentities, LashlangCellOpener>,
     print_projector: std::sync::Arc<dyn ValueProjector>,
     observations: Mutex<Vec<Observation>>,
-    effect_failures: Mutex<BTreeMap<(String, u64), lashlang::LashlangEffectFailure>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
     next_tool_index: Mutex<usize>,
@@ -132,7 +131,6 @@ impl<'run> HostBridge<'run> {
             ctx: config.ctx,
             print_projector: config.print_projector,
             observations: Mutex::new(Vec::new()),
-            effect_failures: Mutex::new(BTreeMap::new()),
             printed_images: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
             next_tool_index: Mutex::new(0),
@@ -161,11 +159,13 @@ impl<'run> HostBridge<'run> {
     fn consume_reply(
         &self,
         reply: ToolInvocationReply,
+        replay_key: &str,
     ) -> (
         Result<FlowValue, ExecutionHostError>,
         Option<lash_core::ToolCallRecord>,
     ) {
-        let result = protocol_tool_output_to_lashlang_value(&reply.output, &self.cancellation);
+        let result =
+            protocol_tool_output_to_lashlang_value(&reply.output, replay_key, &self.cancellation);
         (result, reply.record)
     }
 
@@ -195,13 +195,14 @@ impl<'run> HostBridge<'run> {
         index: usize,
         operation: &str,
         reply: ToolInvocationReply,
+        replay_key: &str,
     ) -> Result<FlowValue, ExecutionHostError> {
         let outcome = if reply.output.is_success() {
             lash_core::ExecutedCallOutcome::Ok
         } else {
             lash_core::ExecutedCallOutcome::Err
         };
-        let (result, host_record) = self.consume_reply(reply);
+        let (result, host_record) = self.consume_reply(reply, replay_key);
         if let Some(host_record) = host_record {
             self.record_executed_call(index, operation.to_string(), outcome, Some(host_record))?;
         }
@@ -480,7 +481,6 @@ impl HostBridge<'_> {
             .as_object_mut()
             .ok_or_else(|| ExecutionHostError::new("module operation payload must be an object"))?;
         let index = self.next_index();
-        let observed_site = call_site.clone();
         let call_id = {
             let call_site =
                 Self::require_call_site(&operation, &host_operation, call_site.as_ref())?;
@@ -512,15 +512,6 @@ impl HostBridge<'_> {
             .is_none()
             .then(|| self.deferred_grant_for_tool_id(&tool_id))
             .flatten();
-        let retry_policy = execution_grant
-            .as_ref()
-            .map(|grant| grant.manifest().retry_policy)
-            .or_else(|| {
-                self.ctx
-                    .callable_tool_manifest_by_id(&tool_id)
-                    .map(|manifest| manifest.retry_policy)
-            })
-            .unwrap_or(lash_core::ToolRetryPolicy::Never);
         let replay_key = call_id.clone();
         let issuing_node_id = call_site
             .as_ref()
@@ -557,19 +548,6 @@ impl HostBridge<'_> {
                 Box::pin(tool_ctx.call_tool_by_id(call_id, tool_id, payload, index)).await
             }
         };
-        if let (Some(call_site), Some(failure)) = (
-            observed_site.as_ref(),
-            lash_lashlang_runtime::observed_effect_failure(
-                &reply.output,
-                &replay_key,
-                retry_policy,
-            ),
-        ) {
-            self.effect_failures.lock_recover().insert(
-                (call_site.site.node_id.clone(), call_site.occurrence),
-                failure,
-            );
-        }
         // Invocation replies are terminal: pending calls are resolved before
         // this path. Exhaustiveness keeps a future terminal outcome honest.
         let outcome = match &reply.output.outcome {
@@ -578,7 +556,7 @@ impl HostBridge<'_> {
                 lash_core::ExecutedCallOutcome::Err
             }
         };
-        let (result, host_record) = self.consume_reply(reply);
+        let (result, host_record) = self.consume_reply(reply, &replay_key);
         self.record_executed_call(index, source_operation, outcome, host_record)?;
         result
     }
@@ -597,8 +575,6 @@ impl HostBridge<'_> {
         let mut source_operations = Vec::new();
         let mut execution_indices = Vec::new();
         let mut invocations = Vec::new();
-        let mut observed_sites = Vec::new();
-        let mut retry_policies = Vec::new();
         let mut replay_keys = Vec::new();
 
         for (source_index, operation) in batch.operations.into_iter().enumerate() {
@@ -744,18 +720,6 @@ impl HostBridge<'_> {
             {
                 invocation = invocation.with_child_execution_trace_hook(hook);
             }
-            let retry_policy = invocation
-                .execution_grant
-                .as_ref()
-                .map(|grant| grant.manifest().retry_policy)
-                .or_else(|| {
-                    self.ctx
-                        .callable_tool_manifest_by_id(&invocation.tool_id)
-                        .map(|manifest| manifest.retry_policy)
-                })
-                .unwrap_or(lash_core::ToolRetryPolicy::Never);
-            observed_sites.push((call_site.site.node_id, call_site.occurrence));
-            retry_policies.push(retry_policy);
             replay_keys.push(invocation.id.clone());
             positions.push(source_index);
             source_operations.push(source_operation);
@@ -770,41 +734,21 @@ impl HostBridge<'_> {
                 lash_core::session::ToolBatchOccurrence::Opener(occurrence),
             )
             .await;
-        for (
-            (
-                (
-                    (((source_index, source_operation), execution_index), observed_site),
-                    retry_policy,
-                ),
-                replay_key,
-            ),
-            reply,
-        ) in positions
+        for ((((source_index, source_operation), execution_index), replay_key), reply) in positions
             .iter()
             .copied()
             .zip(source_operations)
             .zip(execution_indices)
-            .zip(observed_sites)
-            .zip(retry_policies)
             .zip(replay_keys)
             .zip(batch.replies)
         {
-            if let Some(failure) = lash_lashlang_runtime::observed_effect_failure(
-                &reply.output,
-                &replay_key,
-                retry_policy,
-            ) {
-                self.effect_failures
-                    .lock_recover()
-                    .insert(observed_site, failure);
-            }
             // Batch replies are terminal for the same reason as scalar replies.
             let outcome = match &reply.output.outcome {
                 lash_core::ToolCallOutcome::Success(_) => lash_core::ExecutedCallOutcome::Ok,
                 lash_core::ToolCallOutcome::Failure(_)
                 | lash_core::ToolCallOutcome::Cancelled(_) => lash_core::ExecutedCallOutcome::Err,
             };
-            let (result, host_record) = self.consume_reply(reply);
+            let (result, host_record) = self.consume_reply(reply, &replay_key);
             let result = self
                 .record_executed_call(execution_index, source_operation, outcome, host_record)
                 .and(result);
@@ -839,16 +783,14 @@ impl HostBridge<'_> {
 
     async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
         let index = self.next_index();
+        let replay_key = uuid::Uuid::new_v4().to_string();
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             self.ctx
-                .await_tool_handle(
-                    uuid::Uuid::new_v4().to_string(),
-                    handle_to_json(&handle).await?,
-                )
+                .await_tool_handle(replay_key.clone(), handle_to_json(&handle).await?)
                 .await
         };
-        self.consume_recorded_reply(index, "await_handle", reply)
+        self.consume_recorded_reply(index, "await_handle", reply, &replay_key)
     }
 
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {
@@ -1042,15 +984,6 @@ impl ExecutionHost for HostBridge<'_> {
             identity: trace.identity().clone(),
             payload,
         });
-    }
-
-    fn take_lashlang_effect_failure(
-        &self,
-        call_site: &lashlang::LashlangExecutionCallSite,
-    ) -> Option<lashlang::LashlangEffectFailure> {
-        self.effect_failures
-            .lock_recover()
-            .remove(&(call_site.site.node_id.clone(), call_site.occurrence))
     }
 }
 

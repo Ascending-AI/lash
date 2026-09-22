@@ -807,6 +807,15 @@ pub(super) fn recovery_worker_with_plugins(
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
+    recovery_worker_with_plugins_and_trace(registry, store_factory, extra_plugins, None)
+}
+
+pub(super) fn recovery_worker_with_plugins_and_trace(
+    registry: Arc<dyn ProcessRegistry>,
+    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
+) -> DurableProcessWorker {
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecoveryProcessTool);
     let mut plugins = vec![
@@ -830,7 +839,8 @@ pub(super) fn recovery_worker_with_plugins(
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::in_memory(
                 lash_lashlang_runtime::LashlangSurface::default(),
-            ),
+            )
+            .with_execution_trace(trace_sink, lash_trace::TraceContext::default()),
         ),
     );
     DurableProcessWorker::new(
@@ -946,14 +956,16 @@ pub(super) async fn segmented_child_await_registration(
 #[tokio::test]
 pub(super) async fn lashlang_process_retains_child_possession_across_restate_segments() {
     let (registry, continuations) = process_stores();
+    let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
     // The cell starts its child through `processes.start`, which is a plugin
     // tool now, so the worker that runs the parent has to serve it.
-    let worker = recovery_worker_with_plugins(
+    let worker = recovery_worker_with_plugins_and_trace(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         vec![Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         )],
+        Some(graphs.clone()),
     );
     let workflow = Arc::new(
         LashProcessWorkflowImpl::new_for_test(
@@ -1055,6 +1067,23 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
     assert_eq!(
         boundary_count, 2,
         "start and await each cross an effect-count segment boundary"
+    );
+    let parent_graphs = graphs
+        .graphs()
+        .into_iter()
+        .filter(|graph| {
+            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
+            if process_id == &registration.id)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parent_graphs.len(),
+        1,
+        "one admitted Restate invocation retains one attempt across its segments"
+    );
+    assert_eq!(
+        parent_graphs[0].history[0].event.identity.attempt(),
+        Some(1)
     );
 }
 
