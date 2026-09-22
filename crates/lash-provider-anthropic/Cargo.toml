@@ -34,7 +34,6 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream", "rustls"] }
 serde_json = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 # Self dev-dependency so `testing` is on for every test build of this crate:
