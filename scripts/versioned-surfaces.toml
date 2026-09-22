@@ -165,6 +165,20 @@ paths = [
 symbols = ["EFFECT_SCHEMA", "AWAIT_EVENT_TABLES", "SCOPE_RETIREMENT_TABLE"]
 elide = "sql_idempotent_index"
 
+# The durable lifecycle JSON the `runtime_effect_group.lifecycle` column
+# carries (ADR 0099 section 7, FIG-3410): `{"type":"live"}`,
+# `{"type":"closing","disposition":..,"finalized":0..3}`,
+# `{"type":"settled","disposition":..}`. Both SQL stores decode the same
+# vocabulary, so the one guard covers both schemas.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/effect/group_journal.rs"]
+symbols = [
+    "EffectGroupLifecycle",
+    "EffectGroupLifecyclePhase",
+    "FinalizationStep",
+]
+
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
 constant_path = "crates/lash-core-store/src/process_identity.rs"

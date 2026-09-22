@@ -68,6 +68,13 @@ pub struct RestateEffectControllerOptions {
     segment_duration_cap: Option<Duration>,
     segment_effect_budget: u64,
     journaled_effect_byte_budget: Option<u64>,
+    /// The §7 drain budget: on the SQL tiers it bounds how long group
+    /// finalization waits on a cancel-decided child's attempt body after its
+    /// decision commits. On Restate there is no such wait — the engine's own
+    /// cancellation already abandons a cancelled child's drive, so the bound
+    /// is vacuous here — but the option is held so the three tiers carry one
+    /// construction-level vocabulary (FIG-3410).
+    drain_budget: Duration,
 }
 
 impl Default for RestateEffectControllerOptions {
@@ -77,6 +84,7 @@ impl Default for RestateEffectControllerOptions {
             segment_duration_cap: None,
             segment_effect_budget: 10_000,
             journaled_effect_byte_budget: None,
+            drain_budget: lash_core::EffectGroupDrainBudget::DEFAULT.duration(),
         }
     }
 }
@@ -141,6 +149,19 @@ impl RestateEffectControllerOptions {
         self.journaled_effect_byte_budget = Some(bytes);
         self
     }
+
+    /// Set the group drain budget (ADR 0099 §7): the bound a group's
+    /// finalization waits on a cancel-decided child's attempt body after its
+    /// decision commits.
+    ///
+    /// On this tier the bound is **vacuous** and is held for cross-tier parity
+    /// only: engine cancellation abandons the cancelled child's drive itself,
+    /// so no host-side wait exists for it to bound. The value is journaled
+    /// nowhere and changing it never changes a committed obligation.
+    pub fn drain_budget(mut self, budget: lash_core::EffectGroupDrainBudget) -> Self {
+        self.drain_budget = budget.duration();
+        self
+    }
 }
 
 impl fmt::Debug for RestateEffectControllerOptions {
@@ -153,6 +174,7 @@ impl fmt::Debug for RestateEffectControllerOptions {
                 "journaled_effect_byte_budget",
                 &self.journaled_effect_byte_budget,
             )
+            .field("drain_budget", &self.drain_budget)
             .finish()
     }
 }

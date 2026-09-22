@@ -274,6 +274,7 @@ fn host_with_lease(path: &std::path::Path, executors: Arc<dyn GroupExecutors>) -
             SqliteEffectReplayOptions {
                 lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
                     .expect("the ttl is at least three renew intervals wide"),
+                drain_budget: Default::default(),
             },
         )
         .await

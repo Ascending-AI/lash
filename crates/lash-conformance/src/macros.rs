@@ -1991,6 +1991,45 @@ macro_rules! store_effect_group_drain_tests {
     };
 }
 
+/// Register the durable-closing laws (ADR 0099 §7, FIG-3410) against the same
+/// drain-world factory the drain suite uses: each law builds its own hosts
+/// over the same journal and reaches the closing seam through
+/// `EffectHost::effect_group_closing`.
+#[macro_export]
+macro_rules! store_effect_group_closing_tests {
+    ($fixture:block) => {
+        $crate::store_effect_group_closing_tests!(@catalogue $fixture; [
+            (
+                closing_is_recorded_before_any_cancel_is_issued,
+                "group-closing-before-cancel"
+            ),
+            (
+                a_crash_after_drain_resumes_at_outcome_commit,
+                "group-crash-outcome"
+            ),
+            (
+                a_crash_after_accounting_resumes_at_parent_end,
+                "group-crash-parent-end"
+            ),
+            (
+                a_drain_budget_expiry_leaves_closing_recorded,
+                "group-closing-pending"
+            ),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, make) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(make).await;
+                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+            }
+        )*
+    };
+}
+
 #[macro_export]
 macro_rules! signal_intent_tests {
     ($fixture:block) => {

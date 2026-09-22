@@ -2,6 +2,13 @@
 
 pub use crate::attachments::PersistenceManifestAdapter;
 pub use crate::runtime::default_queued_drain_policy;
+pub use crate::runtime::effect::effect_replay_driver::{
+    EffectGroupLifecycle, EffectGroupLifecyclePhase, FinalizationStep,
+};
+pub use crate::runtime::effect::group_closing::{
+    GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
+    StoreEffectGroupClosing,
+};
 pub use crate::runtime::effect::group_drain::DrainedChild;
 pub use crate::runtime::effect::group_drain::{
     ChildDrainOutcome, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,

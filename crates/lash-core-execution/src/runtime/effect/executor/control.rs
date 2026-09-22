@@ -108,6 +108,21 @@ pub trait EffectHost: AwaitEventResolver {
         )
     }
 
+    /// The durable closing/finalization seam over this host's group journal
+    /// (ADR 0099 §7, FIG-3410): the recorded `closing` fact a `close` writes
+    /// and the four-step cursor a finalizer advances.
+    ///
+    /// `None` on a tier that keeps no group row — Restate answers the same
+    /// lifecycle through its engine-side `EffectGroupIndex` `Closed`/`Retired`
+    /// states, which are the twin of this seam, so there is nothing to hand
+    /// out. The SQL hosts answer with the shared driver's closing object, and
+    /// the native controller answers with its in-memory twin.
+    fn effect_group_closing(
+        &self,
+    ) -> Option<Arc<dyn super::super::group_closing::StoreEffectGroupClosing>> {
+        None
+    }
+
     /// Installs — or returns the already-installed — tool-child wiring for this
     /// host, and registers it as the host's group-executor resolver
     /// (ADR 0099 §2, FIG-2266).

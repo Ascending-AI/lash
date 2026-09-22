@@ -3547,3 +3547,26 @@ statement = "turn_ingress.select_claimed_batch_head_payload"
 backends = ["postgres"]
 kind = "operation exists on one backend only"
 reason = "The other read half of the same fork as turn_ingress.record_wake_fence_from_claim."
+
+[[dialect_only]]
+statement = "effect_group.transition_lifecycle"
+backends = ["sqlite", "postgres"]
+kind = "JSON operator"
+reason = """
+The lifecycle CAS guards on the phase tag inside the JSON column: SQLite reads
+it with `json_extract(lifecycle, '$.type')` over `json_each` and binds the
+phase list as a JSON array; PostgreSQL reads the JSONB column with
+`lifecycle->>'type'` and binds the phase list as a text array for `= ANY`.
+"""
+
+[[dialect_only]]
+statement = "effect_group.select_closing_by_scope"
+backends = ["sqlite", "postgres"]
+kind = "JSON operator"
+reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."
+
+[[dialect_only]]
+statement = "effect_group.select_session_pins"
+backends = ["sqlite", "postgres"]
+kind = "JSON operator"
+reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."

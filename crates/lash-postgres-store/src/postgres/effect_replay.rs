@@ -26,13 +26,14 @@ use lash_core::facade_support::effect_replay_driver::{
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectCommitState,
     EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
     EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupColumn,
-    EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayCapabilities,
-    EffectReplayRowStore, EffectReplayVocabulary, EffectRowDefect, EffectRowStatus, EffectTerminal,
-    StoreEffectReplayDriver, StoredChildArbitration, StoredEffectRow, StoredGroupSettlement,
-    ToolBatchRedrive, UnsettledGroupChild, decide_effect_claim,
+    EffectGroupLifecycle, EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence,
+    EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore, EffectReplayVocabulary,
+    EffectRowDefect, EffectRowStatus, EffectTerminal, StoreEffectReplayDriver,
+    StoredChildArbitration, StoredEffectRow, StoredGroupSettlement, ToolBatchRedrive,
+    UnsettledGroupChild, decide_effect_claim,
 };
 
-use lash_core::{GroupExecutors, StoreEffectGroupDrain};
+use lash_core::{GroupExecutors, StoreEffectGroupClosing, StoreEffectGroupDrain};
 
 use crate::await_event::{
     PostgresAwaitEventBackend, lock_scope, postgres_await_events, scope_is_retired, wait_sql,
@@ -168,7 +169,33 @@ lash_store_sql::statements! {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING
              RETURNING group_key, scope_id, session_id, wake, loser_disposition,
-                       expected_children, created_at_ms";
+                       expected_children, lifecycle, created_at_ms";
+
+        /// The §7 lifecycle CAS: set `lifecycle = ?2::jsonb` on `?1` while its
+        /// phase tag is one of the `?3` text array's strings (an empty array
+        /// is a guaranteed miss), and return the lifecycle now durable.
+        /// `->>'type'`/`= ANY` are PostgreSQL's operators; SQLite spells the
+        /// same guard with `json_extract` over `json_each`.
+        transition_lifecycle = "UPDATE runtime_effect_group
+             SET lifecycle = ?2::jsonb
+             WHERE group_key = ?1
+               AND lifecycle->>'type' = ANY(?3)
+             RETURNING group_key, lifecycle";
+
+        /// Every `closing` group under scope `?1` — the resumable
+        /// finalization set (ADR 0099 §7).
+        select_closing_by_scope = "SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    expected_children, lifecycle, created_at_ms
+             FROM runtime_effect_group
+             WHERE scope_id = ?1
+               AND lifecycle->>'type' = 'closing'";
+
+        /// `(group_key, lifecycle)` for every non-`settled` group owned by
+        /// session `?1` — the pins session deletion refuses on.
+        select_session_pins = "SELECT group_key, lifecycle
+             FROM runtime_effect_group
+             WHERE session_id = ?1
+               AND lifecycle->>'type' != 'settled'";
     }
 }
 
@@ -273,6 +300,11 @@ pub struct PostgresEffectReplayOptions {
     /// [`LeaseTimings`] they configure on the runtime so effect leases expire
     /// on the same failover window as session and process leases.
     pub lease_timings: lash_core::facade_support::LeaseTimings,
+    /// How long a group's finalization waits on a cancel-decided child's
+    /// attempt body after the decision commits (ADR 0099 §7). Construction-
+    /// level like `lease_timings`: the bound is operational, never semantic —
+    /// it changes how long the finalizer waits, never what it commits.
+    pub drain_budget: lash_core::EffectGroupDrainBudget,
 }
 
 #[derive(Clone)]
@@ -464,6 +496,14 @@ impl PostgresEffectHost {
     pub fn group_drain(&self) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::clone(&self.inner).into_group_drain()
     }
+
+    /// The closing/finalization seam over this host's effect journal (ADR 0099
+    /// §7): the durable `closing` fact this host's `close` writes, and the
+    /// four-step cursor a finalizer — or a redriven turn's
+    /// `resume_closing_groups` — advances.
+    pub fn group_closing(&self) -> Arc<dyn StoreEffectGroupClosing> {
+        Arc::clone(&self.inner).into_group_closing()
+    }
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -533,6 +573,7 @@ fn build_effect_replay_driver(
         await_events,
         clock,
         options.lease_timings,
+        options.drain_budget,
     )
 }
 

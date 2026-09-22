@@ -94,11 +94,22 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
     "lash_turn_cancel_affected_inputs",
     "uq_lash_runtime_effect_replay_commit_seq",
 ];
-/// Component 112 changed encoded payloads without introducing relations.
-/// The retained 111-to-112 arm therefore has no divergent artifacts.
+/// What the newest generation alone introduced — the `introduced_relations` of
+/// the migration out of the immediate predecessor version. The divergent fixture
+/// records that predecessor over the *current* catalog, so these are exactly the
+/// artifacts its refusal must enumerate.
+///
+/// Under the component-114 boundary the retained generation is 113. Its
+/// immediate predecessor, component 112, only carried encoded-payload cutovers
+/// and observer-selection metadata the current walk no longer enumerates, so
+/// no introduced relational artifacts are listed.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
-/// Component 113 removes observer-selection metadata. No migration targets
-/// this generation; a component-112 stamp requires recreation.
+/// A creation-only generation expects the predecessor stamp over its current
+/// catalog to be classified as migration divergence. A destructive generation
+/// has no migration arm, so that same pre-cutover stamp is the ordinary
+/// reject-and-recreate boundary. Component 114 is destructive (ADR 0099 §7
+/// group lifecycle values, FIG-3410): no arm leaves from component 113, so
+/// the component-113 stamp is refused as having no applicable migration.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even

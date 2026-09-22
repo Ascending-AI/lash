@@ -13,7 +13,8 @@ use crate::postgres_test_support;
 use lash_core::ChildDrainOutcome;
 use lash_core::facade_support::effect_replay_driver::{
     EffectClaimObservation, EffectCommitState, EffectGroupChildCommitOutcome,
-    EffectGroupChildCommitRequest, MintingEffectRef,
+    EffectGroupChildCommitRequest, EffectGroupLifecycle, EffectGroupLifecyclePhase,
+    MintingEffectRef,
 };
 
 #[test]
@@ -116,6 +117,7 @@ impl GroupFixture {
             loser_disposition: lash_core::LoserPolicy::RunToCompletion,
             expected_children: 2,
             created_at_ms: 1_000,
+            lifecycle: lash_core::runtime::effect_replay_driver::EffectGroupLifecycle::Live,
         }
     }
 
@@ -627,6 +629,20 @@ async fn retirement_removes_a_group_and_its_children_together() {
         .await
         .expect("finalize the first child");
     fixture.discharge("k1").await;
+
+    // Session retirement refuses while the group is live (ADR 0099 §7);
+    // settle the lifecycle first so the delete is the thing under test.
+    fixture
+        .store
+        .transition_group_lifecycle(
+            &fixture.group_key,
+            &[EffectGroupLifecyclePhase::Live],
+            &EffectGroupLifecycle::Settled {
+                disposition: lash_core::LoserPolicy::RunToCompletion,
+            },
+        )
+        .await
+        .expect("settle the group lifecycle");
 
     let removed = fixture
         .store

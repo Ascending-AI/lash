@@ -346,6 +346,18 @@ impl EffectHost for NativeEffectHost {
         )?))
     }
 
+    /// The §7 closing seam, answered against the controller's in-memory group
+    /// table — the same vocabulary the SQL tiers serve, minus the journal.
+    /// `None` on a host over a foreign controller, for the same reason
+    /// `scoped_for_group_child` refuses there: its group state is not
+    /// inspectable, so there is no lifecycle to read or advance.
+    fn effect_group_closing(&self) -> Option<Arc<dyn super::StoreEffectGroupClosing>> {
+        self.groups_admin.as_ref().map(|groups| {
+            Arc::new(super::executor::NativeGroupClosing::new(Arc::clone(groups)))
+                as Arc<dyn super::StoreEffectGroupClosing>
+        })
+    }
+
     fn install_tool_child_host(
         &self,
         candidate: Arc<super::ToolChildHost>,

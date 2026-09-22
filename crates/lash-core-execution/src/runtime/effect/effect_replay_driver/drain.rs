@@ -107,6 +107,15 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                  one for a group the journal does not hold"
             )));
         };
+        // A group whose close is durably recorded applies the disposition that
+        // close committed — the lifecycle's `closing`/`settled` disposition —
+        // and the declared column answers only while the group is `live`
+        // (ADR 0099 §7).
+        let disposition = record.effective_loser_disposition();
+        let record = EffectGroupRecord {
+            loser_disposition: disposition,
+            ..record
+        };
         let queued = self
             .row_store
             .read_unsettled_group_children(group_key)
@@ -145,13 +154,19 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         self.retire_group_if_complete(group_key).await;
         Ok(GroupDrainReport {
             group_key: group_key.to_string(),
-            disposition: record.loser_disposition,
+            disposition,
             children,
         })
     }
 
     /// What the pass does with one child that held no rank.
-    async fn drain_group_child(
+    ///
+    /// `pub(super)` because the finalizer (`super::closing`) runs its step-1
+    /// obligation pass through this same per-child driver — deciding what a
+    /// `Cancel` close owes, discharging committed children, and executing
+    /// `RunToCompletion` children nobody runs — so the two paths can never
+    /// drift into two answers.
+    pub(super) async fn drain_group_child(
         self: &Arc<Self>,
         record: &EffectGroupRecord,
         child: &UnsettledGroupChild,
