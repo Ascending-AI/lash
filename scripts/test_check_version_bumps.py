@@ -729,6 +729,74 @@ class VersionBumpFixtureTest(unittest.TestCase):
             {"WORKFLOW_GRAPH_SCHEMA_VERSION", "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"},
         )
 
+    def test_workflow_identity_preimage_selection_changes_demand_a_graph_bump(
+        self,
+    ) -> None:
+        graph_surface = next(
+            surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant == "WORKFLOW_GRAPH_SCHEMA_VERSION"
+        )
+        identity_guard = next(
+            guard
+            for guard in graph_surface.guards
+            if "crates/lash-typescript/src/workflow_graph/mod.rs" in guard.paths
+        )
+        selectors = (
+            "workflow_graph_from_source_with_facets",
+            "workflow_graph_from_program",
+        )
+        for selector in selectors:
+            self.assertIn(selector, identity_guard.symbols)
+
+        symbols = ", ".join(f'"{symbol}"' for symbol in identity_guard.symbols)
+        config = f"""
+        [[surface]]
+        constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
+        constant_path = "src/graph.rs"
+        description = "fixture workflow identity preimage selection"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/projector.rs"]
+        symbols = [{symbols}]
+        """
+        source = """
+        fn workflow_graph_from_source_with_facets() { select("canonical source"); }
+        fn workflow_graph_from_program() { select("serialized program"); }
+        fn source_identity() {}
+        fn node_id() {}
+        fn edge() {}
+        fn hex_digest() {}
+        """
+        for selector in selectors:
+            with self.subTest(selector=selector):
+                fixture = FixtureRepository(config)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/graph.rs",
+                    "pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 13;\n",
+                )
+                fixture.write_file("src/projector.rs", source)
+                base = fixture.commit("workflow identity selector base")
+                fixture.write_file(
+                    "src/projector.rs",
+                    source.replace(
+                        f"fn {selector}() {{",
+                        f"fn {selector}() {{ changed();",
+                    ),
+                )
+                head = fixture.commit("change preimage selection without graph bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(
+                    result.failures[0].surface.constant,
+                    "WORKFLOW_GRAPH_SCHEMA_VERSION",
+                )
+
     def test_rust_impl_guard_detects_custom_serializer_changes(self) -> None:
         config = """
         [[surface]]

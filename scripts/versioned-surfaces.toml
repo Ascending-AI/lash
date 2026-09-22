@@ -1353,7 +1353,14 @@ paths = [
   "crates/lash-typescript/src/workflow_graph/mod.rs",
   "crates/lash-typescript/src/workflow_graph/render_helpers.rs",
 ]
-symbols = ["source_identity", "node_id", "edge", "hex_digest"]
+symbols = [
+  "workflow_graph_from_source_with_facets",
+  "workflow_graph_from_program",
+  "source_identity",
+  "node_id",
+  "edge",
+  "hex_digest",
+]
 
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"

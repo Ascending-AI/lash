@@ -98,8 +98,21 @@ impl WorkflowGraph {
                 expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
             });
         }
-        let wire: WorkflowGraphWire =
-            serde_json::from_value(value).map_err(WorkflowGraphDecodeError::Document)?;
+        let encoded = serde_json::to_string(&value).map_err(WorkflowGraphDecodeError::Document)?;
+        let mut deserializer = serde_json::Deserializer::from_str(&encoded);
+        let mut unknown_fields = Vec::new();
+        let wire: WorkflowGraphWire = serde_ignored::deserialize(&mut deserializer, |path| {
+            unknown_fields.push(path.to_string());
+        })
+        .map_err(WorkflowGraphDecodeError::Document)?;
+        if let Some(path) = unknown_fields.into_iter().next() {
+            let field = path.rsplit('.').next().unwrap_or(path.as_str());
+            return Err(WorkflowGraphDecodeError::Document(
+                <serde_json::Error as serde::de::Error>::custom(format!(
+                    "unknown field `{field}` at {path}"
+                )),
+            ));
+        }
         Ok(Self {
             schema_version: wire.schema_version,
             source_identity: wire.source_identity,
@@ -130,6 +143,35 @@ impl WorkflowGraph {
         }
         nodes.into_iter()
     }
+}
+
+fn deserialize_strict<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let mut unknown_field = None;
+    let value = serde_ignored::deserialize(deserializer, |path| {
+        if unknown_field.is_none() {
+            unknown_field = Some(path.to_string());
+        }
+    })?;
+    if let Some(path) = unknown_field {
+        let field = path.rsplit('.').next().unwrap_or(path.as_str());
+        return Err(serde::de::Error::custom(format!(
+            "unknown field `{field}` at {path}"
+        )));
+    }
+    Ok(value)
+}
+
+fn deserialize_tolerant<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 impl<'de> Deserialize<'de> for WorkflowGraph {
@@ -188,31 +230,37 @@ pub fn reconcile(
             (None, None) => {}
         }
     }
-    let mut submitted_pairs = BTreeMap::<WorkflowNodeId, Vec<usize>>::new();
-    let mut reprojected_pairs = BTreeMap::<WorkflowNodeId, Vec<usize>>::new();
-    for (index, pair) in candidates.iter().enumerate() {
-        submitted_pairs
-            .entry(pair.submitted.clone())
-            .or_default()
-            .push(index);
-        reprojected_pairs
-            .entry(pair.reprojected.clone())
-            .or_default()
-            .push(index);
-    }
     let mut ambiguous_pairs = BTreeSet::new();
-    for (side, by_id) in [
-        (WorkflowGraphReconcileSide::Submitted, submitted_pairs),
-        (WorkflowGraphReconcileSide::Reprojected, reprojected_pairs),
+    for (side, locations_by_id) in [
+        (
+            WorkflowGraphReconcileSide::Submitted,
+            structural_locations_by_id(&submitted),
+        ),
+        (
+            WorkflowGraphReconcileSide::Reprojected,
+            structural_locations_by_id(&reprojected),
+        ),
     ] {
-        for (id, indexes) in by_id {
-            if indexes.len() <= 1 {
+        for (id, locations) in locations_by_id {
+            if locations.len() <= 1 {
                 continue;
             }
+            let indexes = candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(index, pair)| {
+                    let candidate_id = match side {
+                        WorkflowGraphReconcileSide::Submitted => &pair.submitted,
+                        WorkflowGraphReconcileSide::Reprojected => &pair.reprojected,
+                    };
+                    (candidate_id == &id).then_some(index)
+                })
+                .collect::<Vec<_>>();
             ambiguous_pairs.extend(indexes.iter().copied());
             result.ambiguous.push(WorkflowGraphAmbiguousNode {
                 side,
                 id,
+                locations,
                 candidates: indexes
                     .into_iter()
                     .map(|index| candidates[index].clone())
@@ -259,6 +307,7 @@ pub struct WorkflowGraphUnmatchedNode {
 pub struct WorkflowGraphAmbiguousNode {
     pub side: WorkflowGraphReconcileSide,
     pub id: WorkflowNodeId,
+    pub locations: Vec<WorkflowGraphStructuralLocation>,
     pub candidates: Vec<WorkflowGraphReconcilePair>,
 }
 
@@ -331,6 +380,19 @@ fn nodes_by_structural_location(
     locations
 }
 
+fn structural_locations_by_id(
+    nodes: &BTreeMap<WorkflowGraphStructuralLocation, WorkflowNodeId>,
+) -> BTreeMap<WorkflowNodeId, Vec<WorkflowGraphStructuralLocation>> {
+    let mut locations_by_id = BTreeMap::new();
+    for (location, id) in nodes {
+        locations_by_id
+            .entry(id.clone())
+            .or_insert_with(Vec::new)
+            .push(location.clone());
+    }
+    locations_by_id
+}
+
 fn collect_structural_locations(
     graph: &WorkflowSubgraph,
     root: &WorkflowGraphStructuralRoot,
@@ -388,7 +450,7 @@ struct WorkflowGraphWire {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowDeclaration {
-    Type(TypeDecl),
+    Type(#[serde(deserialize_with = "deserialize_strict")] TypeDecl),
     Process(WorkflowProcess),
     /// A declared pure function, carried through the document unprojected.
     ///
@@ -398,7 +460,7 @@ pub enum WorkflowDeclaration {
     /// no execution sites: projecting it into nodes would invent graph
     /// structure with nothing behind it. It travels verbatim instead, exactly
     /// as `Type` does, so a round trip through the document is lossless.
-    Function(FunctionDecl),
+    Function(#[serde(deserialize_with = "deserialize_strict")] FunctionDecl),
 }
 
 /// A named process is a container with its own child subgraph.
@@ -412,10 +474,13 @@ pub struct WorkflowProcess {
     pub description: Option<String>,
     pub name_source: WorkflowNodeNameSource,
     #[serde(default)]
+    #[serde(deserialize_with = "deserialize_strict")]
     pub params: Vec<ProcessParam>,
     #[serde(default)]
+    #[serde(deserialize_with = "deserialize_strict")]
     pub signals: Vec<ProcessSignalDecl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_strict")]
     pub return_ty: Option<TypeExpr>,
     pub body: WorkflowSubgraph,
 }
@@ -450,12 +515,15 @@ pub struct WorkflowNode {
     pub available_variables: Vec<String>,
     /// Optional host-derived type information. It is never used to render source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_tolerant")]
     pub type_facets: Option<WorkflowNodeTypeFacets>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<VariableVersion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(deserialize_with = "deserialize_strict")]
     pub execution_sites: Vec<WorkflowExecutionSite>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_strict")]
     pub source_span: Option<Span>,
 }
 
@@ -464,12 +532,16 @@ pub struct WorkflowNode {
 pub enum WorkflowNodeKind {
     Data {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
         binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
     },
     Call {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
         binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
         receiver: Expr,
         operation: String,
         #[serde(default)]
@@ -479,6 +551,7 @@ pub enum WorkflowNodeKind {
     },
     Effect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
         binding: Option<AssignTarget>,
         effect: WorkflowEffectKind,
         #[serde(default)]
@@ -488,15 +561,20 @@ pub enum WorkflowNodeKind {
     },
     Computation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
         binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
     },
     StateUpdate {
+        #[serde(deserialize_with = "deserialize_strict")]
         target: AssignTarget,
+        #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
     },
     Terminal {
         terminal: WorkflowTerminalKind,
+        #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
     },
     Container(WorkflowContainer),
@@ -514,8 +592,14 @@ pub enum WorkflowNodeKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowArgument {
-    Positional { value: Expr },
-    Named { fields: Vec<(AstString, Expr)> },
+    Positional {
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+    },
+    Named {
+        #[serde(deserialize_with = "deserialize_strict")]
+        fields: Vec<(AstString, Expr)>,
+    },
 }
 
 /// Ordered wrappers around a call or effect, from the operation outwards.
@@ -711,7 +795,9 @@ pub enum WorkflowTerminalKind {
 pub enum WorkflowContainer {
     If {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
         binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
         condition: Expr,
         /// Whether the source's then branch is a statement block rather than a value expression.
         then_is_block: bool,
@@ -722,16 +808,20 @@ pub enum WorkflowContainer {
     },
     For {
         binding: String,
+        #[serde(deserialize_with = "deserialize_strict")]
         iterable: Expr,
         body: Box<WorkflowSubgraph>,
     },
     While {
+        #[serde(deserialize_with = "deserialize_strict")]
         condition: Expr,
         body: Box<WorkflowSubgraph>,
     },
     ListComprehension {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
         binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
         clauses: Vec<WorkflowListComprehensionClause>,
         element: Box<WorkflowSubgraph>,
     },
@@ -781,8 +871,15 @@ impl WorkflowContainer {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowListComprehensionClause {
-    For { binding: String, iterable: Expr },
-    If { condition: Expr },
+    For {
+        binding: String,
+        #[serde(deserialize_with = "deserialize_strict")]
+        iterable: Expr,
+    },
+    If {
+        #[serde(deserialize_with = "deserialize_strict")]
+        condition: Expr,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
