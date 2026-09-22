@@ -10,6 +10,10 @@ jobs_limit=""
 while (($#)); do
   case "$1" in
     --jobs)
+      if (($# < 2)); then
+        printf 'run-gate-commands: --jobs requires a value\n' >&2
+        exit 2
+      fi
       jobs_limit="${2:-}"
       shift 2
       ;;
