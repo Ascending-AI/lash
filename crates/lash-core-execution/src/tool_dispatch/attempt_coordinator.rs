@@ -780,7 +780,7 @@ async fn settle_terminal_attempt(
                                     ),
                                 )
                             })?;
-                        record = Box::new(sealed.record);
+                        *record = sealed.record;
                         intents = sealed.intents;
                         recorded_call_id = sealed.recorded_call_id;
                     }
