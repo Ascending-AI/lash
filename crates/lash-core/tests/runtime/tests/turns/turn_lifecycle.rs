@@ -1858,7 +1858,9 @@ pub(super) fn journal_replay_host(
     controller: Arc<dyn lash_core::RuntimeEffectController>,
 ) -> lash_core::facade_support::EmbeddedRuntimeHost {
     let mut host = test_host_config();
-    host.core.control.effect_host = super::effect::controller_effect_host(controller);
+    host.core = host
+        .core
+        .with_effect_host(super::effect::controller_effect_host(controller));
     host
 }
 

@@ -180,7 +180,7 @@ pub async fn public_signal_intent_wakes_parked_process(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    host.control.effect_host = Arc::clone(&effect_host);
+    host = host.with_effect_host(Arc::clone(&effect_host));
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let mut policy = crate::testing::mock_session_policy();

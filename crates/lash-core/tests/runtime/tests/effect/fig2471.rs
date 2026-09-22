@@ -77,7 +77,7 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    config.control.effect_host = Arc::new(DefaultBindingHost::default());
+    config = config.with_effect_host(Arc::new(DefaultBindingHost::default()));
     let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
