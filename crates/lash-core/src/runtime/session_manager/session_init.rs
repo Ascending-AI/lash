@@ -450,6 +450,17 @@ async fn settle_session_observer_intents(
     })
 }
 
+/// Whether a session-init failure is the catalog's typed "no by-id lookup"
+/// refusal rather than a transient inspect failure. `durable_session_store`
+/// mints the code; this is the single consumer-side recognizer.
+fn session_catalog_lookup_unsupported(error: &crate::PluginError) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Runtime(runtime)
+            if runtime.code == crate::RuntimeErrorCode::SessionCatalogLookupUnsupported
+    )
+}
+
 /// The session's durable store when its catalog row already exists.
 async fn durable_session_store(
     current: &CurrentSessionCapability,
@@ -461,10 +472,24 @@ async fn durable_session_store(
     factory
         .open_existing_store_by_id(session_id)
         .await
-        .map_err(|error| {
-            crate::PluginError::Session(format!(
+        .map_err(|error| match error {
+            // A catalog that cannot resolve a session by id can never serve
+            // the session this call names: the refusal is a deployment fact,
+            // not a transient miss. Carrying it as a typed, terminal code —
+            // not an ordinary `PluginError::Session` lookup failure — is what
+            // lets the `SessionTurn` caller refuse rather than re-admit the
+            // process forever (FIG-3487).
+            crate::StoreError::UnsupportedStoreOperation { .. } => {
+                crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::SessionCatalogLookupUnsupported,
+                    format!(
+                        "failed to inspect session `{session_id}` before initialisation: {error}"
+                    ),
+                ))
+            }
+            error => crate::PluginError::Session(format!(
                 "failed to inspect session `{session_id}` before initialisation: {error}"
-            ))
+            )),
         })
 }
 
@@ -752,9 +777,24 @@ impl RuntimeSessionServices {
             None => {
                 let initialized = Box::pin(initialize_session(&self.current, create_request))
                     .await
-                    .map_err(|source| SessionTurnInitError::Create {
-                        session_id: requested_session_id.clone(),
-                        source: Box::new(source),
+                    .map_err(|source| {
+                        // A catalog that cannot resolve a session by id can
+                        // never reopen the recorded session on any attempt:
+                        // refuse deterministically so the process terminalizes
+                        // instead of releasing the claim and re-admitting the
+                        // row forever (FIG-3487). Every other failure stays
+                        // `Create` — recoverable, because a transient catalog
+                        // miss may resolve on the next admission.
+                        if session_catalog_lookup_unsupported(&source) {
+                            return SessionTurnInitError::Refused {
+                                session_id: requested_session_id.clone(),
+                                source: Box::new(source),
+                            };
+                        }
+                        SessionTurnInitError::Create {
+                            session_id: requested_session_id.clone(),
+                            source: Box::new(source),
+                        }
                     })?;
                 #[cfg(any(test, feature = "testing"))]
                 spawned_children::record(&initialized.session_id, &initialized.handle);
@@ -876,15 +916,19 @@ impl RuntimeSessionServices {
         process_id: &crate::ProcessId,
         turn_id: &TurnId,
     ) -> Result<(), crate::PluginError> {
-        let Some(store) = factory
-            .open_existing_store_by_id(session_id)
-            .await
-            .map_err(|error| {
-                crate::PluginError::Session(format!(
+        let store = match factory.open_existing_store_by_id(session_id).await {
+            Ok(store) => store,
+            // A catalog without the by-id seam can hold no claimable input
+            // this reconcile could reach — the same toleration
+            // `list_sessions` got above (FIG-3487).
+            Err(crate::StoreError::UnsupportedStoreOperation { .. }) => return Ok(()),
+            Err(error) => {
+                return Err(crate::PluginError::Session(format!(
                     "failed to inspect cancelled process `{process_id}` child session `{session_id}`: {error}"
-                ))
-            })?
-        else {
+                )));
+            }
+        };
+        let Some(store) = store else {
             return Ok(());
         };
         // A session the catalog attributes to this process exists solely to
@@ -1047,11 +1091,12 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
         session_id: Option<SessionId>,
         source: Box<crate::PluginError>,
     },
-    /// The recorded request itself is not initializable on this build — a
-    /// predecessor payload whose start point `SessionStartPoint` keeps only
-    /// for decode. Deterministic: no attempt can run it, so the process
-    /// terminalizes with the refusal rather than staying recoverable and
-    /// retrying an unrunnable row forever.
+    /// The recorded request can never be initialized by this deployment —
+    /// a predecessor payload whose start point `SessionStartPoint` keeps
+    /// only for decode, or a configured catalog that cannot resolve the
+    /// recorded session by id. Deterministic: no attempt can run it, so
+    /// the process terminalizes with the refusal rather than staying
+    /// recoverable and retrying an unrunnable row forever.
     Refused {
         session_id: Option<SessionId>,
         source: Box<crate::PluginError>,

@@ -22,6 +22,7 @@ mod parent_end_redrive_tests;
 mod recovery_disposition_tests;
 mod session_store_factories;
 mod session_turn_cancellation_tests;
+mod session_turn_refusal_tests;
 mod worker_fixtures;
 use session_store_factories::*;
 use worker_fixtures::*;

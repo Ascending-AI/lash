@@ -41,7 +41,7 @@ impl crate::SessionStoreFactory for InMemorySessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &crate::SessionId,
-    ) -> Result<Option<std::sync::Arc<dyn crate::RuntimePersistence>>, String> {
+    ) -> Result<Option<std::sync::Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         InMemorySessionStoreFactory::open_existing_store_by_id(self, session_id).await
     }
     async fn pending_turn_cancel_closure_pins(

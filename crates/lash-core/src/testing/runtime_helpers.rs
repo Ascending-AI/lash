@@ -330,7 +330,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::StoreError> {
         Ok(self
             .stores
             .lock_recover()

@@ -100,7 +100,7 @@ impl SessionStoreFactory for SharedInMemorySessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         Ok(Some(self.store(session_id)))
     }
 

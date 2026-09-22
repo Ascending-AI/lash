@@ -441,8 +441,10 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
     async fn open_existing_store_by_id(
         &self,
         _session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
-        Err("create-only factory offers no by-id session lookup".to_string())
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::open_existing_store_by_id",
+        })
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {

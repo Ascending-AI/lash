@@ -58,7 +58,7 @@ impl SessionStoreFactory for GrowthFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, StoreError> {
         lash_core::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id).await
     }
 

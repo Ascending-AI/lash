@@ -788,7 +788,8 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         _session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
         Ok(Some(
             Arc::clone(&self.store) as Arc<dyn lash_core::RuntimePersistence>
         ))
@@ -1155,8 +1156,11 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         _session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
-        Err("recording factory keeps no session catalog to resolve a store by id".to_string())
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::open_existing_store_by_id",
+        })
     }
 
     async fn pending_turn_cancel_closure_pins(
@@ -1239,7 +1243,8 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
         Ok(self
             .stores
             .lock_recover()
