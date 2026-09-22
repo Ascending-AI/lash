@@ -1640,6 +1640,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
+        | RuntimeEffectCommand::PresentToolResult { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
             RestateEffectExecution::JournaledRun {
                 envelope: RuntimeEffectEnvelope {
@@ -1651,7 +1652,6 @@ pub(crate) fn restate_effect_execution(
         }
     })
 }
-
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {
     format!("lash:{}", invocation.replay_key())
 }

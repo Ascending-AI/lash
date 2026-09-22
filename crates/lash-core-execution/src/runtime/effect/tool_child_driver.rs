@@ -52,14 +52,16 @@
 //! without an in-process slot.
 //!
 //! It projects the child's result exactly once, at its own presentation
-//! boundary: the session's plugin projector is a singleton lent through the
-//! dispatch context, and the driver journals the resolved `ModelToolReturn` on
-//! the settlement rather than leaving a `CompletedToolCall` for the opener to
-//! derive. Incorporation consumes the record; it never re-projects, so a
-//! changed projector environment on replay cannot change what the child
-//! settled.
+//! boundary: the session's ordered presentation steps run once through the
+//! journaled `PresentToolResult` effect under the child's bound controller,
+//! and the driver journals the resolved `ModelToolReturn` on the settlement
+//! rather than leaving a `CompletedToolCall` for the opener to derive.
+//! Incorporation consumes the record; it never re-presents, so a changed
+//! presentation environment on replay cannot change what the child settled.
 
 use std::sync::Arc;
+
+use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 
 use tokio_util::sync::CancellationToken;
 
@@ -1077,31 +1079,54 @@ async fn resolve_model_return(
         outcome.record.tool.clone(),
         &outcome.record.output,
     );
-    let settlement = ToolSettlement::from_dispatch(outcome, baseline);
-    let presentation = dispatch
-        .plugins
-        .present_tool_result(
-            crate::plugin::ToolResultProjectionContext {
-                session_id: dispatch.session_id.clone(),
-                call_id: request.call.call_id.clone(),
-                tool_name: outcome.record.tool.clone(),
-                args: outcome.record.args.clone(),
-                output: outcome.record.output.clone(),
-                duration_ms: outcome.record.duration_ms,
-                artifacts: Arc::new(crate::runtime::effect::SessionPresentationArtifacts::new(
-                    Arc::clone(&dispatch.attachment_store),
-                )),
-            },
-            Arc::new(settlement),
-            &dispatch
-                .execution_env_spec
-                .policy
-                .model
-                .capability
-                .attachment_acceptance,
+    let settlement = Arc::new(ToolSettlement::from_dispatch(outcome, baseline));
+    // The child's presentation boundary is a journaled `PresentToolResult`
+    // effect under the child's own bound controller, so the folded return is
+    // the settlement's recorded `model_return` — replay serves the record and
+    // never re-runs a step (ADR 0099 §6, FIG-3420).
+    let replay_key = format!("{}:present", request.call.call_id);
+    let scoped = dispatch.effect_controller.scoped();
+    let invocation = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(scoped.execution_scope().clone(), replay_key.clone())
+            .expect("child tool presentation carries an admitted effect scope"),
+        dispatch.parentless_attribution(),
+        replay_key,
+    );
+    let presented = scoped
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::PresentToolResult {
+                    call_id: request.call.call_id.clone(),
+                    tool_name: outcome.record.tool.clone(),
+                    args: outcome.record.args.clone(),
+                    output: Box::new(outcome.record.output.clone()),
+                    duration_ms: outcome.record.duration_ms,
+                },
+            ),
+            crate::RuntimeEffectLocalExecutor::presentation(
+                Arc::clone(&dispatch.plugins),
+                settlement,
+                Arc::clone(&dispatch.attachment_store),
+                (*dispatch
+                    .execution_env_spec
+                    .policy
+                    .model
+                    .capability
+                    .attachment_acceptance)
+                    .clone(),
+            ),
         )
-        .await;
-    let mut model_return = presentation.model_return;
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_tool_presentation);
+    let mut model_return = match presented {
+        Ok(presentation) => presentation.model_return,
+        Err(error) => crate::ModelToolReturn::text(
+            request.call.call_id.clone(),
+            outcome.record.tool.clone(),
+            error.to_string(),
+        ),
+    };
     // The same addenda the session path appends in `complete_tool_call`: the
     // realized intents are part of the presentation the model sees, so the
     // recorded return carries them rather than leaving incorporation to

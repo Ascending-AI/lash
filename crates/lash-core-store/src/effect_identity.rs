@@ -44,6 +44,11 @@ pub enum RuntimeEffectKind {
     /// (ADR 0099 §6): which ranks the opener applied before an externally
     /// effective step, so replay restores exactly that mapping.
     IncorporateGroupSettlements,
+    /// The recorded presentation boundary of one settled tool result
+    /// (ADR 0099 §6, FIG-3420): the ordered presentation steps folded once,
+    /// journaled so replay serves the recorded return and retained artifacts
+    /// without re-running a step.
+    PresentToolResult,
     ToolParentEnd,
     Trigger,
     Process,
@@ -69,6 +74,7 @@ impl RuntimeEffectKind {
             Self::ToolBatch => "tool_batch",
             Self::ToolInvocation => "tool_invocation",
             Self::IncorporateGroupSettlements => "incorporate_group_settlements",
+            Self::PresentToolResult => "present_tool_result",
             Self::ToolParentEnd => "tool_parent_end",
             Self::Trigger => "trigger",
             Self::Process => "process",
