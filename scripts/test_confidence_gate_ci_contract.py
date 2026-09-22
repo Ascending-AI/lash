@@ -623,7 +623,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["workspace-tests"]["result"] = "skipped"
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
+        needs["bazel-tests-tail"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
+        needs["bazel-tests-tail"] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
         dispatch_needs = {
             job: {"result": "success", "outputs": dict(value.get("outputs", {}))}

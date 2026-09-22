@@ -405,12 +405,14 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertIn("bazel-tests", jobs["ci-conclusion"]["needs"])
 
-        # The tail leg runs `//:workspace_tail_tests` on a parallel runner
-        # under the identical trust gate and pool environment, so the
-        # partition's wall clock is max(legs), not sum.
+        # The tail leg runs only for merge groups and dispatches, preserving
+        # the complete combined-tree partition without duplicating PR work.
         tail_job = jobs["bazel-tests-tail"]
         self.assertEqual("build-cache", tail_job["environment"])
-        self.assertEqual(bazel_job["if"], tail_job["if"])
+        self.assertEqual(
+            bazel_job["if"] + " && github.event_name != 'pull_request'",
+            tail_job["if"],
+        )
         tail_run = job_step(
             tail_job, "Test the workspace tail suite with shared cache"
         )["run"]
@@ -439,7 +441,7 @@ class BazelTestContractTests(unittest.TestCase):
         setup = shared_cache_action()
         flags = job_step(setup, "Export shared cache flags")["run"]
         bazel_command = job_step(
-            jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
+            jobs["bazel-tests"], "Test deterministic PR selection or merge-group suite"
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
@@ -945,10 +947,20 @@ class BazelTestContractTests(unittest.TestCase):
         # Remote execution needs the action result, not hundreds of MiB of
         # top-level binaries.
         bazel_test = job_step(
-            jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
+            jobs["bazel-tests"], "Test deterministic PR selection or merge-group suite"
         )
         self.assertIn("//:workspace_tests", bazel_test["run"])
         self.assertIn("-//:workspace_tail_tests", bazel_test["run"])
+        selector = job_step(jobs["bazel-tests"], "Select deterministic PR tests")
+        checkout = job_step(jobs["bazel-tests"], "Check out repository")
+        self.assertIn(
+            'git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=2 origin "${GITHUB_SHA}"',
+            checkout["run"],
+        )
+        self.assertEqual("github.event_name == 'pull_request'", selector["if"])
+        self.assertIn("scripts/ci/pr_test_targets.py", selector["run"])
+        self.assertIn("pr-test-targets.txt", bazel_test["run"])
+        self.assertNotIn("GITHUB_TOKEN", bazel_test.get("env", {}))
         self.assertNotIn("//:workspace_compile", bazel_test["run"])
         self.assertNotIn("workspace_doctests", bazel_test["run"])
         self.assertIn("--remote_download_outputs=minimal", bazel_test["run"])

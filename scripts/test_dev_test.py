@@ -98,11 +98,15 @@ class DevTestTests(unittest.TestCase):
 
     def test_query_cannot_select_deferred_manual_or_duplicate_batch_members(self):
         query = self.bin / "bazel"
-        query.write_text("#!/bin/sh\nprintf '%s\\n' //crates/example:first //crates/example:second "
+        query.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > .git/query-args\nprintf '%s\\n' //crates/example:first //crates/example:second "
                          "//crates/example:test_batch //crates/example:deferred //crates/example:manual\n")
         query.chmod(0o755)
         commands = json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"]
         self.assertEqual(commands, [["kiln", "test", "//crates/example:test_batch", "//:schema_checks"]])
+        self.assertIn(
+            "rdeps(set(//crates/... //examples/... //runbooks/...),",
+            (self.root / ".git/query-args").read_text(),
+        )
         query.write_text("#!/bin/sh\necho //crates/example:first\n")
         self.assertEqual(json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"],
                          [["kiln", "test", "//crates/example:first", "//:schema_checks"]])

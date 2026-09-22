@@ -153,7 +153,10 @@ def plan(base: str, dependents: bool) -> dict:
     allowed, batches = dev_inventory()
     members = {label for label in allowed if label.split(":")[0] in packages}
     if dependents and packages and not broad:
-        expression = 'kind("test", rdeps(//..., set(' + " ".join(p + ":all" for p in packages) + ')))'
+        # Restrict the query universe to first-party packages. `//...` also
+        # traverses Bazel's generated bazel-src symlink in a fork and can fail
+        # while loading its external repository aliases, forcing a broad suite.
+        expression = 'kind("test", rdeps(set(//crates/... //examples/... //runbooks/...), set(' + " ".join(p + ":all" for p in packages) + ')))'
         result = subprocess.run(
             ["bazel", "query", expression], cwd=ROOT, capture_output=True, text=True
         )
