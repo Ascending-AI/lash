@@ -716,9 +716,15 @@ test executions, since package source runfiles can still re-run source-reading
 tests without recompiling them.
 
 `unit_test_sources` can narrow a library's unit-test source patterns separately
-from its integration roots. Core-execution uses it to keep the relocated lease
-wire tests out of the large unit-test compile. Those 15 tests live in
-`tests/process_model.rs` and its module tree, use existing public runtime APIs,
-and retain their `runtime::process::lease_serde_tests::*` names. No testing
-feature or private export is added. Both Cargo discovery and generated Bazel
-partitions include the new binary.
+from its integration roots. Core-execution uses it to keep public model
+contracts out of the large unit-test compile. `tests/process_model.rs` owns
+58 lease-wire and registry-transition tests; `tests/effect_model.rs` owns
+35 effect-group, retained tool-child and journal-outcome tests. Their module
+trees retain the original unit-test names and assertions and call existing
+public APIs. Private runtime tests remain in the unit binary.
+
+Both Cargo discovery and generated Bazel partitions include these integration
+binaries. The `core-internal-features` lane also runs them with no default
+features, including no `testing` feature, against the production library.
+The lease-preimage and retained-tool-child mutation recipes select their
+integration targets as well as the unit tests.

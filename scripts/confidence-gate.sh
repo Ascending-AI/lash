@@ -2556,7 +2556,7 @@ run_process_lease_preimage_mutation_evidence() {
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-execution-lease-preimage-targeted" \
-    -- --locked -p lash-internal-sqlite-store --lib --test conformance lease
+    -- --locked -p lash-internal-core-execution -p lash-internal-sqlite-store --lib --test process_model --test conformance lease
 }
 
 run_authority_rebind_mutation_evidence() {
@@ -2598,7 +2598,7 @@ run_authority_rebind_mutation_evidence() {
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-execution-tool-child-targeted" \
-    -- --locked -p lash-internal-core-execution --lib tool_child
+    -- --locked -p lash-internal-core-execution --lib --test effect_model tool_child
   run_mutants_recorded "lash-core-execution group reopen settlement capture" "${out_dir}/mutants-lash-core-execution-group-settlement-targeted" \
     cargo mutants \
     -p lash-internal-core-execution \
