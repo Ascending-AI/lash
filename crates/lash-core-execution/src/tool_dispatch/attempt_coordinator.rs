@@ -662,7 +662,10 @@ pub async fn coordinate_tool_invocation<'run>(
 /// When no outcome exists to carry them — a controller abort refuses the
 /// launch itself — an attempt's journaled facts land in the open context's
 /// buffers, exactly where the pre-applicator restore put them, because the
-/// commit they are evidence of already happened.
+/// commit they are evidence of already happened. The abort ends the call, so
+/// nothing downstream could incorporate a settlement for it; reaching for the
+/// buffers directly is tolerable only because there is no settlement left to
+/// own the facts.
 fn abandon_to_open_buffers(
     context: &ToolDispatchContext<'_>,
     triggers: Vec<ToolTriggerEffectOutcome>,
