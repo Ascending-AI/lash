@@ -1053,7 +1053,7 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
                         .into_iter()
                         .find(|graph| {
                             matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
-                                if process_id == &registration.id)
+                                if process_id == registration.id)
                         })
                         .expect("parent attempt graph before replay");
                     context.start_replay();
@@ -1082,7 +1082,7 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
                         .into_iter()
                         .find(|graph| {
                             matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
-                                if process_id == &registration.id)
+                                if process_id == registration.id)
                         })
                         .expect("parent attempt graph after replay");
                     assert_eq!(
@@ -1132,7 +1132,7 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
         .into_iter()
         .filter(|graph| {
             matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
-            if process_id == &registration.id)
+            if process_id == registration.id)
         })
         .collect::<Vec<_>>();
     let mut attempts = parent_graphs
