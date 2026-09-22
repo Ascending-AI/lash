@@ -22,6 +22,9 @@ use serde::{Deserialize, Serialize};
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
 mod fixture;
 
+const REBASED_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-97-e327bd63e/sqlite-expected.json",
+];
 const SETTLEMENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-f9e0aa07d/sqlite-expected.json",
 ];

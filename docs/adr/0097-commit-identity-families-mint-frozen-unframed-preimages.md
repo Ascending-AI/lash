@@ -65,9 +65,9 @@ family's serializer and domain are also unchanged; its typed payload reflects
 the new message shape at the same database cutover.
 
 Pre-cutover catalogs are refused and recreated: SQLite durable-core 72 and
-effects 31, PostgreSQL 111. Node bodies use generation 19, turn checkpoints 6,
-tool settlements 4, and attempt captures 3. Remote protocol 86 and trace
-schema 25 mark their wire changes. Durable read fixture generation 97 records
+effects 32, PostgreSQL 112. Node bodies use generation 19, turn checkpoints 6,
+tool settlements 5, and attempt captures 4. Remote protocol 86 and trace
+schema 25 mark their wire changes. Durable read fixture generation 98 records
 both backends. No removed message field or part lifecycle field is accepted
 by a current decoder.
 

@@ -33,11 +33,9 @@ use super::*;
 /// journaled `ToolUsageDelta`s and the aggregated captures/triggers on the
 /// journaled `ToolDispatchOutcome` — again a journaled-encoding cutover with
 /// no relational DDL, so the boundary is again reject-and-recreate and the
-/// retained endpoint moves to 110: every row now targets 110 and no row
-/// declares component 111 reachable, so a component-110 stamp over this
-/// catalog is refused as having no applicable migration,
+/// retained endpoint moved to 110 at that cutover.
 /// Component 112 removes the old message body and lifecycle fields. The retained
-/// endpoint remains 110; no arm crosses either encoding cutover at 111 or 112.
+/// endpoint moves to 111; no arm reaches this build's component 112.
 /// This is exactly the claim the pre-cutover fixture proves. The
 /// `source_missing_*` lists stay keyed to this build's catalog — a
 /// pre-cutover store lacks the component-109 and -110 additions against it —
@@ -70,7 +68,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
         from: 101,
-        to: 110,
+        to: 111,
         // The lists are keyed to the floor, not to one generation: a relation
         // or column introduced after 105 belongs here too, so the fixture
         // rebuilds the published component-101 catalog by removing them.
@@ -106,7 +104,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 110,
+        to: 111,
         source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
@@ -128,7 +126,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 110,
+        to: 111,
         source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
@@ -149,7 +147,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 110,
+        to: 111,
         source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
@@ -171,7 +169,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 110,
+        to: 111,
         source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -193,7 +191,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 110,
+        to: 111,
         source_missing_tables: &["lash_runtime_effect_group_child"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -217,7 +215,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 110,
+        to: 111,
         source_missing_tables: &[],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -238,7 +236,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 110,
+        to: 111,
         source_missing_tables: &[],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -264,10 +262,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // A component-109 catalog predates the ADR 0099 §§4–5 arbitration state
     // wholesale: the commit-protocol columns and guards on the replay row, the
     // group counters, and both renames. Component 111 adds no relational DDL
-    // of its own, so the arm targets 110 like every other retained arm.
+    // of its own; this historical arm now targets the retained endpoint 111.
     SchemaMigration {
         from: 109,
-        to: 110,
+        to: 111,
         source_missing_tables: &[],
         source_missing_columns: &[
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -285,6 +283,17 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "uq_lash_runtime_effect_replay_commit_seq",
             "uq_lash_runtime_effect_group_child_replay_key",
         ],
+        statements: &[],
+    },
+    // Component 110 has the current relational shape. Its older journal encoding
+    // remains a historical refusal case: no declaration targets component 112.
+    SchemaMigration {
+        from: 110,
+        to: 111,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
         statements: &[],
     },
 ];

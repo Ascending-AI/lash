@@ -25,6 +25,9 @@ mod support;
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
 mod fixture;
 
+const REBASED_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-97-e327bd63e/postgres-expected.json",
+];
 const SETTLEMENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-f9e0aa07d/postgres-expected.json",
 ];
@@ -228,7 +231,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 111);
+    assert_eq!(PostgresStorage::schema_version(), 112);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -529,7 +532,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     )
     .execute(&pool)
     .await
-    .expect("refresh refusal fixture with the component-111 settlement-fact-carriage catalog");
+    .expect("refresh refusal fixture with the component-112 ordered-parts catalog");
     // The trigger subscription table cut over to the lifecycle column shape
     // with no migration, so the refusal fixture discards its pre-cutover rows
     // and takes the current catalog.
