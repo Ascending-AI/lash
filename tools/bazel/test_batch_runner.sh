@@ -19,12 +19,20 @@ jobs_cap=$(( $(nproc 2>/dev/null || echo 4) ))
 [ "$jobs_cap" -gt 8 ] && jobs_cap=8
 [ "$jobs_cap" -lt 1 ] && jobs_cap=1
 
+args=("$@")
+list_only=0
+help_only=0
+for arg in "${args[@]}"; do
+    [[ "$arg" == "--list" ]] && list_only=1
+    [[ "$arg" == "--help" || "$arg" == "-h" ]] && help_only=1
+done
+
 declare -a pids=()
 declare -a names=()
 run_member() {
     local rloc="$1" name
     name="$(basename "$rloc")"
-    "$TEST_SRCDIR/$rloc" >"$logs/$name.log" 2>&1
+    "$TEST_SRCDIR/$rloc" "${args[@]}" >"$logs/$name.log" 2>&1
     echo "$? $rloc" >> "$logs/status"
 }
 
@@ -58,6 +66,24 @@ if [ "$ran" -lt "$total" ]; then
 fi
 
 if [ "${#failures[@]}" -eq 0 ]; then
+    # Explicit libtest arguments request observable output, especially --list
+    # and --nocapture. Print after joining to avoid interleaved member output.
+    if [ "${#args[@]}" -gt 0 ]; then
+        matched=0
+        for rloc in "${names[@]}"; do
+            log="$logs/$(basename "$rloc").log"
+            cat "$log"
+            if ((list_only)); then
+                grep -Eq ': (test|benchmark)$' "$log" && matched=1
+            else
+                grep -Eq 'running [1-9][0-9]* tests?|test result: .* ([1-9][0-9]* passed|[1-9][0-9]* ignored)' "$log" && matched=1
+            fi
+        done
+        if ((!matched && !help_only)); then
+            echo "FAIL: no tests matched the batch arguments" >&2
+            exit 1
+        fi
+    fi
     echo "PASS: $total test binaries in batch"
     exit 0
 fi
