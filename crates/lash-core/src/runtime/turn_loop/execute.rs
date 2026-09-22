@@ -650,7 +650,7 @@ impl LashRuntime {
         // Restore the basis captured before preparation cleared the resident
         // value. TurnBoundary is the state persisted by a host continuation;
         // keeping this value stable prevents a mid-turn call from changing the
-        // rolling-history projection when the logical turn is redriven.
+        // standard-compaction projection when the logical turn is redriven.
         self.state.last_prompt_usage = previous_prompt_usage;
         let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
             self.state.clone(),

@@ -425,7 +425,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // aggregated captures and trigger receipts to the settlement boundary.
 // Component-110 catalogs are rejected and recreated rather than replayed
 // under the old carrier shape.
-const SCHEMA_VERSION: i32 = 111;
+// Version 112 cuts over message parts, append encoding 5 and standard compaction.
+// Component-111 catalogs are rejected and recreated, including effect payloads.
+const SCHEMA_VERSION: i32 = 112;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

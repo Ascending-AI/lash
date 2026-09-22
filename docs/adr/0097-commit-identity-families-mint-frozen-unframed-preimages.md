@@ -27,8 +27,7 @@ families after a framing defect, and bytes that are equality-compared
 evidence cannot be repudiated by framing them differently; recovery from a
 defect in these grammars would still require a bespoke versioned encoding,
 exactly the mechanism the append family already carries
-(`LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION` /
-`APPEND_REQUEST_IDENTITY_ENCODING_VERSION` beside the digest in the receipt).
+(`APPEND_REQUEST_IDENTITY_ENCODING_VERSION` beside the digest in the receipt).
 
 These families are therefore minted through `IdentityEncoder::new_unframed`,
 which emits the family's frozen grammar without the header and only for the
@@ -46,3 +45,34 @@ binary grammar that keeps `i64`/`u64`/`f64` numbers distinct, whereas
 The intent and history-node projections serialize typed structs through
 `stable_json_string`; their canonicality comes from fixed struct field order,
 not from `identity_json` normalization, which does not apply.
+
+## Append-message generation 5 cutover
+
+FIG-1952 and FIG-1955 intentionally replace the append-message projection in
+one recreation-only store cutover. Every append request uses encoding 5.
+Plugin messages encode id, role, origin and one ordered parts body. Parts
+have no lifecycle discriminant; attachment sources remain inside attachment
+parts. Provider replay routes and the separately retained response metadata
+leaves are encoded explicitly. The obsolete payload-dependent encoders and
+their corpora are removed; `append_request_identity_v5.hex` owns the new
+node, whole-request, route and effect-cause vectors.
+
+The append family retains its unframed envelope and `lash-append-request/v2`
+hash label. Encoding 5 is the receipt's grammar discriminator, not a new hash
+domain. The `lash.history-node` projection and the separately owned effect
+address projections, versions and domain labels are unchanged. The intent
+family's serializer and domain are also unchanged; its typed payload reflects
+the new message shape at the same database cutover.
+
+Pre-cutover catalogs are refused and recreated: SQLite durable-core 72 and
+effects 31, PostgreSQL 111. Node bodies use generation 19, turn checkpoints 6,
+tool settlements 4, and attempt captures 3. Remote protocol 86 and trace
+schema 25 mark their wire changes. Durable read fixture generation 97 records
+both backends. No removed message field or part lifecycle field is accepted
+by a current decoder.
+
+The renamed plugin mints compaction request IDs under
+`lash-standard-compaction/v1`. Its former hash labels stay reserved in the
+append-only domain registry as retired historical labels; they are not aliases
+or active encoders. This plugin-owned domain change does not alter the generic
+effect address or history-node families.

@@ -812,7 +812,7 @@ impl RuntimeTurnCommitStamp {
         Ok(Self {
             operation,
             append_request_identity: AppendRequestIdentity::Append {
-                encoding_version: commit_identity::append_request_identity_encoding_version(nodes),
+                encoding_version: commit_identity::APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
                 request_hash: request_identity_hash,
                 requested_node_count: u64::try_from(nodes.len()).map_err(|_| {
                     StoreError::Backend("append requested-node count does not fit u64".to_string())

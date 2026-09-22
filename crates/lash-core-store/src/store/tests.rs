@@ -38,7 +38,7 @@ fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
                 let is_message = map.contains_key("role") && map.contains_key("parts");
                 let is_message_part = map.contains_key("kind")
                     && map.contains_key("content")
-                    && map.contains_key("prune_state");
+                    && map.contains_key("id");
                 if is_message || is_message_part {
                     map.remove("id");
                 }
@@ -390,17 +390,17 @@ fn intent_hash_golden_vector() {
     // Checkpoint manifest v3 and explicit ambient tool access are pinned in intent bytes.
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "d66a62e305da062c361f45ad0fdba8566cec0c85808a387c4f3b68a334a8f0fd"
+        "df11d09b3ffded5372100b1b9a80f9b14902f9fcaa44373dc3a5e3d1f37ab998"
     );
 }
 
 #[test]
-fn cancellation_evidence_changes_intent_hash_without_changing_absent_legacy_hash() {
+fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "d66a62e305da062c361f45ad0fdba8566cec0c85808a387c4f3b68a334a8f0fd",
-        "an absent cancellation field must preserve the legacy plain-commit preimage"
+        "df11d09b3ffded5372100b1b9a80f9b14902f9fcaa44373dc3a5e3d1f37ab998",
+        "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
     let mut baseline = legacy;
@@ -428,12 +428,12 @@ fn cancellation_evidence_changes_intent_hash_without_changing_absent_legacy_hash
 }
 
 #[test]
-fn failure_evidence_changes_intent_hash_without_changing_empty_legacy_hash() {
+fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline = intent_fixture();
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "d66a62e305da062c361f45ad0fdba8566cec0c85808a387c4f3b68a334a8f0fd"
+        "df11d09b3ffded5372100b1b9a80f9b14902f9fcaa44373dc3a5e3d1f37ab998"
     );
 
     let mut with_evidence = baseline;

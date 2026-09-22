@@ -369,10 +369,12 @@ fn the_child_gets_fresh_checkpoint_and_trigger_buffers() {
     lent.checkpoint_messages.enqueue(vec![crate::PluginMessage {
         id: None,
         role: crate::MessageRole::Assistant,
-        content: "the opener's".to_string(),
         origin: None,
-        parts: Vec::new(),
-        attachments: Vec::new(),
+        parts: vec![crate::Part::text(
+            String::new(),
+            "the opener's".to_string(),
+            None,
+        )],
     }]);
     lent.trigger_outcomes
         .enqueue(crate::tool_dispatch::ToolTriggerEffectOutcome {

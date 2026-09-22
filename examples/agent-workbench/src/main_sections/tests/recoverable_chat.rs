@@ -932,18 +932,16 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "two printed images")
             .with_id("rlm-printed-images");
     for id in ["sha256:rlm-printed-image-a", "sha256:rlm-printed-image-b"] {
-        committed
-            .attachments
-            .push(lash::direct::AttachmentSource::stored(
-                lash::attachments::AttachmentRef {
-                    id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
-                    media_type: lash::attachments::MediaType::parse("image/png")
-                        .expect("valid PNG media type"),
-                    byte_len: 68,
-                    type_metadata: None,
-                    label: None,
-                },
-            ));
+        committed.parts.push(injected_attachment_part(
+            lash::direct::AttachmentSource::stored(lash::attachments::AttachmentRef {
+                id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
+                media_type: lash::attachments::MediaType::parse("image/png")
+                    .expect("valid PNG media type"),
+                byte_len: 68,
+                type_metadata: None,
+                label: None,
+            }),
+        ));
     }
     session
         .admin()
@@ -1841,9 +1839,9 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
                 turn_id: TurnId::from(turn_id),
                 input_id: Some("workbench-input-fig994".to_string().into()),
             });
-    committed
-        .attachments
-        .push(lash::direct::AttachmentSource::stored(attachment));
+    committed.parts.push(injected_attachment_part(
+        lash::direct::AttachmentSource::stored(attachment),
+    ));
     let session = state
         .core
         .session(session_id.clone())
@@ -1933,9 +1931,9 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
         turn_id: TurnId::from(turn_id),
         input_id: Some("workbench-input-fig994-replay".to_string().into()),
     });
-    committed
-        .attachments
-        .push(lash::direct::AttachmentSource::stored(attachment));
+    committed.parts.push(injected_attachment_part(
+        lash::direct::AttachmentSource::stored(attachment),
+    ));
     let session = state
         .core
         .session(session_id.clone())
@@ -1988,9 +1986,9 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     let mut message =
         lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "see image")
             .with_id("committed-attachment-message");
-    message
-        .attachments
-        .push(lash::direct::AttachmentSource::stored(attachment.clone()));
+    message.parts.push(injected_attachment_part(
+        lash::direct::AttachmentSource::stored(attachment.clone()),
+    ));
     let session = state
         .core
         .session(session_id)
@@ -2446,4 +2444,12 @@ pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_s
         None,
     )
     .await
+}
+
+fn injected_attachment_part(source: lash::direct::AttachmentSource) -> lash::messages::Part {
+    lash::messages::Part::attachment_part(
+        String::new(),
+        String::new(),
+        Some(lash::messages::PartAttachment { source }),
+    )
 }

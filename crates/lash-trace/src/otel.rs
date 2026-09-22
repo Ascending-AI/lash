@@ -320,17 +320,17 @@ where
             TraceEvent::CompositionChanged { .. } => {
                 self.emit_instant(record, "lash.composition.changed", None)
             }
-            TraceEvent::RollingHistoryCompactionNeeded { .. } => {
-                self.emit_instant(record, "lash.rolling_history.compaction_needed", None)
+            TraceEvent::CompactionNeeded { .. } => {
+                self.emit_instant(record, "lash.compaction.needed", None)
             }
-            TraceEvent::RollingHistoryPromptPruned { .. } => {
-                self.emit_instant(record, "lash.rolling_history.prompt_pruned", None)
+            TraceEvent::PromptViewPruned { .. } => {
+                self.emit_instant(record, "lash.prompt_view.pruned", None)
             }
-            TraceEvent::RollingHistoryCompactionStarted { .. } => {
-                self.emit_instant(record, "lash.rolling_history.compaction_started", None)
+            TraceEvent::CompactionStarted { .. } => {
+                self.emit_instant(record, "lash.compaction.started", None)
             }
-            TraceEvent::RollingHistoryCompactionCompleted { .. } => {
-                self.emit_instant(record, "lash.rolling_history.compaction_completed", None)
+            TraceEvent::CompactionCompleted { .. } => {
+                self.emit_instant(record, "lash.compaction.completed", None)
             }
             TraceEvent::ExecCodeStarted { .. }
             | TraceEvent::ExecCodeCompleted { .. }
@@ -545,63 +545,63 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 tool_schemas,
             );
         }
-        TraceEvent::RollingHistoryCompactionNeeded {
+        TraceEvent::CompactionNeeded {
             context_budget_tokens,
             max_context_tokens,
             threshold_tokens,
         } => {
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_CONTEXT_BUDGET_TOKENS,
+                attr::LASH_COMPACTION_CONTEXT_BUDGET_TOKENS,
                 *context_budget_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_MAX_CONTEXT_TOKENS,
+                attr::LASH_COMPACTION_MAX_CONTEXT_TOKENS,
                 *max_context_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_THRESHOLD_TOKENS,
+                attr::LASH_COMPACTION_THRESHOLD_TOKENS,
                 *threshold_tokens as i64,
             ));
         }
-        TraceEvent::RollingHistoryPromptPruned {
+        TraceEvent::PromptViewPruned {
             context_budget_tokens,
             max_context_tokens,
             dropped_prefix_messages,
             retained_messages,
         } => {
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_CONTEXT_BUDGET_TOKENS,
+                attr::LASH_COMPACTION_CONTEXT_BUDGET_TOKENS,
                 *context_budget_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_MAX_CONTEXT_TOKENS,
+                attr::LASH_COMPACTION_MAX_CONTEXT_TOKENS,
                 *max_context_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_DROPPED_PREFIX_MESSAGES,
+                attr::LASH_COMPACTION_DROPPED_PREFIX_MESSAGES,
                 *dropped_prefix_messages as i64,
             ));
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_RETAINED_MESSAGES,
+                attr::LASH_COMPACTION_RETAINED_MESSAGES,
                 *retained_messages as i64,
             ));
         }
-        TraceEvent::RollingHistoryCompactionStarted {
+        TraceEvent::CompactionStarted {
             source_messages,
             instructions_present,
         } => {
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_SOURCE_MESSAGES,
+                attr::LASH_COMPACTION_SOURCE_MESSAGES,
                 *source_messages as i64,
             ));
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_INSTRUCTIONS_PRESENT,
+                attr::LASH_COMPACTION_INSTRUCTIONS_PRESENT,
                 *instructions_present,
             ));
         }
-        TraceEvent::RollingHistoryCompactionCompleted { summary_nodes } => {
+        TraceEvent::CompactionCompleted { summary_nodes } => {
             attrs.push(KeyValue::new(
-                attr::LASH_ROLLING_HISTORY_SUMMARY_NODES,
+                attr::LASH_COMPACTION_SUMMARY_NODES,
                 *summary_nodes as i64,
             ));
         }

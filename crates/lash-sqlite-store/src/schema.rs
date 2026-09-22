@@ -739,7 +739,9 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// envelopes (FIG-1949 layer 2). The durable-core version guards these bytes
 /// as well as the DDL. Pre-71 catalogs are rejected at open and recreated;
 /// there is no envelope migration or legacy decode path.
-pub(crate) const SCHEMA_VERSION: i32 = 71;
+// Generation 72 cuts over to ordered plugin parts and the standard-compaction identity.
+// Pre-cutover durable-core catalogs are rejected and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 72;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -1360,7 +1362,8 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// aggregated captures and trigger receipts to the settlement boundary. A
 /// pre-31 journal is rejected at open and recreated rather than replayed
 /// under the old carrier shape.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 31;
+/// Generation 32 rejects journaled settlements/captures with the retired message body.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 32;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

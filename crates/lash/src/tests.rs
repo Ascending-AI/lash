@@ -2202,9 +2202,9 @@ mod processes_endstate;
 mod rebuild_conformance;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
-mod rolling_history_persistence;
 #[cfg(feature = "rlm")]
 mod stack_budget;
+mod standard_compaction_persistence;
 mod tool_intent_ingress;
 mod tool_restore_report;
 mod turn_streaming;

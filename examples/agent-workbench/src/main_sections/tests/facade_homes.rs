@@ -364,8 +364,8 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
 }
 
 #[test]
-fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
-    run_async_test_on_stack_budget("workbench-rolling-history-test", || async {
+fn workbench_standard_compaction_projects_the_prompt_under_its_session_window() {
+    run_async_test_on_stack_budget("workbench-standard-compaction-test", || async {
         const OLD_MARKER: &str = "FIG992-old-context-that-must-be-pruned";
         const CURRENT_MARKER: &str = "FIG992-current-context-that-must-remain";
 
@@ -400,22 +400,22 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
         );
         let host = lash::plugins::PluginHost::new(plugins.into_factories());
         let session = host
-            .build_session("workbench-rolling-history-session")
-            .expect("build rolling history plugin session");
+            .build_session("workbench-standard-compaction-session")
+            .expect("build standard compaction plugin session");
         let messages = vec![
             text_message("u1", lash::messages::MessageRole::User, OLD_MARKER),
             text_message("a1", lash::messages::MessageRole::Assistant, "old response"),
             text_message("u2", lash::messages::MessageRole::User, CURRENT_MARKER),
         ];
         let policy = lash::runtime::SessionPolicy {
-            model: lash::ModelSpec::builder("workbench-rolling-history-model")
+            model: lash::ModelSpec::builder("workbench-standard-compaction-model")
                 .context_window_tokens(41_000)
                 .build()
-                .expect("rolling history model"),
+                .expect("standard compaction model"),
             ..lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded)
         };
         let state = lash::runtime::SessionSnapshot {
-            session_id: SessionId::from("workbench-rolling-history-session"),
+            session_id: SessionId::from("workbench-standard-compaction-session"),
             policy,
             session_graph: lash::persistence::SessionGraph::from_active_read_state(&messages),
             ..lash::runtime::SessionSnapshot::new(lash::runtime::SessionPolicy::new(
@@ -441,11 +441,11 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
             scoped_effect_controller: lash::runtime::ScopedEffectController::shared(
                 Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
                 lash::runtime::AdmittedScope::turn(
-                    "workbench-rolling-history-session",
-                    "workbench-rolling-history-turn",
+                    "workbench-standard-compaction-session",
+                    "workbench-standard-compaction-turn",
                 ),
             )
-            .expect("build rolling history turn scope"),
+            .expect("build standard compaction turn scope"),
             direct_completions: lash::runtime::DirectCompletionClient::from_fn(|_, _| {
                 Err(lash::plugins::PluginError::Session(
                     "direct completions are unavailable in this test".to_string(),
@@ -469,11 +469,11 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
         assert_eq!(state.policy.turn_budget, lash::TurnBudget::Unbounded);
         assert!(
             second_prompt.contains(CURRENT_MARKER),
-            "rolling history must retain the current user turn"
+            "standard compaction must retain the current user turn"
         );
         assert!(
             !second_prompt.contains(OLD_MARKER),
-            "rolling history must project away the old turn once the prior 30,000-token prompt exceeds the 21,000-token threshold derived from the session's 41,000-token window; second prompt: {second_prompt}"
+            "standard compaction must project away the old turn once the prior 30,000-token prompt exceeds the 21,000-token threshold derived from the session's 41,000-token window; second prompt: {second_prompt}"
         );
     });
 }

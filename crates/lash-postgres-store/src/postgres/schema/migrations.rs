@@ -36,7 +36,9 @@ use super::*;
 /// retained endpoint moves to 110: every row now targets 110 and no row
 /// declares component 111 reachable, so a component-110 stamp over this
 /// catalog is refused as having no applicable migration,
-/// which is exactly the claim the pre-cutover fixture proves. The
+/// Component 112 removes the old message body and lifecycle fields. The retained
+/// endpoint remains 110; no arm crosses either encoding cutover at 111 or 112.
+/// This is exactly the claim the pre-cutover fixture proves. The
 /// `source_missing_*` lists stay keyed to this build's catalog — a
 /// pre-cutover store lacks the component-109 and -110 additions against it —
 /// so the older-store fixture drops those columns by name like every other

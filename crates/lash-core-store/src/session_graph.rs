@@ -261,7 +261,7 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 18;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 19;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {

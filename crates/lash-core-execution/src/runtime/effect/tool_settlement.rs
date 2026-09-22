@@ -134,7 +134,8 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// guarded here because it rides the same journaled `ToolInvocation` outcome —
 /// carries the aggregated attempt captures and trigger outcomes the
 /// applicator incorporates.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 4;
+/// Version 5 carries one ordered parts body without part lifecycle fields.
+pub const TOOL_SETTLEMENT_VERSION: u16 = 5;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
@@ -145,7 +146,8 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 4;
 /// the same `source`/`model` addition [`TOOL_SETTLEMENT_VERSION`] 4 records —
 /// a captured delta is only chargeable at incorporation when it carries the
 /// labels the session ledger keys on.
-pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 3;
+/// Version 4 carries the same message cutover as settlement version 5.
+pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 4;
 
 /// One provider spend attributable to one attempt of a tool child.
 ///

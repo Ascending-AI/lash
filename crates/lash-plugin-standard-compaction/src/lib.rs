@@ -1,4 +1,4 @@
-//! Default rolling-history plugin.
+//! Default standard-compaction plugin.
 //!
 //! Owns rolling prompt-view shaping and the explicit `/compact`
 //! summarization strategy.
@@ -29,12 +29,12 @@ use lash_core::{
 };
 
 const PRUNE_RECENT_USER_TURNS: usize = 2;
-pub const ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS: usize = 20_000;
+pub const STANDARD_COMPACTION_BUFFER_TOKENS: usize = 20_000;
 const COMPACTION_KEEP_RECENT_TOKENS: usize = 20_000;
 const PRUNE_CONTEXT_THRESHOLD: f64 = 0.6;
 /// Marker `plugin_id` stamped on compaction summary messages so the
 /// history pipeline can recognize them on subsequent turns.
-pub(crate) const ROLLING_HISTORY_PLUGIN_ID: &str = "rolling_history";
+pub(crate) const STANDARD_COMPACTION_PLUGIN_ID: &str = "standard_compaction";
 pub(crate) const COMPACTION_SUMMARY_TITLE: &str = "Compaction summary:";
 const COMPACTION_PROMPT: &str = "Provide a detailed summary of the conversation above so a later session can continue the work without the full history.\n\nUse this template:\n---\n## Goal\n[What is the user trying to accomplish?]\n\n## Instructions\n- [Relevant instructions or constraints]\n\n## Discoveries\n[Important findings, failures, or decisions]\n\n## Accomplished\n[What is done, what is in progress, what remains]\n\n## Relevant files / directories\n[List important files or directories]\n---";
 const PRUNED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted from older context]";
@@ -54,19 +54,20 @@ pub const OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS: usize = 16_000;
 pub const OVERFLOW_RECOVERY_ELIDED_RETAINED_CHARS: usize = 400;
 
 const OVERFLOW_RECOVERY_MARKER: &str =
-    "Rolling-history context-overflow recovery marker (pending):";
-const OVERFLOW_RECOVERY_COMPLETED: &str = "Rolling-history context-overflow recovery completed:";
-const OVERFLOW_RECOVERY_FAILED: &str = "Rolling-history context-overflow recovery failure:";
+    "Standard-compaction context-overflow recovery marker (pending):";
+const OVERFLOW_RECOVERY_COMPLETED: &str =
+    "Standard-compaction context-overflow recovery completed:";
+const OVERFLOW_RECOVERY_FAILED: &str = "Standard-compaction context-overflow recovery failure:";
 const OVERFLOW_RECOVERY_EXHAUSTED: &str =
-    "Rolling-history context-overflow recovery exhausted (recoverable failure):";
+    "Standard-compaction context-overflow recovery exhausted (recoverable failure):";
 const OVERFLOW_RECOVERY_INSTRUCTIONS: &str = "Recover a task whose turn stopped because the provider refused the request as too long. The oversized tool result has been elided from the history below.\n\nSummarize precisely what the user asked for, what was already accomplished, and what remains, so a fresh continuation can finish the task without re-running any tool.";
 const OVERFLOW_ELIDED_PART_PLACEHOLDER: &str =
     "[oversized part elided before context-overflow summarization]";
-const TRACE_OVERFLOW_RECOVERY_TRIGGER: &str = "rolling_history.overflow_recovery.triggered";
-const TRACE_OVERFLOW_RECOVERY_OUTCOME: &str = "rolling_history.overflow_recovery.outcome";
+const TRACE_OVERFLOW_RECOVERY_TRIGGER: &str = "standard_compaction.overflow_recovery.triggered";
+const TRACE_OVERFLOW_RECOVERY_OUTCOME: &str = "standard_compaction.overflow_recovery.outcome";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RollingHistoryConfig;
+pub struct StandardCompactionConfig;
 
 fn compaction_update_prompt(previous_summary: &str) -> String {
     format!(
@@ -151,7 +152,7 @@ fn strip_all_attachments(messages: &mut [Message], placeholder: &str) -> bool {
 pub(crate) fn is_compaction_summary_message(message: &Message) -> bool {
     matches!(
         message.origin,
-        Some(MessageOrigin::Plugin { ref plugin_id, .. }) if plugin_id == ROLLING_HISTORY_PLUGIN_ID
+        Some(MessageOrigin::Plugin { ref plugin_id, .. }) if plugin_id == STANDARD_COMPACTION_PLUGIN_ID
     )
 }
 
@@ -185,7 +186,7 @@ pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize)
     latest_user_index(messages).unwrap_or(messages.len())
 }
 
-/// The one context-pressure fact both rolling-history decisions consume: a known prompt usage
+/// The one context-pressure fact both standard-compaction decisions consume: a known prompt usage
 /// measured against a context window that actually bounds it.  A window of zero bounds nothing,
 /// so it carries no pressure at all — the same filter the sans-io section builder applies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,8 +232,7 @@ fn extract_previous_summary(messages: &[Message]) -> Option<String> {
 }
 
 pub(crate) fn compaction_threshold(max_context_tokens: usize) -> usize {
-    max_context_tokens
-        .saturating_sub(ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
+    max_context_tokens.saturating_sub(STANDARD_COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
 }
 
 fn append_identity_field(identity: &mut Vec<u8>, value: &str) {
@@ -398,13 +398,13 @@ fn compaction_request_identity(
     };
     let mut identity = serde_json::to_value(identity).map_err(|error| {
         ContextError::Session(format!(
-            "failed to encode rolling-history compaction request identity: {error}"
+            "failed to encode standard compaction request identity: {error}"
         ))
     })?;
     canonicalize_json_objects(&mut identity);
     serde_json::to_string(&identity).map_err(|error| {
         ContextError::Session(format!(
-            "failed to encode rolling-history compaction request identity: {error}"
+            "failed to encode standard compaction request identity: {error}"
         ))
     })
 }
@@ -428,14 +428,12 @@ pub(crate) fn compaction_request_ids(
     append_identity_field(&mut identity, journal_scope.key());
     let request_identity = compaction_request_identity(request_snapshot, prompt_text)?;
     append_identity_field(&mut identity, &request_identity);
-    let discriminator = lash_sansio::core_support::blake3_domain_hash_hex(
-        "lash-rolling-history-compaction/v2",
-        identity,
-    );
+    let discriminator =
+        lash_sansio::core_support::blake3_domain_hash_hex("lash-standard-compaction/v1", identity);
     Ok((
         SessionId::from(format!("{parent_session_id}-compaction:{discriminator}")),
         TurnId::from(format!(
-            "{physical_parent_turn_id}:rolling-history-compaction:{discriminator}"
+            "{physical_parent_turn_id}:standard-compaction:{discriminator}"
         )),
     ))
 }
@@ -591,7 +589,7 @@ fn compaction_summary_seed(summary: &str) -> lash_core::SessionAppendNode {
             format!("{COMPACTION_SUMMARY_TITLE}\n{summary}"),
         )
         .with_origin(MessageOrigin::Plugin {
-            plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
             transient: false,
         }),
     )
@@ -630,49 +628,51 @@ async fn compact_messages_core(
     )])))
 }
 
-pub struct RollingHistoryPluginFactory {
-    config: RollingHistoryConfig,
+pub struct StandardCompactionPluginFactory {
+    config: StandardCompactionConfig,
 }
 
-impl RollingHistoryPluginFactory {
-    pub fn new(config: RollingHistoryConfig) -> Self {
+impl StandardCompactionPluginFactory {
+    pub fn new(config: StandardCompactionConfig) -> Self {
         Self { config }
     }
 }
 
-impl Default for RollingHistoryPluginFactory {
+impl Default for StandardCompactionPluginFactory {
     fn default() -> Self {
-        Self::new(RollingHistoryConfig)
+        Self::new(StandardCompactionConfig)
     }
 }
 
-impl PluginFactory for RollingHistoryPluginFactory {
+impl PluginFactory for StandardCompactionPluginFactory {
     fn id(&self) -> &'static str {
-        ROLLING_HISTORY_PLUGIN_ID
+        STANDARD_COMPACTION_PLUGIN_ID
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(RollingHistoryPlugin {
+        Ok(Arc::new(StandardCompactionPlugin {
             config: self.config.clone(),
         }))
     }
 }
 
-struct RollingHistoryPlugin {
-    config: RollingHistoryConfig,
+struct StandardCompactionPlugin {
+    config: StandardCompactionConfig,
 }
 
-impl SessionPlugin for RollingHistoryPlugin {
+impl SessionPlugin for StandardCompactionPlugin {
     fn id(&self) -> &'static str {
-        ROLLING_HISTORY_PLUGIN_ID
+        STANDARD_COMPACTION_PLUGIN_ID
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let config = self.config.clone();
+        reg.context().prepare_turn(
+            100,
+            Arc::new(StandardCompactionTurnTransform::new(config.clone())),
+        );
         reg.context()
-            .prepare_turn(100, Arc::new(RollingTurnTransform::new(config.clone())));
-        reg.context()
-            .compact(100, Arc::new(RollingContextCompactor::new(config)));
+            .compact(100, Arc::new(StandardContextCompactor::new(config)));
         reg.turn()
             .after(Arc::new(|ctx: lash_core::plugin::TurnResultHookContext| {
                 Box::pin(async move { overflow_recovery_after_turn(&ctx).await })
@@ -691,18 +691,18 @@ impl SessionPlugin for RollingHistoryPlugin {
     }
 }
 
-struct RollingTurnTransform;
+struct StandardCompactionTurnTransform;
 
-impl RollingTurnTransform {
-    fn new(_config: RollingHistoryConfig) -> Self {
+impl StandardCompactionTurnTransform {
+    fn new(_config: StandardCompactionConfig) -> Self {
         Self
     }
 }
 
 #[async_trait]
-impl TurnContextTransform for RollingTurnTransform {
+impl TurnContextTransform for StandardCompactionTurnTransform {
     fn id(&self) -> &'static str {
-        "rolling_history.prepare_turn"
+        "standard_compaction.prepare_turn"
     }
 
     async fn transform(
@@ -779,7 +779,7 @@ impl TurnContextTransform for RollingTurnTransform {
             ctx.session_graph
                 .emit_trace_event(
                     trace_context.clone(),
-                    lash_core::TraceEvent::RollingHistoryCompactionNeeded {
+                    lash_core::TraceEvent::CompactionNeeded {
                         context_budget_tokens: pressure.context_budget_tokens,
                         max_context_tokens: pressure.max_context_tokens,
                         threshold_tokens: compaction_threshold(pressure.max_context_tokens),
@@ -805,7 +805,7 @@ impl TurnContextTransform for RollingTurnTransform {
             ctx.session_graph
                 .emit_trace_event(
                     trace_context,
-                    lash_core::TraceEvent::RollingHistoryPromptPruned {
+                    lash_core::TraceEvent::PromptViewPruned {
                         context_budget_tokens: pressure.context_budget_tokens,
                         max_context_tokens: pressure.max_context_tokens,
                         dropped_prefix_messages: 0,
@@ -824,7 +824,7 @@ impl TurnContextTransform for RollingTurnTransform {
         ctx.session_graph
             .emit_trace_event(
                 trace_context,
-                lash_core::TraceEvent::RollingHistoryPromptPruned {
+                lash_core::TraceEvent::PromptViewPruned {
                     context_budget_tokens: pressure.context_budget_tokens,
                     max_context_tokens: pressure.max_context_tokens,
                     dropped_prefix_messages,
@@ -836,18 +836,18 @@ impl TurnContextTransform for RollingTurnTransform {
     }
 }
 
-struct RollingContextCompactor;
+struct StandardContextCompactor;
 
-impl RollingContextCompactor {
-    fn new(_config: RollingHistoryConfig) -> Self {
+impl StandardContextCompactor {
+    fn new(_config: StandardCompactionConfig) -> Self {
         Self
     }
 }
 
 #[async_trait]
-impl ContextCompactor for RollingContextCompactor {
+impl ContextCompactor for StandardContextCompactor {
     fn id(&self) -> &'static str {
-        "rolling_history.compact"
+        "standard_compaction.compact"
     }
 
     async fn compact(
@@ -862,7 +862,7 @@ impl ContextCompactor for RollingContextCompactor {
         ctx.session_graph
             .emit_trace_event(
                 trace_context.clone(),
-                lash_core::TraceEvent::RollingHistoryCompactionStarted {
+                lash_core::TraceEvent::CompactionStarted {
                     source_messages: ctx.state.messages().len(),
                     instructions_present: ctx
                         .instructions
@@ -892,7 +892,7 @@ impl ContextCompactor for RollingContextCompactor {
         ctx.session_graph
             .emit_trace_event(
                 trace_context,
-                lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes },
+                lash_core::TraceEvent::CompactionCompleted { summary_nodes },
             )
             .await?;
         compaction

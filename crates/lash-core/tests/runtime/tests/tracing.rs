@@ -330,7 +330,7 @@ where
 }
 
 #[tokio::test]
-async fn runtime_session_graph_service_routes_rolling_history_event_to_real_sink() {
+async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_sink() {
     let trace_path = std::env::temp_dir().join(format!(
         "lash-runtime-plugin-trace-{}-{}.jsonl",
         std::process::id(),
@@ -351,7 +351,7 @@ async fn runtime_session_graph_service_routes_rolling_history_event_to_real_sink
     graph
         .emit_trace_event(
             lash_core::TraceContext::default().for_session("emitter-supplied-id"),
-            lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 },
+            lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 },
         )
         .await
         .expect("runtime graph service should route trace records");
@@ -363,7 +363,7 @@ async fn runtime_session_graph_service_routes_rolling_history_event_to_real_sink
     assert_eq!(record.context.session_id.as_deref(), Some("root"));
     assert!(matches!(
         record.event,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 }
     ));
     let _ = std::fs::remove_file(trace_path);
 }

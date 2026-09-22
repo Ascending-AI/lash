@@ -33,7 +33,7 @@ lash-http-transport = { workspace = true }
 lashlang = { workspace = true }
 lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
 lash-plugin-process-controls = { workspace = true }
-lash-plugin-rolling-history = { workspace = true }
+lash-plugin-standard-compaction = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-postgres-store = { workspace = true }

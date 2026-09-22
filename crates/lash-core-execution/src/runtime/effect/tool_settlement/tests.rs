@@ -70,10 +70,8 @@ fn message(content: &str) -> PluginMessage {
     PluginMessage {
         id: None,
         role: MessageRole::Assistant,
-        content: content.to_string(),
         origin: None,
-        parts: Vec::new(),
-        attachments: Vec::new(),
+        parts: vec![crate::Part::text(String::new(), content.to_string(), None)],
     }
 }
 

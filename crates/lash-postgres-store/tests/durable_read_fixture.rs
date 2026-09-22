@@ -25,7 +25,13 @@ mod support;
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
 mod fixture;
 
+const SETTLEMENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-f9e0aa07d/postgres-expected.json",
+];
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const MESSAGE_BODY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-4883e7a46/postgres-expected.json",
+];
 const ENVELOPE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-95-e7d07c89b/postgres-expected.json",
 ];
@@ -807,6 +813,19 @@ async fn refresh_prior_fixture_node_bodies(pool: &sqlx::PgPool) {
     for (node_id, parent_node_id, node_json) in rows {
         let mut body: serde_json::Value =
             serde_json::from_str(&node_json).expect("parse prior fixture node body");
+        // This refusal fixture retains obsolete checkpoint component bytes, but
+        // its surrounding conversation must use the current part shape so the
+        // test reaches component hydration instead of failing at node decode.
+        if let Some(parts) = body
+            .pointer_mut("/event/Conversation/parts")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for part in parts {
+                part.as_object_mut()
+                    .expect("fixture part object")
+                    .remove("prune_state");
+            }
+        }
         body["schema_version"] =
             serde_json::Value::from(lash_core::SESSION_NODE_BODY_SCHEMA_VERSION);
         let record = lash_core::SessionNodeRecord::decode_storage_body(

@@ -67,7 +67,7 @@ dependencies = [
  "lash-internal-llm-tools",
  "lash-internal-plugin-mcp",
  "lash-internal-plugin-process-controls",
- "lash-internal-plugin-rolling-history",
+ "lash-internal-plugin-standard-compaction",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
@@ -2414,7 +2414,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-internal-plugin-rolling-history"
+name = "lash-internal-plugin-standard-compaction"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
@@ -2798,7 +2798,7 @@ dependencies = [
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-tools",
  "lash-internal-plugin-process-controls",
- "lash-internal-plugin-rolling-history",
+ "lash-internal-plugin-standard-compaction",
  "lash-internal-plugin-tool-output-budget",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
@@ -2841,7 +2841,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-llm-tools",
  "lash-internal-plugin-process-controls",
- "lash-internal-plugin-rolling-history",
+ "lash-internal-plugin-standard-compaction",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
@@ -2878,7 +2878,7 @@ dependencies = [
  "lash-internal-llm-tools",
  "lash-internal-plugin-mcp",
  "lash-internal-plugin-process-controls",
- "lash-internal-plugin-rolling-history",
+ "lash-internal-plugin-standard-compaction",
  "lash-internal-plugin-tool-output-budget",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",

@@ -85,21 +85,21 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 5. **Pressure is bounded and trace-gated.** Submit several distinctive marker turns (at
    least two, no more than six),
    each with enough deterministic filler to approach the 21,000-token compaction threshold.
-   Stop adding pressure as soon as `rolling_history_compaction_needed` appears. Never exceed
+   Stop adding pressure as soon as `compaction_needed` appears. Never exceed
    six pressure turns and never fill the window until provider rejection.
-6. **Record both rolling-history decision events by scope.** The first
-   `rolling_history_compaction_needed` must report `max_context_tokens == 41000`,
+6. **Record both standard-compaction decision events by scope.** The first
+   `compaction_needed` must report `max_context_tokens == 41000`,
    `threshold_tokens == 21000`, and `context_budget_tokens >= threshold_tokens`.
-   `rolling_history_prompt_pruned` must carry non-negative dropped/retained counts and be
+   `prompt_view_pruned` must carry non-negative dropped/retained counts and be
    turn-scoped. Missing or incorrectly parented decision evidence is a FAIL.
    The decision consumes the prior completed prompt's usage: if the sixth bounded prompt is
    the first to cross 21,000 tokens, submit one short marker-only probe (no more filler) and
    require the events on that probe.
 
-   `rolling_history_compaction_started` and `rolling_history_compaction_completed` are
+   `compaction_started` and `compaction_completed` are
    intentionally out of scope here. They describe host-invoked `compact_context` lifecycle
    work in standard mode, covered by the slack-clone variant-B compaction runbook and core
-   rolling-history regression tests. The workbench is the RLM-only reference host: its
+   standard-compaction regression tests. The workbench is the RLM-only reference host: its
    durable context transition is the agent-driven `control.continue_as` frame switch that
    this runbook exercises, not a host-invoked standard-mode compaction.
 7. **Exercise a real tool before switching.** At least one pressure turn must produce paired
@@ -154,7 +154,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   `lash-sessions/durable-core.db.graph_nodes`. Decode `node_json`; reconstruct the active
   ancestry and both frame-scoped read models rather than treating all raw nodes as visible.
 - **Layer 3 — trace:** filter `trace.jsonl` by `context.session_id == <S>`. Preserve full
-  records for rolling-history events, tool calls, and `turn_completed`, including graph and
+  records for standard-compaction events, tool calls, and `turn_completed`, including graph and
   parent ids. The browser's work rail calls `/api/work` during hydration and on its polling
   interval; those reads legitimately emit session-scoped `agent_workbench.api.work.response`
   custom records even before the first turn. Preserve them, but do not count them as runtime
@@ -174,12 +174,12 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 Start from a nonexistent data directory. Boot with the exact environment above, gate
 `/healthz`, and open the scoped URL. Require the composer, empty transcript, rendered session
 id `<S>`, `/api/state.settings.session_id == <S>`, idle, and no active turns. Require zero
-session-scoped graph rows and zero session-scoped turn, rolling-history, or tool-call trace
+session-scoped graph rows and zero session-scoped turn, standard-compaction, or tool-call trace
 records. Passive `agent_workbench.api.work.response` records with an empty result are expected
 from the rendered browser surface and must be recorded separately from that activity gate.
 Record the workbench PID, Restate container id and `StartedAt`, model, and exact
 `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS` launch value; the first Phase 1
-`rolling_history_compaction_needed.max_context_tokens` is the runtime proof that the session
+`compaction_needed.max_context_tokens` is the runtime proof that the session
 policy delivered that value to the hook. Screenshot `00-scoped-empty.png`; save
 `00-identities.json`, `00-state.json`, and `00-trace.json`.
 
@@ -196,12 +196,12 @@ explicitly label
 
 After every send, gate the relevant `turn_completed`, idle, empty active turns, and stable
 row/message counts, then run the three-layer cross-check. Poll the trace after each turn and
-stop pressure immediately when `rolling_history_compaction_needed` appears; FAIL if it has
+stop pressure immediately when `compaction_needed` appears; FAIL if it has
 not appeared after the sixth pressure turn plus the permitted short threshold probe from
 golden rule 6. Gate the payloads and scope/parentage in golden rule 6, and the successful
 paired tool records in golden rule 7. Screenshot
 `01-pressure-ready.png`; save `01-pressure-{dom,state,store,trace}.json`,
-`01-rolling-history.json`, and `01-tool-call.json`.
+`01-standard-compaction.json`, and `01-tool-call.json`.
 
 ## Phase 2 — Drive and prove `continue_as`
 
@@ -296,8 +296,8 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot/scope | `/healthz` 200; exact 41,000-token launch; rendered/API session `<S>`; DOM/API/graph and runtime-activity trace empty (passive empty work-poll records allowed and retained) | | `00-scoped-empty.png`, `00-identities.json`, `00-state.json`, `00-trace.json` |
-| Bounded pressure | 2–6 marker turns; `rolling_history_compaction_needed` has 41000/21000 budget fields | | `01-pressure-ready.png`, `01-rolling-history.json` |
-| Rolling-history scope | needed/pruned are turn-scoped with typed payloads retained; host-invoked standard-mode started/completed lifecycle is out of scope | | `01-rolling-history.json` |
+| Bounded pressure | 2–6 marker turns; `compaction_needed` has 41000/21000 budget fields | | `01-pressure-ready.png`, `01-standard-compaction.json` |
+| Standard-compaction scope | needed/pruned are turn-scoped with typed payloads retained; host-invoked standard-mode started/completed lifecycle is out of scope | | `01-standard-compaction.json` |
 | Real tool turn | paired successful tool start/completion with one call id | | `01-tool-call.json` |
 | Switch lever | organic pressure tried once; actual lever recorded honestly | | `02-lever.json` |
 | Frame switch | matching trace switch + `frame_open{reason:"continue_as"}`; follow frame completed coherently | | `02-frame-graph.json`, `02-switch-trace.json` |
@@ -309,7 +309,7 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 | Restart/reload identity | identical row multiset and identical durable pre-switch/new-frame pair plus seed | | `06-after-restart-reload.png`, `06-*.json` |
 | Teardown | process/container gone; port closed; state directory removed | | command log |
 
-**Aggregate:** did a real workbench RLM agent, under bounded rolling-history pressure, tail-call
+**Aggregate:** did a real workbench RLM agent, under bounded standard-compaction pressure, tail-call
 through `control.continue_as` into a structurally proven clean frame, carry exactly its seed,
 render the frame boundary according to the predeclared asymmetric answer key, demonstrate
 seeded competence without leaking a deliberately omitted fact, and preserve that truth across

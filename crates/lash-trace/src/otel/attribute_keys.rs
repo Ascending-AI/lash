@@ -116,21 +116,17 @@ pub(super) const LASH_REQUEST_BODY_JSON_OMITTED_REASON: &str =
 pub(super) const LASH_REQUEST_BODY_LEN: &str = "lash.request.body_len";
 pub(super) const LASH_REQUEST_BODY_SHA256: &str = "lash.request.body_sha256";
 pub(super) const LASH_RETRY_ATTEMPTS_JSON: &str = "lash.retry.attempts_json";
-pub(super) const LASH_ROLLING_HISTORY_CONTEXT_BUDGET_TOKENS: &str =
-    "lash.rolling_history.context_budget_tokens";
-pub(super) const LASH_ROLLING_HISTORY_DROPPED_PREFIX_MESSAGES: &str =
-    "lash.rolling_history.dropped_prefix_messages";
-pub(super) const LASH_ROLLING_HISTORY_INSTRUCTIONS_PRESENT: &str =
-    "lash.rolling_history.instructions_present";
-pub(super) const LASH_ROLLING_HISTORY_MAX_CONTEXT_TOKENS: &str =
-    "lash.rolling_history.max_context_tokens";
-pub(super) const LASH_ROLLING_HISTORY_RETAINED_MESSAGES: &str =
-    "lash.rolling_history.retained_messages";
-pub(super) const LASH_ROLLING_HISTORY_SOURCE_MESSAGES: &str =
-    "lash.rolling_history.source_messages";
-pub(super) const LASH_ROLLING_HISTORY_SUMMARY_NODES: &str = "lash.rolling_history.summary_nodes";
-pub(super) const LASH_ROLLING_HISTORY_THRESHOLD_TOKENS: &str =
-    "lash.rolling_history.threshold_tokens";
+pub(super) const LASH_COMPACTION_CONTEXT_BUDGET_TOKENS: &str =
+    "lash.compaction.context_budget_tokens";
+pub(super) const LASH_COMPACTION_DROPPED_PREFIX_MESSAGES: &str =
+    "lash.compaction.dropped_prefix_messages";
+pub(super) const LASH_COMPACTION_INSTRUCTIONS_PRESENT: &str =
+    "lash.compaction.instructions_present";
+pub(super) const LASH_COMPACTION_MAX_CONTEXT_TOKENS: &str = "lash.compaction.max_context_tokens";
+pub(super) const LASH_COMPACTION_RETAINED_MESSAGES: &str = "lash.compaction.retained_messages";
+pub(super) const LASH_COMPACTION_SOURCE_MESSAGES: &str = "lash.compaction.source_messages";
+pub(super) const LASH_COMPACTION_SUMMARY_NODES: &str = "lash.compaction.summary_nodes";
+pub(super) const LASH_COMPACTION_THRESHOLD_TOKENS: &str = "lash.compaction.threshold_tokens";
 pub(super) const LASH_STORE_OPERATION: &str = "lash.store.operation";
 pub(super) const LASH_STREAM_ELAPSED_MS: &str = "lash.stream.elapsed_ms";
 pub(super) const LASH_STREAM_EVENT_NAME: &str = "lash.stream.event_name";

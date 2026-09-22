@@ -151,20 +151,10 @@ pub enum MessageOrigin {
     },
 }
 
-/// A typed message part. Each variant owns exactly the fields its kind
-/// may carry — a text part cannot smuggle a `tool_call_id`, and a tool
-/// call cannot lack one. `id` is stable identity within the owning
-/// `Message` (`{message_id}.p{i}`), `content` is the human-readable or
-/// tool-facing text, and `prune_state` tracks lifecycle within the
-/// context window.
-///
-/// Serialization writes the same flat object the struct wrote —
-/// `{"id": …, "kind": "Text", "content": …, "prune_state": …}` with
-/// fields in the original order — via [`FlatPartRef`], so durable
-/// payloads stay byte-identical. Deserialization accepts that same flat
-/// shape and rejects pairings the constructors cannot produce — e.g. a
-/// `Text` part carrying a `tool_call_id` — with
-/// [`InvalidPartCombination`].
+/// An ordered message part whose variant owns its kind-specific fields.
+/// `id` identifies the part within its message; `content` is rendered text.
+/// Serialization uses a flat object and rejects unknown fields and invalid
+/// kind/field combinations through [`InvalidPartCombination`].
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Part {
@@ -174,7 +164,6 @@ pub enum Part {
         id: String,
         content: String,
         response_meta: Option<ResponseTextMeta>,
-        prune_state: PruneState,
     },
     /// A pointer at a stored attachment. Tool-result attachments also
     /// carry the `tool_call_id`/`tool_name` of the call they answer;
@@ -186,33 +175,19 @@ pub enum Part {
         attachment: Option<PartAttachment>,
         tool_call_id: Option<String>,
         tool_name: Option<String>,
-        prune_state: PruneState,
     },
     /// Fenced code block.
-    Code {
-        id: String,
-        content: String,
-        prune_state: PruneState,
-    },
+    Code { id: String, content: String },
     /// Tool or process output.
-    Output {
-        id: String,
-        content: String,
-        prune_state: PruneState,
-    },
+    Output { id: String, content: String },
     /// An error surfaced as a message part.
-    Error {
-        id: String,
-        content: String,
-        prune_state: PruneState,
-    },
+    Error { id: String, content: String },
     /// Markdown prose (e.g. a composed document); `response_meta` carries
     /// provider-assigned phase/replay metadata when present.
     Prose {
         id: String,
         content: String,
         response_meta: Option<ResponseTextMeta>,
-        prune_state: PruneState,
     },
     /// A tool invocation request. `tool_call_id` and `tool_name` are the
     /// provider-side call id and the tool's registered name;
@@ -224,7 +199,6 @@ pub enum Part {
         tool_call_id: String,
         tool_name: String,
         tool_replay: Option<ProviderReplayMeta>,
-        prune_state: PruneState,
     },
     /// The text result answering a tool call.
     ToolResult {
@@ -232,7 +206,6 @@ pub enum Part {
         content: String,
         tool_call_id: String,
         tool_name: String,
-        prune_state: PruneState,
     },
     /// Chain-of-thought / reasoning item captured from providers that
     /// expose a reasoning channel. `content` holds the human-readable
@@ -247,7 +220,6 @@ pub enum Part {
         id: String,
         content: String,
         reasoning_meta: Option<ProviderReasoningReplay>,
-        prune_state: PruneState,
     },
 }
 
@@ -273,10 +245,9 @@ impl std::fmt::Display for InvalidPartCombination {
 
 impl std::error::Error for InvalidPartCombination {}
 
-/// The pre-enum flat wire shape of `Part`, kept as the compatibility
-/// reader: stored snapshots and externally produced parts decode through
-/// it, then are validated into the variant that `kind` selects.
+/// Strict flat wire shape, validated into the variant selected by `kind`.
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FlatPart {
     id: String,
     kind: PartKind,
@@ -289,7 +260,6 @@ struct FlatPart {
     tool_name: Option<String>,
     #[serde(default)]
     tool_replay: Option<ProviderReplayMeta>,
-    prune_state: PruneState,
     #[serde(default)]
     reasoning_meta: Option<ProviderReasoningReplay>,
     #[serde(default)]
@@ -353,7 +323,6 @@ impl FlatPart {
                 id: self.id,
                 content: self.content,
                 response_meta: self.response_meta,
-                prune_state: self.prune_state,
             },
             PartKind::Attachment => {
                 // A tool-result attachment carries the call pair; an
@@ -370,29 +339,24 @@ impl FlatPart {
                     attachment: self.attachment,
                     tool_call_id,
                     tool_name,
-                    prune_state: self.prune_state,
                 }
             }
             PartKind::Code => Part::Code {
                 id: self.id,
                 content: self.content,
-                prune_state: self.prune_state,
             },
             PartKind::Output => Part::Output {
                 id: self.id,
                 content: self.content,
-                prune_state: self.prune_state,
             },
             PartKind::Error => Part::Error {
                 id: self.id,
                 content: self.content,
-                prune_state: self.prune_state,
             },
             PartKind::Prose => Part::Prose {
                 id: self.id,
                 content: self.content,
                 response_meta: self.response_meta,
-                prune_state: self.prune_state,
             },
             PartKind::ToolCall => {
                 let (tool_call_id, tool_name) = match (self.tool_call_id, self.tool_name) {
@@ -406,7 +370,6 @@ impl FlatPart {
                     tool_call_id,
                     tool_name,
                     tool_replay: self.tool_replay,
-                    prune_state: self.prune_state,
                 }
             }
             PartKind::ToolResult => {
@@ -420,14 +383,12 @@ impl FlatPart {
                     content: self.content,
                     tool_call_id,
                     tool_name,
-                    prune_state: self.prune_state,
                 }
             }
             PartKind::Reasoning => Part::Reasoning {
                 id: self.id,
                 content: self.content,
                 reasoning_meta: self.reasoning_meta,
-                prune_state: self.prune_state,
             },
         };
         Ok(part)
@@ -451,7 +412,6 @@ struct FlatPartRef<'a> {
     tool_name: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_replay: Option<&'a ProviderReplayMeta>,
-    prune_state: &'a PruneState,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_meta: Option<&'a ProviderReasoningReplay>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -468,7 +428,6 @@ impl serde::Serialize for Part {
             tool_call_id: self.tool_call_id(),
             tool_name: self.tool_name(),
             tool_replay: self.tool_replay(),
-            prune_state: self.prune_state(),
             reasoning_meta: self.reasoning_meta(),
             response_meta: self.response_meta(),
         }
@@ -510,30 +469,14 @@ pub struct PartAttachment {
     pub source: AttachmentSource,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum PruneState {
-    Intact,
-    Cleared,
-    Deleted {
-        breadcrumb: String,
-        archive_hash: String,
-    },
-    Summarized {
-        summary: String,
-        archive_hash: String,
-    },
-}
-
 impl Part {
     #[cfg(test)]
     fn base(id: String, kind: PartKind, content: String) -> Self {
-        let prune_state = PruneState::Intact;
         match kind {
             PartKind::Text => Self::Text {
                 id,
                 content,
                 response_meta: None,
-                prune_state,
             },
             PartKind::Attachment => Self::Attachment {
                 id,
@@ -541,28 +484,14 @@ impl Part {
                 attachment: None,
                 tool_call_id: None,
                 tool_name: None,
-                prune_state,
             },
-            PartKind::Code => Self::Code {
-                id,
-                content,
-                prune_state,
-            },
-            PartKind::Output => Self::Output {
-                id,
-                content,
-                prune_state,
-            },
-            PartKind::Error => Self::Error {
-                id,
-                content,
-                prune_state,
-            },
+            PartKind::Code => Self::Code { id, content },
+            PartKind::Output => Self::Output { id, content },
+            PartKind::Error => Self::Error { id, content },
             PartKind::Prose => Self::Prose {
                 id,
                 content,
                 response_meta: None,
-                prune_state,
             },
             PartKind::ToolCall => Self::ToolCall {
                 id,
@@ -570,20 +499,17 @@ impl Part {
                 tool_call_id: String::new(),
                 tool_name: String::new(),
                 tool_replay: None,
-                prune_state,
             },
             PartKind::ToolResult => Self::ToolResult {
                 id,
                 content,
                 tool_call_id: String::new(),
                 tool_name: String::new(),
-                prune_state,
             },
             PartKind::Reasoning => Self::Reasoning {
                 id,
                 content,
                 reasoning_meta: None,
-                prune_state,
             },
         }
     }
@@ -666,38 +592,6 @@ impl Part {
         }
     }
 
-    /// Lifecycle within the context window: intact, cleared, deleted
-    /// (breadcrumb retained), or summarized.
-    pub fn prune_state(&self) -> &PruneState {
-        match self {
-            Self::Text { prune_state, .. }
-            | Self::Attachment { prune_state, .. }
-            | Self::Code { prune_state, .. }
-            | Self::Output { prune_state, .. }
-            | Self::Error { prune_state, .. }
-            | Self::Prose { prune_state, .. }
-            | Self::ToolCall { prune_state, .. }
-            | Self::ToolResult { prune_state, .. }
-            | Self::Reasoning { prune_state, .. } => prune_state,
-        }
-    }
-
-    /// Mutable access to the prune lifecycle — pruning plugins rewrite
-    /// content and state together.
-    pub fn prune_state_mut(&mut self) -> &mut PruneState {
-        match self {
-            Self::Text { prune_state, .. }
-            | Self::Attachment { prune_state, .. }
-            | Self::Code { prune_state, .. }
-            | Self::Output { prune_state, .. }
-            | Self::Error { prune_state, .. }
-            | Self::Prose { prune_state, .. }
-            | Self::ToolCall { prune_state, .. }
-            | Self::ToolResult { prune_state, .. }
-            | Self::Reasoning { prune_state, .. } => prune_state,
-        }
-    }
-
     /// The stored attachment this part points at; `Some` only for
     /// attachment parts that carry one.
     pub fn attachment(&self) -> Option<&PartAttachment> {
@@ -776,7 +670,6 @@ impl Part {
             id,
             content,
             response_meta,
-            prune_state: PruneState::Intact,
         }
     }
 
@@ -791,7 +684,6 @@ impl Part {
             attachment,
             tool_call_id: None,
             tool_name: None,
-            prune_state: PruneState::Intact,
         }
     }
 
@@ -808,32 +700,19 @@ impl Part {
             attachment: Some(attachment),
             tool_call_id: Some(tool_call_id),
             tool_name: Some(tool_name),
-            prune_state: PruneState::Intact,
         }
     }
 
     pub fn code(id: String, content: String) -> Self {
-        Self::Code {
-            id,
-            content,
-            prune_state: PruneState::Intact,
-        }
+        Self::Code { id, content }
     }
 
     pub fn output(id: String, content: String) -> Self {
-        Self::Output {
-            id,
-            content,
-            prune_state: PruneState::Intact,
-        }
+        Self::Output { id, content }
     }
 
     pub fn error(id: String, content: String) -> Self {
-        Self::Error {
-            id,
-            content,
-            prune_state: PruneState::Intact,
-        }
+        Self::Error { id, content }
     }
 
     pub fn prose(id: String, content: String, response_meta: Option<ResponseTextMeta>) -> Self {
@@ -841,7 +720,6 @@ impl Part {
             id,
             content,
             response_meta,
-            prune_state: PruneState::Intact,
         }
     }
 
@@ -858,7 +736,6 @@ impl Part {
             tool_call_id,
             tool_name,
             tool_replay,
-            prune_state: PruneState::Intact,
         }
     }
 
@@ -873,7 +750,6 @@ impl Part {
             content,
             tool_call_id,
             tool_name,
-            prune_state: PruneState::Intact,
         }
     }
 
@@ -886,7 +762,6 @@ impl Part {
             id,
             content,
             reasoning_meta,
-            prune_state: PruneState::Intact,
         }
     }
 
@@ -895,7 +770,7 @@ impl Part {
         // Reasoning parts are not user-visible text and aren't sent to the
         // model as flat prompt content. Provider adapters may re-emit them
         // via structured replay metadata instead. Excluding them from the
-        // accounting keeps the rolling-history plugin's prune decisions
+        // accounting keeps the standard-compaction plugin's prune decisions
         // driven by real conversation content.
         if matches!(self.kind(), PartKind::Reasoning) {
             return 0;
@@ -923,18 +798,7 @@ impl Part {
                 content.clone()
             };
         }
-        match self.prune_state() {
-            PruneState::Intact => self.content().to_string(),
-            PruneState::Cleared => "[Old tool result content cleared]".to_string(),
-            PruneState::Deleted {
-                breadcrumb,
-                archive_hash,
-            } => format!("[pruned:{} — {}]", archive_hash, breadcrumb),
-            PruneState::Summarized {
-                summary,
-                archive_hash,
-            } => format!("[SUMMARY of original {}]\n{}", archive_hash, summary),
-        }
+        self.content().to_string()
     }
 }
 

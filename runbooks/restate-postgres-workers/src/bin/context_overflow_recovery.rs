@@ -48,11 +48,11 @@ const OVERSIZED_BYTES: usize = 512 * 1024;
 /// turn's context.
 const OVERSIZED_TOOL: &str = "oversized_report";
 
-const ROLLING_HISTORY_PLUGIN_ID: &str = "rolling_history";
+const STANDARD_COMPACTION_PLUGIN_ID: &str = "standard_compaction";
 const OVERFLOW_RECOVERY_MARKER_TITLE: &str =
-    "Rolling-history context-overflow recovery marker (pending):";
+    "Standard-compaction context-overflow recovery marker (pending):";
 const OVERFLOW_RECOVERY_COMPLETED_TITLE: &str =
-    "Rolling-history context-overflow recovery completed:";
+    "Standard-compaction context-overflow recovery completed:";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -138,7 +138,7 @@ async fn overflow_and_recovery(
             lash_core::MessageOrigin::Plugin { plugin_id, .. } => plugin_id.clone(),
             _ => String::new(),
         });
-        origin.as_deref() == Some(ROLLING_HISTORY_PLUGIN_ID)
+        origin.as_deref() == Some(STANDARD_COMPACTION_PLUGIN_ID)
             && message
                 .parts
                 .iter()
@@ -341,7 +341,7 @@ impl Harness {
                     .unwrap_or_else(|| std::path::PathBuf::from("/dev/null")),
             )
             .plugin(Arc::new(
-                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
             ))
             .plugin(Arc::new(OverflowPluginFactory {
                 tool_bytes: Arc::clone(&tool_bytes),
