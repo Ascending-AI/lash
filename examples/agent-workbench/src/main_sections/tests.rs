@@ -83,6 +83,10 @@ mod recoverable_chat_bare_prose_tests;
 #[path = "tests/recoverable_chat_failures.rs"]
 mod recoverable_chat_failures_tests;
 #[cfg(test)]
+#[path = "tests/reference_transport.rs"]
+mod reference_transport_tests;
+pub(crate) use reference_transport_tests::recoverable_chat_test_state_with_replay_store;
+#[cfg(test)]
 #[path = "tests/typescript_dialect.rs"]
 mod typescript_dialect_tests;
 pub(crate) use typescript_dialect_tests::{
