@@ -7,7 +7,8 @@ Accepted.
 Amended by [ADR 0100](0100-the-run-observation-contract.md): expression-valued
 graph fields carry authoritative IR, dialects only parse and print them, and
 the projector lives in the IR crate with dialect print and parse operations
-injected.
+injected. FIG-3467 advances the workflow graph schema from 11 to 12 and the
+type facet schema from 2 to 3.
 
 Amended 2026-09-13 (FIG-2990): under [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) starting a process is an ordinary
 call node rather than a dedicated start effect kind, and a process literal in

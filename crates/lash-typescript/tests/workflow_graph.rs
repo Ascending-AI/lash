@@ -200,6 +200,7 @@ fn workflow_graph_ir_json_golden_is_exact() {
     let graph =
         workflow_graph_from_source("await tools.lookup({ query: \"x\" });\nawait sleep(\"1s\");\n")
             .expect("fixture projects");
+    assert_eq!(graph.schema_version, 12);
     let kinds = serde_json::Value::Array(
         graph
             .main
