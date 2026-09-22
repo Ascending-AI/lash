@@ -28,6 +28,9 @@ lash_rust_library(
         "perf-witness",
         "testing",
     ],
+    compile_data_patterns = [
+        "Cargo.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -413,6 +416,9 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
+    compile_data_patterns = [
+        "Cargo.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -436,6 +442,9 @@ lash_rust_feature_library(
         "lashlang",
         "perf-witness",
         "testing",
+    ],
+    compile_data_patterns = [
+        "Cargo.toml",
     ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
@@ -463,6 +472,9 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
+    compile_data_patterns = [
+        "Cargo.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -487,6 +499,9 @@ lash_rust_feature_library(
         "lashlang",
         "perf-witness",
         "testing",
+    ],
+    compile_data_patterns = [
+        "Cargo.toml",
     ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
@@ -514,6 +529,9 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
+    compile_data_patterns = [
+        "Cargo.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -537,6 +555,9 @@ lash_rust_feature_library(
         "lashlang",
         "perf-witness",
         "testing",
+    ],
+    compile_data_patterns = [
+        "Cargo.toml",
     ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
@@ -562,6 +583,9 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
+    compile_data_patterns = [
+        "Cargo.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -583,6 +607,9 @@ lash_rust_feature_library(
         "lashlang",
         "perf-witness",
         "testing",
+    ],
+    compile_data_patterns = [
+        "Cargo.toml",
     ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
