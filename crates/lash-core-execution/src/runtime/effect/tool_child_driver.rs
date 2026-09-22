@@ -277,6 +277,10 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
                 )
                 .with_turn_cancel_observation(false),
             ),
+            // Wait *options*, not a self-running leaf: the tier's own dispatch
+            // — the store driver's `execute_effect_cancellable` arm, the native
+            // controller's `execute_effect` arm — is what reads them and waits
+            // on its await-event registry.
             RuntimeEffectCommand::AwaitEvent { .. } => Some(
                 RuntimeEffectLocalExecutor::await_event_with_clock(
                     CancellationToken::new(),

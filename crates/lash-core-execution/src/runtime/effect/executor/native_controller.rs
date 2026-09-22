@@ -293,7 +293,7 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         group.validate_execution_scope(group.invocation().execution_scope())?;
         let executors = self.groups.registered_executors()?;
-        NativeEffectGroups::open(&self.groups, &executors, group)
+        NativeEffectGroups::open(&self.groups, &executors, group, self)
     }
 
     async fn await_next_settlement(
@@ -783,6 +783,7 @@ impl NativeEffectGroups {
         groups: &Arc<Self>,
         executors: &Arc<dyn GroupExecutors>,
         group: RuntimeEffectGroup,
+        controller: &NativeRuntimeEffectController,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let handle = EffectGroupHandle::new(&group);
         {
@@ -813,7 +814,7 @@ impl NativeEffectGroups {
             open.insert(group.group_key().to_string(), Arc::clone(&state));
             state
         };
-        Self::dispatch(groups, &state, group, resolved);
+        Self::dispatch(groups, &state, group, resolved, controller);
         Ok(handle)
     }
 
@@ -826,6 +827,7 @@ impl NativeEffectGroups {
         state: &Arc<NativeEffectGroup>,
         group: RuntimeEffectGroup,
         executors: Vec<RuntimeEffectLocalExecutor<'static>>,
+        controller: &NativeRuntimeEffectController,
     ) {
         let group_key = Arc::<str>::from(group.group_key());
         for (position, (child, executor)) in
@@ -839,9 +841,16 @@ impl NativeEffectGroups {
             // Registered before the task exists, so a fast-finishing child
             // cannot remove a position that was never inserted.
             state.state.lock_recover().running.insert(position);
+            let controller = controller.clone();
             let child_task = tracing::Instrument::instrument(
                 async move {
-                    let execution = executor.execute(child);
+                    // Dispatch through `execute_effect`, not the executor
+                    // directly: some resolved executors are wait *options* an
+                    // `execute` refuses (an `AwaitEvent` child), and this arm
+                    // is where the tier reads them against its registry — the
+                    // same shape `execute_effect_cancellable` gives the store
+                    // tiers.
+                    let execution = controller.execute_effect(child, executor);
                     tokio::pin!(execution);
                     let outcome = tokio::select! {
                         biased;

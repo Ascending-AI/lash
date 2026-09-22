@@ -664,12 +664,7 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
         {
             return Ok(recorded);
         }
-        let outcome = lash_core::RuntimeEffectController::execute_effect(
-            &self.inner,
-            envelope,
-            local_executor,
-        )
-        .await?;
+        let outcome = self.inner.execute_effect(envelope, local_executor).await?;
         self.recorded
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -882,12 +877,7 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         }
         self.realizations
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let outcome = lash_core::RuntimeEffectController::execute_effect(
-            &self.inner,
-            envelope,
-            local_executor,
-        )
-        .await?;
+        let outcome = self.inner.execute_effect(envelope, local_executor).await?;
         *self
             .recorded
             .lock()
