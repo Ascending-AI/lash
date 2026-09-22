@@ -62,8 +62,8 @@ pub fn effect_groups_unsupported(controller: &str) -> RuntimeEffectControllerErr
 pub use lash_core_store::turn_control_binding::admitted_turn_cancel_scope;
 pub use lash_core_store::turn_control_binding::turn_control_binding_id_for_scope;
 pub use lash_core_store::turn_control_binding::{TurnControlBindingId, TurnControlBindingIdError};
-pub(crate) use native_controller::NativeEffectGroups;
 pub use native_controller::NativeRuntimeEffectController;
+pub(crate) use native_controller::{NativeEffectGroups, NativeGroupClosing};
 pub use trigger::TriggerLocalExecution;
 pub use turn_control_authority::{
     TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,

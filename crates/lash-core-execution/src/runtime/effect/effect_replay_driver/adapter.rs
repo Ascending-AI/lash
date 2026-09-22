@@ -262,6 +262,15 @@ impl<T: StoreReplayHost> EffectHost for T {
         )?))
     }
 
+    /// The §7 closing/finalization seam, over this host's own driver so a
+    /// `close` this host serves and a `resume_closing_groups` a redriven turn
+    /// calls advance the same row under the same owner identity.
+    fn effect_group_closing(
+        &self,
+    ) -> Option<Arc<dyn crate::runtime::effect::StoreEffectGroupClosing>> {
+        Some(Arc::clone(self.replay_driver()).into_group_closing())
+    }
+
     /// One implementation for both SQL tiers, because both reach their group
     /// seam through the same shared replay driver.
     fn install_tool_child_host(

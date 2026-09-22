@@ -33,7 +33,7 @@ use lash_core::facade_support::effect_replay_driver::{
     UnsettledGroupChild, decide_effect_claim,
 };
 
-use lash_core::{GroupExecutors, StoreEffectGroupDrain};
+use lash_core::{GroupExecutors, StoreEffectGroupClosing, StoreEffectGroupDrain};
 
 use crate::await_event::{
     PostgresAwaitEventBackend, lock_scope, postgres_await_events, scope_is_retired, wait_sql,
@@ -300,6 +300,11 @@ pub struct PostgresEffectReplayOptions {
     /// [`LeaseTimings`] they configure on the runtime so effect leases expire
     /// on the same failover window as session and process leases.
     pub lease_timings: lash_core::facade_support::LeaseTimings,
+    /// How long a group's finalization waits on a cancel-decided child's
+    /// attempt body after the decision commits (ADR 0099 §7). Construction-
+    /// level like `lease_timings`: the bound is operational, never semantic —
+    /// it changes how long the finalizer waits, never what it commits.
+    pub drain_budget: lash_core::EffectGroupDrainBudget,
 }
 
 #[derive(Clone)]
@@ -491,6 +496,14 @@ impl PostgresEffectHost {
     pub fn group_drain(&self) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::clone(&self.inner).into_group_drain()
     }
+
+    /// The closing/finalization seam over this host's effect journal (ADR 0099
+    /// §7): the durable `closing` fact this host's `close` writes, and the
+    /// four-step cursor a finalizer — or a redriven turn's
+    /// `resume_closing_groups` — advances.
+    pub fn group_closing(&self) -> Arc<dyn StoreEffectGroupClosing> {
+        Arc::clone(&self.inner).into_group_closing()
+    }
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -560,6 +573,7 @@ fn build_effect_replay_driver(
         await_events,
         clock,
         options.lease_timings,
+        options.drain_budget,
     )
 }
 

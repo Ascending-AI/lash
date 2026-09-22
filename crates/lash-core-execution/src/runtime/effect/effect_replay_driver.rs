@@ -1352,6 +1352,9 @@ pub struct StoreEffectReplayDriver<P, A> {
     lease_counter: AtomicU64,
     replay_mode: AtomicBool,
     lease_timings: LeaseTimings,
+    /// The bound step 1 of group finalization waits on a cancel-decided
+    /// child's attempt body after its decision commits (ADR 0099 §7).
+    drain_budget: super::group::EffectGroupDrainBudget,
     /// The groups this driver has open, and the host-owned task set their
     /// children run on. Process-local by design: every durable fact about a
     /// group lives in the journal, and this map holds only what a process that
@@ -1423,6 +1426,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         await_events: AwaitEventCoordinator<A>,
         clock: Arc<dyn crate::Clock>,
         lease_timings: LeaseTimings,
+        drain_budget: super::group::EffectGroupDrainBudget,
     ) -> Self {
         let sequence = EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
         let owner_id = format!(
@@ -1438,6 +1442,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             lease_counter: AtomicU64::new(1),
             replay_mode: AtomicBool::new(false),
             lease_timings,
+            drain_budget,
             groups: groups::DurableEffectGroups::default(),
             group_executors: OnceLock::new(),
             tool_children: OnceLock::new(),
@@ -2326,6 +2331,7 @@ fn sleep_spec(envelope: &RuntimeEffectEnvelope) -> Option<SleepSpec> {
     }
 }
 
+mod closing;
 mod drain;
 mod groups;
 

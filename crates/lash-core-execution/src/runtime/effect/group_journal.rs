@@ -146,6 +146,20 @@ impl EffectGroupRecord {
             created_at_ms,
         }
     }
+
+    /// The disposition now in force: the lifecycle's recorded closing
+    /// disposition once close has committed one, else the declared column.
+    ///
+    /// Once `closing` is durable this — not `loser_disposition` — is the
+    /// authority a drain pass or a reopen must apply, because the close's
+    /// `resolve_close` output is what the row committed to and the declared
+    /// column is only what the opener asked for.
+    #[must_use]
+    pub fn effective_loser_disposition(&self) -> LoserPolicy {
+        self.lifecycle
+            .closing_disposition()
+            .unwrap_or(self.loser_disposition)
+    }
 }
 
 /// How far the four-step close has run, recorded on the group's `closing`

@@ -30,7 +30,7 @@ use lash_core::facade_support::effect_replay_driver::{
 };
 use lash_core::{
     EffectJournalRetirement, EffectRetirementGate, ExecutionScope, GroupExecutors,
-    RuntimeEffectControllerError, RuntimeError, StoreEffectGroupDrain,
+    RuntimeEffectControllerError, RuntimeError, StoreEffectGroupClosing, StoreEffectGroupDrain,
     facade_support::LeaseTimings,
 };
 
@@ -269,6 +269,11 @@ pub struct SqliteEffectReplayOptions {
     /// [`LeaseTimings`] they configure on the runtime so effect leases expire
     /// on the same failover window as session and process leases.
     pub lease_timings: LeaseTimings,
+    /// How long a group's finalization waits on a cancel-decided child's
+    /// attempt body after the decision commits (ADR 0099 §7). Construction-
+    /// level like `lease_timings`: the bound is operational, never semantic —
+    /// it changes how long the finalizer waits, never what it commits.
+    pub drain_budget: lash_core::EffectGroupDrainBudget,
 }
 
 /// Deployment-level SQLite effect host.
@@ -528,6 +533,14 @@ impl SqliteEffectHost {
     pub fn group_drain(&self) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::clone(&self.inner).into_group_drain()
     }
+
+    /// The closing/finalization seam over this host's effect journal (ADR 0099
+    /// §7): the durable `closing` fact this host's `close` writes, and the
+    /// four-step cursor a finalizer — or a redriven turn's
+    /// `resume_closing_groups` — advances.
+    pub fn group_closing(&self) -> Arc<dyn StoreEffectGroupClosing> {
+        Arc::clone(&self.inner).into_group_closing()
+    }
 }
 
 impl SqliteRuntimeEffectController {
@@ -736,6 +749,7 @@ fn build_effect_replay_driver(
         await_events,
         clock,
         options.lease_timings,
+        options.drain_budget,
     )
 }
 
