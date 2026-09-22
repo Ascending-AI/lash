@@ -250,10 +250,6 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
                     .await
                     .expect("the caller closes under Cancel");
                 eprintln!("L1-crash: closed");
-                // DIAG
-                sink.release_all();
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                eprintln!("L1-crash: released+settled, returning");
                 // Returning drops the runtime with the drain still parked.
             })
         }

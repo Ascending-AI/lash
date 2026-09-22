@@ -73,7 +73,7 @@ UPDATE main.runtime_effect_replay
 UPDATE main.runtime_effect_replay
              SET commit_state = 'drained', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
-               AND commit_state = 'committed'
+               AND commit_state = 'committed' AND status <> 'in_progress'
 === main | effect::replay::ReplayStatements | effect_replay.settle_drained_final
 UPDATE main.runtime_effect_replay
              SET commit_state = 'drained', settlement_seq = ?4,
@@ -357,7 +357,7 @@ UPDATE effect_journal.runtime_effect_replay
 UPDATE effect_journal.runtime_effect_replay
              SET commit_state = 'drained', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
-               AND commit_state = 'committed'
+               AND commit_state = 'committed' AND status <> 'in_progress'
 === effect_journal | effect::replay::ReplayStatements | effect_replay.settle_drained_final
 UPDATE effect_journal.runtime_effect_replay
              SET commit_state = 'drained', settlement_seq = ?4,
@@ -641,7 +641,7 @@ UPDATE process_registry.runtime_effect_replay
 UPDATE process_registry.runtime_effect_replay
              SET commit_state = 'drained', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
-               AND commit_state = 'committed'
+               AND commit_state = 'committed' AND status <> 'in_progress'
 === process_registry | effect::replay::ReplayStatements | effect_replay.settle_drained_final
 UPDATE process_registry.runtime_effect_replay
              SET commit_state = 'drained', settlement_seq = ?4,

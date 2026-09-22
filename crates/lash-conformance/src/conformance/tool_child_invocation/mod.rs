@@ -1784,7 +1784,10 @@ where
             phase(world).await;
         });
         eprintln!("crashed_world: phase returned, dropping runtime");
-        drop(runtime);
+        // A killed worker does not shut down gracefully: bound the teardown so
+        // a task parked mid-drain — which is exactly the state a crash leaves —
+        // cannot hold the worker threads open.
+        runtime.shutdown_timeout(std::time::Duration::from_secs(10));
         eprintln!("crashed_world: runtime dropped");
     })
     .join()

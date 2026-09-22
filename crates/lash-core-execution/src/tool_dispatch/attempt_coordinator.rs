@@ -808,12 +808,18 @@ async fn settle_terminal_attempt(
     // final-commit order, so a committed sibling below this child that still
     // owes its drain holds this drain back until it finishes.
     if let Some((group_key, commit_seq)) = &drain_admission {
+        let mut diag_iters = 0u64;
         while controller
             .group_child_drain_blocked(group_key, *commit_seq)
             .await?
         {
+            diag_iters += 1;
+            if diag_iters <= 5 || diag_iters % 10000 == 0 {
+                eprintln!("DIAG barrier: iter {diag_iters} seq={commit_seq}");
+            }
             context.clock.sleep(GROUP_DRAIN_BARRIER_POLL).await;
         }
+        eprintln!("DIAG barrier: passed seq={commit_seq} after {diag_iters}");
     }
     if let Some(slot) = &intent_drain_slot {
         slot.begin_final_drain().await;
