@@ -1069,8 +1069,9 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
 // while the admitted commands the decision protects — replay rows already
 // journaled — claim, take over, and finalize exactly as before.
 
-/// Journals the cancel decision for `replay_key`, insisting it wins.
-async fn cancel_child(store: &SqliteEffectReplayRowStore, replay_key: &str) {
+/// Journals the cancel decision for `replay_key`, insisting it wins, and
+/// returns the settlement rank the decision seated the child at.
+async fn cancel_child(store: &SqliteEffectReplayRowStore, replay_key: &str) -> u64 {
     let envelope_json = format!(r#"{{"json":"{replay_key}","hash":"hash-{replay_key}"}}"#);
     let outcome = store
         .decide_cancel(&EffectCancelRequest {
@@ -1084,9 +1085,40 @@ async fn cancel_child(store: &SqliteEffectReplayRowStore, replay_key: &str) {
         })
         .await
         .expect("journal the cancel decision");
+    match outcome {
+        EffectCancelOutcome::Decided { settlement_seq } => settlement_seq,
+        other => panic!("the child must be decided by this call, got {other:?}"),
+    }
+}
+
+/// A late §4 final commit against a cancel-decided child reports the typed
+/// `CancelDecided` outcome carrying the rank the decision seated — the same
+/// rank `decide_cancel` returned — never a store error: the schema CHECK
+/// forbids `commit_seq` on a `cancel_decided` row, so the rank must come from
+/// `settlement_seq`.
+#[tokio::test]
+async fn a_late_final_commit_on_a_cancel_decided_child_reports_the_seated_rank() {
+    let store = row_store().await;
+    open_and_claim(&store, &[("k1", "owner-a")]).await;
+    let rank = cancel_child(&store, "k1").await;
+
+    let outcome = store
+        .commit_group_child(&EffectGroupChildCommitRequest {
+            group_key: Some(GROUP.to_string()),
+            scope_id: SCOPE.to_string(),
+            replay_key: "k1".to_string(),
+            drain_input: "{}".to_string(),
+            owner_id: "owner-a".to_string(),
+        })
+        .await
+        .expect("a late final on a decided child is an observation, not corruption");
     assert!(
-        matches!(outcome, EffectCancelOutcome::Decided { .. }),
-        "the child must be decided by this call, got {outcome:?}"
+        matches!(
+            outcome,
+            EffectGroupChildCommitOutcome::CancelDecided { commit_seq, .. }
+            if commit_seq == rank
+        ),
+        "the refusal must carry the seated settlement rank {rank}: {outcome:?}"
     );
 }
 

@@ -849,8 +849,9 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
 // transaction, so it serializes against `decide_cancel`'s membership write.
 
 impl GroupFixture {
-    /// Journals the cancel decision for `replay_key`, insisting it wins.
-    async fn cancel_child(&self, replay_key: &str) {
+    /// Journals the cancel decision for `replay_key`, insisting it wins, and
+    /// returns the settlement rank the decision seated the child at.
+    async fn cancel_child(&self, replay_key: &str) -> u64 {
         let outcome = self
             .store
             .decide_cancel(&EffectCancelRequest {
@@ -864,10 +865,10 @@ impl GroupFixture {
             })
             .await
             .expect("journal the cancel decision");
-        assert!(
-            matches!(outcome, EffectCancelOutcome::Decided { .. }),
-            "the child must be decided by this call, got {outcome:?}"
-        );
+        match outcome {
+            EffectCancelOutcome::Decided { settlement_seq } => settlement_seq,
+            other => panic!("the child must be decided by this call, got {other:?}"),
+        }
     }
 
     /// A claim on an ungrouped effect minted by `minting_replay_key`.
@@ -887,6 +888,41 @@ impl GroupFixture {
             ..self.claim_request(replay_key, owner)
         }
     }
+}
+
+/// A late §4 final commit against a cancel-decided child reports the typed
+/// `CancelDecided` outcome carrying the rank the decision seated — the same
+/// rank `decide_cancel` returned — never a store error: the schema CHECK
+/// forbids `commit_seq` on a `cancel_decided` row, so the rank must come from
+/// `settlement_seq`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_late_final_commit_on_a_cancel_decided_child_reports_the_seated_rank() {
+    let Some(fixture) = GroupFixture::open("late-final-rank").await else {
+        eprintln!("skipping late-final seated-rank report: database URL is not set");
+        return;
+    };
+    fixture.claim("k1", "owner-a").await;
+    let rank = fixture.cancel_child("k1").await;
+
+    let outcome = fixture
+        .store
+        .commit_group_child(&EffectGroupChildCommitRequest {
+            group_key: Some(fixture.group_key.clone()),
+            scope_id: fixture.scope_id.clone(),
+            replay_key: "k1".to_string(),
+            drain_input: "{}".to_string(),
+            owner_id: "owner-a".to_string(),
+        })
+        .await
+        .expect("a late final on a decided child is an observation, not corruption");
+    assert!(
+        matches!(
+            outcome,
+            EffectGroupChildCommitOutcome::CancelDecided { commit_seq, .. }
+            if commit_seq == rank
+        ),
+        "the refusal must carry the seated settlement rank {rank}: {outcome:?}"
+    );
 }
 
 /// §4: a new admission beneath a cancel-decided child is refused with no write.

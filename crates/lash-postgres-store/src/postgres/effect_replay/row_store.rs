@@ -548,14 +548,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 });
             }
             EffectCommitState::CancelDecided => {
-                let commit_seq = commit_seq.ok_or_else(|| {
-                    replay_corrupt(format!(
-                        "child `{}` of group {group_key} is cancel-decided but \
-                         carries no commit_seq; the column CHECK makes that \
-                         unwritable",
-                        request.replay_key
-                    ))
-                })?;
+                // The schema CHECK forbids `commit_seq` on a cancel-decided
+                // row; the rank the caller is owed is the settlement rank the
+                // decision seated.
+                let commit_seq =
+                    read_child_settlement_seq(&mut tx, &group_key, &request.replay_key).await?;
                 tx.commit().await.map_err(effect_store_error)?;
                 return Ok(EffectGroupChildCommitOutcome::CancelDecided {
                     group_key,

@@ -484,6 +484,19 @@ const SURFACE_POSTGRES_READS: &[&str] = &[
     super::generated_surface::POSTGRES_EFFECT_GROUP_CHILD_READ,
 ];
 
+/// True when `sql` selects `FROM <table>`: the name must be followed by a
+/// non-identifier character (or end of string), so `runtime_effect_group`
+/// cannot be satisfied by `FROM runtime_effect_group_child`.
+fn reads_table(sql: &str, table: &str) -> bool {
+    let needle = format!("FROM {table}");
+    sql.match_indices(&needle).any(|(index, _)| {
+        sql[index + needle.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
+
 /// Every `CREATE TABLE` name declared by the SQLite schema, deduplicated.
 fn declared_sqlite_tables() -> Vec<&'static str> {
     let mut tables = Vec::new();
@@ -548,14 +561,16 @@ fn residue_digest_covers_every_durable_table() {
                 // reader SQL. Dropping a column or table from either reader
                 // turns the exclusion it replaced back into a failure here.
                 assert!(
-                    SURFACE_SQLITE_READS.iter().any(|sql| sql.contains(table)),
+                    SURFACE_SQLITE_READS
+                        .iter()
+                        .any(|sql| reads_table(sql, table)),
                     "surface-differential table `{table}` is not read by the \
                      generated surface's SQLite journal reader",
                 );
                 assert!(
                     SURFACE_POSTGRES_READS
                         .iter()
-                        .any(|sql| sql.contains(&format!("lash_{table}"))),
+                        .any(|sql| reads_table(sql, &format!("lash_{table}"))),
                     "surface-differential table `{table}` is not read by the \
                      generated surface's PostgreSQL journal reader",
                 );
@@ -578,4 +593,29 @@ fn residue_digest_covers_every_durable_table() {
         "these tables are excluded but the digest now reads them; delete their exclusions: \
          {stale:?}"
     );
+}
+
+/// The coverage check must not let a prefix do a table's work: a reader over
+/// `runtime_effect_group_child` is not a reader over `runtime_effect_group`.
+#[test]
+fn surface_reader_coverage_matches_whole_table_names() {
+    let child_only = "SELECT group_key, position FROM runtime_effect_group_child ORDER BY 1";
+    assert!(!reads_table(child_only, "runtime_effect_group"));
+    assert!(reads_table(child_only, "runtime_effect_group_child"));
+    assert!(reads_table(
+        "SELECT 1 FROM runtime_effect_group",
+        "runtime_effect_group"
+    ));
+    assert!(reads_table(
+        "SELECT 1\n     FROM runtime_effect_group ORDER BY group_key",
+        "runtime_effect_group"
+    ));
+    assert!(!reads_table(
+        "SELECT 1 FROM runtime_effect_group_extra",
+        "runtime_effect_group"
+    ));
+    assert!(reads_table(
+        "SELECT 1 FROM lash_runtime_effect_group ORDER BY 1",
+        "lash_runtime_effect_group"
+    ));
 }
