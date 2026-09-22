@@ -62,7 +62,6 @@ pub(crate) fn encode_artifact_blob(
     };
     encode_msgpack(
         &StoredBlobEnvelope {
-            descriptor: descriptor.clone(),
             compression,
             content: stored_content,
         },
@@ -159,36 +158,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blob_envelope_stores_hints_without_payload_family() {
-        #[derive(serde::Deserialize)]
-        struct WireEnvelope {
-            descriptor: serde_json::Value,
-            compression: BlobCompression,
-        }
+    fn blob_envelope_carries_no_descriptor_field() {
         let content = vec![b'x'; 8192];
         for (profile, compression) in [
             (BuiltinBlobProfile::LowLatency, BlobCompression::None),
             (BuiltinBlobProfile::Balanced, BlobCompression::Zlib),
             (BuiltinBlobProfile::Compact, BlobCompression::Zlib),
         ] {
-            for (descriptor, expected_descriptor, expected_compression) in [
-                (
-                    BlobArtifactDescriptor::checkpoint_component(),
-                    serde_json::json!({"hints": ["Compressible", "LargePayload"]}),
-                    compression,
-                ),
+            for (descriptor, expected_compression) in [
+                (BlobArtifactDescriptor::checkpoint_component(), compression),
                 (
                     BlobArtifactDescriptor::new(Vec::new()),
-                    serde_json::json!({}),
                     BlobCompression::None,
                 ),
             ] {
                 let encoded = encode_artifact_blob(&descriptor, profile, &content)
                     .expect("encode artifact blob");
-                let wire: WireEnvelope =
+                let wire: std::collections::BTreeMap<String, serde::de::IgnoredAny> =
                     rmp_serde::from_slice(&encoded).expect("inspect named MessagePack envelope");
-                assert_eq!(wire.descriptor, expected_descriptor);
-                assert_eq!(wire.compression, expected_compression);
+                assert_eq!(
+                    wire.keys().collect::<Vec<_>>(),
+                    ["compression", "content"],
+                    "the wire envelope carries no descriptor field"
+                );
+                let envelope: StoredBlobEnvelope =
+                    rmp_serde::from_slice(&encoded).expect("decode stored blob envelope");
+                assert_eq!(envelope.compression, expected_compression);
                 assert_eq!(decode_artifact_blob(&encoded).unwrap(), content);
             }
         }

@@ -731,7 +731,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// there is no envelope migration or legacy decode path.
 // Generation 72 cuts over to ordered plugin parts and the standard-compaction identity.
 // Pre-cutover durable-core catalogs are rejected and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 73;
+/// Bumped to 74 for FIG-1949 layer 2: the stored artifact-blob envelope now
+/// actually drops its `descriptor` field — the pointer table's namespace key
+/// is the sole owner of the payload-family fact. A pre-74 database holds
+/// envelopes that still carry the field, so it is rejected at open and
+/// recreated rather than decoded under the new shape.
+pub(crate) const SCHEMA_VERSION: i32 = 74;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

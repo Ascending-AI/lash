@@ -128,7 +128,6 @@ async fn sqlite_persisted_record_decode_classification() {
         .expect("read checkpoint ref");
     let malformed_manifest = encode_msgpack(
         &StoredBlobEnvelope {
-            descriptor: BlobArtifactDescriptor::checkpoint_manifest(),
             compression: BlobCompression::None,
             content: vec![0xc1],
         },
@@ -499,7 +498,6 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         params![
             encode_msgpack(
                 &StoredBlobEnvelope {
-                    descriptor: BlobArtifactDescriptor::checkpoint_manifest(),
                     compression: BlobCompression::Zlib,
                     content: vec![0xFF, 0x00],
                 },
