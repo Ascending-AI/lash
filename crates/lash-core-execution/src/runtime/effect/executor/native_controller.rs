@@ -31,6 +31,13 @@
 //!   That is the whole determinism argument: once rank `n` has been decided it is
 //!   re-read, never re-raced, so a caller that awaits rank `n` twice — either
 //!   side of a park — observes the same child both times.
+//! * **The group is the opener's supervisor (ADR 0099 §14).** It owns its
+//!   children's tasks for exactly the group's life — open to reap, and reap
+//!   happens only after the last settlement, so no task is ever aborted while
+//!   a loser drains; under `Cancel` a child ends by observing the token and
+//!   recording its terminal, never by abort. Each task owns the runner that
+//!   owns the lent opener context through the child's whole drain, and the
+//!   unsettled count below is what a quiescent retirement reads.
 
 use crate::ProcessId;
 use crate::SessionId;
@@ -298,6 +305,12 @@ impl NativeRuntimeEffectController {
         Arc::clone(&self.await_events)
     }
 
+    /// The group supervisor table, so a `NativeEffectHost` over this
+    /// controller can count unsettled children for a quiescent retirement.
+    pub(in crate::runtime::effect) fn groups(&self) -> Arc<NativeEffectGroups> {
+        Arc::clone(&self.groups)
+    }
+
     pub(super) fn with_await_event_registry(await_events: Arc<AwaitEventRegistry>) -> Self {
         Self {
             await_events,
@@ -384,6 +397,17 @@ impl NativeRuntimeEffectController {
     pub fn recorded_group_settlements(&self, group_key: &str) -> Vec<RecordedSettlement> {
         self.groups.recorded(group_key)
     }
+
+    /// The children still unsettled in open groups under `scope` — the count a
+    /// quiescent-gated retirement reads on this tier.
+    pub fn unsettled_children_under(&self, scope: &ExecutionScope) -> usize {
+        self.groups.unsettled_children_under(scope)
+    }
+
+    /// The live task count of one open group — `None` once it has reaped.
+    pub fn open_group_task_count(&self, group_key: &str) -> Option<usize> {
+        self.groups.open_group_task_count(group_key)
+    }
 }
 
 impl std::fmt::Debug for NativeRuntimeEffectController {
@@ -426,6 +450,10 @@ pub(crate) struct NativeEffectGroups {
 /// blocked callers a new rank exists.
 struct NativeEffectGroup {
     group_key: String,
+    /// The scope the group was admitted under, which is what a quiescent
+    /// retirement counts this group's unsettled children against (ADR 0099
+    /// §14: the supervisor's unclaimed tasks are the scope's liveness).
+    scope: ExecutionScope,
     children: usize,
     /// Held for reopen fencing only. The host deliberately does **not** branch on
     /// the wake rule: `await_next_settlement` serves rank `consumed + 1`
@@ -441,6 +469,11 @@ struct NativeEffectGroup {
     /// select on their own child token, so cancelling the group cancels exactly
     /// the children that have not settled.
     cancel: CancellationToken,
+    /// The child tasks this group supervises: spawned at dispatch, joined by
+    /// the JoinSet's own drop when the group is reaped after its last
+    /// settlement. Owning them here — rather than detaching each on
+    /// `task::spawn` — is what makes the group its children's supervisor.
+    tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
     state: Mutex<NativeEffectGroupState>,
     settled: Notify,
 }
@@ -498,6 +531,7 @@ impl NativeEffectGroup {
     fn new(group: &RuntimeEffectGroup) -> Self {
         Self {
             group_key: group.group_key().to_string(),
+            scope: group.invocation().execution_scope().clone(),
             children: group.children().len(),
             wake: group.wake(),
             declared: group.loser_disposition(),
@@ -509,6 +543,7 @@ impl NativeEffectGroup {
                 closed: false,
             }),
             settled: Notify::new(),
+            tasks: std::sync::Mutex::new(tokio::task::JoinSet::new()),
         }
     }
 }
@@ -648,14 +683,19 @@ impl NativeEffectGroups {
             let state = Arc::clone(state);
             let group_key = Arc::clone(&group_key);
             let cancel = state.cancel.child_token();
-            crate::task::spawn(async move {
-                let outcome = tokio::select! {
-                    biased;
-                    () = cancel.cancelled() => Err(child_cancelled_error(&group_key, position)),
-                    outcome = executor.execute(child) => outcome,
-                };
-                Self::record(&groups, &group_key, &state, position, outcome);
-            });
+            let task_owner = Arc::clone(&state);
+            let child_task = tracing::Instrument::instrument(
+                async move {
+                    let outcome = tokio::select! {
+                        biased;
+                        () = cancel.cancelled() => Err(child_cancelled_error(&group_key, position)),
+                        outcome = executor.execute(child) => outcome,
+                    };
+                    Self::record(&groups, &group_key, &state, position, outcome);
+                },
+                tracing::Span::current(),
+            );
+            task_owner.tasks.lock_recover().spawn(child_task);
         }
     }
 
@@ -819,6 +859,31 @@ impl NativeEffectGroups {
     /// with the process rather than accumulating in a store. Closing is the
     /// caller's obligation under the contract; dropping a handle is not a
     /// supported way to end a group.
+    /// The children still unsettled in open groups under `scope` — seats
+    /// (`children`) minus recorded settlements (`order`). This is what a
+    /// quiescent-gated retirement reads (ADR 0099 §14): a group closed under
+    /// `RunToCompletion` keeps its draining losers counted until each records
+    /// its terminal, so the fence cannot land mid-drain.
+    pub(in crate::runtime::effect) fn unsettled_children_under(
+        &self,
+        scope: &ExecutionScope,
+    ) -> usize {
+        self.open
+            .read_recover()
+            .values()
+            .filter(|state| state.scope == *scope)
+            .map(|state| state.children - state.state.lock_recover().order.len())
+            .sum()
+    }
+
+    /// The live task count of one open group, for the tests that pin the
+    /// supervisor's ownership span. `None` once the group has reaped.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn open_group_task_count(&self, group_key: &str) -> Option<usize> {
+        self.get(group_key)
+            .map(|state| state.tasks.lock_recover().len())
+    }
+
     fn reap(&self, group_key: &str, state: &Arc<NativeEffectGroup>) {
         let mut open = self.open.write_recover();
         if open

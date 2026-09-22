@@ -15,9 +15,9 @@ crate::tool_child_invocation_tests!({
     // one only for an embedding that accepts that such a key dies with the
     // process — which a single-process conformance run is.
     let host: Arc<dyn crate::EffectHost> = Arc::new(
-        crate::NativeEffectHost::new(
-            Arc::new(NativeRuntimeEffectController::default()) as Arc<dyn RuntimeEffectController>
-        )
+        crate::NativeEffectHost::with_native_controller(Arc::new(
+            NativeRuntimeEffectController::default(),
+        ))
         .allow_process_lifetime_completion_keys(),
     );
     (
