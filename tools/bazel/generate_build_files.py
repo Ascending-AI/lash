@@ -401,6 +401,9 @@ def target_support(
         # `examples/codemode-parity/*.ts` cells with `include_str!`, so the
         # cells are compile inputs of this test and of no other.
         extra_compile_data.append("//examples:codemode_parity_cells")
+        # The schema agreement test compiles the published graph schema into
+        # the test and validates real serialized graph documents against it.
+        extra_compile_data.append("//:workflow_graph_schema")
     if package["name"] == "lash-internal-lashlang" and target["name"] == "dialect_cost":
         # It holds the dialect to the corpus's own checked-in budget by
         # reading the budget file with `include_str!`, the way lash-perf

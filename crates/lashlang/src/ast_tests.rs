@@ -38,6 +38,31 @@ fn process_signature_construction_and_wire_shape_are_checked() {
         serde_json::json!({"Process": {"kind": "unknown"}})
     );
     assert_eq!(format_type_expr(&unknown), "Process");
+
+    let schema = serde_json::to_value(schemars::schema_for!(TypeExpr)).unwrap();
+    let validator = jsonschema::JSONSchema::compile(&schema).expect("type schema compiles");
+    for value in [
+        serde_json::to_value(&process).unwrap(),
+        serde_json::to_value(&unknown).unwrap(),
+    ] {
+        assert!(validator.is_valid(&value), "schema rejected {value}");
+        serde_json::from_value::<TypeExpr>(value).expect("schema-valid process decodes");
+    }
+    for value in [
+        serde_json::json!({"Process": {"kind": "known", "params": []}}),
+        serde_json::json!({"Process": {"kind": "unknown", "extra": true}}),
+        serde_json::json!({"Process": {
+            "kind": "known",
+            "params": [{"name": "message", "ty": "Str", "extra": true}],
+            "output": "Bool"
+        }}),
+    ] {
+        assert!(!validator.is_valid(&value), "schema accepted {value}");
+        assert!(
+            serde_json::from_value::<TypeExpr>(value.clone()).is_err(),
+            "decoder accepted {value}"
+        );
+    }
 }
 
 #[test]
@@ -97,6 +122,18 @@ fn union_members_hold_at_least_two_variants() {
             serde_json::from_value::<TypeExpr>(degenerate).is_err(),
             "degenerate union wire must refuse: {label}"
         );
+    }
+
+    let schema = serde_json::to_value(schemars::schema_for!(TypeExpr)).unwrap();
+    let validator = jsonschema::JSONSchema::compile(&schema).expect("type schema compiles");
+    for (members, accepted) in [
+        (serde_json::json!([]), false),
+        (serde_json::json!(["Str"]), false),
+        (serde_json::json!(["Str", "Null"]), true),
+    ] {
+        let value = serde_json::json!({"Union": members});
+        assert_eq!(validator.is_valid(&value), accepted, "{value}");
+        assert_eq!(serde_json::from_value::<TypeExpr>(value).is_ok(), accepted);
     }
 }
 

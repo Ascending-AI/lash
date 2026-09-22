@@ -293,7 +293,7 @@ impl Compiler {
                 self.code.push(Instruction::PushNumber(*value));
             }
             Expr::String(value) => {
-                let value = self.push_const(Value::String(value.clone()));
+                let value = self.push_const(Value::String(value.clone().into()));
                 self.code.push(Instruction::PushConst(value));
             }
             Expr::Variable(name) => {

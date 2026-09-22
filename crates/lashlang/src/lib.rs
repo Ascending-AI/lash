@@ -2,6 +2,7 @@ mod namespace;
 
 mod artifact;
 mod ast;
+mod ast_string;
 mod builtins;
 mod compile;
 mod ecma_stdlib;
@@ -28,8 +29,8 @@ pub use artifact::{
     global_in_memory_lashlang_artifact_store, host_requirements_for_program,
 };
 pub use ast::{
-    AssignPathStep, AssignTarget, AstPath, AstRoot, BinaryOp, CatchClause, Declaration, Expr,
-    ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
+    AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BinaryOp, CatchClause, Declaration,
+    Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
     LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
     ProcessLiteralExpr, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessSignatureError,

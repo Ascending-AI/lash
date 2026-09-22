@@ -55,6 +55,46 @@ lash_rust_unit_test(
 )
 
 lash_rust_binary(
+    name = "workflow_schema_generator__bin",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "workflow_schema_generator",
+    crate_root = "src/bin/workflow_schema_generator.rs",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lashlang",
+    library_crate_name = "lashlang",
+    manifest_dir = "crates/lashlang",
+    package_name = "lash-internal-lashlang",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_unit_test(
+    name = "workflow_schema_generator__bin__unit_test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "workflow_schema_generator",
+    crate_root = "src/bin/workflow_schema_generator.rs",
+    declared_features = [
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    library = ":lashlang",
+    library_crate_name = "lashlang",
+    manifest_dir = "crates/lashlang",
+    package_name = "lash-internal-lashlang",
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_binary(
     name = "function_perf__example",
     crate_features = [
         "testing",
@@ -308,6 +348,7 @@ lash_batch_test(
         ":lashlang__unit_test",
         ":property__test",
         ":stack_budget__test",
+        ":workflow_schema_generator__bin__unit_test",
     ],
 )
 

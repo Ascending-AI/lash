@@ -1,0 +1,503 @@
+{
+  "$id": "https://lash.dev/examples/workflow-graph-roundtrip/workflow-document",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ChildGroup": {
+      "properties": {
+        "nodeIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeIds",
+        "scope",
+        "slot"
+      ],
+      "type": "object"
+    },
+    "EdgeData": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "variable": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "EditableComprehensionClause": {
+      "oneOf": [
+        {
+          "properties": {
+            "binding": {
+              "type": "string"
+            },
+            "iterable": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "for"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "binding",
+            "iterable",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "condition": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "if"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "condition",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EditableProcessField": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "type": "object"
+    },
+    "EditableValue": {},
+    "ExpectedArgumentType": {
+      "properties": {
+        "slot": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot",
+        "type"
+      ],
+      "type": "object"
+    },
+    "FlowEdge": {
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/EdgeData"
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "id",
+        "source",
+        "target"
+      ],
+      "type": "object"
+    },
+    "FlowNode": {
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/NodeData"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "id",
+        "type"
+      ],
+      "type": "object"
+    },
+    "GraphRoots": {
+      "properties": {
+        "main": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "processes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "main"
+      ],
+      "type": "object"
+    },
+    "NodeData": {
+      "description": "A node's display name together with the one fact that decides whether the host may throw it away: who chose it.\n\nRendering emits an `@label` annotation only for an authored name, so a payload that carries a title without saying where the name came from is a rename waiting to evaporate. The tag is therefore mandatory and carries the title inside the variant: \"title present, tag absent\" is unrepresentable, and an unknown tag is a decode error rather than a silent `derived`. The wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the browser client already writes on every node.",
+      "oneOf": [
+        {
+          "description": "The author named this node: the title and its optional description are theirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "nameSource": {
+              "enum": [
+                "label"
+              ],
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The name is a rendering of the node's own expression. The title is output, not input: the save path recomputes it and it carries no description.",
+          "properties": {
+            "nameSource": {
+              "enum": [
+                "derived"
+              ],
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "availableVars": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TypedVariable"
+          },
+          "type": "array"
+        },
+        "binding": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "children": {
+          "items": {
+            "$ref": "#/definitions/ChildGroup"
+          },
+          "type": "array"
+        },
+        "clauses": {
+          "items": {
+            "$ref": "#/definitions/EditableComprehensionClause"
+          },
+          "type": "array"
+        },
+        "condition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/TypeDiagnostic"
+          },
+          "type": "array"
+        },
+        "effect": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedArgTypes": {
+          "items": {
+            "$ref": "#/definitions/ExpectedArgumentType"
+          },
+          "type": "array"
+        },
+        "expression": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/definitions/EditableValue"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "iterable": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "items": {
+            "$ref": "#/definitions/EditableProcessField"
+          },
+          "type": "array"
+        },
+        "receiver": {
+          "description": "The receiver the catalog entry this node came from belongs to, carried so a call node posted with no `expression` can be synthesized against the receiver it actually names (FIG-3178).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signals": {
+          "items": {
+            "$ref": "#/definitions/EditableProcessField"
+          },
+          "type": "array"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subkind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminalKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Span": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "TypeDiagnostic": {
+      "properties": {
+        "class": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "slot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "span": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Span"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "class",
+        "kind",
+        "message",
+        "nodeId"
+      ],
+      "type": "object"
+    },
+    "TypedVariable": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "edges": {
+      "items": {
+        "$ref": "#/definitions/FlowEdge"
+      },
+      "type": "array"
+    },
+    "facetSchemaVersion": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/definitions/FlowNode"
+      },
+      "type": "array"
+    },
+    "roots": {
+      "$ref": "#/definitions/GraphRoots"
+    },
+    "schemaVersion": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "source": {
+      "type": "string"
+    },
+    "version": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "edges",
+    "nodes",
+    "roots",
+    "schemaVersion",
+    "source",
+    "version"
+  ],
+  "title": "WorkflowDocument",
+  "type": "object"
+}

@@ -2,10 +2,16 @@
 // URLs are relative so the same code works behind the Vite dev proxy and when
 // served single-origin from `frontend/dist/`.
 
+// @ts-check
+
+/** @typedef {import('../generated/workflow-document').WorkflowDocument} WorkflowDocument */
+/** @typedef {import('../generated/error-response').ErrorBody} ErrorBody */
+
+/** @returns {Promise<WorkflowDocument>} */
 export async function fetchWorkflow() {
   const res = await fetch('/workflow', { headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`GET /workflow failed: ${res.status}`);
-  return res.json();
+  return /** @type {Promise<WorkflowDocument>} */ (res.json());
 }
 
 // Built-in workflow catalog: [{ id, name, description }] in display order.
@@ -16,7 +22,7 @@ export async function fetchWorkflows() {
 }
 
 // Discards any draft.
-export async function selectWorkflow(id) {
+export async function selectWorkflow(/** @type {string} */ id) {
   const res = await fetch('/workflow/select', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -33,7 +39,7 @@ export async function selectWorkflow(id) {
 // id remint that every Save performs. It arrives either as a sibling key on the
 // document body or wrapped in an { document, idMap } envelope; both are handled.
 // Older backends omit it entirely (idMap: null → caller falls back gracefully).
-export async function saveWorkflow(document) {
+export async function saveWorkflow(/** @type {WorkflowDocument} */ document) {
   const res = await fetch('/workflow', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -52,9 +58,10 @@ export async function saveWorkflow(document) {
     }
     return { ok: true, document: body, idMap: null };
   }
+  /** @type {ErrorBody | null} */
   let body = null;
   try {
-    body = await res.json();
+    body = /** @type {ErrorBody} */ (await res.json());
   } catch {
     body = null;
   }
@@ -83,7 +90,11 @@ export async function fetchOperations() {
 // errors.
 // `availableVars` is the scope the fragment is typed in: TypeScript rejects a fragment that
 // reads a name it cannot see, so the field sends the names the node was projected with.
-export async function validateFragment(kind, text, availableVars = []) {
+export async function validateFragment(
+  /** @type {string} */ kind,
+  /** @type {string} */ text,
+  /** @type {string[]} */ availableVars = [],
+) {
   try {
     const res = await fetch('/validate', {
       method: 'POST',
@@ -104,7 +115,7 @@ export async function validateFragment(kind, text, availableVars = []) {
 // `{ ok:false, status, error }` on a 4xx parse error, or
 // `{ ok:false, unsupported:true }` when the backend has no `/project` route so
 // the pane stays read-only rather than erroring.
-export async function projectSource(source) {
+export async function projectSource(/** @type {string} */ source) {
   let res;
   try {
     res = await fetch('/project', {
@@ -113,7 +124,10 @@ export async function projectSource(source) {
       body: JSON.stringify({ source }),
     });
   } catch (err) {
-    return { ok: false, error: { code: 'network', message: err?.message ?? String(err) } };
+    return {
+      ok: false,
+      error: { code: 'network', message: err instanceof Error ? err.message : String(err) },
+    };
   }
   if (res.ok) {
     const body = await res.json();
@@ -132,7 +146,7 @@ export async function projectSource(source) {
 
 // Each call is a brand-new run/invocation.
 // `signal` aborts it (a new Play).
-export async function* runWorkflow(signal) {
+export async function* runWorkflow(/** @type {AbortSignal} */ signal) {
   const res = await fetch('/run', { method: 'POST', signal });
   if (!res.ok) {
     let detail = '';
@@ -143,6 +157,7 @@ export async function* runWorkflow(signal) {
     }
     throw new Error(`POST /run failed: ${res.status} ${detail}`);
   }
+  if (!res.body) throw new Error('POST /run returned no response body');
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -161,7 +176,7 @@ export async function* runWorkflow(signal) {
   }
 }
 
-function parseFrame(frame) {
+function parseFrame(/** @type {string} */ frame) {
   const lines = frame.split('\n');
   let dataLine = null;
   let eventName = null;

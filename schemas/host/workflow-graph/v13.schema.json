@@ -1,0 +1,2537 @@
+{
+  "$id": "https://lash.dev/schemas/workflow-graph/v13",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "AssignPathStep": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Field": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Index": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Index"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AssignTarget": {
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/definitions/AssignPathStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "type": "object"
+    },
+    "BinaryOp": {
+      "enum": [
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Modulo",
+        "Equal",
+        "NotEqual",
+        "Less",
+        "LessEqual",
+        "Greater",
+        "GreaterEqual",
+        "In",
+        "And",
+        "Or"
+      ],
+      "type": "string"
+    },
+    "CatchClause": {
+      "properties": {
+        "binding": {
+          "type": "string"
+        },
+        "body": {
+          "$ref": "#/definitions/Expr"
+        }
+      },
+      "required": [
+        "binding",
+        "body"
+      ],
+      "type": "object"
+    },
+    "Expr": {
+      "oneOf": [
+        {
+          "enum": [
+            "Null",
+            "Break",
+            "Continue"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Block": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "Block"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "LabelAnnotated": {
+              "properties": {
+                "expr": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "label": {
+                  "$ref": "#/definitions/LabelMetadata"
+                }
+              },
+              "required": [
+                "expr",
+                "label"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "LabelAnnotated"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The JavaScript `undefined` value. This node is AST-only.",
+          "enum": [
+            "Undefined"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Bool": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "Bool"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Number": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "Number"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "String": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "String"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Variable": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Variable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Tuple": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "Tuple"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "List": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "List"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ListComprehension": {
+              "properties": {
+                "clauses": {
+                  "items": {
+                    "$ref": "#/definitions/ListComprehensionClause"
+                  },
+                  "type": "array"
+                },
+                "element": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "clauses",
+                "element"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ListComprehension"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Record": {
+              "items": {
+                "items": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/definitions/Expr"
+                  }
+                ],
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "Record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Assign": {
+              "properties": {
+                "expr": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "target": {
+                  "$ref": "#/definitions/AssignTarget"
+                }
+              },
+              "required": [
+                "expr",
+                "target"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Assign"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "If": {
+              "properties": {
+                "condition": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "else_block": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "then_block": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "condition",
+                "else_block",
+                "then_block"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "If"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "For": {
+              "properties": {
+                "binding": {
+                  "type": "string"
+                },
+                "body": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "iterable": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "binding",
+                "body",
+                "iterable"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "For"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "While": {
+              "properties": {
+                "body": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "condition": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "body",
+                "condition"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "While"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ProcessRef": {
+              "properties": {
+                "process": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "process"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ProcessRef"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "HostDescriptorConstructor": {
+              "properties": {
+                "input": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "type_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "input",
+                "type_name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "HostDescriptorConstructor"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ResourceRef": {
+              "$ref": "#/definitions/ResourceRefExpr"
+            }
+          },
+          "required": [
+            "ResourceRef"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ReceiverCall": {
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "type": "array"
+                },
+                "operation": {
+                  "type": "string"
+                },
+                "receiver": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "args",
+                "operation",
+                "receiver"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ReceiverCall"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Await": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Await"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "SleepFor": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "SleepFor"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "SleepUntil": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "SleepUntil"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "WaitSignal": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "WaitSignal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ResultUnwrap": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "ResultUnwrap"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Print": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Print"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Yield": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Yield"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Finish": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Finish"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Fail": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Fail"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "BuiltinCall": {
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "type": "array"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "args",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "BuiltinCall"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A user-defined function value. This node is AST-only; the parser never produces it. Captures are copied when the closure is created.",
+          "properties": {
+            "Function": {
+              "$ref": "#/definitions/FunctionExpr"
+            }
+          },
+          "required": [
+            "Function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An inline process body written where a `Process`-typed slot is expected. This node is AST-only and never survives the link: the linker's expected-type hook lifts it to a hoisted [`ProcessDecl`], and a literal whose slot is not a process is a type error.",
+          "properties": {
+            "ProcessLiteral": {
+              "$ref": "#/definitions/ProcessLiteralExpr"
+            }
+          },
+          "required": [
+            "ProcessLiteral"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Call": {
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "type": "array"
+                },
+                "function": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "args",
+                "function"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Call"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Calls a declared [`FunctionDecl`] by name.\n\nThe parser never produces this node: source spells a call to a declared function exactly like a builtin call, and the linker is the resolver that rewrites the `BuiltinCall` whose name it recognises. Keeping the resolved shape distinct is what lets the compiler emit a static callee and lets every later pass tell a pure declared call apart from a first-class closure call.",
+          "properties": {
+            "FunctionCall": {
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "type": "array"
+                },
+                "function": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "args",
+                "function"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "FunctionCall"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "AST-only map intrinsic used to exercise builtin-to-VM callbacks.",
+          "properties": {
+            "Map": {
+              "properties": {
+                "function": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "items": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "function",
+                "items"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Map"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "AST-only structured exception scope. The parser intentionally has no production for this node; dialects construct it directly.",
+          "properties": {
+            "Try": {
+              "$ref": "#/definitions/TryExpr"
+            }
+          },
+          "required": [
+            "Try"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "AST-only explicit throw. The thrown value is transferred unchanged.",
+          "properties": {
+            "Throw": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Throw"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "AST-only JavaScript function return. The compiler runs every enclosing `finally` before returning from the current function.",
+          "properties": {
+            "Return": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Return"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Field": {
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "target": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "field",
+                "target"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Index": {
+              "properties": {
+                "index": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "target": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "index",
+                "target"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Unary": {
+              "properties": {
+                "expr": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "op": {
+                  "$ref": "#/definitions/UnaryOp"
+                }
+              },
+              "required": [
+                "expr",
+                "op"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Unary"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Binary": {
+              "properties": {
+                "left": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "op": {
+                  "$ref": "#/definitions/BinaryOp"
+                },
+                "right": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "left",
+                "op",
+                "right"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Binary"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An ECMA-262 unary operation whose coercion differs from Lashlang.",
+          "properties": {
+            "JavaScriptUnary": {
+              "properties": {
+                "expr": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "op": {
+                  "$ref": "#/definitions/JavaScriptUnaryOp"
+                }
+              },
+              "required": [
+                "expr",
+                "op"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "JavaScriptUnary"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An eager ECMA-262 binary operation whose coercion differs from Lashlang.",
+          "properties": {
+            "JavaScriptBinary": {
+              "properties": {
+                "left": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "op": {
+                  "$ref": "#/definitions/JavaScriptBinaryOp"
+                },
+                "right": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "left",
+                "op",
+                "right"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "JavaScriptBinary"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A short-circuiting ECMA-262 logical operation that returns an operand.",
+          "properties": {
+            "JavaScriptLogical": {
+              "properties": {
+                "left": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "op": {
+                  "$ref": "#/definitions/JavaScriptLogicalOp"
+                },
+                "right": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "left",
+                "op",
+                "right"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "JavaScriptLogical"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "TypeLiteral": {
+              "$ref": "#/definitions/TypeExpr"
+            }
+          },
+          "required": [
+            "TypeLiteral"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FunctionExpr": {
+      "properties": {
+        "body": {
+          "$ref": "#/definitions/Expr"
+        },
+        "captures": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "type": "object"
+    },
+    "FunctionParam": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "JavaScriptBinaryOp": {
+      "enum": [
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Remainder",
+        "StrictEqual",
+        "StrictNotEqual",
+        "LooseEqual",
+        "LooseNotEqual",
+        "Less",
+        "LessEqual",
+        "Greater",
+        "GreaterEqual"
+      ],
+      "type": "string"
+    },
+    "JavaScriptLogicalOp": {
+      "enum": [
+        "And",
+        "Or",
+        "NullishCoalesce"
+      ],
+      "type": "string"
+    },
+    "JavaScriptUnaryOp": {
+      "enum": [
+        "Plus",
+        "Negate",
+        "Not",
+        "TypeOf"
+      ],
+      "type": "string"
+    },
+    "LabelMetadata": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "ListComprehensionClause": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "For": {
+              "properties": {
+                "binding": {
+                  "type": "string"
+                },
+                "iterable": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "binding",
+                "iterable"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "For"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "If": {
+              "properties": {
+                "condition": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "condition"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "If"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProcessLiteralExpr": {
+      "description": "The authored shape of an inline process body, as a dialect lowers it.\n\n`params` carries the parameter names and their declared types, so a TypeScript arrow's annotations reach the lifted declaration's signature instead of widening to `Any`. `body` is the same wrapper a process literal run lowers to: the authored statements inside the process-failure wrapper, with the params passed through by name.",
+      "properties": {
+        "body": {
+          "$ref": "#/definitions/Expr"
+        },
+        "hidden_args": {
+          "description": "Immutable, durably representable cell locals the body reads; each becomes a hidden start argument carrying the value the variable had when the process started (FIG-2998).",
+          "items": {
+            "$ref": "#/definitions/ProcessParam"
+          },
+          "type": "array"
+        },
+        "params": {
+          "items": {
+            "$ref": "#/definitions/ProcessParam"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "body",
+        "params"
+      ],
+      "type": "object"
+    },
+    "ProcessParam": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "ProcessParamWire": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "ProcessSignalDecl": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "ProcessType": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "known"
+              ],
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/definitions/TypeExpr"
+            },
+            "params": {
+              "items": {
+                "$ref": "#/definitions/ProcessParamWire"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "output",
+            "params"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ResourceRefExpr": {
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resource_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "resource_type"
+      ],
+      "type": "object"
+    },
+    "Span": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "TryExpr": {
+      "properties": {
+        "body": {
+          "$ref": "#/definitions/Expr"
+        },
+        "catch": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CatchClause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finally": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Expr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "type": "object"
+    },
+    "TypeExpr": {
+      "description": "A serialized value-type expression.\n\nHost decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.",
+      "oneOf": [
+        {
+          "enum": [
+            "Any",
+            "Str",
+            "Int",
+            "Float",
+            "Bool",
+            "Dict"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The literal `null` type; usually only useful as part of a `Union` (e.g. `str | null` for a nullable field).",
+          "enum": [
+            "Null"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Enum": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "Enum"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "List": {
+              "$ref": "#/definitions/TypeExpr"
+            }
+          },
+          "required": [
+            "List"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Object": {
+              "items": {
+                "$ref": "#/definitions/TypeField"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "Object"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Ref"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Process": {
+              "$ref": "#/definitions/ProcessType"
+            }
+          },
+          "required": [
+            "Process"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "TriggerHandle": {
+              "$ref": "#/definitions/TypeExpr"
+            }
+          },
+          "required": [
+            "TriggerHandle"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Union of alternative type shapes, e.g. `str | int | null`.",
+          "properties": {
+            "Union": {
+              "$ref": "#/definitions/UnionMembers"
+            }
+          },
+          "required": [
+            "Union"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TypeField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "optional",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "UnaryOp": {
+      "enum": [
+        "Negate",
+        "Not"
+      ],
+      "type": "string"
+    },
+    "UnionMembers": {
+      "items": {
+        "$ref": "#/definitions/TypeExpr"
+      },
+      "minItems": 2,
+      "type": "array"
+    },
+    "VariableVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "variable": {
+          "type": "string"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "variable",
+        "version"
+      ],
+      "type": "object"
+    },
+    "WorkflowArgument": {
+      "description": "One call or effect argument in graph order.\n\nType facets address these values with a serialized [`WorkflowSlotPath`]. Its typed call, argument, field, and index segments cannot collide when a field contains punctuation. Nodes with several nested receiver calls add a call segment in depth-first IR walk order.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "positional"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "fields": {
+              "items": {
+                "items": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/definitions/Expr"
+                  }
+                ],
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "named"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "fields",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowDeclaration": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "type"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "ty": {
+              "$ref": "#/definitions/TypeExpr"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "ty"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A named process is a container with its own child subgraph.",
+          "properties": {
+            "body": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "display_name": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "name_source": {
+              "$ref": "#/definitions/WorkflowNodeNameSource"
+            },
+            "params": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/ProcessParam"
+              },
+              "type": "array"
+            },
+            "return_ty": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TypeExpr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "signals": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/ProcessSignalDecl"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "body",
+            "display_name",
+            "id",
+            "kind",
+            "name",
+            "name_source"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A declared pure function, carried through the document unprojected.\n\nA process becomes a container with a child subgraph because its body is made of durable steps the editor has to show and reorder. A function's body contains no effects by construction, so it contributes no steps and no execution sites: projecting it into nodes would invent graph structure with nothing behind it. It travels verbatim instead, exactly as `Type` does, so a round trip through the document is lossless.",
+          "properties": {
+            "body": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "function"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "params": {
+              "items": {
+                "$ref": "#/definitions/FunctionParam"
+              },
+              "type": "array"
+            },
+            "return_ty": {
+              "$ref": "#/definitions/TypeExpr"
+            }
+          },
+          "required": [
+            "body",
+            "kind",
+            "name",
+            "return_ty"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowDiagnosticClass": {
+      "description": "Whether a diagnostic blocks save under ADR 0073's gradual typing rule.",
+      "enum": [
+        "definite",
+        "advisory"
+      ],
+      "type": "string"
+    },
+    "WorkflowDiagnosticKind": {
+      "description": "Closed host-facing vocabulary for linker diagnostics.",
+      "enum": [
+        "duplicate_declaration",
+        "duplicate_process_param",
+        "duplicate_process_signal",
+        "unknown_process",
+        "unknown_name",
+        "unknown_builtin",
+        "unknown_resource",
+        "unknown_type",
+        "incompatible_constructor_input",
+        "incompatible_operation_input",
+        "awaited_settled_expression",
+        "incompatible_expected_literal",
+        "incompatible_process_return",
+        "incompatible_function_return",
+        "duplicate_function_param",
+        "function_argument_count",
+        "incompatible_function_argument",
+        "forbidden_in_function",
+        "function_name_is_not_a_value",
+        "function_shadows_builtin",
+        "invalid_trigger_registration",
+        "invalid_trigger_subscription_key",
+        "process_literal_outside_process_slot",
+        "conflicting_signal_payload",
+        "invalid_trigger_inputs",
+        "duplicate_trigger_input",
+        "missing_trigger_input",
+        "unknown_trigger_input",
+        "missing_trigger_event_input",
+        "trigger_target_takes_no_event",
+        "ambiguous_omitted_trigger_inputs",
+        "trigger_event_outside_inputs",
+        "trigger_event_projection",
+        "invalid_trigger_list",
+        "unknown_trigger_event_type",
+        "invalid_trigger_target",
+        "trigger_event_mismatch",
+        "unresolved_receiver",
+        "unknown_resource_operation",
+        "ambiguous_module_operation",
+        "bare_tool_call",
+        "incompatible_process_argument",
+        "feature_disabled",
+        "process_lifecycle_outside_process",
+        "opaque_host_descriptor_access",
+        "unknown_object_field",
+        "incompatible_binary_operands",
+        "incompatible_builtin_operands",
+        "incompatible_iteration_target",
+        "module_hash",
+        "invalid_ast"
+      ],
+      "type": "string"
+    },
+    "WorkflowEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/WorkflowEdgeKind"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "id",
+        "kind",
+        "to"
+      ],
+      "type": "object"
+    },
+    "WorkflowEdgeKind": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "data_dependency"
+              ],
+              "type": "string"
+            },
+            "variable": {
+              "type": "string"
+            },
+            "version": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "variable",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "sequence"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowEffectKind": {
+      "enum": [
+        "await_join",
+        "wait_signal",
+        "sleep_for",
+        "sleep_until",
+        "print",
+        "yield",
+        "break",
+        "continue"
+      ],
+      "type": "string"
+    },
+    "WorkflowExecutionSite": {
+      "description": "Stable source-level location carried by runtime sites for workflow-graph joins.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "path": {
+          "default": [],
+          "items": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "owner"
+      ],
+      "type": "object"
+    },
+    "WorkflowExpectedArgument": {
+      "properties": {
+        "slot": {
+          "items": {
+            "$ref": "#/definitions/WorkflowSlotPathSegment"
+          },
+          "type": "array"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "slot",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "WorkflowListComprehensionClause": {
+      "description": "One editable list-comprehension clause.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "type": "string"
+            },
+            "iterable": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "for"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "binding",
+            "iterable",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "if"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "condition",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowNode": {
+      "additionalProperties": false,
+      "properties": {
+        "available_variables": {
+          "description": "Identifiers visible before this node executes, in stable lexical order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_sites": {
+          "items": {
+            "$ref": "#/definitions/WorkflowExecutionSite"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/WorkflowNodeKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "name_source": {
+          "$ref": "#/definitions/WorkflowNodeNameSource"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/definitions/VariableVersion"
+          },
+          "type": "array"
+        },
+        "source_span": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Span"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type_facets": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkflowNodeTypeFacets"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional host-derived type information. It is never used to render source."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "name_source"
+      ],
+      "type": "object"
+    },
+    "WorkflowNodeKind": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expression": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "data"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expression",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/WorkflowArgument"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "enum": [
+                "call"
+              ],
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "receiver": {
+              "$ref": "#/definitions/Expr"
+            },
+            "result_steps": {
+              "items": {
+                "$ref": "#/definitions/WorkflowResultStep"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "operation",
+            "receiver"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/WorkflowArgument"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effect": {
+              "$ref": "#/definitions/WorkflowEffectKind"
+            },
+            "kind": {
+              "enum": [
+                "effect"
+              ],
+              "type": "string"
+            },
+            "result_steps": {
+              "items": {
+                "$ref": "#/definitions/WorkflowResultStep"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "effect",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expression": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "computation"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expression",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expression": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "state_update"
+              ],
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/definitions/AssignTarget"
+            }
+          },
+          "required": [
+            "expression",
+            "kind",
+            "target"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expression": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "terminal"
+              ],
+              "type": "string"
+            },
+            "terminal": {
+              "$ref": "#/definitions/WorkflowTerminalKind"
+            }
+          },
+          "required": [
+            "expression",
+            "kind",
+            "terminal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "condition": {
+              "$ref": "#/definitions/Expr"
+            },
+            "container_kind": {
+              "enum": [
+                "if"
+              ],
+              "type": "string"
+            },
+            "else_graph": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "else_is_block": {
+              "description": "Whether the source's else branch is a block rather than a direct value or `else if`.",
+              "type": "boolean"
+            },
+            "kind": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            },
+            "then_graph": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "then_is_block": {
+              "description": "Whether the source's then branch is a statement block rather than a value expression.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "condition",
+            "container_kind",
+            "else_graph",
+            "else_is_block",
+            "kind",
+            "then_graph",
+            "then_is_block"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "type": "string"
+            },
+            "body": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "container_kind": {
+              "enum": [
+                "for"
+              ],
+              "type": "string"
+            },
+            "iterable": {
+              "$ref": "#/definitions/Expr"
+            },
+            "kind": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "binding",
+            "body",
+            "container_kind",
+            "iterable",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "condition": {
+              "$ref": "#/definitions/Expr"
+            },
+            "container_kind": {
+              "enum": [
+                "while"
+              ],
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "body",
+            "condition",
+            "container_kind",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clauses": {
+              "items": {
+                "$ref": "#/definitions/WorkflowListComprehensionClause"
+              },
+              "type": "array"
+            },
+            "container_kind": {
+              "enum": [
+                "list_comprehension"
+              ],
+              "type": "string"
+            },
+            "element": {
+              "$ref": "#/definitions/WorkflowSubgraph"
+            },
+            "kind": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "clauses",
+            "container_kind",
+            "element",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "opaque"
+              ],
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowNodeNameSource": {
+      "enum": [
+        "label",
+        "derived"
+      ],
+      "type": "string"
+    },
+    "WorkflowNodeTypeFacets": {
+      "properties": {
+        "available_variables": {
+          "items": {
+            "$ref": "#/definitions/WorkflowTypedVariable"
+          },
+          "type": "array"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/WorkflowTypeDiagnostic"
+          },
+          "type": "array"
+        },
+        "expected_arguments": {
+          "items": {
+            "$ref": "#/definitions/WorkflowExpectedArgument"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "WorkflowResultStep": {
+      "description": "Ordered wrappers around a call or effect, from the operation outwards.",
+      "enum": [
+        "await",
+        "unwrap_result"
+      ],
+      "type": "string"
+    },
+    "WorkflowSlotPathSegment": {
+      "description": "One structural step in a [`WorkflowSlotPath`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "call"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arg": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowSubgraph": {
+      "additionalProperties": false,
+      "properties": {
+        "edges": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/WorkflowEdge"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/WorkflowNode"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "WorkflowTerminalKind": {
+      "enum": [
+        "finish",
+        "fail"
+      ],
+      "type": "string"
+    },
+    "WorkflowTypeDiagnostic": {
+      "properties": {
+        "class": {
+          "$ref": "#/definitions/WorkflowDiagnosticClass"
+        },
+        "kind": {
+          "$ref": "#/definitions/WorkflowDiagnosticKind"
+        },
+        "message": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "slot": {
+          "items": {
+            "$ref": "#/definitions/WorkflowSlotPathSegment"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "span": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Span"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "class",
+        "kind",
+        "message",
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "WorkflowTypedVariable": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "The single serializable graph document used for editing and run overlays.",
+  "properties": {
+    "declarations": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/WorkflowDeclaration"
+      },
+      "type": "array"
+    },
+    "facet_schema_version": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "main": {
+      "$ref": "#/definitions/WorkflowSubgraph"
+    },
+    "schema_version": {
+      "enum": [
+        13
+      ],
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "source_identity": {
+      "description": "Content identity of the projected definition.\n\nThe TypeScript projector hashes the canonical source bytes under `lash-workflow-source/v3`. The BLAKE3 preimage is the big-endian `u64` domain length, the domain bytes, then the canonical source bytes. Projection from an IR value uses those same source bytes when the IR can be printed and reparsed; otherwise the final preimage component is the JSON-serialized [`crate::Program`]. This value identifies definition content. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts, and `module_ref` identifies compiled artifact bytes.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "main",
+    "schema_version",
+    "source_identity"
+  ],
+  "title": "WorkflowGraph",
+  "type": "object",
+  "x-lash-schema-version": 13,
+  "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
+}

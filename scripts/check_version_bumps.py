@@ -24,6 +24,11 @@ pinned the same way: the guards project guarded text, so a retyped variant reads
 as a shape change even when the serialized bytes are identical, and only a
 reviewer can say which it was.
 
+Guard hashing ignores only allowlisted non-wire derives inside top-level
+``derive`` attributes and ``derive`` entries of ``cfg_attr``. Wire-producing
+and unknown derives remain in the preimage, as do namespaced attributes, macro
+arguments, and every ``serde`` attribute.
+
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.  Pull-request CI passes the PR merge-base explicitly.
 """
@@ -291,6 +296,15 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-3469: `AstString` replaced the `CompactString` alias with a local
+    # transparent wrapper. Its serde and schema agreement test pins the same
+    # JSON string bytes, and the process wire DTO agreement tests pin the
+    # custom process-type encoding. The graph, facet, bytecode, and
+    # continuation carriers therefore keep their current versions.
+    'crates/lashlang/src/lib.rs:BYTECODE_FORMAT_VERSION': 'sha256:a9f3e2866427a4620ff01c0a1a77a77378083975ad9cbaeca59bef8b28c70029',
+    'crates/lashlang/src/workflow_graph.rs:WORKFLOW_GRAPH_SCHEMA_VERSION': 'sha256:ba80461ef5b1dd94ef6ab0fb1c19b4ed5be0c9e551e635199c4e4cc62840d18c',
+    'crates/lashlang/src/workflow_graph/facets.rs:WORKFLOW_TYPE_FACET_SCHEMA_VERSION': 'sha256:96b314b45059996ec12f1c6d58a1d5885c1c019e19499b316eefa3e553998a41',
+
     # FIG-2888: the four duplicated identity-projection helpers (event type,
     # value selector, payload leaf, schema leaf) moved once into
     # runtime/process/identity_projection.rs and were renamed
@@ -585,15 +599,19 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lashlang/src/runtime/state.rs:LASHLANG_SNAPSHOT_VERSION": (
         "sha256:294f7111ef9bfc2d934213f174516de111d8dde72413fd0be1163f5fbd78ccee"
     ),
-    # FIG-3020 (live): `Span` moved verbatim from crates/lashlang/src/lexer.rs
+    # FIG-3020: `Span` moved verbatim from crates/lashlang/src/lexer.rs
     # to crates/lashlang/src/span.rs (the path in versioned-surfaces.toml
     # follows it) when the authored surface was deleted; same derives, same two
     # usize fields, no serde change, so the serialized bytes are identical and
-    # VM_CONTINUATION_FORMAT_VERSION stays 14. Any further guarded-shape drift
-    # re-fails the gate.
+    # VM_CONTINUATION_FORMAT_VERSION stayed 14.
+    #
+    # FIG-3469 (live) supersedes that reading after `AstString` replaced the
+    # `CompactString` alias with a serde-transparent local wrapper. The
+    # wrapper's byte-agreement test pins the same strings, so the continuation
+    # remains byte-identical at version 16. Any further drift re-fails.
     "crates/lashlang/src/runtime/vm/continuation.rs:"
     "VM_CONTINUATION_FORMAT_VERSION": (
-        "sha256:3be27b55f201a7b5e39f3c668f7d4508b33a6ea7527cc4e85b65d53dea1c45ae"
+        "sha256:b07d96a2f2c5cd041c93ffcf833d693803119fcc0af6bc89e9e013bfef330f75"
     ),
     # FIG-2992: a process identity's `definition` became the typed
     # `ProcessDefinitionRef` instead of a bare `serde_json::Value`. Both trigger
@@ -1355,6 +1373,201 @@ def rust_item_start_with_attributes(
     return cursor
 
 
+NON_WIRE_DERIVES = {
+    "Debug",
+    "Clone",
+    "Copy",
+    "PartialEq",
+    "Eq",
+    "PartialOrd",
+    "Ord",
+    "Hash",
+    "Default",
+    "schemars::JsonSchema",
+    "thiserror::Error",
+}
+
+
+def _rust_group_end(text: str, open_index: int) -> int | None:
+    """Return the exclusive end of a token-aware parenthesized Rust group."""
+    if open_index >= len(text) or text[open_index] != "(":
+        return None
+    index = open_index + 1
+    depth = 1
+    while index < len(text):
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline + 1
+        elif text.startswith("/*", index):
+            skipped = _rust_trivia_end(text, index)
+            if skipped is None:
+                return None
+            index = skipped
+        elif raw := _raw_string_start(text, index):
+            content_start, closer = raw
+            closing = text.find(closer, content_start)
+            if closing < 0:
+                return None
+            index = closing + len(closer)
+        elif text[index] == '"' or (text[index] == "b" and following == '"'):
+            index += 2 if text[index] == "b" else 1
+            while index < len(text):
+                if text[index] == "\\":
+                    index += 2
+                else:
+                    closing = text[index] == '"'
+                    index += 1
+                    if closing:
+                        break
+            else:
+                return None
+        elif char_end := _char_literal_end(text, index):
+            index = char_end
+        elif text[index] == "(":
+            depth += 1
+            index += 1
+        elif text[index] == ")":
+            depth -= 1
+            index += 1
+            if depth == 0:
+                return index
+        else:
+            index += 1
+    return None
+
+
+def _rust_top_level_items(text: str, start: int, end: int) -> tuple[tuple[int, int], ...] | None:
+    """Split a Rust token range on top-level commas."""
+    items: list[tuple[int, int]] = []
+    item_start = start
+    index = start
+    delimiters: list[str] = []
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    while index < end:
+        following = text[index + 1] if index + 1 < end else ""
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2, end)
+            index = end if newline < 0 else newline + 1
+        elif text.startswith("/*", index):
+            skipped = _rust_trivia_end(text[:end], index)
+            if skipped is None:
+                return None
+            index = skipped
+        elif raw := _raw_string_start(text, index):
+            content_start, closer = raw
+            closing = text.find(closer, content_start, end)
+            if closing < 0:
+                return None
+            index = closing + len(closer)
+        elif text[index] == '"' or (text[index] == "b" and following == '"'):
+            index += 2 if text[index] == "b" else 1
+            while index < end:
+                if text[index] == "\\":
+                    index += 2
+                else:
+                    closing = text[index] == '"'
+                    index += 1
+                    if closing:
+                        break
+            else:
+                return None
+        elif char_end := _char_literal_end(text, index):
+            index = char_end
+        elif text[index] in pairs:
+            delimiters.append(pairs[text[index]])
+            index += 1
+        elif text[index] in ")]}":
+            if not delimiters or delimiters.pop() != text[index]:
+                return None
+            index += 1
+        elif text[index] == "," and not delimiters:
+            items.append((item_start, index))
+            item_start = index + 1
+            index += 1
+        else:
+            index += 1
+    if delimiters:
+        return None
+    items.append((item_start, end))
+    return tuple(items)
+
+
+def _derive_contents(text: str, start: int, end: int) -> tuple[int, int] | None:
+    """Return contents for an item that is exactly `derive(...)`."""
+    cursor = _rust_trivia_end(text, start)
+    if cursor is None:
+        return None
+    name = re.match(r"derive\b", text[cursor:end])
+    if name is None:
+        return None
+    cursor = _rust_trivia_end(text, cursor + len(name.group(0)))
+    if cursor is None or cursor >= end or text[cursor] != "(":
+        return None
+    group_end = _rust_group_end(text[:end], cursor)
+    if group_end is None:
+        return None
+    tail = _rust_trivia_end(text, group_end)
+    if tail != end:
+        return None
+    return cursor + 1, group_end - 1
+
+
+def _attribute_derive_lists(attribute: str) -> tuple[tuple[int, int], ...]:
+    """Find only top-level derive and cfg_attr derive-list positions."""
+    content_start = 2
+    content_end = len(attribute) - 1
+    cursor = _rust_trivia_end(attribute, content_start)
+    if cursor is None:
+        return ()
+    name = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\b", attribute[cursor:content_end])
+    if name is None:
+        return ()
+    attribute_name = name.group(1)
+    cursor = _rust_trivia_end(attribute, cursor + len(attribute_name))
+    if cursor is None or cursor >= content_end or attribute[cursor] != "(":
+        return ()
+    group_end = _rust_group_end(attribute[:content_end], cursor)
+    if group_end is None or _rust_trivia_end(attribute, group_end) != content_end:
+        return ()
+    if attribute_name == "derive":
+        return ((cursor + 1, group_end - 1),)
+    if attribute_name != "cfg_attr":
+        return ()
+    items = _rust_top_level_items(attribute, cursor + 1, group_end - 1)
+    if items is None:
+        return ()
+    return tuple(
+        contents
+        for item_start, item_end in items[1:]
+        if (contents := _derive_contents(attribute, item_start, item_end)) is not None
+    )
+
+
+def normalize_rust_derive_lists(text: str) -> str:
+    """Ignore allowlisted non-wire derives in real derive attributes only."""
+    replacements: list[tuple[int, int, str]] = []
+    for attribute_start, attribute_end in rust_outer_attribute_ranges(text):
+        attribute = text[attribute_start:attribute_end]
+        for start, end in _attribute_derive_lists(attribute):
+            items = _rust_top_level_items(attribute, start, end)
+            if items is None:
+                continue
+            retained = [
+                strip_rust_trivia(attribute[item_start:item_end])
+                for item_start, item_end in items
+                if strip_rust_trivia(attribute[item_start:item_end])
+                and strip_rust_trivia(attribute[item_start:item_end]) not in NON_WIRE_DERIVES
+            ]
+            replacements.append(
+                (attribute_start + start, attribute_start + end, ",".join(retained))
+            )
+    normalized = text
+    for start, end, replacement in reversed(replacements):
+        normalized = normalized[:start] + replacement + normalized[end:]
+    return normalized
+
+
 RUST_DECLARATION = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
     r"(?:const|static|fn|struct|enum|type)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
@@ -1540,7 +1753,7 @@ def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
             continue
         start = rust_item_start_with_attributes(text, match.start(), attribute_ranges)
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(text[start:end])
+        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
         if name in found and found[name] != value:
             raise CheckError(f"guarded Rust symbol {name} is ambiguous in one file")
         found[name] = value
@@ -1576,7 +1789,7 @@ def serde_shapes(text: str) -> dict[str, str]:
         if "Serialize" not in attributes and "Deserialize" not in attributes:
             continue
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(text[start:end])
+        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
         key = name
         ordinal = 2
         while key in found:

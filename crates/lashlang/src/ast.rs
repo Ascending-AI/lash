@@ -1,12 +1,10 @@
-use compact_str::CompactString;
-use serde::ser::SerializeStruct;
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::fmt;
 
+pub use crate::ast_string::AstString;
 use crate::span::Span;
-
-pub type AstString = CompactString;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Program {
@@ -395,7 +393,7 @@ pub enum Declaration {
     Function(FunctionDecl),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TypeDecl {
     pub name: AstString,
     pub ty: TypeExpr,
@@ -414,7 +412,7 @@ pub struct ProcessDecl {
     pub body: Expr,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessParam {
     pub name: AstString,
     pub ty: TypeExpr,
@@ -429,7 +427,7 @@ pub struct ProcessParam {
 /// rejects every effect inside the body. That ban is what keeps effect identity
 /// untouched — every effect stays at a stable top-level syntactic site, so
 /// call-site exactly-once identity and continuation snapshots see no new shape.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FunctionDecl {
     pub name: AstString,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -438,26 +436,26 @@ pub struct FunctionDecl {
     pub body: Expr,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FunctionParam {
     pub name: AstString,
     pub ty: TypeExpr,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessSignalDecl {
     pub name: AstString,
     pub ty: TypeExpr,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LabelMetadata {
     pub title: AstString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<AstString>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AssignTarget {
     pub root: AstString,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -477,13 +475,13 @@ impl AssignTarget {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum AssignPathStep {
     Field(AstString),
     Index(Expr),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum Expr {
     Block(Vec<Expr>),
     LabelAnnotated {
@@ -626,7 +624,7 @@ pub enum Expr {
     TypeLiteral(Box<TypeExpr>),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FunctionExpr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<AstString>,
@@ -668,7 +666,7 @@ pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
 /// instead of widening to `Any`. `body` is the same wrapper a process literal
 /// run lowers to: the authored statements inside the process-failure wrapper,
 /// with the params passed through by name.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessLiteralExpr {
     pub params: Vec<ProcessParam>,
     /// Immutable, durably representable cell locals the body reads; each
@@ -679,7 +677,7 @@ pub struct ProcessLiteralExpr {
     pub body: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TryExpr {
     pub body: Box<Expr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -688,13 +686,13 @@ pub struct TryExpr {
     pub finally: Option<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CatchClause {
     pub binding: AstString,
     pub body: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum ListComprehensionClause {
     For { binding: AstString, iterable: Expr },
     If { condition: Expr },
@@ -1235,7 +1233,7 @@ where
 /// Host decoders must refuse unknown variants. `TypeExpr` is decoded only
 /// after its graph or facet carrier version is accepted; adding a variant
 /// therefore requires the owning carrier version to advance.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum TypeExpr {
     Any,
     Str,
@@ -1266,6 +1264,21 @@ pub enum TypeExpr {
 /// duplicates first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnionMembers(Vec<TypeExpr>);
+
+impl JsonSchema for UnionMembers {
+    fn schema_name() -> String {
+        "UnionMembers".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = generator.subschema_for::<Vec<TypeExpr>>();
+        let schemars::schema::Schema::Object(object) = &mut schema else {
+            return schema;
+        };
+        object.array.get_or_insert_with(Default::default).min_items = Some(2);
+        schema
+    }
+}
 
 impl UnionMembers {
     pub fn new(members: Vec<TypeExpr>) -> Option<Self> {
@@ -1464,34 +1477,45 @@ impl Serialize for ProcessType {
     where
         S: Serializer,
     {
-        match &self.0 {
-            ProcessTypeKind::Unknown => {
-                let mut state = serializer.serialize_struct("ProcessType", 1)?;
-                state.serialize_field("kind", "unknown")?;
-                state.end()
-            }
-            ProcessTypeKind::Known(signature) => {
-                let mut state = serializer.serialize_struct("ProcessType", 3)?;
-                state.serialize_field("kind", "known")?;
-                state.serialize_field("params", signature.params())?;
-                state.serialize_field("output", signature.output())?;
-                state.end()
-            }
-        }
+        let wire = match &self.0 {
+            ProcessTypeKind::Unknown => ProcessTypeWire::Unknown {},
+            ProcessTypeKind::Known(signature) => ProcessTypeWire::Known {
+                params: signature
+                    .params()
+                    .iter()
+                    .map(|param| ProcessParamWire {
+                        name: param.name.clone(),
+                        ty: param.ty.clone(),
+                    })
+                    .collect(),
+                output: signature.output().clone(),
+            },
+        };
+        wire.serialize(serializer)
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ProcessTypeWire {
-    Unknown,
+    Unknown {},
     Known {
         params: Vec<ProcessParamWire>,
         output: TypeExpr,
     },
 }
 
-#[derive(Deserialize)]
+impl JsonSchema for ProcessType {
+    fn schema_name() -> String {
+        "ProcessType".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        ProcessTypeWire::json_schema(generator)
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProcessParamWire {
     name: AstString,
@@ -1504,7 +1528,7 @@ impl<'de> Deserialize<'de> for ProcessType {
         D: Deserializer<'de>,
     {
         match ProcessTypeWire::deserialize(deserializer)? {
-            ProcessTypeWire::Unknown => Ok(Self::unknown()),
+            ProcessTypeWire::Unknown {} => Ok(Self::unknown()),
             ProcessTypeWire::Known { params, output } => ProcessSignature::try_new(
                 params
                     .into_iter()
@@ -1586,7 +1610,7 @@ impl fmt::Display for TypeExpr {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TypeField {
     pub name: AstString,
@@ -1594,7 +1618,7 @@ pub struct TypeField {
     pub optional: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResourceRefExpr {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path: Vec<AstString>,
@@ -1636,13 +1660,13 @@ impl ResourceRefExpr {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum UnaryOp {
     Negate,
     Not,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum JavaScriptUnaryOp {
     Plus,
     Negate,
@@ -1650,7 +1674,7 @@ pub enum JavaScriptUnaryOp {
     TypeOf,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum JavaScriptBinaryOp {
     Add,
     Subtract,
@@ -1667,14 +1691,14 @@ pub enum JavaScriptBinaryOp {
     GreaterEqual,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum JavaScriptLogicalOp {
     And,
     Or,
     NullishCoalesce,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum BinaryOp {
     Add,
     Subtract,

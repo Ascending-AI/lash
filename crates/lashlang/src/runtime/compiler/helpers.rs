@@ -314,7 +314,10 @@ pub(super) fn fold_type(ty: &TypeExpr) -> Option<Value> {
                 TYPE.into(),
                 Value::String(SchemaScalarKind::String.as_schema_name().into()),
             );
-            let items: Vec<Value> = values.iter().map(|v| Value::String(v.clone())).collect();
+            let items: Vec<Value> = values
+                .iter()
+                .map(|v| Value::String(v.clone().into()))
+                .collect();
             rec.insert(ENUM.into(), Value::List(items.into()));
             Some(Value::Record(Arc::new(rec)))
         }
@@ -336,7 +339,7 @@ pub(super) fn fold_type(ty: &TypeExpr) -> Option<Value> {
             let required: Vec<Value> = fields
                 .iter()
                 .filter(|f| !f.optional)
-                .map(|f| Value::String(f.name.clone()))
+                .map(|f| Value::String(f.name.clone().into()))
                 .collect();
             let mut rec = record_with_capacity(4);
             rec.insert(

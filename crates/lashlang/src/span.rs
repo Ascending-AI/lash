@@ -6,9 +6,10 @@
 //! crate produces them any more. They stay here because the compiler, the VM
 //! and the durable continuation all blame errors on one.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

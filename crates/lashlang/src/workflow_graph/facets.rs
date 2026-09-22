@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Span, WorkflowNodeId};
@@ -7,7 +8,7 @@ use crate::linker::{LinkError, WorkflowLinkAnalysis};
 /// Version of the optional, derived workflow type-facet contract.
 pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 3;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowNodeTypeFacets {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub available_variables: Vec<WorkflowTypedVariable>,
@@ -17,13 +18,13 @@ pub struct WorkflowNodeTypeFacets {
     pub diagnostics: Vec<WorkflowTypeDiagnostic>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowTypedVariable {
     pub name: String,
     pub ty: TypeExpr,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowExpectedArgument {
     pub slot: WorkflowSlotPath,
     pub ty: TypeExpr,
@@ -34,7 +35,9 @@ pub struct WorkflowExpectedArgument {
 /// The serialized list is authoritative. [`Display`](std::fmt::Display) is a
 /// derived spelling for text-only host contracts; field names use JSON string
 /// quoting so they cannot collide with structural indexes or separators.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(transparent)]
 pub struct WorkflowSlotPath(pub Vec<WorkflowSlotPathSegment>);
 
@@ -83,7 +86,9 @@ impl std::fmt::Display for WorkflowSlotPath {
 }
 
 /// One structural step in a [`WorkflowSlotPath`].
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowSlotPathSegment {
     Call(u32),
@@ -142,7 +147,7 @@ fn receiver_calls<'a>(expression: &'a Expr, calls: &mut Vec<&'a Expr>) {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowTypeDiagnostic {
     pub node_id: WorkflowNodeId,
     pub kind: WorkflowDiagnosticKind,
@@ -155,7 +160,7 @@ pub struct WorkflowTypeDiagnostic {
 }
 
 /// Whether a diagnostic blocks save under ADR 0073's gradual typing rule.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowDiagnosticClass {
     Definite,
@@ -163,7 +168,7 @@ pub enum WorkflowDiagnosticClass {
 }
 
 /// Closed host-facing vocabulary for linker diagnostics.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowDiagnosticKind {
     DuplicateDeclaration,
