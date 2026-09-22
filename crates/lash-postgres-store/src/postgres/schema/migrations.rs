@@ -318,17 +318,4 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_relations: &[],
         statements: &[],
     },
-    // The immediate predecessor of the retained generation: a component-111
-    // catalog likewise carries every relation, column, and guard this build
-    // owns — 112 and 113 changed only journaled values — so the walk finds
-    // nothing missing and the arm is a stamp-only advance.
-    SchemaMigration {
-        from: 111,
-        to: 112,
-        source_missing_tables: &[],
-        source_missing_columns: &[],
-        source_missing_guards: &[],
-        introduced_relations: &[],
-        statements: &[],
-    },
 ];
