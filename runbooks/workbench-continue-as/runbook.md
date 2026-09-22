@@ -85,18 +85,18 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 5. **Pressure is bounded and trace-gated.** Submit several distinctive marker turns (at
    least two, no more than six),
    each with enough deterministic filler to approach the 21,000-token compaction threshold.
-   Stop adding pressure as soon as `rolling_history_compaction_needed` appears. Never exceed
+   Stop adding pressure as soon as `context_compaction_needed` appears. Never exceed
    six pressure turns and never fill the window until provider rejection.
 6. **Record both rolling-history decision events by scope.** The first
-   `rolling_history_compaction_needed` must report `max_context_tokens == 41000`,
-   `threshold_tokens == 21000`, and `context_budget_tokens >= threshold_tokens`.
-   `rolling_history_prompt_pruned` must carry non-negative dropped/retained counts and be
+   `context_compaction_needed` must report `max_context_tokens == 41000`,
+   `threshold_tokens == 21000`, and `used_tokens >= threshold_tokens`.
+   `prompt_view_pruned` must carry non-negative dropped/retained counts and be
    turn-scoped. Missing or incorrectly parented decision evidence is a FAIL.
    The decision consumes the prior completed prompt's usage: if the sixth bounded prompt is
    the first to cross 21,000 tokens, submit one short marker-only probe (no more filler) and
    require the events on that probe.
 
-   `rolling_history_compaction_started` and `rolling_history_compaction_completed` are
+   `context_compaction_started` and `context_compaction_completed` are
    intentionally out of scope here. They describe host-invoked `compact_context` lifecycle
    work in standard mode, covered by the slack-clone variant-B compaction runbook and core
    rolling-history regression tests. The workbench is the RLM-only reference host: its
@@ -179,7 +179,7 @@ records. Passive `agent_workbench.api.work.response` records with an empty resul
 from the rendered browser surface and must be recorded separately from that activity gate.
 Record the workbench PID, Restate container id and `StartedAt`, model, and exact
 `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS` launch value; the first Phase 1
-`rolling_history_compaction_needed.max_context_tokens` is the runtime proof that the session
+`context_compaction_needed.max_context_tokens` is the runtime proof that the session
 policy delivered that value to the hook. Screenshot `00-scoped-empty.png`; save
 `00-identities.json`, `00-state.json`, and `00-trace.json`.
 
@@ -196,7 +196,7 @@ explicitly label
 
 After every send, gate the relevant `turn_completed`, idle, empty active turns, and stable
 row/message counts, then run the three-layer cross-check. Poll the trace after each turn and
-stop pressure immediately when `rolling_history_compaction_needed` appears; FAIL if it has
+stop pressure immediately when `context_compaction_needed` appears; FAIL if it has
 not appeared after the sixth pressure turn plus the permitted short threshold probe from
 golden rule 6. Gate the payloads and scope/parentage in golden rule 6, and the successful
 paired tool records in golden rule 7. Screenshot
@@ -296,7 +296,7 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot/scope | `/healthz` 200; exact 41,000-token launch; rendered/API session `<S>`; DOM/API/graph and runtime-activity trace empty (passive empty work-poll records allowed and retained) | | `00-scoped-empty.png`, `00-identities.json`, `00-state.json`, `00-trace.json` |
-| Bounded pressure | 2–6 marker turns; `rolling_history_compaction_needed` has 41000/21000 budget fields | | `01-pressure-ready.png`, `01-rolling-history.json` |
+| Bounded pressure | 2–6 marker turns; `context_compaction_needed` has 41000/21000 budget fields | | `01-pressure-ready.png`, `01-rolling-history.json` |
 | Rolling-history scope | needed/pruned are turn-scoped with typed payloads retained; host-invoked standard-mode started/completed lifecycle is out of scope | | `01-rolling-history.json` |
 | Real tool turn | paired successful tool start/completion with one call id | | `01-tool-call.json` |
 | Switch lever | organic pressure tried once; actual lever recorded honestly | | `02-lever.json` |

@@ -250,12 +250,12 @@ fn event_samples() -> Vec<TraceEvent> {
             }],
         },
         TraceEvent::ContextCompactionNeeded {
-            context_budget_tokens: 30_000,
+            used_tokens: 30_000,
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
         },
         TraceEvent::PromptViewPruned {
-            context_budget_tokens: 30_000,
+            used_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 2,
             retained_messages: 1,
@@ -1250,12 +1250,12 @@ fn execution_started_map_carries_no_identity_copy() {
 fn rolling_history_events_pin_decision_payloads() {
     let events = [
         TraceEvent::ContextCompactionNeeded {
-            context_budget_tokens: 30_000,
+            used_tokens: 30_000,
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
         },
         TraceEvent::PromptViewPruned {
-            context_budget_tokens: 30_000,
+            used_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 2,
             retained_messages: 1,
@@ -1272,13 +1272,13 @@ fn rolling_history_events_pin_decision_payloads() {
         [
             json!({
                 "type": "context_compaction_needed",
-                "context_budget_tokens": 30_000,
+                "used_tokens": 30_000,
                 "max_context_tokens": 40_000,
                 "threshold_tokens": 20_000,
             }),
             json!({
                 "type": "prompt_view_pruned",
-                "context_budget_tokens": 30_000,
+                "used_tokens": 30_000,
                 "max_context_tokens": 40_000,
                 "dropped_prefix_messages": 2,
                 "retained_messages": 1,

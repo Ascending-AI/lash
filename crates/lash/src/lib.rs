@@ -834,9 +834,6 @@ pub mod durability {
 /// Runtime events, errors, and execution controls.
 pub mod runtime {
     pub use crate::core::AdvancedLashCoreBuilder;
-    /// Prompt-token accounting a [`TurnContextTransform`](crate::plugins::TurnContextTransform)
-    /// is handed so a rolling strategy can budget against the last render.
-    pub use lash_core::PromptUsage;
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;

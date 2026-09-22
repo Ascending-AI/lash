@@ -1,6 +1,6 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use crate::dialect::TypescriptDialect;
-use crate::driver::{RlmPreambleConfig, SharedPromptUsage};
+use crate::driver::{RlmPreambleConfig, SharedUsage};
 use crate::execution_prompt::render_system_prompt;
 use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options, effective_budget_tokens};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
@@ -64,7 +64,7 @@ struct NativeContextProjector {
     prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
-    last_prompt_usage: SharedPromptUsage,
+    last_prompt_usage: SharedUsage,
     bound_variables_prompt: SharedBoundVariablesPrompt,
     dialect: Arc<TypescriptDialect>,
 }

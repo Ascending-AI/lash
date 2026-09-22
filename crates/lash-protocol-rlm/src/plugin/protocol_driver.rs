@@ -2,7 +2,7 @@ use crate::dialect::TypescriptDialect;
 use std::sync::Arc;
 
 use super::RlmProtocolPluginConfig;
-use crate::driver::{RlmPreambleConfig, SharedPromptUsage, build_rlm_preamble_with_dialect};
+use crate::driver::{RlmPreambleConfig, SharedUsage, build_rlm_preamble_with_dialect};
 use crate::rlm_support::SharedBoundVariablesPrompt;
 use lash_core::plugin::ProtocolDriverPlugin;
 use lash_core::{ProtocolBuildInput, TurnDriverPreamble};
@@ -10,7 +10,7 @@ use lash_core::{ProtocolBuildInput, TurnDriverPreamble};
 pub(super) struct RlmProtocolDriver {
     pub(super) config: RlmProtocolPluginConfig,
     pub(super) dialect: Arc<TypescriptDialect>,
-    pub(super) last_prompt_usage: SharedPromptUsage,
+    pub(super) last_prompt_usage: SharedUsage,
     pub(super) bound_variables_prompt: SharedBoundVariablesPrompt,
 }
 

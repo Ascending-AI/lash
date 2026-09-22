@@ -24,7 +24,7 @@ pub type CompactionSystemPrompt =
 pub struct TurnTransformContext<'run> {
     pub session_id: SessionId,
     pub state: SessionReadView,
-    pub prompt_usage: Option<crate::runtime::PromptUsage>,
+    pub prompt_usage: Option<crate::TokenUsage>,
     pub max_context_tokens: Option<usize>,
     pub sessions: Arc<dyn super::SessionStateService>,
     pub session_lifecycle: Arc<dyn super::SessionLifecycleService>,

@@ -70,6 +70,7 @@ pub(crate) use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model::ModelSpec;
 pub(crate) use lash_core_llm::provider;
 pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
+pub(crate) use lash_sansio::AcceptedInjectedTurnInput;
 pub(crate) use lash_sansio::llm::types::ChargeSafetyDecision;
 pub(crate) use lash_sansio::llm::types::{
     AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, ProtocolPosition,
@@ -80,7 +81,6 @@ pub(crate) use lash_sansio::session_model::{
     NoProgressBudget, message::BaseRenderCache, message::MessageSequence,
 };
 pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest};
-pub(crate) use lash_sansio::{AcceptedInjectedTurnInput, PromptUsage};
 pub(crate) use lash_sansio::{
     AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
     CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId, Message,
@@ -189,7 +189,7 @@ pub(crate) mod runtime {
     pub(crate) use crate::session_execution_lease;
     pub(crate) use crate::session_state as state;
     pub(crate) use crate::{
-        PromptUsage, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimData, TurnInputClaimData,
+        QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimData, TurnInputClaimData,
     };
 
     #[allow(unused_imports)]
