@@ -781,3 +781,16 @@ and shared `runtime_support` helpers. The turns suite also owns its two
 `#[path]` modules outside the turns directory. Editing one suite still reruns
 other tests that scan its source at runtime, but does not recompile unrelated
 suite binaries.
+
+### No Swift toolchain registration
+
+Lash has no Swift source or Swift targets. Bazel 9.1 still brings `rules_swift`
+3.1.2 through its built-in `bazel_tools` module. Lash's root module patches out
+that dependency's automatic `register_toolchains` call, so Rust analysis no
+longer discovers or probes a host Swift compiler on any platform.
+
+The dependency itself remains because Bazel requires it. The patch changes only
+registration in `rules_swift`'s `MODULE.bazel`; it does not replace the module,
+change the Bazel installation, or alter Rust, C/C++, or bindgen registrations.
+Fresh Linux CI previously spent 27s and 55s compiling a Swift feature probe in
+its lint and tail jobs. There is no Swift opt-out flag or fallback in Lash.

@@ -86,3 +86,11 @@ single_version_override(
     patches = ["//tools/bazel:patches/rules-rs-reachable-features.patch"],
     patch_strip = 1,
 )
+
+# Bazel brings rules_swift, but Lash has no Swift targets or host toolchains.
+single_version_override(
+    module_name = "rules_swift",
+    version = "3.1.2",
+    patches = ["//tools/bazel:patches/rules-swift-no-toolchain-registration.patch"],
+    patch_strip = 1,
+)
