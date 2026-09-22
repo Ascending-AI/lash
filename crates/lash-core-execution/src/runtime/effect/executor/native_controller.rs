@@ -56,8 +56,8 @@ use super::super::envelope::{
 use super::super::group::EffectGroupDrainBudget;
 use super::super::group::{
     EffectGroupHandle, EffectGroupRecordAccessor, GroupSettlement, GroupWakePolicy, LoserPolicy,
-    RuntimeEffectGroup, await_cancelled_error, child_cancelled_error, closed_group_error,
-    exhausted_group_error, fence_reopen, group_shape_error,
+    RankedGroupSettlement, RuntimeEffectGroup, await_cancelled_error, child_cancelled_error,
+    closed_group_error, exhausted_group_error, fence_reopen, group_shape_error,
 };
 use super::super::group_closing::{
     GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
@@ -303,6 +303,15 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.groups.registered_executors()?;
         NativeEffectGroups::await_next_settlement(&self.groups, handle, cancel).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        self.groups.registered_executors()?;
+        NativeEffectGroups::read_settlement(&self.groups, group_key, rank)
     }
 
     async fn close_effect_group(
@@ -966,6 +975,41 @@ impl NativeEffectGroups {
                 () = &mut notified => {}
             }
         }
+    }
+
+    /// Serves the settlement recorded at `rank` without touching any caller
+    /// cursor (ADR 0099 §8): the read a §6 incorporation prefix makes, which
+    /// needs the child's durable identity rather than its declared position.
+    fn read_settlement(
+        groups: &Arc<Self>,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        let state = groups.lookup(group_key)?;
+        let inner = state.state.lock_recover();
+        let index = usize::try_from(rank)
+            .ok()
+            .and_then(|rank| rank.checked_sub(1));
+        let Some(settled) = index.and_then(|index| inner.order.get(index)) else {
+            return Ok(None);
+        };
+        let child_replay_key = state
+            .positions
+            .iter()
+            .find(|(_, position)| **position == settled.position)
+            .map(|(replay_key, _)| replay_key.clone())
+            .ok_or_else(|| {
+                group_shape_error(format!(
+                    "durable effect group {group_key} recorded a settlement at position \
+                     {} that no member replay key names",
+                    settled.position
+                ))
+            })?;
+        Ok(Some(RankedGroupSettlement {
+            sequence: settled.sequence,
+            child_replay_key,
+            outcome: settled.outcome.clone(),
+        }))
     }
 
     /// Releases the caller's interest, applying the disposition the close

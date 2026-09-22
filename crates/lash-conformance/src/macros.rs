@@ -2145,6 +2145,10 @@ macro_rules! tool_child_invocation_tests {
                 a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink,
                 "tool-child-admission-fence"
             ),
+            (
+                a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks,
+                "tool-child-group-prefix-incorporation"
+            ),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

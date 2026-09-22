@@ -53,6 +53,16 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
             self.native.await_next_settlement(handle, cancel).await
         }
+        async fn read_group_settlement(
+            &self,
+            group_key: &str,
+            rank: u64,
+        ) -> Result<
+            Option<lash_core::runtime::effect::RankedGroupSettlement>,
+            lash_core::RuntimeEffectControllerError,
+        > {
+            self.native.read_group_settlement(group_key, rank).await
+        }
 
         async fn close_effect_group(
             &self,

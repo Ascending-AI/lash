@@ -197,7 +197,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         clippy::expect_used,
         reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
     )]
-    fn language_runtime_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
+    pub(crate) fn language_runtime_invocation(
+        &self,
+        effect_id: &str,
+    ) -> crate::RuntimeEffectInvocation {
         let execution_scope = self
             .dispatch
             .effect_controller

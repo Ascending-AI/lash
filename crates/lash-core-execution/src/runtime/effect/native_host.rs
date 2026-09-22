@@ -9,10 +9,10 @@ use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectGroupChildCommitOutcome, EffectGroupHandle, EffectHost,
     EffectJournalRetirement, ExecutionScope, GroupChildFinalCommit, GroupSettlement, LoserPolicy,
-    NativeRuntimeEffectController, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    SegmentProgress, TurnControlParticipation,
+    NativeRuntimeEffectController, RankedGroupSettlement, Resolution, ResolveOutcome,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlParticipation,
 };
 use crate::RuntimeError;
 
@@ -640,6 +640,13 @@ impl RuntimeEffectController for FencedNativeController {
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.host.await_next_settlement(handle, cancel).await
     }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        self.host.read_group_settlement(group_key, rank).await
+    }
 
     async fn close_effect_group(
         &self,
@@ -727,6 +734,13 @@ impl RuntimeEffectController for NativeEffectHost {
         cancel: CancellationToken,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.controller.await_next_settlement(handle, cancel).await
+    }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        self.controller.read_group_settlement(group_key, rank).await
     }
 
     async fn close_effect_group(

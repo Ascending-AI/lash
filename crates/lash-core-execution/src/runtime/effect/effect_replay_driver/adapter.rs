@@ -444,6 +444,19 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         .await
     }
 
+    /// The cursorless rank read the §6 incorporation record needs, delegated to
+    /// the same driver the group's settlements are journaled on.
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
+    {
+        self.replay_driver()
+            .read_recorded_group_settlement(group_key, rank)
+            .await
+    }
+
     /// The §4 boundary commit, forwarded to the same driver the child's claim
     /// rides on: the request's lease owner is this host's driver identity, so
     /// the CAS is fenced on the claim this execution holds rather than on any

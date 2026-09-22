@@ -647,6 +647,16 @@ impl RuntimeEffectController for FencedRestateController {
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.controller.await_next_settlement(handle, cancel).await
     }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.controller.read_group_settlement(group_key, rank).await
+    }
 
     async fn close_effect_group(
         &self,
@@ -1264,7 +1274,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
         }
         let record = match read {
-            EffectGroupReadRankResponse::Settled { settlement } => settlement,
+            EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
             EffectGroupReadRankResponse::NotSettled => {
                 return Err(group_shape_error(format!(
                     "effect group {} rank {rank} remained unsettled after its notification",
@@ -1323,6 +1333,82 @@ impl RuntimeEffectController for RestateEffectHostController {
         let settlement = settlement_from_payload(record, payload)?;
         handle.advance()?;
         Ok(settlement)
+    }
+
+    /// The cursorless rank read the §6 incorporation record needs: the same
+    /// index `read_rank` + payload `get` pair as `await_next_settlement`,
+    /// minus the cursor and the durable wait.
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        RuntimeEffectControllerError,
+    > {
+        let ingress = &self.await_event_ingress.ingress;
+        let read = ingress
+            .call_object_json::<_, EffectGroupReadRankResponse>(
+                "EffectGroupIndex",
+                group_key,
+                "read_rank",
+                &EffectGroupReadRankRequest { rank },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
+        let (record, child_replay_key) = match read {
+            EffectGroupReadRankResponse::Settled {
+                settlement,
+                child_replay_key,
+            } => (settlement, child_replay_key),
+            EffectGroupReadRankResponse::NotSettled | EffectGroupReadRankResponse::Closed => {
+                return Ok(None);
+            }
+            EffectGroupReadRankResponse::UnknownGroup => {
+                return Err(group_shape_error(format!(
+                    "effect group {group_key} is unknown"
+                )));
+            }
+            EffectGroupReadRankResponse::Retired => {
+                return Err(group_shape_error(format!(
+                    "effect group {group_key} is retired"
+                )));
+            }
+        };
+        let payload = if matches!(
+            record.terminal,
+            EffectGroupSettlementTerminal::StoredPayload
+        ) {
+            match ingress
+                .call_object_empty_json::<EffectGroupPayloadGetResponse>(
+                    "EffectGroupPayload",
+                    &payload_key(group_key, record.position),
+                    "get",
+                )
+                .await
+                .map_err(|error| ingress_group_error("EffectGroupPayload/get", error))?
+            {
+                EffectGroupPayloadGetResponse::Stored { bytes } => Some(bytes),
+                EffectGroupPayloadGetResponse::Missing => {
+                    return Err(group_shape_error(format!(
+                        "effect group {group_key} rank {rank} refers to a missing payload"
+                    )));
+                }
+                EffectGroupPayloadGetResponse::Retired => {
+                    return Err(group_shape_error(format!(
+                        "effect group {group_key} payload was retired"
+                    )));
+                }
+            }
+        } else {
+            None
+        };
+        let settlement = settlement_from_payload(record, payload)?;
+        Ok(Some(lash_core::runtime::effect::RankedGroupSettlement {
+            sequence: settlement.sequence,
+            child_replay_key,
+            outcome: settlement.outcome,
+        }))
     }
 
     async fn close_effect_group(

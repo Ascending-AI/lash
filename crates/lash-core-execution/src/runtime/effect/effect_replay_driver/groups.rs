@@ -830,13 +830,34 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     ),
                 )
             })?;
-        let outcome = match stored.state {
+        let outcome = self.decode_group_terminal(group_key, &stored)?;
+        Ok(GroupSettlement {
+            position,
+            sequence: stored.sequence,
+            outcome,
+        })
+    }
+
+    /// Decode the recorded terminal of a settled group row — the shared half
+    /// of [`decode_settlement`](Self::decode_settlement) and
+    /// [`read_recorded_group_settlement`](Self::read_recorded_group_settlement),
+    /// which differ only in whether the caller needs the declared position.
+    fn decode_group_terminal(
+        &self,
+        group_key: &str,
+        stored: &StoredGroupSettlement,
+    ) -> Result<
+        Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+        RuntimeEffectControllerError,
+    > {
+        let vocabulary = self.vocabulary();
+        let outcome = match &stored.state {
             EffectRowState::Settled(EffectTerminal::Completed { outcome_json }) => {
-                Ok(serde_json::from_str::<RuntimeEffectOutcome>(&outcome_json)
+                Ok(serde_json::from_str::<RuntimeEffectOutcome>(outcome_json)
                     .map_err(|err| vocabulary.decode_error(err))?)
             }
             EffectRowState::Settled(EffectTerminal::Failed { error_json }) => Err(
-                serde_json::from_str::<RuntimeEffectControllerError>(&error_json)
+                serde_json::from_str::<RuntimeEffectControllerError>(error_json)
                     .map_err(|err| vocabulary.decode_error(err))?,
             ),
             EffectRowState::Corrupt(defect) => {
@@ -860,11 +881,39 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 ));
             }
         };
-        Ok(GroupSettlement {
-            position,
+        Ok(outcome)
+    }
+
+    /// Read the group's settlement at `rank` without touching any caller
+    /// cursor (ADR 0099 §8): the incorporation prefix record reads the journal
+    /// through this seam, so it names the settled child by its replay key and
+    /// needs no position map — an opener that never opened the group
+    /// in-process still incorporates the recorded prefix.
+    pub async fn read_recorded_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
+    {
+        let rank = usize::try_from(rank).map_err(|_| {
+            self.vocabulary().error(
+                EffectReplayFailure::CorruptRow,
+                format!("durable effect group {group_key} was asked for rank {rank}, which no journal can hold"),
+            )
+        })?;
+        let Some(stored) = self
+            .row_store
+            .read_group_settlement(group_key, rank)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let outcome = self.decode_group_terminal(group_key, &stored)?;
+        Ok(Some(crate::runtime::effect::RankedGroupSettlement {
             sequence: stored.sequence,
+            child_replay_key: stored.replay_key,
             outcome,
-        })
+        }))
     }
 
     /// Release the caller's interest in the group, recording the close durably

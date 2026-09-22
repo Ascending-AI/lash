@@ -670,6 +670,33 @@ impl std::fmt::Debug for GroupSettlement {
     }
 }
 
+/// One rank of the incorporation prefix a group-settlement record journaled
+/// (ADR 0099 §6): the durable rank and the settled child's replay key — its
+/// identity in [`SettlementSource::GroupRank`], not its position.
+///
+/// [`SettlementSource::GroupRank`]: crate::session::SettlementSource::GroupRank
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncorporatedGroupRank {
+    pub rank: u64,
+    pub child_replay_key: String,
+}
+
+/// A group's settlement at a durable rank, read back without advancing any
+/// caller cursor (ADR 0099 §8): the allocated sequence, the settled child's
+/// replay key, and its recorded terminal. Unlike [`GroupSettlement`] — the
+/// consume view — this names the child the rank belongs to, which is what a
+/// prefix incorporation needs to build its [`SettlementSource::GroupRank`]
+/// identity. Position is deliberately absent: incorporation orders by rank and
+/// never needs the declared slot.
+///
+/// [`SettlementSource::GroupRank`]: crate::session::SettlementSource::GroupRank
+#[derive(Clone, Debug)]
+pub struct RankedGroupSettlement {
+    pub sequence: u64,
+    pub child_replay_key: String,
+    pub outcome: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+}
+
 /// What becomes of a group's remaining children once the caller stops consuming.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
