@@ -102,7 +102,12 @@ pub struct ToolChildHost {
     /// reference back would make the three a cycle no drop ever breaks. A
     /// resolver whose host is gone routes nothing, which is the honest answer.
     host: std::sync::Weak<dyn EffectHost>,
-    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    /// The store a child's recorded `execution_env` resolves against
+    /// (`run_tool_child`). Mutable for the same reason the clock is: the host
+    /// is installed — get-or-init — inside `RuntimeHostConfig::new`, before
+    /// `with_process_env_store` can name the store the rest of the runtime
+    /// publishes to, and a second install cannot replace it.
+    process_env_store: Arc<std::sync::Mutex<Arc<dyn ProcessExecutionEnvStore>>>,
     /// The clock a `Sleep`/`AwaitEvent` group child waits on. Mutable because
     /// the host is installed — get-or-init — before the runtime's configured
     /// clock is known (`RuntimeHostConfig::with_clock` follows `new`), and a
@@ -130,7 +135,7 @@ impl ToolChildHost {
         Arc::new(Self {
             openers: Arc::new(LiveOpenerRegistry::new()),
             host: Arc::downgrade(host),
-            process_env_store,
+            process_env_store: Arc::new(std::sync::Mutex::new(process_env_store)),
             clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),
         })
     }
@@ -143,6 +148,21 @@ impl ToolChildHost {
     /// registry would strand the openers already registered on this one.
     pub fn with_clock(self: &Arc<Self>, clock: Arc<dyn crate::Clock>) -> Arc<Self> {
         *self.clock.lock_recover() = clock;
+        Arc::clone(self)
+    }
+
+    /// Rebinds the store children resolve their recorded execution
+    /// environment against, in place, and returns the same host.
+    ///
+    /// In place rather than rebuilding for the same reason as
+    /// [`with_clock`](Self::with_clock): a `RuntimeHostConfig` that swaps its
+    /// durability store after `new` must not leave the installed host reading
+    /// the store the runtime no longer publishes to.
+    pub fn with_process_env_store(
+        self: &Arc<Self>,
+        store: Arc<dyn ProcessExecutionEnvStore>,
+    ) -> Arc<Self> {
+        *self.process_env_store.lock_recover() = store;
         Arc::clone(self)
     }
 
@@ -614,7 +634,7 @@ pub(crate) async fn run_tool_child<'run>(
     request.validate()?;
 
     let execution_env_spec = crate::runtime::load_process_execution_env(
-        host.process_env_store.as_ref(),
+        host.process_env_store.lock_recover().as_ref(),
         &request.execution_env,
     )
     .await

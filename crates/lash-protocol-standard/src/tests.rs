@@ -354,7 +354,7 @@ pub(super) struct CountingEffectController {
     /// a durable effect group now, so a test double that refuses groups
     /// leaves every batch unrouted. Shared with the runtime's effect host
     /// so group opens and group-child admission see the same group map.
-    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+    pub(super) native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
 }
 
 impl CountingEffectController {
@@ -702,7 +702,10 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
             DurableMemoryAttachmentStore::default(),
         )),
     );
-    host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
+    // Through the builder, not a field write: the installed tool-child host
+    // resolves a child's recorded `execution_env` against the same store and
+    // must hear about the swap.
+    host = host.with_process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()));
     let started = Arc::new(AtomicUsize::new(0));
     let internal_executed = Arc::new(AtomicUsize::new(0));
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![

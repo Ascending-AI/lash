@@ -137,9 +137,9 @@ async fn assert_commit_placement(
     let host = match controller.effect_journaling() {
         lash_core::EffectJournaling::Local => {
             let mut config = test_runtime_host_config();
-            config.control.effect_host = Arc::new(
+            config = config.with_effect_host(Arc::new(
                 lash_core::facade_support::NativeEffectHost::new(controller.clone()),
-            );
+            ));
             EmbeddedRuntimeHost::new(config)
         }
         lash_core::EffectJournaling::Journaled => journal_replay_host(controller.clone()),
