@@ -1043,11 +1043,17 @@ async fn drive_turn(
             }
         })
         .build();
-    let mut host = crate::RuntimeHostConfig::in_memory(
+    // Constructed on the tier's host rather than `in_memory` with the field
+    // overwritten: `RuntimeHostConfig::new` installs the tool-child resolver
+    // on the effect host it is given, and a later `control.effect_host` swap
+    // would leave the resolver registered on the discarded host.
+    let mut host = crate::RuntimeHostConfig::new(
+        Arc::clone(&world.effect_host),
+        Arc::new(crate::InMemoryAttachmentStore::new()),
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    host.control.effect_host = Arc::clone(&world.effect_host);
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let mut policy = crate::testing::mock_session_policy();

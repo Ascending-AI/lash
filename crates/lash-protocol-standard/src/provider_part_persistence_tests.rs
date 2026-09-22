@@ -117,7 +117,19 @@ async fn persisted_provider_response(
     let provider_handle = lash_core::facade_support::ProviderHandle::new(
         lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
     );
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    // The turn's scoped controller and the runtime's effect host must share
+    // one native controller: group opens issued by the turn forward to it,
+    // and the tool-child resolver `RuntimeHostConfig::new` installs lands on
+    // the same controller's group map.
+    let native = Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default());
+    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
+        Arc::new(
+            lash_core::facade_support::NativeEffectHost::with_native_controller(Arc::clone(
+                &native,
+            )),
+        ),
+        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new()),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -137,7 +149,10 @@ async fn persisted_provider_response(
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
     let scoped_controller = lash_core::ScopedEffectController::shared(
-        Arc::new(CountingEffectController::default()),
+        Arc::new(CountingEffectController {
+            native,
+            ..Default::default()
+        }),
         lash_core::AdmittedScope::turn(session_id, "turn-1"),
     )
     .expect("scoped controller");

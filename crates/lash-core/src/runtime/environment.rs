@@ -284,7 +284,7 @@ impl RuntimeEnvironmentBuilder {
     }
 
     pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
-        self.env.core.control.effect_host = effect_host;
+        self.env.core = self.env.core.with_effect_host(effect_host);
         self
     }
 

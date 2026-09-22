@@ -252,7 +252,7 @@ async fn fig1293_runtime(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.control.effect_host = effect_host;
+    host = host.with_effect_host(effect_host);
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
