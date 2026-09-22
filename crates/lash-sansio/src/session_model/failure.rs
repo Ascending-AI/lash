@@ -602,30 +602,12 @@ impl Namespace {
     /// Lash-authored, so a host may not mint under them. `name` must start
     /// with a lowercase ASCII letter, contain only lowercase ASCII letters,
     /// digits, `_`, `.` and `-`, and be at most 63 bytes.
+    ///
+    /// For a literal the host controls, [`HostNamespace::new`] validates at
+    /// compile time instead, and [`FailureCode::host`] mints from a
+    /// [`HostNamespace`] infallibly.
     pub fn host(name: impl Into<String>) -> Result<Self, InvalidNamespace> {
-        let name = name.into();
-        let reason = if Self::from_wire(&name).is_reserved() {
-            Some("`lash`, `provider`, `adapter` and `refusal` are reserved namespaces")
-        } else if name.is_empty()
-            || name.len() > 63
-            || !name
-                .chars()
-                .next()
-                .is_some_and(|first| first.is_ascii_lowercase())
-            || !name.chars().all(|c| {
-                c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-'
-            })
-        {
-            Some(
-                "must start with a lowercase letter, contain only lowercase letters, digits, `_`, `.` or `-`, and be at most 63 bytes",
-            )
-        } else {
-            None
-        };
-        match reason {
-            Some(reason) => Err(InvalidNamespace { name, reason }),
-            None => Ok(Self(std::borrow::Cow::Owned(name))),
-        }
+        HostNamespace::checked(name).map(HostNamespace::into_namespace)
     }
 
     /// The namespace an on-the-wire code carried, kept verbatim whether or
@@ -659,6 +641,135 @@ impl Namespace {
 }
 
 impl std::fmt::Display for Namespace {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// `str` equality usable from a `const fn`: `PartialEq` is not a const trait,
+/// and a byte-string literal pattern still reaches it, so compare bytes
+/// directly.
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Whether `name` is a failure-code namespace no host may mint.
+const fn is_reserved_namespace(name: &str) -> bool {
+    str_eq(name, "lash")
+        || str_eq(name, "provider")
+        || str_eq(name, "adapter")
+        || str_eq(name, "refusal")
+}
+
+/// Why `name` cannot be a host-owned namespace, if it cannot. Shared by
+/// [`HostNamespace::new`] (checked at compile time for a literal),
+/// [`HostNamespace::checked`], and [`Namespace::host`].
+const fn host_namespace_error(name: &str) -> Option<&'static str> {
+    if is_reserved_namespace(name) {
+        return Some("`lash`, `provider`, `adapter` and `refusal` are reserved namespaces");
+    }
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes.len() > 63 || !bytes[0].is_ascii_lowercase() {
+        return Some(
+            "must start with a lowercase letter, contain only lowercase letters, digits, `_`, `.` or `-`, and be at most 63 bytes",
+        );
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if !(byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || byte == b'_'
+            || byte == b'.'
+            || byte == b'-')
+        {
+            return Some(
+                "must start with a lowercase letter, contain only lowercase letters, digits, `_`, `.` or `-`, and be at most 63 bytes",
+            );
+        }
+        i += 1;
+    }
+    None
+}
+
+/// A [`Namespace`] a host may mint [`FailureCode`]s under.
+///
+/// Construction is the only validation point: [`HostNamespace::new`] checks a
+/// literal at compile time and [`HostNamespace::checked`] checks a name known
+/// only at runtime; both apply [`Namespace::host`]'s rules. Because a
+/// `HostNamespace` can never hold a reserved or malformed name,
+/// [`FailureCode::host`] mints from it infallibly — a host keeps its
+/// namespace in a `const` and emits codes without an `expect`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HostNamespace(Namespace);
+
+impl HostNamespace {
+    /// A host namespace for a string literal, checked where it is written.
+    ///
+    /// In a `const`/`static` initializer an invalid or reserved name fails
+    /// compilation. [`HostNamespace::checked`] is the same validation for a
+    /// name only known at runtime.
+    ///
+    /// ```text
+    /// const NS: HostNamespace = HostNamespace::new("figments");
+    /// ```
+    pub const fn new(name: &'static str) -> Self {
+        assert!(
+            !is_reserved_namespace(name),
+            "`lash`, `provider`, `adapter` and `refusal` are reserved failure-code namespaces"
+        );
+        assert!(
+            host_namespace_error(name).is_none(),
+            "invalid host failure-code namespace: must start with a lowercase letter, contain only lowercase letters, digits, `_`, `.` or `-`, and be at most 63 bytes"
+        );
+        Self(Namespace(std::borrow::Cow::Borrowed(name)))
+    }
+
+    /// The runtime-checked counterpart of [`HostNamespace::new`], for a name
+    /// only known at runtime.
+    pub fn checked(name: impl Into<String>) -> Result<Self, InvalidNamespace> {
+        let name = name.into();
+        match host_namespace_error(&name) {
+            Some(reason) => Err(InvalidNamespace { name, reason }),
+            None => Ok(Self(Namespace(std::borrow::Cow::Owned(name)))),
+        }
+    }
+
+    /// The namespace's wire spelling.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The general [`Namespace`] view of this host namespace — e.g. for APIs
+    /// that also accept wire-decoded namespaces.
+    pub fn namespace(&self) -> &Namespace {
+        &self.0
+    }
+
+    /// Consume into the general [`Namespace`].
+    pub fn into_namespace(self) -> Namespace {
+        self.0
+    }
+}
+
+impl From<HostNamespace> for Namespace {
+    fn from(namespace: HostNamespace) -> Self {
+        namespace.0
+    }
+}
+
+impl std::fmt::Display for HostNamespace {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
     }
@@ -713,12 +824,26 @@ impl FailureCode {
         Self::pair(Namespace::PROVIDER, spelling)
     }
 
+    /// A code in the host's own namespace — the infallible mint for a
+    /// namespace the host controls.
+    ///
+    /// A [`HostNamespace`] can only hold a validated, unreserved name, so no
+    /// runtime check remains: a host keeps `const NS: HostNamespace =
+    /// HostNamespace::new("…")` and emits `FailureCode::host(&NS, "…")`
+    /// without an `expect`. For a namespace decoded off the wire use
+    /// [`FailureCode::foreign`], which retains the reserved-namespace check.
+    pub fn host(namespace: &HostNamespace, spelling: impl Into<String>) -> Self {
+        Self::pair(namespace.0.clone(), spelling)
+    }
+
     /// A code in a caller-owned namespace — how hosts and plugins carry their
     /// own vocabulary without Lash reinterpreting the spelling.
     ///
     /// Reserved namespaces are refused: `lash` (and its retired
     /// `adapter`/`refusal` spellings) comes from [`FailureCode::lash`] and
-    /// `provider` wire codes from [`FailureCode::provider`].
+    /// `provider` wire codes from [`FailureCode::provider`]. A host minting
+    /// under its own constant namespace should prefer
+    /// [`FailureCode::host`], which is infallible.
     pub fn foreign(
         namespace: Namespace,
         spelling: impl Into<String>,
@@ -939,7 +1064,7 @@ impl From<crate::llm::types::LlmTerminalReason> for TurnFailureCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{FailureCode, Namespace, TurnFailureCode, TurnFailureKind};
+    use super::{FailureCode, HostNamespace, Namespace, TurnFailureCode, TurnFailureKind};
 
     /// Every arm's spelling survives a round trip through the wire form, so a
     /// typed arm never silently degrades into an open arm.
@@ -1199,6 +1324,32 @@ mod tests {
                 "every named arm must round-trip through from_wire"
             );
         }
+    }
+
+    /// `HostNamespace::new` validates in const position: `FIGMENTS` below is
+    /// itself the compile-time proof, and `FailureCode::host` mints from it
+    /// without a `Result`.
+    #[test]
+    fn host_namespace_static_construction_and_infallible_mint() {
+        const FIGMENTS: HostNamespace = HostNamespace::new("figments");
+
+        assert_eq!(FIGMENTS.as_str(), "figments");
+        assert_eq!(
+            FIGMENTS.namespace(),
+            &Namespace::host("figments").expect("valid namespace")
+        );
+
+        let code = FailureCode::host(&FIGMENTS, "quota_exceeded");
+        assert_eq!(code.namespace(), FIGMENTS.namespace());
+        assert_eq!(code.to_string(), "figments:quota_exceeded");
+        assert_eq!(code.turn_code(), None);
+
+        // `checked` is the same validation for runtime names.
+        let checked = HostNamespace::checked("figments").expect("valid host namespace");
+        assert_eq!(checked, FIGMENTS);
+        assert!(HostNamespace::checked("lash").is_err());
+        assert!(HostNamespace::checked("Lash").is_err());
+        assert!(HostNamespace::checked("provider").is_err());
     }
 
     #[test]

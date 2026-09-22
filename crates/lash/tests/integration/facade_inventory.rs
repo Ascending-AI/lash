@@ -87,6 +87,7 @@ use lash::process::ProcessStartRequest as _;
 use lash::process::ProcessStatusFilter as _;
 use lash::process::SessionScope as _;
 use lash::provider::CacheControlDialect as _;
+use lash::provider::HostNamespace as _;
 use lash::provider::LlmContentBlock as _;
 use lash::provider::LlmJsonSchema as _;
 use lash::provider::LlmRequest as _;

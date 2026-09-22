@@ -1062,9 +1062,11 @@ pub mod provider {
     /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt
     /// journals: `lash:` codes are workspace-authored, `provider:` codes came
     /// off the provider wire, and a host names its own vocabulary through
-    /// [`Namespace::host`] plus [`FailureCode::foreign`] — a host namespace is
-    /// first-class, never `provider:`.
-    pub use lash_core::{FailureCode, InvalidNamespace, Namespace};
+    /// [`HostNamespace`] plus [`FailureCode::host`] — a host namespace is
+    /// first-class, never `provider:`. [`Namespace::host`] plus
+    /// [`FailureCode::foreign`] remain for namespaces only known at runtime
+    /// or decoded off the wire.
+    pub use lash_core::{FailureCode, HostNamespace, InvalidNamespace, Namespace};
 }
 
 pub use crate::core::ForkRequest;
