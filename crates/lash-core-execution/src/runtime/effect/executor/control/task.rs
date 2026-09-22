@@ -6,6 +6,8 @@
 
 use super::*;
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
+
 type EffectControllerTaskFuture<'run> = Pin<Box<dyn Future<Output = ()> + Send + 'run>>;
 
 pub enum EffectControllerTaskRequest {
@@ -623,19 +625,27 @@ pub async fn drive_effect_controller_task(
         local_executor: Box::new(local_executor),
         response: root_tx,
     };
-    let mut stack = vec![root.into_future(controller)];
+    // Every in-flight request is polled, not just the newest: a suspended
+    // frame can hold a store transaction's locks, and burying it under a newer
+    // request that needs the same lock deadlocks the task — the root effect's
+    // parked-wait claim suspended mid-transaction while a `ResolveAwaitEvent`
+    // needed its scope lock was exactly that shape. Requests are independent
+    // RPCs whose callers already await their own response, so progress under
+    // the root is free.
+    let mut in_flight = FuturesUnordered::new();
+    in_flight.push(root.into_future(controller));
     let mut requests_open = true;
     tokio::pin!(root_rx);
 
     loop {
-        let Some(active) = stack.last_mut() else {
+        if in_flight.is_empty() {
             return root_rx.await.map_err(|_| {
                 RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                     "root effect controller response was dropped",
                 )
             })?;
-        };
+        }
         tokio::select! {
             biased;
             response = &mut root_rx => {
@@ -646,9 +656,7 @@ pub async fn drive_effect_controller_task(
                     )
                 })?;
             }
-            () = active => {
-                stack.pop();
-            }
+            _ = in_flight.next() => {}
             request = async {
                 if requests_open {
                     requests.recv().await
@@ -657,7 +665,7 @@ pub async fn drive_effect_controller_task(
                 }
             } => {
                 match request {
-                    Some(request) => stack.push(request.into_future(controller)),
+                    Some(request) => in_flight.push(request.into_future(controller)),
                     None => requests_open = false,
                 }
             }

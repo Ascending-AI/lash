@@ -38,7 +38,9 @@ const PROCESS_REGISTRY_LIFECYCLE_SOURCE: &str =
 const PROCESS_REGISTRY_LEASES_SOURCE: &str =
     include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
-const EFFECT_REPLAY_SOURCE: &str = include_str!("../src/postgres/effect_replay.rs");
+// The lease atoms live in the `effect_replay/row_store.rs` split; the module
+// root only re-exports them, so the fence reads the file that holds the bodies.
+const EFFECT_REPLAY_SOURCE: &str = include_str!("../src/postgres/effect_replay/row_store.rs");
 const CONNECTION_SQL_SOURCE: &str = include_str!("../src/postgres/connection_sql.rs");
 
 fn unique_id(prefix: &str) -> String {
@@ -300,7 +302,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             EFFECT_REPLAY_SOURCE,
             "async fn take_over_expired_lease(",
-            "fn effect_store_error(",
+            "fn stored_group_settlement(",
         ),
     ];
 

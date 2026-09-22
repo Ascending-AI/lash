@@ -1279,9 +1279,22 @@ impl EffectGroupIndex {
         };
         store_index(&ctx, record.clone());
         if effective == LoserPolicy::Cancel {
+            let live = record.live()?;
             for position in 0..shape.children() {
-                let rank = record
-                    .live()?
+                // A committed-but-undrained child is a pending protected drain
+                // (ADR 0099 §4): the cancel decision refused it, so the close
+                // seats no rank for it, does not resolve its cancel wait, and
+                // does not interrupt its invocation — its `record_settlement`
+                // seats the rank and resolves the rank wait when the drain
+                // finishes.
+                if matches!(
+                    live.commit_states.get(&position),
+                    Some(EffectGroupChildCommitState::Committed { .. })
+                ) && !live.settled_positions.contains_key(&position)
+                {
+                    continue;
+                }
+                let rank = live
                     .settled_positions
                     .get(&position)
                     .copied()
@@ -1470,19 +1483,22 @@ impl EffectGroupIndex {
                 live.settled_positions.insert(position, rank);
                 changed = true;
             }
+            // A committed-but-undrained child is a pending protected drain
+            // (ADR 0099 §4): it holds no rank yet, and the retirement wait
+            // pass resolves every remaining wait as Retired — only children
+            // with a seated rank get their Rank/Cancel/Admit resolutions here.
             let ranks = (0..facts.children())
-                .map(|position| {
-                    live.settled_positions.get(&position).copied().ok_or_else(|| {
-                        TerminalError::new(format!(
-                            "effect group {group_key} has no retirement settlement rank for child {position}"
-                        ))
-                    })
+                .filter_map(|position| {
+                    live.settled_positions
+                        .get(&position)
+                        .copied()
+                        .map(|rank| (position, rank))
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Vec<_>>();
             (facts.clone(), ranks, changed)
         };
         store_index(&ctx, record.clone());
-        for (position, rank) in ranks.iter().copied().enumerate() {
+        for (position, rank) in ranks.iter().copied() {
             resolve_group_wait(
                 &ctx,
                 &facts.wait_scope,
