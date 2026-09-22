@@ -51,6 +51,10 @@ tracing = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync", "process", "rt", "macros", "signal", "time"] }
 tokio-util = { workspace = true }
 
+# Process-group shutdown of stdio servers is a Unix behavior (FIG-3519).
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }

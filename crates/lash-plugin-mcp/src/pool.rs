@@ -59,14 +59,15 @@ use lifecycle_actor::{LifecycleActor, LifecycleCommand};
 const ENTRY_SHUTDOWN_SCHEDULING_MARGIN: Duration = Duration::from_secs(1);
 
 /// One entry's complete explicit-shutdown budget is its configured graceful
-/// period plus post-kill wait and this scheduling margin.
+/// period, the post-terminate wait, the post-kill wait, and this scheduling
+/// margin.
 ///
 /// All entry actors are joined concurrently, so `shutdown_all()` takes roughly
 /// one configured bound rather than `entries` times that bound.
 fn entry_shutdown_total_bound(policy: &McpShutdownPolicy) -> Duration {
     policy
         .graceful_period
-        .saturating_add(policy.post_kill_wait)
+        .saturating_add(policy.post_kill_wait.saturating_mul(2))
         .saturating_add(ENTRY_SHUTDOWN_SCHEDULING_MARGIN)
 }
 
