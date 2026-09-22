@@ -93,6 +93,11 @@ const LEAF_SPEND_CANCEL: &str = "tool:law_spend_cancel";
 /// The leaf the commit-boundary laws run: returns a terminal that declares a
 /// process start and an event, so the §5 drain is observable intent writes.
 const LEAF_COMMIT: &str = "tool:law_commit";
+/// The leaf the admission-fence law's orchestrating child calls nested: like
+/// `law_commit` it gates on `held` and declares intent writes, plus a
+/// process-definition registration — the journaled CAS write FIG-3470 routes
+/// through the bound controller like every other sink.
+const LEAF_FENCE: &str = "tool:law_fence";
 
 /// One host over the substrate under test, plus the drain it hands out.
 pub struct ToolChildWorld {
@@ -336,6 +341,7 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_BILLED,
         LEAF_SPEND_CANCEL,
         LEAF_COMMIT,
+        LEAF_FENCE,
     ]
     .into_iter()
     .map(|id| {
@@ -554,6 +560,55 @@ impl crate::ToolProvider for LawLeafProvider {
                             event_type: "law.intent-event".to_string(),
                             payload: serde_json::json!({ "leaf": "commit", "call_id": call_id }),
                         }),
+                    ]),
+                )
+            }
+            // The admission-fence leaf: the same held gate as `law_commit`,
+            // then a terminal whose declarations cover the three journaled
+            // sinks the law watches — the process service, the event log and
+            // the process-definition registry (FIG-3470).
+            name if name == LEAF_FENCE.trim_start_matches("tool:") => {
+                let call_id = context
+                    .tool_call_id()
+                    .unwrap_or("missing-call-id")
+                    .to_string();
+                self.observation.await_released(&call_id).await;
+                crate::ToolAttemptOutcome::done(
+                    crate::ToolOutcomeDone::ok(
+                        serde_json::json!({ "leaf": "fence", "call_id": call_id }),
+                    ),
+                    crate::ToolIntents::v3(vec![
+                        crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+                            session_id: self.session_id.clone(),
+                            declaration: crate::ProcessStartDeclaration::external(
+                                crate::ProcessOriginator::host(),
+                                serde_json::json!({ "leaf": "fence", "call_id": call_id }),
+                                crate::ProcessLifecyclePolicy::new(
+                                    crate::ParentScope::Host,
+                                    crate::OnParentEnd::Abandon,
+                                ),
+                            ),
+                        })),
+                        crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                            session_id: self.session_id.clone(),
+                            process_id: self.intent_target.clone(),
+                            event_type: "law.intent-event".to_string(),
+                            payload: serde_json::json!({ "leaf": "fence", "call_id": call_id }),
+                        }),
+                        crate::ToolIntent::RegisterProcessDefinition(Box::new(
+                            crate::RegisterProcessDefinitionIntent {
+                                session_id: self.session_id.clone(),
+                                engine_kind: admission_fence::LAW_FENCE_ENGINE_KIND.to_string(),
+                                definition: serde_json::json!({
+                                    "program": "law-fence",
+                                    "call_id": call_id,
+                                }),
+                                env_spec: None,
+                                label: Some(format!("law fence {call_id}")),
+                                name: Some(format!("law-fence-{call_id}")),
+                                expected_revision: None,
+                            },
+                        )),
                     ]),
                 )
             }
@@ -1845,6 +1900,7 @@ async fn until_claims_lapse(world: &ToolChildWorld, group_key: &str) {
 // The laws
 // =============================================================================
 
+mod admission_fence;
 mod capture;
 mod commit_boundary;
 mod driver;
@@ -1853,6 +1909,7 @@ mod incarnation;
 mod recovery;
 mod usage;
 
+pub use admission_fence::*;
 pub use capture::*;
 pub use commit_boundary::*;
 pub use driver::*;

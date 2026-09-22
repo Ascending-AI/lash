@@ -762,7 +762,7 @@ impl SurfaceRunner {
                 let processes = lash_core::testing::effect_backed_process_service(Arc::clone(
                     &self.process_registry,
                 ));
-                let completed = lash_conformance::coordinate_tool_provider_with_services(
+                let completed = Box::pin(lash_conformance::coordinate_tool_provider_with_services(
                     controller.clone(),
                     Arc::clone(&processes),
                     &SessionId::from(SURFACE_SESSION),
@@ -776,7 +776,7 @@ impl SurfaceRunner {
                         None,
                         serde_json::Value::Null,
                     ),
-                )
+                ))
                 .await
                 .map_err(|error| {
                     format!("{} provider/coordinator row failed: {error}", self.name)
@@ -1576,7 +1576,7 @@ async fn apply_and_observe(
 ) {
     let mut operation_results = Vec::with_capacity(runners.len());
     for runner in runners.iter_mut() {
-        operation_results.push((runner.name, runner.apply(operation).await.err()));
+        operation_results.push((runner.name, Box::pin(runner.apply(operation)).await.err()));
     }
     let mut observations = Vec::with_capacity(runners.len());
     for runner in runners {
@@ -1635,7 +1635,8 @@ async fn first_divergence(
     let clock = Arc::new(DifferentialClock) as Arc<dyn Clock>;
     let mut runners = surface_runners(root.path(), storage, database_url, clock).await;
     for (step, operation) in operations.iter().enumerate() {
-        let (operation_results, observations) = apply_and_observe(&mut runners, operation).await;
+        let (operation_results, observations) =
+            Box::pin(apply_and_observe(&mut runners, operation)).await;
         if !operation_results_agree(&operation_results) || !states_agree(&observations) {
             return Some(SurfaceDivergence {
                 step: step + 1,
@@ -1658,7 +1659,7 @@ async fn minimize_diverging_prefix(
     while index + 1 < minimal.len() {
         let mut candidate = minimal.clone();
         candidate.remove(index);
-        if first_divergence(storage, database_url, &candidate)
+        if Box::pin(first_divergence(storage, database_url, &candidate))
             .await
             .is_some()
         {
@@ -1693,21 +1694,21 @@ async fn generated_cross_backend_surface_differential_agrees() {
         .unwrap();
     let storage = PostgresStorage::connect(&database_url).await.unwrap();
     // CI seed 852 minimized to occurrence ingestion with no subscription state.
-    if let Some(divergence) = first_divergence(
+    if let Some(divergence) = Box::pin(first_divergence(
         &storage,
         &database_url,
         &[SurfaceOperation::TriggerOccurrence { key: 0 }],
-    )
+    ))
     .await
     {
         panic!("seed-852 minimized trigger-occurrence regression diverged: {divergence:#?}");
     }
     // PR #570 seed 852 at 9eef49f32 minimized to one session-owned registration.
-    if let Some(divergence) = first_divergence(
+    if let Some(divergence) = Box::pin(first_divergence(
         &storage,
         &database_url,
         &[SurfaceOperation::TriggerRegister { key: 0 }],
-    )
+    ))
     .await
     {
         panic!("seed-852 minimized trigger-register regression diverged: {divergence:#?}");
@@ -1724,8 +1725,12 @@ async fn generated_cross_backend_surface_differential_agrees() {
         SurfaceOperation::ProcessSignalZero { negative: true },
         SurfaceOperation::ProcessSignalZero { negative: false },
     ];
-    if let Some(divergence) =
-        first_divergence(&storage, &database_url, &canonical_conflict_material).await
+    if let Some(divergence) = Box::pin(first_divergence(
+        &storage,
+        &database_url,
+        &canonical_conflict_material,
+    ))
+    .await
     {
         panic!("canonical conflict-material differential diverged: {divergence:#?}");
     }
@@ -1769,7 +1774,7 @@ async fn generated_cross_backend_surface_differential_agrees() {
         let mut runners = surface_runners(root.path(), &storage, &database_url, clock).await;
         for (step, operation) in operations.iter().enumerate() {
             let (operation_results, observations) =
-                apply_and_observe(&mut runners, operation).await;
+                Box::pin(apply_and_observe(&mut runners, operation)).await;
             if !operation_results_agree(&operation_results) || !states_agree(&observations) {
                 let observed = SurfaceDivergence {
                     step: step + 1,
@@ -1777,13 +1782,17 @@ async fn generated_cross_backend_surface_differential_agrees() {
                     operation_results,
                     observations,
                 };
-                let minimal =
-                    minimize_diverging_prefix(&storage, &database_url, &operations[..=step]).await;
+                let minimal = Box::pin(minimize_diverging_prefix(
+                    &storage,
+                    &database_url,
+                    &operations[..=step],
+                ))
+                .await;
                 // A prefix that stops reproducing is a harness defect, not a
                 // clean run: say which divergence was observed and then lost,
                 // so the report never hides behind a bare expect.
                 let Some(minimal_divergence) =
-                    first_divergence(&storage, &database_url, &minimal).await
+                    Box::pin(first_divergence(&storage, &database_url, &minimal)).await
                 else {
                     let path = persist_counterexample(seed, &operations[..=step], &observed);
                     panic!(

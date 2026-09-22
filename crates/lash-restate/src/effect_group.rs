@@ -50,29 +50,12 @@ const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
     std::sync::OnceLock::new();
 
-mod btree_map_as_pairs {
-    use std::collections::BTreeMap;
-
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<K, V, S>(map: &BTreeMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        K: Ord + Serialize,
-        V: Serialize,
-        S: Serializer,
-    {
-        map.iter().collect::<Vec<_>>().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, K, V, D>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
-    where
-        K: Ord + Deserialize<'de>,
-        V: Deserialize<'de>,
-        D: Deserializer<'de>,
-    {
-        Vec::<(K, V)>::deserialize(deserializer).map(|pairs| pairs.into_iter().collect())
-    }
-}
+mod wire;
+pub(crate) use wire::btree_map_as_pairs;
+pub use wire::{
+    EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,
+    EffectGroupProbeResponse,
+};
 
 /// Constructor-owned deployment services for Restate effect groups.
 ///
@@ -178,25 +161,6 @@ pub enum EffectGroupDispatchState {
 
 mod index_record;
 pub use index_record::*;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupPhase {
-    Preparing,
-    Ready,
-    Closed,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupProbeResponse {
-    Absent,
-    Exists {
-        shape_digest: String,
-        phase: EffectGroupPhase,
-    },
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1037,6 +1001,43 @@ impl EffectGroupIndex {
         Ok(Json(EffectGroupCommitChildResponse::Committed {
             commit_seq,
             blocking_positions,
+        }))
+    }
+
+    /// §4's admission fence on this tier (FIG-3470): may a semantic effect
+    /// minted under the named child still be admitted? The index answers —
+    /// under the same object serialization `close` writes the decision
+    /// through — so an admission can never observe a pre-decision state while
+    /// its run survives the decision's commit. `CancelDecided` refuses;
+    /// `Committed` and undecided admit, because a committed child retains
+    /// authority to finish its drain and a live one has no decision to lose
+    /// to. An absent or retired group is `UnknownGroup`: a reaped index has
+    /// no live state to arbitrate under.
+    #[handler]
+    async fn admit_semantic(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<EffectGroupAdmitSemanticRequest>,
+    ) -> HandlerResult<Json<EffectGroupAdmitSemanticResponse>> {
+        let Some(record) = load_index(&ctx).await? else {
+            return Ok(Json(EffectGroupAdmitSemanticResponse::UnknownGroup));
+        };
+        let Ok(live) = record.live() else {
+            return Ok(Json(EffectGroupAdmitSemanticResponse::UnknownGroup));
+        };
+        let Some(position) = live
+            .shape
+            .replay_keys
+            .iter()
+            .position(|replay_key| replay_key == &request.replay_key)
+        else {
+            return Ok(Json(EffectGroupAdmitSemanticResponse::UnknownChild));
+        };
+        Ok(Json(match live.commit_states.get(&position).copied() {
+            Some(EffectGroupChildCommitState::CancelDecided) => {
+                EffectGroupAdmitSemanticResponse::CancelDecided
+            }
+            _ => EffectGroupAdmitSemanticResponse::Admitted,
         }))
     }
 

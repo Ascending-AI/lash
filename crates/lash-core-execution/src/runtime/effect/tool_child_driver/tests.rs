@@ -335,8 +335,18 @@ fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
         &host,
         Arc::new(crate::InMemoryProcessExecutionEnvStore::default()),
     );
+    let binding = crate::GroupChildBinding {
+        child: crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
+            .expect("a valid child address"),
+        membership: crate::EffectGroupMembership {
+            group_key: "group".to_string(),
+            position: 0,
+            wake: crate::GroupWakePolicy::All,
+            loser_disposition: crate::LoserPolicy::RunToCompletion,
+        },
+    };
     let controller = tool_children
-        .child_controller(&request.scope.admitted_scope)
+        .child_controller(&request.scope.admitted_scope, binding)
         .expect("the admitted pair constructs the child's controller");
     assert_eq!(
         controller.execution_scope(),
@@ -1196,6 +1206,12 @@ async fn a_resolved_child_executes_on_the_captured_opener_context() {
         RuntimeEffectCommand::ToolInvocation {
             request: Box::new(request),
         },
+    )
+    .in_effect_group(
+        "group",
+        0,
+        crate::GroupWakePolicy::All,
+        crate::LoserPolicy::Cancel,
     );
     let lent_dispatch = lent();
     let lent_controller = lent_dispatch

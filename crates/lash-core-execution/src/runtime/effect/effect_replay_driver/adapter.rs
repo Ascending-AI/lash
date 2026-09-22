@@ -93,14 +93,27 @@ pub trait StoreReplayHost: StoreReplayAdapter + AwaitEventResolver {
 pub trait StoreReplayController: StoreReplayAdapter + AwaitEventResolver {
     /// The scope whose journal this controller executes against.
     fn execution_scope(&self) -> &ExecutionScope;
+
+    /// The group child this controller's admissions are minted under, when it
+    /// was bound by
+    /// [`EffectHost::scoped_for_group_child`](crate::EffectHost::scoped_for_group_child)
+    /// (FIG-3470). `None` for an unbound scope controller.
+    fn group_child_binding(&self) -> Option<&crate::GroupChildBinding> {
+        None
+    }
 }
 
 /// The controller a [`StoreReplayHost`] mints from [`EffectHost::scoped`]: the
-/// host's driver bound to one scope.
+/// host's driver bound to one scope. `binding` is `Some` when the host minted
+/// it through `scoped_for_group_child` — every claim it serves then carries
+/// the bound child's minting-effect reference, so the row-store fence arbitrates
+/// the admission against the child's own replay row rather than the envelope's
+/// `caused_by` lineage (FIG-3470).
 struct ScopedStoreReplayController<P, A> {
     driver: Arc<StoreEffectReplayDriver<P, A>>,
     scope: ExecutionScope,
     authority_binding_id: String,
+    binding: Option<crate::GroupChildBinding>,
 }
 
 impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreReplayAdapter
@@ -122,6 +135,10 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreRep
 {
     fn execution_scope(&self) -> &ExecutionScope {
         &self.scope
+    }
+
+    fn group_child_binding(&self) -> Option<&crate::GroupChildBinding> {
+        self.binding.as_ref()
     }
 }
 
@@ -205,6 +222,7 @@ impl<T: StoreReplayHost> EffectHost for T {
             driver: Arc::clone(self.replay_driver()),
             scope: admitted.scope().clone(),
             authority_binding_id: StoreReplayHost::turn_control_binding_id(self),
+            binding: None,
         };
         ScopedEffectController::shared(Arc::new(controller), admitted)
     }
@@ -218,6 +236,25 @@ impl<T: StoreReplayHost> EffectHost for T {
             driver: Arc::clone(self.replay_driver()),
             scope: admitted.scope().clone(),
             authority_binding_id: StoreReplayHost::turn_control_binding_id(self),
+            binding: None,
+        };
+        Ok(Some(ScopedEffectController::shared(
+            Arc::new(controller),
+            admitted,
+        )?))
+    }
+
+    fn scoped_for_group_child(
+        &self,
+        admitted: AdmittedScope,
+        binding: crate::GroupChildBinding,
+    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
+        admitted.scope().validate()?;
+        let controller = ScopedStoreReplayController {
+            driver: Arc::clone(self.replay_driver()),
+            scope: admitted.scope().clone(),
+            authority_binding_id: StoreReplayHost::turn_control_binding_id(self),
+            binding: Some(binding),
         };
         Ok(Some(ScopedEffectController::shared(
             Arc::new(controller),
@@ -351,10 +388,12 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
                 scope,
                 envelope,
                 RuntimeEffectLocalExecutor::testing(move |_| async move { settled }),
+                self.group_child_binding(),
             ))
             .await;
         }
-        Box::pin(driver.execute_effect(scope, envelope, local_executor)).await
+        Box::pin(driver.execute_effect(scope, envelope, local_executor, self.group_child_binding()))
+            .await
     }
 
     /// Delegated to the shared driver exactly as `execute_effect` is: the group

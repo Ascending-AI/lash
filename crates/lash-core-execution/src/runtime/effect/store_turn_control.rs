@@ -219,6 +219,14 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         self.owner.scoped_static(admitted)
     }
 
+    fn scoped_for_group_child(
+        &self,
+        admitted: crate::AdmittedScope,
+        binding: crate::GroupChildBinding,
+    ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
+        self.owner.scoped_for_group_child(admitted, binding)
+    }
+
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
         self
     }

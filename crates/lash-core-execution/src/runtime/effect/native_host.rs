@@ -305,7 +305,10 @@ impl EffectHost for NativeEffectHost {
         &'run self,
         admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        ScopedEffectController::shared(self.fenced_controller(admitted.scope().clone()), admitted)
+        ScopedEffectController::shared(
+            self.fenced_controller(admitted.scope().clone(), None),
+            admitted,
+        )
     }
 
     fn scoped_static(
@@ -313,7 +316,32 @@ impl EffectHost for NativeEffectHost {
         admitted: AdmittedScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         Ok(Some(ScopedEffectController::shared(
-            self.fenced_controller(admitted.scope().clone()),
+            self.fenced_controller(admitted.scope().clone(), None),
+            admitted,
+        )?))
+    }
+
+    /// The bound twin: the controller additionally fences every effect it
+    /// serves through [`NativeEffectGroups::admit_under`], so a nested
+    /// admission minted under a cancel-decided child refuses at the same
+    /// group lock the decision committed under (ADR 0099 §4, FIG-3470).
+    ///
+    /// Refused for a host over a foreign controller: that controller's group
+    /// state is not inspectable, so the host cannot honestly arbitrate a
+    /// bound child's admissions and has no bound controller to lend.
+    fn scoped_for_group_child(
+        &self,
+        admitted: AdmittedScope,
+        binding: crate::GroupChildBinding,
+    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
+        if self.groups_admin.is_none() {
+            return Err(super::executor::effect_groups_unsupported(
+                "a native host over a foreign controller cannot arbitrate group-child admission",
+            )
+            .into_runtime_error());
+        }
+        Ok(Some(ScopedEffectController::shared(
+            self.fenced_controller(admitted.scope().clone(), Some(binding)),
             admitted,
         )?))
     }
@@ -382,10 +410,15 @@ impl EffectHost for NativeEffectHost {
 }
 
 impl NativeEffectHost {
-    fn fenced_controller(&self, scope: ExecutionScope) -> Arc<dyn RuntimeEffectController> {
+    fn fenced_controller(
+        &self,
+        scope: ExecutionScope,
+        binding: Option<crate::GroupChildBinding>,
+    ) -> Arc<dyn RuntimeEffectController> {
         Arc::new(FencedNativeController {
             host: self.clone(),
             scope,
+            binding,
         })
     }
 }
@@ -394,10 +427,16 @@ impl NativeEffectHost {
 /// effect and group it runs is refused with `effect_scope_retired` once the
 /// scope has been retired, so a late redrive under a retired process or
 /// runtime operation fails closed in-process exactly as it does against a
-/// durable journal. Everything else forwards to the host.
+/// durable journal. When `binding` is `Some` — minted by
+/// [`EffectHost::scoped_for_group_child`] — every effect it serves is
+/// additionally admitted under the bound child's §4 decision through
+/// [`NativeEffectGroups::admit_under`], so a nested admission minted under a
+/// cancel-decided child refuses before it runs (FIG-3470). Everything else
+/// forwards to the host.
 struct FencedNativeController {
     host: NativeEffectHost,
     scope: ExecutionScope,
+    binding: Option<crate::GroupChildBinding>,
 }
 
 impl FencedNativeController {
@@ -555,6 +594,14 @@ impl RuntimeEffectController for FencedNativeController {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         envelope.invocation.validate_execution_scope(&self.scope)?;
+        if let Some(binding) = &self.binding {
+            let groups = self.host.groups_admin.as_ref().ok_or_else(|| {
+                super::executor::effect_groups_unsupported(
+                    "a native host over a foreign controller cannot arbitrate group-child admission",
+                )
+            })?;
+            groups.admit_under(binding)?;
+        }
         let _live = self.admit().await?;
         self.host.execute_effect(envelope, local_executor).await
     }

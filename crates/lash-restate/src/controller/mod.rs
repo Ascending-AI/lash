@@ -440,6 +440,30 @@ where
             Arc::new(scope_recording::ScopeRecordingController {
                 inner: self,
                 scope: admitted.scope().clone(),
+                binding: None,
+            }),
+            admitted,
+        )
+    }
+
+    /// The group-child-bound twin of
+    /// [`scoped_effect_controller`](Self::scoped_effect_controller) (ADR 0099
+    /// §4, FIG-3470): every effect the returned controller serves is admitted
+    /// through `EffectGroupIndex/admit_semantic` under `binding`'s recorded
+    /// child before its `ctx.run`, so a nested admission minted under a
+    /// cancel-decided child refuses at the serialized index rather than
+    /// executing under ambient authority.
+    pub fn scoped_effect_controller_for_group_child<'run>(
+        &'run self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        admitted.scope().validate()?;
+        ScopedEffectController::owned(
+            Arc::new(scope_recording::ScopeRecordingController {
+                inner: self,
+                scope: admitted.scope().clone(),
+                binding: Some(binding),
             }),
             admitted,
         )

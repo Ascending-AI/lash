@@ -79,6 +79,33 @@ pub struct EffectGroupMembership {
     pub loser_disposition: LoserPolicy,
 }
 
+/// The group child every semantic admission made through a bound controller is
+/// minted under (ADR 0099 §4, FIG-3470).
+///
+/// A controller minted by
+/// [`EffectHost::scoped_for_group_child`](super::executor::EffectHost::scoped_for_group_child)
+/// carries this pair, and every `execute_effect` it serves is admitted — or
+/// refused — under the substrate's own arbitration for *this* child: the SQL
+/// claim fences its insert on the minting replay row's commit state, the
+/// native controller serializes the admission against the group mutex, and the
+/// Restate handler asks the serialized group index. The `caused_by` lineage a
+/// nested envelope happens to carry is deliberately not consulted: it names a
+/// parent, not the child whose §4 decision owns this admission.
+///
+/// `child` is the group child's own `ToolInvocation` envelope address — the
+/// replay row its cancel disposition is decided on. `membership` is the
+/// retained membership the same envelope carries: the pair comes from one
+/// journaled fact, so a caller cannot bind a controller to a child and a group
+/// that were never recorded together.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupChildBinding {
+    /// The child's own `ToolInvocation` envelope address: the replay row its
+    /// cancel disposition is decided on.
+    pub child: crate::EffectAddress,
+    /// The retained membership the child's envelope carries.
+    pub membership: EffectGroupMembership,
+}
+
 /// A group of independently journaled child effects opened at the effect-host
 /// seam (FIG-1416).
 ///

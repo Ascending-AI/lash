@@ -242,6 +242,13 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
                 Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
             }
             RuntimeEffectCommand::Process { command } => {
+                if matches!(command.as_ref(), ProcessCommand::RegisterDefinition { .. }) {
+                    let result = local_executor
+                        .into_process_definitions()?
+                        .execute(envelope.invocation.replay_key(), *command)
+                        .await?;
+                    return Ok(RuntimeEffectOutcome::Process { result });
+                }
                 let execution = local_executor.into_process()?;
                 if matches!(command.as_ref(), ProcessCommand::Await { .. }) {
                     let result = execution.execute(*command).await?;
@@ -1037,6 +1044,59 @@ impl NativeEffectGroups {
     ) -> Result<Arc<NativeEffectGroup>, RuntimeEffectControllerError> {
         self.get(group_key)
             .ok_or_else(|| closed_group_error(group_key))
+    }
+
+    /// §4's admission fence on this tier: may a semantic effect minted under
+    /// `binding`'s child still be admitted (ADR 0099 §4, FIG-3470)?
+    ///
+    /// The group lock this takes is the same one `record` and `close` write
+    /// the decision under, so an admission can never observe a pre-decision
+    /// state while its execution survives the decision's commit. A
+    /// `Cancelled` decision refuses; anything else — `Committed`, or a
+    /// position the boundary has not reached yet — admits, because a
+    /// committed child retains authority to finish its drain and a live one
+    /// has no decision to lose to.
+    ///
+    /// A group this controller does not hold is the closed-group error, the
+    /// same answer `lookup` gives: a reaped group has no live state to
+    /// arbitrate under, and a process crash is the only way this tier loses
+    /// one. A binding that names a position the group never recorded is a
+    /// shape refusal: the binding derives from a retained membership, so a
+    /// replay key the group does not contain was never bound.
+    pub(crate) fn admit_under(
+        &self,
+        binding: &crate::GroupChildBinding,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let group_key = binding.membership.group_key.as_str();
+        let state = self.lookup(group_key)?;
+        let Some(position) = state
+            .positions
+            .get(binding.child.replay_key.as_str())
+            .copied()
+        else {
+            return Err(group_shape_error(format!(
+                "group-child admission names replay key `{}`, which durable \
+                 effect group {group_key} never recorded; a binding derives \
+                 from the child's retained membership and cannot name a child \
+                 the group does not contain",
+                binding.child.replay_key,
+            )));
+        };
+        let inner = state.state.lock_recover();
+        if matches!(
+            inner.decisions.get(&position),
+            Some(NativeChildDecision::Cancelled)
+        ) {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+                format!(
+                    "child {position} of durable effect group {group_key} is \
+                     cancel-decided; ADR 0099 §4 forbids a new semantic \
+                     admission under it"
+                ),
+            ));
+        }
+        Ok(())
     }
 
     /// Completion alone is not enough, because `RunToCompletion` losers keep

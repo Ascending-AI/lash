@@ -255,6 +255,14 @@ pub struct ProcessLocalExecution {
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
+/// Local execution target for the journaled process-definition CAS write
+/// (FIG-3470): unlike [`ProcessLocalExecution`], which serves the process
+/// service, this target binds only the definition registry the
+/// `RegisterDefinition` command writes through.
+pub struct ProcessDefinitionLocalExecution {
+    pub registry: Arc<dyn crate::ProcessDefinitionRegistry>,
+}
+
 pub(super) struct LocalDirectEffectRunner {
     provider: ProviderHandle,
     charge_safety: crate::ChargeSafetyPolicy,
@@ -330,6 +338,7 @@ enum LocalTarget {
         clock: Arc<dyn crate::Clock>,
     },
     Process(ProcessLocalExecution),
+    ProcessDefinitions(ProcessDefinitionLocalExecution),
     Trigger(TriggerLocalExecution),
     TurnAcceptance(Arc<dyn crate::TurnInputStore>),
     OwnedRunner(Box<dyn RuntimeEffectLocalRunner + Send + 'static>),
@@ -595,6 +604,19 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Binds the process-definition registry for the journaled
+    /// `RegisterDefinition` write (FIG-3470). This is the only command this
+    /// executor serves; every other process command still requires
+    /// [`Self::processes`].
+    pub fn process_definitions(registry: Arc<dyn crate::ProcessDefinitionRegistry>) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(
+                ProcessDefinitionLocalExecution { registry },
+            )),
+            replay_trace: None,
+        }
+    }
+
     /// Binds a turn-input store for effect-host implementors executing the
     /// durable turn-acceptance effect (ADR 0069 §6) natively.
     ///
@@ -818,6 +840,15 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     ),
                 ))
             }
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(_)) => {
+                Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    format!(
+                        "process-definition executor cannot execute {} command directly",
+                        envelope.command.kind().as_str()
+                    ),
+                ))
+            }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(_)) => {
                 Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -863,6 +894,22 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 "no process executor is available for process command",
+            )),
+        }
+    }
+
+    /// Extracts the process-definition registry for the journaled
+    /// `RegisterDefinition` write (FIG-3470).
+    pub fn into_process_definitions(
+        self,
+    ) -> Result<ProcessDefinitionLocalExecution, RuntimeEffectControllerError> {
+        match self.state {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(execution)) => {
+                Ok(execution)
+            }
+            _ => Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                "no process-definition registry is available for the register-definition command",
             )),
         }
     }

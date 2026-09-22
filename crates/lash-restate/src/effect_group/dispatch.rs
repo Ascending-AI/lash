@@ -369,11 +369,31 @@ impl EffectGroupDispatch {
                 .into());
             };
             let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
-            // The child's own admitted controller: the recorded pair — claim
-            // scope and the incarnation it was admitted under — never the
-            // dispatching scope and never fresh admission (ADR 0099 §3).
+            // The child's own admitted controller, bound to its recorded
+            // identity: the recorded pair — claim scope and the incarnation
+            // it was admitted under — never the dispatching scope and never
+            // fresh admission (ADR 0099 §3), and every semantic effect it
+            // serves is admitted through the index under the binding's child
+            // (ADR 0099 §4, FIG-3470). A `ToolInvocation` that reached group
+            // dispatch without retained membership is a shape error — never
+            // run unbound.
+            let Some(membership) = request.envelope.group.as_deref().cloned() else {
+                return Err(TerminalError::new(format!(
+                    "effect group {} tool child {} carries no retained membership; \
+                     a child without one has no identity to bind a controller to",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let binding = lash_core::GroupChildBinding {
+                child: request.envelope.invocation.address.clone(),
+                membership,
+            };
             let scoped = controller
-                .scoped_effect_controller(child.scope.admitted_scope.clone())
+                .scoped_effect_controller_for_group_child(
+                    child.scope.admitted_scope.clone(),
+                    binding,
+                )
                 .map_err(TerminalError::from_error)?;
             let mut drive =
                 driver.drive(child, request.envelope.invocation.address.clone(), scoped);

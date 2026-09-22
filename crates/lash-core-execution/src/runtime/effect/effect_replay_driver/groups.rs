@@ -590,6 +590,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     child,
                     executor,
                     Some(&cancel),
+                    None,
                 ))
                 .await;
                 driver.group_child_finished(&group_key, &state).await;

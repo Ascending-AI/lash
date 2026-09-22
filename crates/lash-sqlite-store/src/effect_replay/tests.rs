@@ -989,6 +989,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
                         })),
                     })
                 }),
+                None,
             )
             .await
     });
@@ -1171,11 +1172,13 @@ async fn a_claim_minted_by_a_cancel_decided_child_is_refused_without_a_row() {
 /// The fence is discriminating, not broad: only `Cancelled` refuses.
 ///
 /// Every other state the join can answer is admission-permitting — a committed
-/// parent's descendants are the protected side of the same decision, an
-/// undecided one is still racing, and a minting key that resolves to no group
-/// child (an ungrouped effect, or a key no row holds) is simply not fenced.
-/// `minting_effect: None` covers the common case, where the envelope carries
-/// no effect causation at all.
+/// parent's descendants are the protected side of the same decision and an
+/// undecided one is still racing. A minting key that resolves to no group
+/// child is different: `minting_effect` is minted from a `GroupChildBinding`,
+/// so an ungrouped or missing minting row is journal corruption, not a live
+/// parent — the claim fails closed rather than admitting under a binding the
+/// journal contradicts. `minting_effect: None` covers the common case, where
+/// the envelope carries no bound child at all.
 #[tokio::test]
 async fn the_fence_refuses_only_a_cancelled_minting_child() {
     let store = row_store().await;
@@ -1209,20 +1212,29 @@ async fn the_fence_refuses_only_a_cancelled_minting_child() {
     );
 
     // A minting key that resolves to no group child — an ungrouped effect's
-    // replay key here — fences nothing.
+    // replay key, or a key no row holds — is corruption the binding cannot
+    // have produced, so the claim fails closed rather than admitting.
     let mut ungrouped = claim("sibling", "owner-s");
     ungrouped.group_key = None;
     assert!(matches!(
         store.claim(&ungrouped).await.expect("claim the sibling"),
         EffectClaimObservation::Claimed { .. }
     ));
-    let observation = store
+    let error = store
         .claim(&minted_claim("n3", "owner-n", "sibling"))
         .await
-        .expect("claim under an ungrouped parent");
+        .expect_err("an ungrouped minting row is corruption, not a parent");
     assert!(
-        matches!(observation, EffectClaimObservation::Claimed { .. }),
-        "a minting key outside the group must not fence admissions: {observation:?}"
+        error.to_string().contains("no group child"),
+        "the refusal names the ungrouped minting row: {error}"
+    );
+    let error = store
+        .claim(&minted_claim("n3b", "owner-n", "missing"))
+        .await
+        .expect_err("a missing minting row is corruption, not a parent");
+    assert!(
+        error.to_string().contains("does not exist"),
+        "the refusal names the missing minting row: {error}"
     );
 
     // No minting reference at all.
