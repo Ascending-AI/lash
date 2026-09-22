@@ -37,9 +37,6 @@ pub(crate) use lash_core_store::usage;
 mod vocabulary;
 pub use vocabulary::*;
 
-// `PromptUsage` is re-exported below alongside the runtime's own types.
-pub use lash_sansio::PromptUsage;
-
 pub use crate::store::QueuedWorkClass;
 
 pub use causal::process_event_invocation;

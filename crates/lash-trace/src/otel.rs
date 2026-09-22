@@ -545,13 +545,13 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             );
         }
         TraceEvent::CompactionNeeded {
-            context_budget_tokens,
+            used_tokens,
             max_context_tokens,
             threshold_tokens,
         } => {
             attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_CONTEXT_BUDGET_TOKENS,
-                *context_budget_tokens as i64,
+                attr::LASH_COMPACTION_USED_TOKENS,
+                *used_tokens as i64,
             ));
             attrs.push(KeyValue::new(
                 attr::LASH_COMPACTION_MAX_CONTEXT_TOKENS,
@@ -563,14 +563,14 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             ));
         }
         TraceEvent::PromptViewPruned {
-            context_budget_tokens,
+            used_tokens,
             max_context_tokens,
             dropped_prefix_messages,
             retained_messages,
         } => {
             attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_CONTEXT_BUDGET_TOKENS,
-                *context_budget_tokens as i64,
+                attr::LASH_COMPACTION_USED_TOKENS,
+                *used_tokens as i64,
             ));
             attrs.push(KeyValue::new(
                 attr::LASH_COMPACTION_MAX_CONTEXT_TOKENS,

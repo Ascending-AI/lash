@@ -2,11 +2,14 @@ use super::StoreError;
 use crate::SessionId;
 
 /// Oldest session-state generation this runtime can admit.
-pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;
+pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 2;
 
 /// Complete mutable-continuation generation emitted and admitted by this runtime.
 /// ADR 0078 refuses the snapshot generation; no converter crosses this cutover.
-pub const CURRENT_SESSION_STATE_VERSION: u32 = 1;
+/// Version 2 (FIG-1961) carries `last_prompt_usage` as the checked `TokenUsage`
+/// shape; generation-1 snapshots holding the retired `PromptUsage` fields are
+/// refused rather than remapped.
+pub const CURRENT_SESSION_STATE_VERSION: u32 = 2;
 
 /// Successful lease-fenced admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]

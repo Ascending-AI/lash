@@ -620,7 +620,7 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
     assert_eq!(
         restored_projection_basis
             .as_ref()
-            .map(|usage| usage.context_budget_tokens),
+            .map(|usage| usage.total()),
         Some(30_001),
         "cold reopen must restore the last completed turn's projection basis"
     );
@@ -628,7 +628,7 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
         checkpointed_projection_bases
             .lock_recover()
             .iter()
-            .map(|usage| usage.as_ref().map(|usage| usage.context_budget_tokens))
+            .map(|usage| usage.as_ref().map(|usage| usage.total()))
             .collect::<Vec<_>>(),
         vec![Some(30_001), Some(30_001)],
         "the durable AfterWork checkpoint must keep the pinned basis after a low-usage provider call"

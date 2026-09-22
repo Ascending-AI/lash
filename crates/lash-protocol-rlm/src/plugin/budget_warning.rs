@@ -2,12 +2,12 @@ use lash_core::facade_support::PreparedContext;
 use lash_core::plugin::{ContextError, TurnContextTransform, TurnTransformContext};
 use lash_sansio::sync::RwLockExt;
 
-use crate::driver::SharedPromptUsage;
+use crate::driver::SharedUsage;
 
 pub(crate) const BUDGET_WARNING_STATUS: &str = "rlm_context_budget_warning";
 
 pub(crate) struct BudgetUsageObserver {
-    pub(crate) cell: SharedPromptUsage,
+    pub(crate) cell: SharedUsage,
 }
 
 #[async_trait::async_trait]
@@ -29,15 +29,12 @@ impl TurnContextTransform for BudgetUsageObserver {
 #[cfg(test)]
 mod tests {
     use crate::rlm_support::{effective_budget_tokens, format_budget_suffix_with_vocabulary};
-    use lash_core::PromptUsage;
+    use lash_core::TokenUsage;
 
-    fn prompt_usage(context_budget_tokens: usize) -> PromptUsage {
-        PromptUsage {
-            prompt_context_tokens: context_budget_tokens,
-            input_tokens: context_budget_tokens,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            context_budget_tokens,
+    fn prompt_usage(used_tokens: usize) -> TokenUsage {
+        TokenUsage {
+            input_tokens: used_tokens as i64,
+            ..TokenUsage::default()
         }
     }
 
@@ -48,9 +45,9 @@ mod tests {
             crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY,
         ] {
             for used in [60, 90, 100, 110] {
-                let usage = PromptUsage {
-                    context_budget_tokens: used,
-                    ..Default::default()
+                let usage = TokenUsage {
+                    input_tokens: used as i64,
+                    ..TokenUsage::default()
                 };
                 let text = format_budget_suffix_with_vocabulary(
                     2,

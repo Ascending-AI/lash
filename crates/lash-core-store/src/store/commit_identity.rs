@@ -24,7 +24,7 @@ pub struct OperationId {
     pub key: String,
 }
 
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 5;
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 6;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).
 /// These are `FAMILY_DOMAINS`-registered names whose preimages carry no
@@ -805,7 +805,7 @@ mod append_request_identity_tests {
     }
 
     #[test]
-    fn append_request_identity_v5_golden_byte_corpus() {
+    fn append_request_identity_v6_golden_byte_corpus() {
         // Versioned durability corpus. These are the exact v5 bytes, not merely
         // relational hashes. Any projection change requires an explicit
         // APPEND_REQUEST_IDENTITY_ENCODING_VERSION bump and corpus replacement.
@@ -1025,14 +1025,14 @@ mod append_request_identity_tests {
         if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_GOLDEN").is_some() {
             std::fs::write(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("src/store/testdata/append_request_identity_v5.hex"),
+                    .join("src/store/testdata/append_request_identity_v6.hex"),
                 &rendered,
             )
             .expect("write golden corpus");
         }
         assert_eq!(
             rendered,
-            include_str!("testdata/append_request_identity_v5.hex")
+            include_str!("testdata/append_request_identity_v6.hex")
         );
     }
 

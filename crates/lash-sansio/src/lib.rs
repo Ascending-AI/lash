@@ -74,7 +74,7 @@ pub use schema_contract::{
 pub use session::{
     CellFailure, CellFailureKind, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
     ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, Observation,
-    OmittedToolCalls, PromptUsage, TextProjectionMetadata,
+    OmittedToolCalls, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource};
 pub use session_model::{

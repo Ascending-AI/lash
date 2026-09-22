@@ -10,19 +10,16 @@ use lash_core::plugin::{SessionGraphService, SessionLifecycleService, SessionSta
 use lash_core::{SessionGraph, SessionPolicy};
 use serde_json::json;
 
-fn prompt_usage(context_budget_tokens: usize) -> PromptUsage {
-    PromptUsage {
-        prompt_context_tokens: context_budget_tokens,
-        input_tokens: context_budget_tokens,
-        cache_read_input_tokens: 0,
-        cache_write_input_tokens: 0,
-        context_budget_tokens,
+fn prompt_usage(used_tokens: usize) -> TokenUsage {
+    TokenUsage {
+        input_tokens: used_tokens as i64,
+        ..TokenUsage::default()
     }
 }
 
 /// Mirrors what the turn transform asks of the pressure: no pressure, no decisions.
 fn standard_compaction_decisions(
-    usage: Option<&PromptUsage>,
+    usage: Option<&TokenUsage>,
     max_context_tokens: Option<usize>,
 ) -> (bool, bool) {
     ContextPressure::derive(usage, max_context_tokens)
@@ -186,7 +183,7 @@ impl SessionGraphService for RecordingSessionGraph {
 fn build_turn_ctx(
     session_id: &SessionId,
     state: SessionSnapshot,
-    prompt_usage: Option<PromptUsage>,
+    prompt_usage: Option<TokenUsage>,
     max_context_tokens: Option<usize>,
     manager: Arc<MockSessionManager>,
 ) -> TurnTransformContext<'static> {
@@ -204,7 +201,7 @@ fn build_turn_ctx(
 fn build_turn_ctx_with_graph(
     session_id: &SessionId,
     state: SessionSnapshot,
-    prompt_usage: Option<PromptUsage>,
+    prompt_usage: Option<TokenUsage>,
     max_context_tokens: Option<usize>,
     manager: Arc<MockSessionManager>,
     session_graph: Arc<dyn SessionGraphService>,
@@ -363,13 +360,7 @@ async fn standard_compaction_turn_transform_strips_old_image_attachments() {
     let ctx = build_turn_ctx(
         &SessionId::from("root"),
         state,
-        Some(PromptUsage {
-            prompt_context_tokens: 130_000,
-            input_tokens: 130_000,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            context_budget_tokens: 130_000,
-        }),
+        Some(prompt_usage(130_000)),
         Some(200_000),
         manager,
     );
@@ -401,13 +392,7 @@ async fn standard_compaction_turn_transform_projects_tail_without_summary() {
     let ctx = build_turn_ctx(
         &SessionId::from("root"),
         state,
-        Some(PromptUsage {
-            prompt_context_tokens: 90_000,
-            input_tokens: 90_000,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            context_budget_tokens: 90_000,
-        }),
+        Some(prompt_usage(90_000)),
         Some(100_000),
         manager.clone(),
     );
@@ -456,13 +441,7 @@ async fn standard_compaction_turn_transform_traces_threshold_and_prompt_pruning(
     let ctx = build_turn_ctx_with_graph(
         &SessionId::from("root"),
         state,
-        Some(PromptUsage {
-            prompt_context_tokens: 30_000,
-            input_tokens: 30_000,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            context_budget_tokens: 30_000,
-        }),
+        Some(prompt_usage(30_000)),
         Some(40_000),
         manager,
         trace.clone(),
@@ -492,7 +471,7 @@ async fn standard_compaction_turn_transform_traces_threshold_and_prompt_pruning(
     assert_eq!(
         events[0].1,
         lash_core::TraceEvent::CompactionNeeded {
-            context_budget_tokens: 30_000,
+            used_tokens: 30_000,
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
         }
@@ -500,7 +479,7 @@ async fn standard_compaction_turn_transform_traces_threshold_and_prompt_pruning(
     assert_eq!(
         events[1].1,
         lash_core::TraceEvent::PromptViewPruned {
-            context_budget_tokens: 30_000,
+            used_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 2,
             retained_messages: 1,
@@ -521,13 +500,7 @@ async fn standard_compaction_turn_transform_records_needed_when_no_cut_point_exi
     let ctx = build_turn_ctx_with_graph(
         &SessionId::from("root"),
         state,
-        Some(PromptUsage {
-            prompt_context_tokens: 30_000,
-            input_tokens: 30_000,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            context_budget_tokens: 30_000,
-        }),
+        Some(prompt_usage(30_000)),
         Some(40_000),
         manager,
         trace.clone(),
@@ -551,7 +524,7 @@ async fn standard_compaction_turn_transform_records_needed_when_no_cut_point_exi
     assert_eq!(
         events[1].1,
         lash_core::TraceEvent::PromptViewPruned {
-            context_budget_tokens: 30_000,
+            used_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 0,
             retained_messages: 2,

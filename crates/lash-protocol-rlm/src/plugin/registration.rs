@@ -8,7 +8,7 @@ use super::protocol_session::RlmProtocolSession;
 use super::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
 use super::tool_args::normalize_projected_tool_args;
 use crate::dialect::TypescriptDialect;
-use crate::driver::SharedPromptUsage;
+use crate::driver::SharedUsage;
 use crate::stream_mask;
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
@@ -17,7 +17,7 @@ pub(super) fn register_rlm_protocol_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedPromptUsage,
+    last_prompt_usage: SharedUsage,
 ) -> Result<(), PluginError> {
     // The catalog contribution carries the dialect so the neutrality guard
     // knows the words model-facing tool prose may not spell literally.

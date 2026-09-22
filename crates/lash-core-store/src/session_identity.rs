@@ -569,7 +569,7 @@ pub struct SessionSnapshot {
     #[serde(default)]
     pub token_usage: crate::TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_usage: Option<crate::PromptUsage>,
+    pub last_prompt_usage: Option<crate::TokenUsage>,
     #[serde(default)]
     pub protocol_turn_options: ProtocolTurnOptions,
     /// Read-only projection of the hydrated tool-state reference. Applying a

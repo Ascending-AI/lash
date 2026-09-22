@@ -276,7 +276,7 @@ finish(result);"#,
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=2 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
-        root                     turn_state            stored logical=357B
+        root                     turn_state            stored logical=351B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown

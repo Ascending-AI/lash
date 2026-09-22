@@ -89,7 +89,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
    six pressure turns and never fill the window until provider rejection.
 6. **Record both standard-compaction decision events by scope.** The first
    `compaction_needed` must report `max_context_tokens == 41000`,
-   `threshold_tokens == 21000`, and `context_budget_tokens >= threshold_tokens`.
+   `threshold_tokens == 21000`, and `used_tokens >= threshold_tokens`.
    `prompt_view_pruned` must carry non-negative dropped/retained counts and be
    turn-scoped. Missing or incorrectly parented decision evidence is a FAIL.
    The decision consumes the prior completed prompt's usage: if the sixth bounded prompt is

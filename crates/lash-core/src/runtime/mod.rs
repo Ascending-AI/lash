@@ -163,9 +163,6 @@ use turn_boundary::*;
 use turn_commit_draft::*;
 use turn_driver::*;
 
-// `PromptUsage` is re-exported below alongside the runtime's own types.
-pub use lash_sansio::PromptUsage;
-
 pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
@@ -391,7 +388,7 @@ pub use usage::{
     UsageReconciliationReport, UsageReportRow, UsageTotals, diff_token_ledger, diff_usage_reports,
     outstanding_unreported_attempts,
 };
-use usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
+use usage::{merge_ledger_entry_saturating, nonzero_usage};
 pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no
