@@ -197,7 +197,7 @@ pub struct Store {
     conn: SqliteConnection,
     turn_cancellation_authority: Option<lash_core::TurnCancellationAuthority>,
     turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
-    session_id: OnceLock<SessionId>,
+    session_id: Arc<OnceLock<SessionId>>,
     clock: Arc<dyn lash_core::Clock>,
     #[cfg(feature = "lashlang")]
     artifact_cache: Mutex<BTreeMap<lashlang::ModuleRef, Arc<lashlang::ModuleArtifact>>>,
@@ -403,32 +403,7 @@ fn map_record_decode_error(record_kind: &'static str, error: StoreError) -> Stor
 
 impl Store {
     fn bind_session(&self, session_id: &SessionId) -> Result<(), StoreError> {
-        if let Some(bound_session_id) = self.session_id.get() {
-            if bound_session_id != session_id {
-                return Err(StoreError::SessionBindingMismatch {
-                    bound_session_id: bound_session_id.clone(),
-                    attempted_session_id: session_id.clone(),
-                });
-            }
-            return Ok(());
-        }
-        let _ = self.session_id.set(session_id.clone());
-        if self
-            .session_id
-            .get()
-            .is_some_and(|bound| bound == session_id)
-        {
-            Ok(())
-        } else {
-            Err(StoreError::SessionBindingMismatch {
-                bound_session_id: self
-                    .session_id
-                    .get()
-                    .cloned()
-                    .unwrap_or_else(|| SessionId::from(String::default())),
-                attempted_session_id: session_id.clone(),
-            })
-        }
+        bind_session_lock(&self.session_id, session_id)
     }
 
     fn selected_session_id(&self) -> Result<SessionId, StoreError> {
@@ -466,6 +441,36 @@ impl Store {
         }
         self.bind_session(&SessionId::from(session_ids[0].clone()))?;
         Ok(self.session_id.get().cloned())
+    }
+}
+
+/// Check-or-install the handle's session binding.
+///
+/// The `OnceLock` makes the decision atomic against every binder, whether it
+/// runs on a task thread or inside a `write_flow` closure on the connection
+/// thread: a set that loses to a concurrent install re-reads the winner's id
+/// and answers the mismatch.
+fn bind_session_lock(lock: &OnceLock<SessionId>, session_id: &SessionId) -> Result<(), StoreError> {
+    if let Some(bound_session_id) = lock.get() {
+        if bound_session_id != session_id {
+            return Err(StoreError::SessionBindingMismatch {
+                bound_session_id: bound_session_id.clone(),
+                attempted_session_id: session_id.clone(),
+            });
+        }
+        return Ok(());
+    }
+    let _ = lock.set(session_id.clone());
+    if lock.get().is_some_and(|bound| bound == session_id) {
+        Ok(())
+    } else {
+        Err(StoreError::SessionBindingMismatch {
+            bound_session_id: lock
+                .get()
+                .cloned()
+                .unwrap_or_else(|| SessionId::from(String::default())),
+            attempted_session_id: session_id.clone(),
+        })
     }
 }
 

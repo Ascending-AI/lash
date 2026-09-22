@@ -1031,12 +1031,14 @@ impl SessionCommitStore for Store {
         let session_id = binding.session_id.clone();
         // The tombstone outranks the handle's own binding: a bound handle
         // asked to admit a deleted session answers SessionDeleted, not
-        // SessionBindingMismatch (FIG-1282). The `OnceLock` cannot cross the
-        // transaction closure's 'static bound, so the mismatch check runs on
-        // a snapshot inside the transaction and the lazy bind installs only
-        // once admission has committed.
-        let bound = self.session_id.get().cloned();
-        let bind_id = session_id.clone();
+        // SessionBindingMismatch (FIG-1282). The binding decision is made
+        // inside the write transaction, between the tombstone check and the
+        // metadata write: the connection thread serializes these closures,
+        // and the `OnceLock` covers binders outside a transaction, so a
+        // competing admission that loses the bind rolls its creation back
+        // rather than committing a session it is then refused for. The lock
+        // crosses the closure's 'static bound as a shared `Arc`.
+        let bound = Arc::clone(&self.session_id);
         let created_at_ms = self.clock.timestamp_ms();
         let meta = SessionMeta {
             session_id: session_id.clone(),
@@ -1048,14 +1050,7 @@ impl SessionCommitStore for Store {
             .write_flow(move |tx| {
                 let outcome: Result<lash_core::SessionAdmission, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
-                    if let Some(bound) = bound.as_ref()
-                        && *bound != session_id
-                    {
-                        return Err(StoreError::SessionBindingMismatch {
-                            bound_session_id: bound.clone(),
-                            attempted_session_id: session_id.clone(),
-                        });
-                    }
+                    crate::bind_session_lock(&bound, &session_id)?;
                     let inserted = crate::session_meta::write_session_meta(
                         tx,
                         &meta,
@@ -1083,10 +1078,6 @@ impl SessionCommitStore for Store {
             })
             .await
             .map_err(sqlite_error)??;
-        // Admission committed, so the lazy bind installs now: an unbound
-        // handle adopts the admitted session, and a concurrent binder that
-        // raced the snapshot is still answered with a mismatch.
-        self.bind_session(&bind_id)?;
         Ok(admission)
     }
 
