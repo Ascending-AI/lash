@@ -343,12 +343,14 @@ macro_rules! delegate_process_lifecycle {
                 self.$inner.settle_parent_end_plan(parent).await
             }
 
-            async fn list_unrecorded_turn_parents(
+            async fn list_unrecorded_opener_parents(
                 &self,
                 after: Option<&str>,
                 limit: std::num::NonZeroUsize,
             ) -> Result<Vec<$crate::ParentScope>, $crate::PluginError> {
-                self.$inner.list_unrecorded_turn_parents(after, limit).await
+                self.$inner
+                    .list_unrecorded_opener_parents(after, limit)
+                    .await
             }
 
             async fn record_first_started_with_authority(

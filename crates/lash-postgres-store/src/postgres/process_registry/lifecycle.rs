@@ -156,12 +156,12 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         parent_end::settle(&self.pool, parent, self.clock.timestamp_ms()).await
     }
 
-    async fn list_unrecorded_turn_parents(
+    async fn list_unrecorded_opener_parents(
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core::ParentScope>, PluginError> {
-        parent_end::list_unrecorded_turn_parents(&self.pool, after, limit).await
+        parent_end::list_unrecorded_opener_parents(&self.pool, after, limit).await
     }
 
     async fn record_first_started_with_authority(

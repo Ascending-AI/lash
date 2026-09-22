@@ -24,6 +24,25 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)
     }
 
+    async fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError> {
+        let Some(session_id) = self.resolve_session_id_for_read().await? else {
+            return Ok(false);
+        };
+        let key =
+            lash_core::store_backend_support::drain_end_receipt_storage_key(&session_id, drain_id)?;
+        self.conn
+            .call(move |conn| {
+                let exists: bool = conn.query_row(
+                    session_sql().turn_commits.exists_for_turn.sql(),
+                    params![session_id.as_str(), key],
+                    |row| row.get(0),
+                )?;
+                Ok(exists)
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(lash_core::store::OLDEST_SUPPORTED_SESSION_STATE_VERSION);

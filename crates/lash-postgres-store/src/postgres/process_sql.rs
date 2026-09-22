@@ -182,16 +182,16 @@ lash_store_sql::statements! {
         /// collision-free canonical key, so `DISTINCT ON` keeps one row per
         /// scope — any child's, since every row sharing the key names the
         /// same typed parent — and `record_json` carries the authority.
-        list_unrecorded_turn_parents = "SELECT DISTINCT ON (child.parent_scope_id)
-               child.parent_scope_id, child.record_json
+        list_unrecorded_opener_parents = "SELECT DISTINCT ON (child.parent_scope_id)
+               child.parent_scope_id, child.parent_scope_kind, child.record_json
          FROM processes AS child
-         WHERE child.parent_scope_kind = 'turn'
+         WHERE child.parent_scope_kind IN ('turn', 'queue_drain')
            AND child.on_parent_end = 'cancel'
            AND child.cancel_requested_at_ms IS NULL
            AND {{live_process_status(child.status)}}
            AND NOT EXISTS (
                SELECT 1 FROM parent_end_plans AS plan
-               WHERE plan.parent_kind = 'turn'
+               WHERE plan.parent_kind = child.parent_scope_kind
                  AND plan.parent_id = child.parent_scope_id
            )
            AND (?1::text IS NULL OR child.parent_scope_id > ?1::text)

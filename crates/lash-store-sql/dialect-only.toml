@@ -1530,7 +1530,7 @@ parameter has no type it can compare; SQLite's is untyped.
 """
 
 [[dialect_only]]
-statement = "process.list_unrecorded_turn_parents"
+statement = "process.list_unrecorded_opener_parents"
 backends = ["sqlite", "postgres"]
 kind = "parameter cast"
 reason = "Same cursor-cast fork as process.list_parent_end_children."

@@ -1432,7 +1432,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     );
     assert_eq!(
         registry
-            .list_unrecorded_turn_parents(None, page)
+            .list_unrecorded_opener_parents(None, page)
             .await
             .expect("page turn parents that still owe a ledger row"),
         vec![parent.clone()],
@@ -1466,7 +1466,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     );
     assert!(
         registry
-            .list_unrecorded_turn_parents(None, page)
+            .list_unrecorded_opener_parents(None, page)
             .await
             .expect("re-page turn parents after the row lands")
             .is_empty(),

@@ -5,7 +5,7 @@
 //! *process* parent's terminal write, which is the one path that writes a row
 //! as a side effect of another fact. A turn cannot end that way — a turn is
 //! not a process row — so `record_parent_end` is its only writer, and
-//! `list_unrecorded_turn_parents` is the only way a crash between the turn
+//! `list_unrecorded_opener_parents` is the only way a crash between the turn
 //! commit and that write is ever noticed. Neither had a shared law: both were
 //! asserted on one backend's own tests, so a tier could implement either one
 //! differently, or inherit the empty-page default, and stay green.
@@ -408,7 +408,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
 
     assert_eq!(
         registry
-            .list_unrecorded_turn_parents(None, PAGE)
+            .list_unrecorded_opener_parents(None, PAGE)
             .await
             .expect("page unrecorded turn parents"),
         vec![first.clone(), second.clone()],
@@ -418,7 +418,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
 
     assert_eq!(
         registry
-            .list_unrecorded_turn_parents(None, std::num::NonZeroUsize::MIN)
+            .list_unrecorded_opener_parents(None, std::num::NonZeroUsize::MIN)
             .await
             .expect("page unrecorded turn parents under a bound"),
         vec![first.clone()],
@@ -429,7 +429,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
         .expect("a turn scope has a storage identity");
     assert_eq!(
         registry
-            .list_unrecorded_turn_parents(Some(first_id.as_str()), PAGE)
+            .list_unrecorded_opener_parents(Some(first_id.as_str()), PAGE)
             .await
             .expect("resume the candidate page after the first scope"),
         vec![second.clone()],
@@ -443,7 +443,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
         .expect("recovery writes the row the crash skipped");
     assert_eq!(
         registry
-            .list_unrecorded_turn_parents(None, PAGE)
+            .list_unrecorded_opener_parents(None, PAGE)
             .await
             .expect("page unrecorded turn parents after the row is written"),
         vec![second.clone()],
@@ -463,7 +463,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     }
     assert_eq!(
         registry
-            .list_unrecorded_turn_parents(None, PAGE)
+            .list_unrecorded_opener_parents(None, PAGE)
             .await
             .expect("page unrecorded turn parents after one child is cancelled"),
         vec![second.clone()],
@@ -486,7 +486,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
         .expect("request a cancel on the remaining sibling");
     assert!(
         registry
-            .list_unrecorded_turn_parents(None, PAGE)
+            .list_unrecorded_opener_parents(None, PAGE)
             .await
             .expect("page unrecorded turn parents once every child is settled")
             .is_empty(),

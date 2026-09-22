@@ -1069,6 +1069,23 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         })
     }
 
+    /// Does this session hold a durable end receipt for `drain_id`?
+    ///
+    /// The same membership read as [`committed_turn_exists`](Self::committed_turn_exists),
+    /// keyed on the drain's `final` receipt: true means the drain's epilogue
+    /// committed, false means it did not (yet). The parent-end recovery sweep
+    /// is its only caller; a drain interrupted before its epilogue is left
+    /// alone for the retried drain under the same `drain_id` to end.
+    ///
+    /// The default refuses. Backends that report parent-end recovery
+    /// candidates must implement it; a backend that reports none is never
+    /// asked.
+    async fn drain_end_exists(&self, _drain_id: &str) -> Result<bool, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "drain_end_exists",
+        })
+    }
+
     /// Atomically persist one settled runtime commit and its durable receipt.
     ///
     /// A commit carrying [`RuntimeCommit::session_execution_lease_fence`]

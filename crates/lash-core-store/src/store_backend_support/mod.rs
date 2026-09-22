@@ -64,6 +64,25 @@ pub fn turn_commit_receipt_storage_key(
     .storage_key()
 }
 
+/// Durable receipt identity of one queued-work drain's end.
+///
+/// A drain's epilogue commits its end under the drain's own execution scope
+/// with the reserved `final` operation key, so this string is present in the
+/// receipt table exactly when the drain ended. Backends implementing
+/// [`SessionCommitStore::drain_end_exists`](crate::store::SessionCommitStore::drain_end_exists)
+/// must test membership with this key rather than deriving one of their own,
+/// so the ended-drain fact cannot drift between tiers.
+pub fn drain_end_receipt_storage_key(
+    session_id: &SessionId,
+    drain_id: &str,
+) -> Result<String, crate::StoreError> {
+    crate::OperationId::new(
+        crate::ExecutionScope::queue_drain(session_id.clone(), drain_id),
+        "final",
+    )
+    .storage_key()
+}
+
 /// Construct queued-work claim data with the predecessor identity that an abandoning store
 /// must restore.
 pub fn queued_work_claim_data(

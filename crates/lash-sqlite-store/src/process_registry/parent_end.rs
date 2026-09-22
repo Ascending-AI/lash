@@ -168,18 +168,20 @@ pub(super) async fn get(
         .transpose()
 }
 
-/// Turn scopes with live `Cancel` children and no ledger row yet.
+/// Turn and queue-drain scopes with live `Cancel` children and no ledger row
+/// yet.
 ///
-/// A turn's ledger row is written right after the turn commit rather than
-/// inside it, so a crash in between leaves exactly this shape: children that
-/// still name a turn scope no row has ended. The recovery sweep confirms the
-/// turn actually committed before writing the row, so a turn interrupted
-/// mid-flight is reported here and then left alone for its redrive.
+/// An opener's ledger row is written right after its end evidence rather than
+/// inside it — the turn commit for a turn, the drain-end receipt for a drain —
+/// so a crash in between leaves exactly this shape: children that still name
+/// an owner scope no row has ended. The recovery sweep confirms the owner
+/// actually ended before writing the row, so an interrupted turn or drain is
+/// reported here and then left alone for its redrive.
 ///
 /// The predicate is the pending-cancel partial index, so a scope whose
 /// children are all terminal or already cancelled needs no row and is not
 /// reported.
-pub(super) async fn list_unrecorded_turn_parents(
+pub(super) async fn list_unrecorded_opener_parents(
     registry: &SqliteProcessRegistry,
     after: Option<&str>,
     limit: NonZeroUsize,
@@ -191,28 +193,34 @@ pub(super) async fn list_unrecorded_turn_parents(
             let mut statement = conn.prepare(
                 process_sql()
                     .process_sqlite
-                    .list_unrecorded_turn_parents
+                    .list_unrecorded_opener_parents
                     .sql(),
             )?;
             let rows = statement.query_map(params![after, limit.get() as i64], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })?;
             rows.collect::<Result<Vec<_>, _>>()
         })
         .await
         .map_err(process_sqlite_error)?;
     rows.into_iter()
-        .map(|(id, record_json)| {
+        .map(|(id, kind, record_json)| {
             let record: ProcessRecord =
                 serde_json::from_str(&record_json).map_err(process_decode_error)?;
             let parent = record.lifecycle.parent;
-            (parent.storage_kind() == "turn" && parent.storage_id().as_deref() == Some(id.as_str()))
-                .then_some(parent)
-                .ok_or_else(|| {
-                    PluginError::Session(format!(
-                        "turn parent-scope candidate `{id}` names a different scope in its record"
-                    ))
-                })
+            (matches!(parent.storage_kind(), "turn" | "queue_drain")
+                && parent.storage_kind() == kind
+                && parent.storage_id().as_deref() == Some(id.as_str()))
+            .then_some(parent)
+            .ok_or_else(|| {
+                PluginError::Session(format!(
+                    "opener parent-scope candidate `{id}` names a different scope in its record"
+                ))
+            })
         })
         .collect()
 }

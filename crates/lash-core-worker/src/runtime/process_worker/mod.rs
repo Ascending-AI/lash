@@ -702,7 +702,7 @@ impl DurableProcessWorker {
     /// detected after claiming and skipped, so re-running a recovery sweep does
     /// not double-execute completed work.
     pub async fn drive_pending_processes(&self) -> Result<ProcessAdmissionReport, PluginError> {
-        self.redrive_missing_turn_parent_end_rows().await?;
+        self.redrive_missing_opener_parent_end_rows().await?;
         self.drive_pending_parent_end_plans().await?;
         // Absorbing its report keeps the outer call from reporting its own just-admitted rows
         // as somebody else's `Busy` when the scan below sees them already scheduled.
