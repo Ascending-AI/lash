@@ -507,6 +507,7 @@ jobs:
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_package_workspace.py
           python3 scripts/test_production_file_size.py
+          python3 scripts/test_lint_orchestrating_tools.py
           python3 scripts/test_confidence_gate_ci_contract.py
           python3 scripts/test_slack_clone_full_host_e2e_contract.py
           python3 scripts/test_slack_clone_live_model_e2e_contract.py
@@ -1516,7 +1517,7 @@ jobs:
         run: bash scripts/check-workflow-graph-model.sh
 
       - name: Check production file-size budget
-        run: bash scripts/check-production-file-size.sh
+        run: python3 scripts/check-production-file-size.py
 
       - name: Check checkpoint-component flatten boundary
         run: python3 scripts/check_checkpoint_component_flatten.py

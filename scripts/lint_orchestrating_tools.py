@@ -106,7 +106,6 @@ def import_aliases(source: str) -> dict[str, tuple[str, str]]:
 
 
 def orchestration_bodies(source: str):
-    source = code_only(source)
     cursor = 0
     while match := ENTRYPOINT.search(source, cursor):
         start = match.start()
@@ -130,8 +129,11 @@ def main() -> int:
     matched_entrypoints = {}
     for path in sorted((ROOT / "crates").glob("**/*.rs")):
         source = path.read_text(encoding="utf-8")
-        aliases = import_aliases(code_only(source))
-        for start, body in orchestration_bodies(source):
+        if "execute_orchestration" not in source:
+            continue
+        code = code_only(source)
+        aliases = import_aliases(code)
+        for start, body in orchestration_bodies(code):
             relative_path = path.relative_to(ROOT)
             matched_entrypoints[relative_path] = matched_entrypoints.get(relative_path, 0) + 1
             line = source.count("\n", 0, start) + 1

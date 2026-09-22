@@ -509,4 +509,4 @@ publish-all *args:
   python3 "{{repo}}/scripts/publish_workspace.py" "$@"
 
 check-file-size:
-  ./scripts/check-production-file-size.sh
+  python3 scripts/check-production-file-size.py

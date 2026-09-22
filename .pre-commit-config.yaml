@@ -52,7 +52,7 @@ repos:
       - id: file-size-budget
         name: production file-size budget
         language: system
-        entry: bash scripts/check-production-file-size.sh
+        entry: python3 scripts/check-production-file-size.py
         files: '\.rs$'
         pass_filenames: false
 

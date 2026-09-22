@@ -2,7 +2,7 @@
 //! `lease_and_claims.rs`.
 //!
 //! It lives here because the parent sits on the 2500-line test budget
-//! `scripts/check-production-file-size.sh` enforces, and FIG-2266's explicit
+//! `scripts/check-production-file-size.py` enforces, and FIG-2266's explicit
 //! group methods pushed it over. A real module rather than an `include!`, so
 //! `cargo fmt` keeps walking it.
 
