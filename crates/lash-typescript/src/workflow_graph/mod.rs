@@ -131,7 +131,16 @@ pub fn workflow_graph_from_program(program: &Program) -> WorkflowGraph {
     if let Ok(canonical) = typescript_program_source(program)
         && let Ok(canonical_program) = crate::parse(&canonical)
     {
-        return GraphProjector::new(&canonical, &canonical_program, None, false).project();
+        // The reparse supplies canonical offsets. Execution-site paths still
+        // belong to the caller's IR, including its process-literal wrappers.
+        return GraphProjector::with_spans(
+            &canonical,
+            program,
+            canonical_program.spans,
+            None,
+            false,
+        )
+        .project();
     }
     #[expect(
         clippy::expect_used,
