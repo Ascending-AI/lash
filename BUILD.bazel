@@ -251,3 +251,7 @@ filegroup(
     name = "schema_checks",
     srcs = [":host_schema_check", ":example_schema_check"],
 )
+alias(
+    name = "runtime_off",
+    actual = "@runtime_off_crates//:lash-runtime",
+)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Keep the package-only OFF witness and schema/type checks in one bounded
-# group. The trusted schema actions have already run alongside Clippy.
+# Keep portable Cargo contracts and frontend type checks in one bounded group.
+# Trusted OFF and schema actions have already run alongside Clippy.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"
@@ -15,8 +15,8 @@ fi
 # leg while Node checks run beside them, and collect both failures.
 cargo_contracts() {
   local status=0
-  cargo check -p lash-runtime --lib --no-default-features --locked || status=$?
   if [[ "$BAZEL_TRUSTED" == false ]]; then
+    cargo check -p lash-runtime --lib --no-default-features --locked || status=$?
     bash scripts/ci/check-schema-contracts.sh || status=$?
   fi
   return "$status"

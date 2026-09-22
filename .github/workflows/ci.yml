@@ -479,6 +479,7 @@ jobs:
           python3 scripts/test_check_feature_coverage.py
           python3 scripts/test_fast_test.py
           python3 scripts/test_bazel_test_contract.py
+          python3 scripts/test_runtime_off_graph.py ManifestInheritance
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/test_check_version_bumps.py
@@ -1404,7 +1405,17 @@ jobs:
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --profile="${RUNNER_TEMP}/bazel-lint-profile.json.gz" \
-            //:workspace_clippy //:feature_lane_clippy //:schema_checks
+            //:workspace_clippy //:feature_lane_clippy //:schema_checks //:runtime_off
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" aquery \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            'mnemonic("Rustc.*", deps(//:runtime_off))' \
+            --output=jsonproto > "$RUNNER_TEMP/runtime-off-actions.json"
+          python3 scripts/check_runtime_off_graph.py \
+            --actions "$RUNNER_TEMP/runtime-off-actions.json"
+          bazel_output_base="$(bazel --output_user_root="$RUNNER_TEMP/bazel-output" info output_base)"
+          python3 scripts/test_runtime_off_graph.py \
+            --resolver "$bazel_output_base/external/rules_rs+/rs/private/resolver.bzl"
 
       - name: Remove client credentials
         if: always()
@@ -1463,8 +1474,9 @@ jobs:
       # that every referenced path exists at that feature set (FIG-3427:
       # `lash_core::runtime::effect` is `pub(crate)` without `testing`, and a
       # downstream `crate::runtime::effect::…` path broke only under this
-      # command). This is the `runtime-features` lane's OFF witness from
-      # scripts/feature-coverage.toml, run unconditionally because the
+      # command). Trusted events now build the isolated //:runtime_off graph
+      # alongside Clippy above and reconcile its actual compiler actions with
+      # Cargo. Untrusted events retain the Cargo OFF witness here because the
       # feature-lanes job is dispatch-only and repo-gates skips Rust-only
       # diffs.
       - name: Check feature and schema contracts
