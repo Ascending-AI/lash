@@ -27,6 +27,36 @@ pub async fn journaled_typescript_runtime_value(
     operation: &str,
     args: &[lashlang::Value],
 ) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
+    journaled_typescript_runtime_value_inner(ctx, effect_id, receiver, operation, args, None).await
+}
+
+pub(crate) async fn journaled_process_typescript_runtime_value(
+    ctx: &lash_core::RuntimeExecutionContext<'_>,
+    effect_id: String,
+    receiver: &lashlang::Value,
+    operation: &str,
+    args: &[lashlang::Value],
+    call_site: &lashlang::LashlangExecutionCallSite,
+) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
+    journaled_typescript_runtime_value_inner(
+        ctx,
+        effect_id,
+        receiver,
+        operation,
+        args,
+        Some(call_site),
+    )
+    .await
+}
+
+async fn journaled_typescript_runtime_value_inner(
+    ctx: &lash_core::RuntimeExecutionContext<'_>,
+    effect_id: String,
+    receiver: &lashlang::Value,
+    operation: &str,
+    args: &[lashlang::Value],
+    call_site: Option<&lashlang::LashlangExecutionCallSite>,
+) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
     let lashlang::Value::Resource(handle) = receiver else {
         return None;
     };
@@ -48,9 +78,29 @@ pub async fn journaled_typescript_runtime_value(
             "unknown TypeScript runtime operation `{operation}`"
         ))));
     }
-    Some(
-        ctx.journaled_language_runtime_value(effect_id, operation.to_string())
+    let value = ctx
+        .journaled_language_runtime_value(effect_id.clone(), operation.to_string())
+        .await;
+    if value.is_ok()
+        && let Some(call_site) = call_site
+        && let Err(error) = ctx
+            .append_process_event(
+                lash_core::ProcessEffectSummaryOccurrence::new(
+                    call_site.site.node_id.clone(),
+                    call_site.occurrence,
+                    operation,
+                    lash_core::ProcessEffectOutcomeClass::Success,
+                    None,
+                    effect_id,
+                )
+                .append_request(),
+            )
             .await
+    {
+        return Some(Err(lashlang::ExecutionHostError::new(error.to_string())));
+    }
+    Some(
+        value
             .map_err(|error| lashlang::ExecutionHostError::new(error.to_string()))
             .and_then(|value| {
                 value.as_f64().map(lashlang::Value::Number).ok_or_else(|| {

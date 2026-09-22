@@ -849,8 +849,8 @@ impl LashlangProcessHost<'_> {
                 ExecutionHostError::new("TypeScript runtime operation is missing its call site")
             })?;
             let effect_id = self.resource_tool_call_id("typescript.runtime", call_site, None);
-            return crate::journaled_typescript_runtime_value(
-                &self.ctx, effect_id, &receiver, &operation, &args,
+            return crate::typescript_runtime::journaled_process_typescript_runtime_value(
+                &self.ctx, effect_id, &receiver, &operation, &args, call_site,
             )
             .await
             .expect("TypeScript runtime receiver checked above");
@@ -862,18 +862,25 @@ impl LashlangProcessHost<'_> {
                 operation,
                 payload,
                 effect_id,
+                call_site,
             } => {
-                return crate::execute_trigger_operation(
+                return crate::trigger_commands::execute_process_trigger_operation(
                     &self.ctx,
                     self.artifact_store.as_ref(),
                     operation,
                     payload,
                     effect_id,
+                    &call_site,
                 )
                 .await;
             }
-            PreparedResourceInvocation::Tool(invocation) => invocation,
+            PreparedResourceInvocation::Tool {
+                invocation,
+                host_operation,
+                call_site,
+            } => (invocation, host_operation, call_site),
         };
+        let (invocation, host_operation, call_site) = invocation;
         let lash_core::facade_support::ToolInvocation {
             id,
             tool_id,
@@ -893,154 +900,16 @@ impl LashlangProcessHost<'_> {
         } else {
             Box::pin(tool_ctx.call_tool_by_id(id, tool_id, args, 0)).await
         };
-        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the TypeScript runtime receiver was checked above per site, and each batch result slot was filled by the same loop that reserved the Vec of slots"
-    )]
-    async fn resource_operation_batch(
-        &self,
-        batch: lashlang::ResourceOperationBatch,
-    ) -> lashlang::ResourceOperationBatchResult {
-        let occurrence = batch.occurrence;
-        let call_sites = batch
-            .operations
-            .iter()
-            .map(|operation| operation.call_site.clone())
-            .collect::<Vec<_>>();
-        let mut results = vec![None; batch.operations.len()];
-        let mut positions = Vec::new();
-        let mut invocations = Vec::new();
-        for (index, operation) in batch.operations.into_iter().enumerate() {
-            if crate::is_typescript_runtime_receiver(&operation.receiver) {
-                let result = match operation.call_site.as_ref() {
-                    Some(call_site) => {
-                        let effect_id = self.resource_tool_call_id(
-                            "typescript.runtime",
-                            call_site,
-                            Some(index),
-                        );
-                        crate::journaled_typescript_runtime_value(
-                            &self.ctx,
-                            effect_id,
-                            &operation.receiver,
-                            &operation.operation,
-                            &operation.args,
-                        )
-                        .await
-                        .expect("TypeScript runtime receiver checked above")
-                    }
-                    None => Err(ExecutionHostError::new(
-                        "TypeScript runtime operation is missing its call site",
-                    )),
-                };
-                results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
-                continue;
-            }
-            match self.prepare_resource_invocation(
-                operation.operation,
-                operation.receiver,
-                operation.args,
-                operation.call_site,
-                Some(index),
-            ) {
-                Ok(PreparedResourceInvocation::Trigger {
-                    operation,
-                    payload,
-                    effect_id,
-                }) => {
-                    let result = crate::execute_trigger_operation(
-                        &self.ctx,
-                        self.artifact_store.as_ref(),
-                        operation,
-                        payload,
-                        effect_id,
-                    )
-                    .await;
-                    results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
-                }
-                Ok(PreparedResourceInvocation::Tool(invocation)) => {
-                    positions.push(index);
-                    invocations.push(invocation);
-                }
-                Err(error) => {
-                    results[index] = Some(lashlang::ResourceOperationResult::Error(error));
-                }
-            }
-        }
-
-        let replay_keys = invocations
-            .iter()
-            .map(|invocation| invocation.id.clone())
-            .collect::<Vec<_>>();
-        let batch_id = lash_core::session::deterministic_tool_invocation_batch_id(
-            &invocations,
-            lash_core::session::ToolGroupOccurrence::Opener(occurrence),
-        );
-        if positions.len() > 1 {
-            for (position, index) in positions.iter().copied().enumerate() {
-                if let Some(Some(call_site)) = call_sites.get(index) {
-                    self.lashlang_execution_trace.emit_waiting(
-                        call_site,
-                        TraceNodeAwaited::ToolBatch {
-                            batch_id: batch_id.clone(),
-                            position,
-                        },
-                    );
-                }
-            }
-        }
-        let batch = self
-            .ctx
-            .call_tool_batch(
-                invocations,
-                lash_core::session::ToolGroupOccurrence::Opener(occurrence),
+        if let Some(record) = &reply.record {
+            self.append_tool_effect_outcome(
+                &call_site,
+                &host_operation,
+                &replay_key,
+                &record.output,
             )
-            .await;
-        for ((index, replay_key), reply) in positions
-            .iter()
-            .copied()
-            .zip(replay_keys)
-            .zip(batch.replies)
-        {
-            results[index] = Some(lashlang::ResourceOperationResult::from_result(
-                protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation),
-            ));
+            .await?;
         }
-        if !self.cancellation.is_cancelled() && positions.len() > 1 {
-            for index in positions.iter().copied() {
-                if let Some(Some(call_site)) = call_sites.get(index) {
-                    self.lashlang_execution_trace
-                        .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
-                }
-            }
-        }
-
-        // The batch counts settlement in its own invocation positions; the VM
-        // counts in the aggregate's leaf positions. Leaves that failed before
-        // the batch ran had already settled, so they lead.
-        let mut settlement_order = (0..results.len())
-            .filter(|index| !positions.contains(index))
-            .collect::<Vec<_>>();
-        // `call_tool_batch` refuses a malformed order at its boundary, so every
-        // reported position is a real invocation position here. Filtering again
-        // would only convert a future defect back into a silent repair.
-        settlement_order.extend(
-            batch
-                .settlement_order
-                .iter()
-                .filter_map(|position| positions.get(*position).copied()),
-        );
-
-        lashlang::ResourceOperationBatchResult::settled_in_order(
-            results
-                .into_iter()
-                .map(|result| result.expect("every batch result slot should be filled"))
-                .collect(),
-            settlement_order,
-        )
+        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
     }
 
     async fn await_handle(
@@ -1196,7 +1065,7 @@ impl LashlangProcessHost<'_> {
             }),
             lashlang::AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
                 Ok(lashlang::AbilityResult::ResourceOperationBatch(
-                    self.resource_operation_batch(batch).await,
+                    self.resource_operation_batch(batch).await?,
                 ))
             }),
             lashlang::AbilityOp::Await(handle) => Box::pin(async move {
@@ -1384,6 +1253,8 @@ fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessA
 mod event_types;
 pub use event_types::{lashlang_process_event_types, lashlang_process_signal_event_types};
 
+#[path = "process/effect_operations.rs"]
+mod effect_operations;
 #[path = "process/schema.rs"]
 mod schema;
 pub use schema::lashlang_type_expr_schema;

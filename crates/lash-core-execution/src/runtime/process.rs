@@ -45,8 +45,12 @@ pub use engine::{
     ProcessRunOutcome, SegmentHandover, settle_started_process_engine_artifacts,
 };
 pub use events::{
-    AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
-    ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    AbandonEvidence, AbandonWriter, DEFAULT_PROCESS_EFFECT_OCCURRENCE_CAP,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput, ProcessCompletionAuthority,
+    ProcessEffectNodeSummary, ProcessEffectOutcomeClass, ProcessEffectSummary,
+    ProcessEffectSummaryConfig, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence,
+    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventPageToken, ProcessEventPageTokenStoreExt,
     ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemantics,

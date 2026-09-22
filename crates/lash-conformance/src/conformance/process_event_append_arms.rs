@@ -243,3 +243,104 @@ async fn terminal_sequence(
         .expect("a completed process has a terminal event")
         .sequence
 }
+
+/// A recorded effect result may reach the process log after its replay row,
+/// before its append acknowledgement, or after process terminalisation.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn durable_effect_outcome_event_crash_windows(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    let process_id = ProcessId::from("durable-effect-outcome-crash-windows");
+    registry
+        .register_process(registration(process_id.as_str()))
+        .await
+        .expect("register effect-summary process");
+    let recorded = lash_core::ProcessEffectSummaryOccurrence::new(
+        "node:tool",
+        1,
+        "fixture.tool",
+        lash_core::ProcessEffectOutcomeClass::Failure,
+        Some(lash_sansio::FailureCode::from_foreign_wire(
+            "fixture:refused",
+        )),
+        "lashlang:recorded-effect:1",
+    );
+
+    // The effect result already exists by the time this path incorporates it.
+    let inserted = registry
+        .append_event(&process_id, recorded.append_request())
+        .await
+        .expect("incorporate recorded failure after effect completion");
+    assert_eq!(inserted.event.sequence, 1);
+    assert_eq!(
+        inserted.event.event_type,
+        lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
+    );
+    let first_payload = inserted.event.payload.clone();
+
+    // Drop the acknowledgement. A redrive recovers the original append.
+    let replayed = registry
+        .append_event(&process_id, recorded.append_request())
+        .await
+        .expect("recover append after lost acknowledgement");
+    assert_eq!(replayed.event.sequence, inserted.event.sequence);
+    assert_eq!(replayed.event.payload, first_payload);
+    assert_eq!(
+        registry
+            .full_event_window(&process_id, 0)
+            .await
+            .expect("read events")
+            .len(),
+        1
+    );
+
+    registry
+        .complete_process(
+            &process_id,
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminalise process");
+    let terminal_replay = registry
+        .append_event(&process_id, recorded.append_request())
+        .await
+        .expect("recover effect append after terminalisation");
+    assert_eq!(terminal_replay.event.sequence, inserted.event.sequence);
+    assert_eq!(
+        registry
+            .full_event_window(&process_id, 0)
+            .await
+            .expect("read events")
+            .len(),
+        2
+    );
+
+    let mut changed = recorded;
+    changed.code = Some(lash_sansio::FailureCode::from_foreign_wire(
+        "fixture:changed",
+    ));
+    let error = registry
+        .append_event(&process_id, changed.append_request())
+        .await
+        .expect_err("changed outcome under the same effect identity must be refused");
+    assert!(
+        error
+            .to_string()
+            .contains("conflicts with an existing event"),
+        "{error}"
+    );
+    assert_eq!(
+        registry
+            .full_event_window(&process_id, 0)
+            .await
+            .expect("read events")
+            .len(),
+        2
+    );
+}

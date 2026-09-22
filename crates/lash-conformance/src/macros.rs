@@ -432,6 +432,7 @@ macro_rules! process_registry_tests {
                 (empty_tool_call_identifiers_leave_no_row, "empty-tool-call-identifiers"),
                 (process_namespace, "process-namespace"),
                 (process_event_append_arms_are_ordered, "process-event-append-arms"),
+                (durable_effect_outcome_event_crash_windows, "durable-effect-outcome-crash-windows"),
             ]
             cancellation [
                 (process_registry_cancellation_contract, "process-registry-cancellation"),

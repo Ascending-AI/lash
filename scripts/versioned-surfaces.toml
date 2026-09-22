@@ -1580,6 +1580,20 @@ kind = "rust_items"
 paths = ["crates/lash-lashlang-runtime/src/process.rs"]
 symbols = ["LashlangSegmentState"]
 
+[[surface]]
+constant = "PROCESS_EVENT_VOCABULARY_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/process/events.rs"
+description = "runtime-owned durable process-event kind and strict payload vocabulary"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/process/events.rs"]
+symbols = [
+  "ProcessEventKind",
+  "ProcessEffectOutcomeClass",
+  "ProcessEffectSummaryOccurrence",
+]
+
 # Runtime observations persist owner-relative node paths in occurrence-counter
 # keys. Any owner, path-assignment, or mint change therefore changes both the
 # graph identity contract and the parked-segment handover contract.

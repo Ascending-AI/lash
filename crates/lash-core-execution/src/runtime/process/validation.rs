@@ -22,6 +22,11 @@ use super::model::{
 pub fn validate_generic_process_event_append(
     request: &ProcessEventAppendRequest,
 ) -> Result<(), PluginError> {
+    if ProcessEventKind::from_event_type(&request.event_type) == ProcessEventKind::UnknownRuntime {
+        return Err(PluginError::ReservedProcessEvent {
+            event_type: request.event_type.clone(),
+        });
+    }
     if matches!(
         request.event_type.as_str(),
         "process.observer_added" | "process.observer_removed" | "process.subscription_retargeted"
@@ -496,7 +501,13 @@ pub fn apply_process_event_projection(
         ProcessEventKind::ObserverAdded
         | ProcessEventKind::ObserverRemoved
         | ProcessEventKind::SubscriptionRetargeted
+        | ProcessEventKind::EffectOutcome
         | ProcessEventKind::Custom => {}
+        ProcessEventKind::UnknownRuntime => {
+            return Err(PluginError::ReservedProcessEvent {
+                event_type: event.event_type.clone(),
+            });
+        }
     }
 
     if let Some(terminal) = event.semantics.terminal.clone() {
@@ -590,6 +601,23 @@ pub fn prepare_process_event_append(
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = record.id.as_str();
     let wake_suppressed = request.wake_suppressed;
+    if ProcessEventKind::from_event_type(&request.event_type) == ProcessEventKind::UnknownRuntime {
+        return Err(PluginError::ReservedProcessEvent {
+            event_type: request.event_type.clone(),
+        });
+    }
+    if request.event_type == super::events::PROCESS_EFFECT_OUTCOME_EVENT_TYPE {
+        let outcome =
+            super::events::ProcessEffectSummaryOccurrence::decode(request.payload.clone())
+                .map_err(|error| PluginError::Session(error.to_string()))?;
+        if request.replay.as_ref().map(|replay| replay.key.as_str())
+            != Some(outcome.replay_key.as_str())
+        {
+            return Err(PluginError::Session(
+                "effect outcome payload replay_key must equal the append replay key".to_string(),
+            ));
+        }
+    }
     if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str())
         && let Some(existing) = replay_lookup
     {
@@ -1127,6 +1155,7 @@ pub fn require_event_replay(
                 | "process.observer_added"
                 | "process.observer_removed"
                 | "process.subscription_retargeted"
+                | super::events::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
         );
     if requires_key
         && request
