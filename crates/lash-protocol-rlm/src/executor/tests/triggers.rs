@@ -857,6 +857,17 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
                 .collect()
         }
 
+        async fn read_group_settlement(
+            &self,
+            group_key: &str,
+            rank: u64,
+        ) -> Result<
+            Option<lash_core::runtime::effect::RankedGroupSettlement>,
+            lash_core::RuntimeEffectControllerError,
+        > {
+            self.inner.read_group_settlement(group_key, rank).await
+        }
+
         // Boxed because the awaited future crosses clippy's large-future
         // threshold once the turn config carries its budgets.
         let first = Box::pin(capture(

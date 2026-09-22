@@ -218,6 +218,21 @@ impl RuntimeEffectController for SeamEffectController {
             )
             .await
     }
+
+    // A rank read is a view on a durable fact, not a turn-seam operation — the
+    // golden trace names lifecycle operations, so the read forwards without
+    // `around` (FIG-3411 part 2).
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
+    }
+
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
@@ -375,6 +390,18 @@ impl RuntimeEffectController for StoreOwnedTurnControlController {
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.close_effect_group(handle, disposition).await
     }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
+    }
+
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
@@ -542,6 +569,18 @@ impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.close_effect_group(handle, disposition).await
     }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
+    }
+
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,

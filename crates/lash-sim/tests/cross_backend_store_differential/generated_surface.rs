@@ -483,6 +483,21 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
             operations.push(SurfaceOperation::RuntimeOperationRecord { key: 0 });
             operations.push(SurfaceOperation::RuntimeOperationRecord { key: 1 });
         }
+
+        async fn read_group_settlement(
+            &self,
+            group_key: &str,
+            rank: u64,
+        ) -> Result<
+            Option<lash_core::runtime::effect::RankedGroupSettlement>,
+            lash_core::RuntimeEffectControllerError,
+        > {
+            self.inner
+                .controller()
+                .read_group_settlement(group_key, rank)
+                .await
+        }
+
         if index == 5 {
             operations.push(SurfaceOperation::TriggerDisable { key: 0 });
         }

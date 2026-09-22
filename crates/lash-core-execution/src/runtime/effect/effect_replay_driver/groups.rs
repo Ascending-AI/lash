@@ -655,23 +655,25 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             let scope = scope.clone();
             let cancel = state.cancel.child_token();
             let replay_key = child.invocation.replay_key().to_string();
-            crate::task::spawn(async move {
-                // The result is discarded here on purpose: a child's outcome is
-                // reported to its caller through the journal, by rank, and this
-                // task's return value has no other reader. A failure is already
-                // journaled as that child's terminal.
-                let _ = Box::pin(driver.execute_effect_cancellable(
-                    &scope,
-                    child,
-                    executor,
-                    Some(&cancel),
-                    None,
-                ))
-                .await;
-                driver
-                    .group_child_finished(&group_key, &replay_key, &state)
+            crate::task::spawn(
+                lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
+                    // The result is discarded here on purpose: a child's outcome is
+                    // reported to its caller through the journal, by rank, and this
+                    // task's return value has no other reader. A failure is already
+                    // journaled as that child's terminal.
+                    let _ = Box::pin(driver.execute_effect_cancellable(
+                        &scope,
+                        child,
+                        executor,
+                        Some(&cancel),
+                        None,
+                    ))
                     .await;
-            });
+                    driver
+                        .group_child_finished(&group_key, &replay_key, &state)
+                        .await;
+                }),
+            );
         }
     }
 

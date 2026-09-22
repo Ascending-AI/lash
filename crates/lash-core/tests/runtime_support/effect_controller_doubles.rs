@@ -1061,6 +1061,17 @@ impl RuntimeEffectController for RecordingEffectController {
         self.native.open_effect_group(group).await
     }
 
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
+    }
+
     fn register_group_executors(
         &self,
         executors: Arc<dyn lash_core::GroupExecutors>,
