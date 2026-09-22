@@ -627,7 +627,8 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .await
         .expect("register runtime scenario intent target");
 
-    let turn_scope = named_turn_scope(
+    let turn_scope = host_turn_scope(
+        &runtime.host.core,
         &SessionId::from("root"),
         &TurnId::from("runtime-scenario-intent-turn"),
     );

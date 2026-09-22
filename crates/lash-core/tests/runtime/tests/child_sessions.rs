@@ -368,7 +368,11 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         .run_turn_assembled(
             TurnInput::text("write the attachment"),
             CancellationToken::new(),
-            named_turn_scope(&child.session_id, &TurnId::from(turn_id)),
+            host_turn_scope(
+                &child_runtime.host.core,
+                &child.session_id,
+                &TurnId::from(turn_id),
+            ),
         )
         .await
         .expect("child turn");
@@ -506,7 +510,11 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         .run_turn_assembled(
             TurnInput::text("register the process"),
             CancellationToken::new(),
-            named_turn_scope(&child.session_id, &TurnId::from(turn_id)),
+            host_turn_scope(
+                &child_runtime.host.core,
+                &child.session_id,
+                &TurnId::from(turn_id),
+            ),
         )
         .await
         .expect("first child turn");
@@ -1105,7 +1113,11 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
     let mut turn = Box::pin(child.run_turn_assembled(
         TurnInput::text("park the child turn"),
         CancellationToken::new(),
-        named_turn_scope(&cancelled_child_session_id, &cancelled_child_turn_id),
+        host_turn_scope(
+            &child.host.core,
+            &cancelled_child_session_id,
+            &cancelled_child_turn_id,
+        ),
     ));
     tokio::select! {
         _ = started_rx.recv() => {}
@@ -1146,7 +1158,11 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
         .run_turn_assembled(
             TurnInput::text("park the child turn"),
             CancellationToken::new(),
-            named_turn_scope(&retry_child_session_id, &retry_child_turn_id),
+            host_turn_scope(
+                &retry_child.host.core,
+                &retry_child_session_id,
+                &retry_child_turn_id,
+            ),
         )
         .await
         .expect("retried child turn");
@@ -1170,7 +1186,11 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
         .run_turn_assembled(
             TurnInput::text("park the child turn"),
             CancellationToken::new(),
-            named_turn_scope(&cancelled_child_session_id, &recovered_turn_id),
+            host_turn_scope(
+                &child.host.core,
+                &cancelled_child_session_id,
+                &recovered_turn_id,
+            ),
         )
         .await
         .expect("the dropped turn future leaves the child session reusable");

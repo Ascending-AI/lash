@@ -100,7 +100,7 @@ async fn resuming_after_a_dropped_permit_release_reacquires_the_slot() {
 #[tokio::test]
 async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
     use lash_core::testing::runtime_helpers::{
-        MockCall, mock_provider, named_turn_scope, runtime_with_plugins_and_tools,
+        MockCall, host_turn_scope, mock_provider, runtime_with_plugins_and_tools,
     };
 
     struct PermitParkingTool {
@@ -190,7 +190,8 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
                     runtime.run_turn_assembled(
                         crate::TurnInput::text("park the run's permit"),
                         cancel,
-                        named_turn_scope(
+                        host_turn_scope(
+                            &runtime.host.core,
                             &SessionId::from("root"),
                             &TurnId::from("permit-cancel-grace-turn"),
                         ),
