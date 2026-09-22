@@ -470,6 +470,19 @@ pub enum StoreError {
         source_key: String,
         existing_input_id: InputId,
     },
+    /// A draft named an `input_id` a stored pending-input row already carries.
+    ///
+    /// Input ids are unique across the whole store, not within one session, so
+    /// the refusing row may belong to a different session than the draft's.
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// return this so a reused input identity is never silently double-filed.
+    #[error(
+        "pending turn input id `{input_id}` is already bound to a stored input; session `{session_id}` cannot file another row under it"
+    )]
+    PendingTurnInputIdConflict {
+        session_id: SessionId,
+        input_id: InputId,
+    },
     #[error(
         "process wake `{process_id}` sequence {sequence} for session `{session_id}` has no live receiver row and is at or below the receiver allocation floor {allocation_floor}; the sender store may have been restored or rewound"
     )]
@@ -724,6 +737,7 @@ impl StoreError {
             Self::UnstagedUsageConfirmation { .. } => "UnstagedUsageConfirmation",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
+            Self::PendingTurnInputIdConflict { .. } => "PendingTurnInputIdConflict",
             Self::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
             Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
             Self::SessionExecutionLeaseRenewalRefused { .. } => {

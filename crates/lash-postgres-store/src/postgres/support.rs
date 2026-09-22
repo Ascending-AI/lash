@@ -158,6 +158,26 @@ pub(crate) fn graph_node_insert_error(
     store_sqlx_error(err)
 }
 
+/// The `pending_turn_inputs.input_id` column is globally `UNIQUE`: a draft
+/// naming an id any row already carries fails the insert, and that violation
+/// is the typed id-conflict refusal, not an opaque storage failure.
+pub(crate) fn pending_turn_input_insert_error(
+    err: sqlx::Error,
+    session_id: &SessionId,
+    input_id: &str,
+) -> StoreError {
+    if let sqlx::Error::Database(database) = &err
+        && database.code().as_deref() == Some("23505")
+        && database.constraint() == Some("lash_pending_turn_inputs_input_id_key")
+    {
+        return StoreError::PendingTurnInputIdConflict {
+            session_id: session_id.clone(),
+            input_id: input_id.into(),
+        };
+    }
+    store_sqlx_error(err)
+}
+
 pub(crate) fn u64_from_sql(
     record_kind: &'static str,
     field: &'static str,

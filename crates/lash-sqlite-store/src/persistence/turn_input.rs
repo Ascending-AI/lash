@@ -560,7 +560,13 @@ impl TurnInputStore for Store {
                             now as i64,
                         ],
                     )
-                    .map_err(sqlite_error)?;
+                    .map_err(|err| {
+                        crate::sqlite_pending_turn_input_insert_error(
+                            err,
+                            &draft.session_id,
+                            &input_id,
+                        )
+                    })?;
                     load_pending_turn_input_by_id_conn(tx, &draft.session_id, &input_id)?
                         .ok_or_else(|| {
                             StoreError::Backend("pending turn input insert disappeared".to_string())

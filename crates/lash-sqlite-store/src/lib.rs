@@ -261,6 +261,29 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
     }
 }
 
+/// The `pending_turn_inputs.input_id` column is globally `UNIQUE`: a draft
+/// naming an id any row already carries fails the insert, and that violation
+/// is the typed id-conflict refusal, not an opaque storage failure.
+fn sqlite_pending_turn_input_insert_error(
+    err: rusqlite::Error,
+    session_id: &SessionId,
+    input_id: &str,
+) -> StoreError {
+    if let rusqlite::Error::SqliteFailure(code, message) = &err
+        && code.code == rusqlite::ErrorCode::ConstraintViolation
+        && message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("pending_turn_inputs.input_id")
+    {
+        return StoreError::PendingTurnInputIdConflict {
+            session_id: session_id.clone(),
+            input_id: input_id.into(),
+        };
+    }
+    sqlite_error(err)
+}
+
 fn sqlite_graph_node_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
