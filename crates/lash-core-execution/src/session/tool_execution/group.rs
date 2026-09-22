@@ -10,8 +10,11 @@
 //! `commit_seq` order, and the consumer observes settlement rank — so a held
 //! source-first leaf no longer blocks a later sibling's terminal.
 //!
-//! What does *not* live here yet: opener-side lifecycle closing at turn
-//! end/cancel (FIG-3410, ADR 0099 §7) and drain-end handling (FIG-3419).
+//! A cancelled turn closes its group under `Cancel` through the FIG-3410
+//! closing driver. What does *not* live here yet: opener-side lifecycle
+//! closing at turn end and process terminal with the opener's own
+//! finalization steps (FIG-3410, ADR 0099 §7) and drain-end handling
+//! (FIG-3419).
 //! Settlement-fact incorporation is FIG-3411's `incorporate_group_prefix`:
 //! the consumer journals the consumed prefix as an `IncorporateGroupSettlements`
 //! record and applies each rank's recorded facts once, while the seam below
@@ -333,14 +336,14 @@ impl RuntimeExecutionContext<'_> {
     /// A `RuntimeEffectGroupAwaitCancelled` await means the turn was
     /// cancelled: consumption stops, every unsettled position is filled with
     /// the batch surface's cancelled reply and appended to the settlement
-    /// order in position order, and the group is deliberately **not** closed
-    /// here — closing at turn end/cancel/process terminal is the opener's
-    /// lifecycle obligation (ADR 0099 §7), driven through the host-owned
-    /// finalization driver FIG-3410 landed and its `OpenerFinalizationSteps`;
-    /// wiring the opener's real implementation — whose
-    /// `commit_outcome_and_accounting` is FIG-3411 step 2, "incorporate every
-    /// settled rank" — is PR C's. Children keep running under host ownership
-    /// and cancel cooperatively through the live opener's token.
+    /// order in position order, and the group is closed under
+    /// [`LoserPolicy::Cancel`]: the close records `closing` through the
+    /// FIG-3410 driver, seats a cancelled terminal for every undecided child
+    /// and fires the group's token, so a child that ignores cooperative
+    /// cancellation is dropped as the batch path's cancel grace dropped it.
+    /// Wiring the opener's real `OpenerFinalizationSteps` — whose
+    /// `commit_outcome_and_accounting` is FIG-3411 step 2 — and closing at
+    /// turn end / process terminal remain PR C's.
     ///
     /// On clean exhaustion the group is closed under the declared
     /// `RunToCompletion` disposition to release consumer interest: the close
@@ -380,8 +383,24 @@ impl RuntimeExecutionContext<'_> {
                     // `IncorporateGroupSettlements` record names them so a
                     // replay applies the same prefix (FIG-3411 part 2).
                     self.incorporate_group_prefix(&handle).await?;
-                    // Abandoned children stay live under host ownership, but a
-                    // child that parked this run's execution slot
+                    // A cancelled turn no longer wants its unsettled children:
+                    // close under `Cancel`, which records `closing`, seats a
+                    // cancelled terminal for every undecided child and fires
+                    // the group's token, so a child that ignores cooperative
+                    // cancellation is dropped rather than left running under
+                    // the turn's sessions — the batch path's cancel-grace
+                    // observable. A committed child keeps its authority to
+                    // finish its drain (§4); finalization is host-owned.
+                    if let Err(error) = controller
+                        .close_effect_group(handle, LoserPolicy::Cancel)
+                        .await
+                    {
+                        tracing::warn!(
+                            error = %error,
+                            "closing a cancelled tool-child group failed; the close is retryable"
+                        );
+                    }
+                    // A child that parked this run's execution slot
                     // (`release_process_execution_permit_while`) is no longer
                     // awaited: the run continues, so it re-takes its slot here
                     // exactly as the batch-effect path does after a cancel
