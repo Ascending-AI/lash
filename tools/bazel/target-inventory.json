@@ -18627,8 +18627,7 @@
         "proptest",
         "reqwest",
         "serde_json",
-        "tokio",
-        "uuid"
+        "tokio"
       ],
       "doc": "//crates/lash-provider-anthropic:lash-provider-anthropic__doc",
       "manifest": "crates/lash-provider-anthropic/Cargo.toml",

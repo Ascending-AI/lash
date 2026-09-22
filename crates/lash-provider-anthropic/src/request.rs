@@ -86,7 +86,7 @@ impl AnthropicProvider {
                 })?;
                 Ok(Some(json!({
                     "type": "tool_use",
-                    "id": normalize_tool_call_id(call_id),
+                    "id": normalize_tool_call_id(call_id)?,
                     "name": tool_name,
                     "input": input,
                 })))
@@ -95,7 +95,7 @@ impl AnthropicProvider {
                 call_id, content, ..
             } => Ok(Some(json!({
                 "type": "tool_result",
-                "tool_use_id": normalize_tool_call_id(call_id),
+                "tool_use_id": normalize_tool_call_id(call_id)?,
                 "content": content.clone(),
             }))),
             LlmContentBlock::Reasoning { text, replay, .. } => {
@@ -678,8 +678,15 @@ fn collect_text(blocks: &[LlmContentBlock]) -> String {
 }
 
 /// Normalize tool call IDs to the Anthropic-allowed character set and length.
-fn normalize_tool_call_id(id: &str) -> String {
-    let sanitized: String = id
+fn normalize_tool_call_id(id: &str) -> Result<String, LlmTransportError> {
+    if id.is_empty() {
+        return Err(
+            LlmTransportError::new("Anthropic tool identity must not be empty")
+                .with_kind(ProviderFailureKind::Validation)
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable),
+        );
+    }
+    Ok(id
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
@@ -689,10 +696,5 @@ fn normalize_tool_call_id(id: &str) -> String {
             }
         })
         .take(64)
-        .collect();
-    if sanitized.is_empty() {
-        uuid::Uuid::new_v4().to_string()
-    } else {
-        sanitized
-    }
+        .collect())
 }

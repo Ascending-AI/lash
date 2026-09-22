@@ -330,13 +330,21 @@ impl AnthropicProvider {
                         }
                     }
                     "tool_use" => {
+                        let call_id = block_meta
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .filter(|id| !id.is_empty())
+                            .ok_or_else(|| {
+                                LlmTransportError::new(
+                                    "Anthropic tool_use requires a nonempty string id",
+                                )
+                                .with_raw(raw.to_string())
+                                .with_kind(ProviderFailureKind::Stream)
+                                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+                            })?;
                         *slot = StreamBlock::ToolUse {
                             input_buffer: String::new(),
-                            call_id: block_meta
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
+                            call_id: call_id.to_string(),
                             name: block_meta
                                 .get("name")
                                 .and_then(|v| v.as_str())
