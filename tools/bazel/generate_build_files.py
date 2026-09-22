@@ -2063,16 +2063,9 @@ class FeatureLaneGraph:
         # `cargo test -p X … <filter>` compiles every selected target and runs
         # only the cases whose name contains the filter; libtest takes the same
         # filter as a positional argument, so the variant runs the same subset.
-        args = [
-            token
-            for token in command.argv[2:]
-            if not token.startswith("-")
-            and token not in (package_name, "check", "test")
-            and command.argv[command.argv.index(token) - 1]
-            not in ("-p", "--package", "--features")
-        ]
+        args = list(command.test_args)
         runnable = command.subcommand == "test"
-        if library is not None and library.get("test", False) and "test" in kinds:
+        if library is not None and library.get("test", False) and command.unit_tests:
             label = self.emit_target(
                 package_name, resolution, library, "unit-test", runnable, args
             )
@@ -2095,6 +2088,8 @@ class FeatureLaneGraph:
                 continue
             if kind not in kinds:
                 continue
+            if kind == "test" and not command.selects_test(target["name"]):
+                continue
             label = self.emit_target(
                 package_name, resolution, target, kind, runnable, args
             )
@@ -2112,7 +2107,12 @@ class FeatureLaneGraph:
             if kind == "test" and runnable:
                 if not cargo_test_policy(package_name, kind, target["name"])[0]:
                     test_labels.append(label)
-            if kind == "bin" and target.get("test", False) and "test" in kinds:
+            if (
+                kind == "bin"
+                and target.get("test", False)
+                and command.unit_tests
+                and command.selector != "--lib"
+            ):
                 unit_label = self.emit_target(
                     package_name, resolution, target, "bin-unit-test", runnable, args
                 )
@@ -2308,14 +2308,21 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
                 if kind == "custom-build" or not required <= root_features:
                     continue
                 if kind == "lib":
-                    if target.get("test", False) and "test" in kinds:
+                    if target.get("test", False) and command.unit_tests:
                         expected.add((root, "unit-test", tuple(sorted(root_features))))
                     continue
                 if kind not in kinds:
                     continue
+                if kind == "test" and not command.selects_test(target["name"]):
+                    continue
                 features = tuple(sorted(root_features | required))
                 expected.add((root, kind, features))
-                if kind == "bin" and target.get("test", False) and "test" in kinds:
+                if (
+                    kind == "bin"
+                    and target.get("test", False)
+                    and command.unit_tests
+                    and command.selector != "--lib"
+                ):
                     expected.add((root, "bin-unit-test", features))
     recorded = {
         (unit["package"], unit["kind"], tuple(unit["features"])) for unit in units

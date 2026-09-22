@@ -1188,6 +1188,73 @@ class FocusedClippyVerdicts(unittest.TestCase):
             self.assertEqual(["--", "//crate:lib"], arguments[-2:])
             self.assertFalse(any(arg.startswith("--build_event_json_file=") for arg in arguments))
 
+class CargoTargetSelectionTests(unittest.TestCase):
+    def emit(self, arguments):
+        from unittest.mock import Mock, patch
+
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+
+        library = {"name": "example", "kind": ["lib"], "test": True}
+        targets = [library, *(
+            {"name": name, "kind": ["test"], "test": True}
+            for name in ("process_model", "effect_model", "other")
+        ), {"name": "app", "kind": ["bin"], "test": True}]
+        graph = generator.FeatureLaneGraph.__new__(generator.FeatureLaneGraph)
+        graph.by_name = {"example": {"targets": targets}}
+        graph.library_of = Mock(return_value=library)
+        graph.emit_target = Mock(side_effect=lambda package, resolution, target, kind, runnable, args:
+                                 f"{target['name']}:{kind}")
+        graph.units = []
+        command = generator.feature_variants.parse_command(
+            ["cargo", "test", "-p", "example", "--no-default-features", *arguments]
+        )
+        tests = []
+        with patch.object(generator, "cargo_test_policy", return_value=(False, "")):
+            compiled = graph.emit_root_targets(command, {"example": []}, tests)
+        return command, compiled, tests, graph.emit_target.call_args_list
+
+    def test_named_integrations_compile_binaries_without_unit_harnesses(self):
+        command, compiled, tests, calls = self.emit([
+            "--test", "process_model", "--test", "effect_model", "--locked"
+        ])
+        self.assertEqual(["process_model:test", "effect_model:test", "app:bin"], compiled)
+        self.assertEqual(["process_model:test", "effect_model:test"], tests)
+        self.assertEqual(("process_model", "effect_model"), command.tests)
+        self.assertFalse(command.default_features)
+        self.assertTrue(command.with_dev)
+        for call in calls:
+            self.assertEqual({"example": []}, call.args[1])
+            self.assertEqual([], call.args[-1])
+
+    def test_default_and_explicit_unit_selections_remain_runnable(self):
+        for flags in ([], ["--tests"], ["--all-targets"]):
+            with self.subTest(flags=flags):
+                _, compiled, tests, _ = self.emit(flags)
+                self.assertIn("example:unit-test", tests)
+                self.assertIn("app:bin-unit-test", tests)
+                self.assertIn("other:test", tests)
+                self.assertIn("app:bin", compiled)
+        _, compiled, tests, _ = self.emit(["--lib"])
+        self.assertEqual(["example:unit-test"], compiled)
+        self.assertEqual(compiled, tests)
+
+    def test_named_integration_can_be_combined_with_explicit_library_tests(self):
+        _, compiled, tests, _ = self.emit(["--lib", "--test", "process_model"])
+        self.assertEqual(["example:unit-test", "process_model:test", "app:bin"], compiled)
+        self.assertEqual(["example:unit-test", "process_model:test"], tests)
+
+    def test_case_filter_and_harness_arguments_do_not_change_selection(self):
+        command, compiled, tests, calls = self.emit([
+            "--test=process_model", "effect_model", "--", "--exact", "--ignored"
+        ])
+        self.assertEqual(["process_model:test"], tests)
+        self.assertNotIn("effect_model:test", compiled)
+        self.assertEqual(("effect_model", "--exact", "--ignored"), command.test_args)
+        for call in calls:
+            self.assertEqual(list(command.test_args), call.args[-1])
+
+
 class CargoResolutionTests(unittest.TestCase):
     def test_repeated_tree_markers_preserve_features_and_still_reject_drift(self):
         import contextlib

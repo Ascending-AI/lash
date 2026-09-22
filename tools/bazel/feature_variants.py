@@ -215,17 +215,33 @@ class Command:
     features: tuple[str, ...]
     selector: str | None
     argv: tuple[str, ...]
+    tests: tuple[str, ...]
+    test_args: tuple[str, ...]
+
+    @property
+    def unit_tests(self) -> bool:
+        return self.selector in DEV_SELECTORS or (
+            self.subcommand == "test" and (self.selector == "--lib" or not self.tests)
+        )
+
+    def selects_test(self, name: str) -> bool:
+        return not self.tests or self.selector in DEV_SELECTORS or name in self.tests
 
     @property
     def with_dev(self) -> bool:
         if self.subcommand == "test":
             return True
-        return self.selector in DEV_SELECTORS
+        return bool(self.tests) or self.selector in DEV_SELECTORS
 
     @property
     def kinds(self) -> tuple[str, ...]:
         if self.selector is not None:
-            return SELECTOR_KINDS[self.selector]
+            kinds = SELECTOR_KINDS[self.selector]
+            if self.tests:
+                kinds = tuple(dict.fromkeys((*kinds, "test", "bin")))
+            return kinds
+        if self.tests:
+            return ("test", "bin")
         # A bare `cargo test -p X` compiles the library, its unit tests, the
         # integration tests and the binaries under test.
         if self.subcommand == "test":
@@ -238,9 +254,22 @@ def parse_command(argv: list[str]) -> Command:
     features: list[str] = []
     default_features = True
     selector = None
-    index = 0
+    tests: list[str] = []
+    test_args: list[str] = []
+    index = 2
     while index < len(argv):
         token = argv[index]
+        if token == "--":
+            test_args.extend(argv[index + 1:])
+            break
+        if token == "--test":
+            tests.append(argv[index + 1])
+            index += 2
+            continue
+        if token.startswith("--test="):
+            tests.append(token.split("=", 1)[1])
+            index += 1
+            continue
         if token == "-p" or token == "--package":
             package = argv[index + 1]
             index += 2
@@ -253,6 +282,8 @@ def parse_command(argv: list[str]) -> Command:
             default_features = False
         elif token in SELECTOR_KINDS:
             selector = token
+        elif not token.startswith("-"):
+            test_args.append(token)
         index += 1
     if package is None:
         raise ValueError(f"lane command selects no package: {argv}")
@@ -263,6 +294,8 @@ def parse_command(argv: list[str]) -> Command:
         features=tuple(features),
         selector=selector,
         argv=tuple(argv),
+        tests=tuple(tests),
+        test_args=tuple(test_args),
     )
 
 
