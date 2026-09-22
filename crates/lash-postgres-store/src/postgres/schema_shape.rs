@@ -186,17 +186,6 @@ impl ForeignKeyAction {
             Self::SetDefault => "set default",
         }
     }
-
-    fn parse(text: &str) -> Option<Self> {
-        Some(match text {
-            "no action" => Self::NoAction,
-            "restrict" => Self::Restrict,
-            "cascade" => Self::Cascade,
-            "set null" => Self::SetNull,
-            "set default" => Self::SetDefault,
-            _ => return None,
-        })
-    }
 }
 
 impl fmt::Display for ForeignKeyAction {
@@ -385,8 +374,9 @@ impl fmt::Display for UniqueGuard {
     }
 }
 
-/// A foreign key declared on a lash-owned table, with the on-delete action lash
-/// pruning depends on.
+/// A foreign key declared on a lash-owned table, with the on-delete action
+/// lash pruning depends on and the deferral semantics write ordering relies
+/// on.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ForeignKeyShape {
     /// Referencing columns on the lash-owned table, in constraint order.
@@ -398,6 +388,10 @@ pub struct ForeignKeyShape {
     pub parent_columns: Vec<String>,
     /// Action taken when a referenced row is deleted.
     pub on_delete: ForeignKeyAction,
+    /// Whether the key may defer enforcement to commit.
+    pub deferrable: bool,
+    /// Whether a deferrable key starts each transaction deferred.
+    pub initially_deferred: bool,
 }
 
 impl fmt::Display for ForeignKeyShape {
@@ -409,7 +403,14 @@ impl fmt::Display for ForeignKeyShape {
             self.parent_table,
             self.parent_columns.join(", "),
             self.on_delete
-        )
+        )?;
+        if self.deferrable {
+            write!(formatter, " deferrable")?;
+            if self.initially_deferred {
+                write!(formatter, " initially deferred")?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -684,7 +685,8 @@ const ARTIFACT_HEADER: &str = "\
 # SET OF ITS COLUMN PAIRINGS, so declaration order is likewise irrelevant while
 # (a, b) -> (x, y) stays distinct from the crossed (a, b) -> (y, x). What a matched
 # pair is then compared on is what changes the rows it affects: the partial predicate
-# and null-distinctness for a guard, the delete action for a foreign key. Column order
+# and null-distinctness for a guard, the delete action and deferral flags for a
+# foreign key. Column order
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
@@ -753,8 +755,34 @@ fn parse_foreign_key_line(rest: &str) -> Option<ForeignKeyShape> {
     let open = tail.find('(')?;
     let parent_table = tail[..open].trim().to_string();
     let (parent_columns, tail) = parse_column_list(&tail[open..])?;
-    let on_delete = ForeignKeyAction::parse(tail.trim().strip_prefix("on delete ")?.trim())?;
-    if parent_table.is_empty() {
+    let mut tail = tail.trim().strip_prefix("on delete ")?.trim_start();
+    // The action is a prefix, not the whole tail: the deferral flags may
+    // follow it. Each variant's SQL is a full token sequence, so the first
+    // prefix match is unambiguous.
+    let (on_delete, rest) = [
+        ForeignKeyAction::NoAction,
+        ForeignKeyAction::Restrict,
+        ForeignKeyAction::Cascade,
+        ForeignKeyAction::SetNull,
+        ForeignKeyAction::SetDefault,
+    ]
+    .into_iter()
+    .find_map(|action| {
+        tail.strip_prefix(action.as_sql())
+            .map(|rest| (action, rest))
+    })?;
+    tail = rest.trim_start();
+    let mut deferrable = false;
+    let mut initially_deferred = false;
+    if let Some(rest) = tail.strip_prefix("deferrable") {
+        deferrable = true;
+        tail = rest.trim_start();
+        if let Some(rest) = tail.strip_prefix("initially deferred") {
+            initially_deferred = true;
+            tail = rest.trim_start();
+        }
+    }
+    if !tail.is_empty() || parent_table.is_empty() {
         return None;
     }
     Some(ForeignKeyShape {
@@ -762,6 +790,8 @@ fn parse_foreign_key_line(rest: &str) -> Option<ForeignKeyShape> {
         parent_table,
         parent_columns,
         on_delete,
+        deferrable,
+        initially_deferred,
     })
 }
 
@@ -970,9 +1000,12 @@ impl PairedObject for ForeignKeyShape {
         )
     }
 
-    /// The delete action is what process pruning depends on.
+    /// The delete action is what process pruning depends on, and the deferral
+    /// flags are what children-before-parent write ordering depends on.
     fn enforces_same_as(&self, expected: &Self) -> bool {
         self.on_delete == expected.on_delete
+            && self.deferrable == expected.deferrable
+            && self.initially_deferred == expected.initially_deferred
     }
 
     fn missing(table: &str, expected: &Self) -> SchemaFinding {

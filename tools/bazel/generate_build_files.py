@@ -593,6 +593,14 @@ def target_support(
         # examples included, so under Bazel it needs them all in the sandbox
         # or it would pass by seeing nothing.
         extra_compile_data.append("//:workspace_rust_sources")
+    if (
+        package["name"] == "lash-sim"
+        and target["name"] == "process_lifecycle_vocabulary"
+    ):
+        # The gate scans lash-core's sources as well as the two store
+        # packages' — a library's runfiles no longer carry another crate's
+        # `.rs` files, so the scanned root names the filegroup directly.
+        extra_compile_data.append("//crates/lash-core:rust_sources")
     return extra_compile_data, extra_data, test_env, target_args
 
 

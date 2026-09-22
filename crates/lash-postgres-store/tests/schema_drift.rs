@@ -1033,6 +1033,156 @@ async fn postgres_retained_prior_component_is_refused_at_open() {
     scratch.cleanup().await;
 }
 
+/// The 114 -> 115 arm is a real migration, not a boundary: a catalog that is
+/// component 114 in every other respect opens under `LashManaged`, gains the
+/// five effect-replay constraints already validated against its existing rows,
+/// and comes out stamped at the current component.
+#[tokio::test]
+async fn the_component_114_catalog_migrates_its_effect_replay_constraints_at_open() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-114 constraint migration: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    // Seed a populated group and replay row so the arm's VALIDATE steps have
+    // existing rows to prove against rather than passing vacuously.
+    scratch
+        .apply(
+            "INSERT INTO lash_runtime_effect_group (
+                 group_key, scope_id, wake, loser_disposition, expected_children, created_at_ms
+             ) VALUES (
+                 'group-migration', 'scope-migration', 'first', 'run_to_completion', 1, 1
+             );
+             INSERT INTO lash_runtime_effect_replay (
+                 scope_id, replay_key, envelope_hash, envelope_json, status, outcome_json,
+                 group_key, settlement_seq, commit_state, commit_seq,
+                 created_at_ms, updated_at_ms
+             ) VALUES (
+                 'scope-migration', 'replay-migration', 'hash', '{}', 'completed', '{}',
+                 'group-migration', 0, 'drained', 0, 1, 1
+             );",
+        )
+        .await;
+    // The deferred foreign keys leave trigger events pending until the seed
+    // transaction commits, so the constraint drops must wait for a second one.
+    scratch
+        .apply(
+            "ALTER TABLE lash_runtime_effect_replay
+                 DROP CONSTRAINT ck_runtime_effect_replay_outcome_json,
+                 DROP CONSTRAINT ck_runtime_effect_replay_error_json,
+                 DROP CONSTRAINT ck_runtime_effect_replay_settlement_seq,
+                 DROP CONSTRAINT fk_runtime_effect_replay_group;
+             ALTER TABLE lash_runtime_effect_group_child
+                 DROP CONSTRAINT fk_runtime_effect_group_child_group;
+             UPDATE lash_schema_versions
+                SET version = 114
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    let storage = PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::LashManaged,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("a conformant component-114 catalog must migrate at open");
+
+    let version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read the post-migration component stamp");
+    assert_eq!(
+        version,
+        PostgresStorage::schema_version(),
+        "the migration must advance the component stamp"
+    );
+    let unvalidated: i64 = sqlx::query_scalar(
+        "SELECT count(*)
+           FROM pg_catalog.pg_constraint AS constraint_catalog
+           JOIN pg_catalog.pg_class AS class ON class.oid = constraint_catalog.conrelid
+           JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = current_schema()
+            AND constraint_catalog.conname = ANY($1)
+            AND NOT constraint_catalog.convalidated",
+    )
+    .bind(vec![
+        "ck_runtime_effect_replay_outcome_json",
+        "ck_runtime_effect_replay_error_json",
+        "ck_runtime_effect_replay_settlement_seq",
+        "fk_runtime_effect_replay_group",
+        "fk_runtime_effect_group_child_group",
+    ])
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("count unvalidated migration constraints");
+    assert_eq!(
+        unvalidated, 0,
+        "every constraint the migration introduces must be validated"
+    );
+    drop(storage);
+    scratch.cleanup().await;
+}
+
+/// A catalog stamped 114 that already carries one of the migration's
+/// introduced artifacts is not a component-114 database — it is a divergent
+/// one, and the arm must refuse it rather than guess at its provenance.
+#[tokio::test]
+async fn a_component_114_catalog_holding_a_migration_artifact_is_refused() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-114 divergence refusal: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "ALTER TABLE lash_runtime_effect_replay
+                 DROP CONSTRAINT ck_runtime_effect_replay_error_json,
+                 DROP CONSTRAINT ck_runtime_effect_replay_settlement_seq;
+             ALTER TABLE lash_runtime_effect_group_child
+                 DROP CONSTRAINT fk_runtime_effect_group_child_group;
+             UPDATE lash_schema_versions
+                SET version = 114
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    let error = PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::LashManaged,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .err()
+    .unwrap_or_else(|| {
+        panic!("a catalog already holding an introduced constraint must be refused")
+    });
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("ck_runtime_effect_replay_outcome_json")
+            || rendered.contains("fk_runtime_effect_replay_group"),
+        "the divergence refusal must name the pre-existing artifact: {rendered}"
+    );
+    let version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read the refused catalog's component stamp");
+    assert_eq!(
+        version, 114,
+        "a refused migration must not advance the stamp"
+    );
+
+    scratch.cleanup().await;
+}
+
 /// Component 65 predates the durable vocabulary CHECKs. The destructive
 /// component-68 cutover must refuse it before either Lash-managed DDL or the
 /// schema-check valve can mutate or admit the database.

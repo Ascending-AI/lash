@@ -235,6 +235,9 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
                 \"COMMIT_SEQ\" INTEGER,
                 \"GROUP_KEY\" TEXT,
                 \"DRAIN_INPUT\" TEXT,
+                \"OUTCOME_JSON\" TEXT,
+                \"ERROR_JSON\" TEXT,
+                \"SETTLEMENT_SEQ\" INTEGER,
                 CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_STATUS\"
                     CHECK ([STATUS] IN ('in_progress', 'completed', 'failed')),
                 CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_COMMIT_STATE\"
@@ -242,7 +245,15 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
                 CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_COMMIT_SEQ\"
                     CHECK (([COMMIT_SEQ] IS NULL OR ([GROUP_KEY] IS NOT NULL AND [COMMIT_STATE] IN ('committed', 'drained'))) AND ([GROUP_KEY] IS NULL OR NOT ([COMMIT_STATE] IN ('committed', 'drained')) OR [COMMIT_SEQ] IS NOT NULL)),
                 CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_DRAIN_INPUT\"
-                    CHECK ([DRAIN_INPUT] IS NULL OR ([GROUP_KEY] IS NOT NULL AND [COMMIT_STATE] IN ('committed', 'drained')))
+                    CHECK ([DRAIN_INPUT] IS NULL OR ([GROUP_KEY] IS NOT NULL AND [COMMIT_STATE] IN ('committed', 'drained'))),
+                CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_OUTCOME_JSON\"
+                    CHECK (([STATUS] = 'completed' AND [OUTCOME_JSON] IS NOT NULL) OR ([STATUS] <> 'completed' AND [OUTCOME_JSON] IS NULL)),
+                CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_ERROR_JSON\"
+                    CHECK (([STATUS] = 'failed' AND [ERROR_JSON] IS NOT NULL) OR ([STATUS] <> 'failed' AND [ERROR_JSON] IS NULL)),
+                CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_SETTLEMENT_SEQ\"
+                    CHECK (([SETTLEMENT_SEQ] IS NULL AND NOT ([COMMIT_STATE] IN ('drained', 'cancel_decided'))) OR ([SETTLEMENT_SEQ] IS NOT NULL AND [COMMIT_STATE] IN ('drained', 'cancel_decided'))),
+                CONSTRAINT \"FK_RUNTIME_EFFECT_REPLAY_GROUP\"
+                    FOREIGN KEY ([GROUP_KEY]) REFERENCES runtime_effect_group([GROUP_KEY]) DEFERRABLE INITIALLY DEFERRED
             );",
         )
         .expect("create genuinely quoted lowercase identifiers");
@@ -255,6 +266,12 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
             "runtime_effect_group",
         ))
         .expect("apply the group table from the provisioning DDL");
+    genuine
+        .execute_batch(lash_sqlite_store::testing::database_table_ddl(
+            SqliteDatabase::EffectReplay,
+            "runtime_effect_group_child",
+        ))
+        .expect("apply the group-child table from the provisioning DDL");
     for statement in
         lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
     {
@@ -327,6 +344,9 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
                  commit_seq INTEGER,
                  group_key TEXT,
                  drain_input TEXT,
+                 outcome_json TEXT,
+                 error_json TEXT,
+                 settlement_seq INTEGER,
                  CONSTRAINT ck_runtime_effect_replay_status
                      CHECK (status IN ('in_progress', 'completed', 'failed')),
                  CONSTRAINT ck_runtime_effect_replay_commit_state
@@ -334,9 +354,16 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
                  CONSTRAINT ck_runtime_effect_replay_commit_seq
                      CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
                  CONSTRAINT ck_runtime_effect_replay_drain_input
-                     CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained')))
-             );
-             INSERT INTO runtime_effect_replay(status, commit_state) VALUES ('completed', 'drained');",
+                     CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
+                 CONSTRAINT ck_runtime_effect_replay_outcome_json
+                     CHECK ((status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)),
+                 CONSTRAINT ck_runtime_effect_replay_error_json
+                     CHECK ((status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)),
+                 CONSTRAINT ck_runtime_effect_replay_settlement_seq
+                     CHECK ((settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))),
+                 CONSTRAINT fk_runtime_effect_replay_group
+                     FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED
+             );",
         )
         .expect("create and checkpoint fixture");
     checkpointed
@@ -345,6 +372,20 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
             "runtime_effect_group",
         ))
         .expect("apply the group table from the provisioning DDL");
+    checkpointed
+        .execute_batch(lash_sqlite_store::testing::database_table_ddl(
+            SqliteDatabase::EffectReplay,
+            "runtime_effect_group_child",
+        ))
+        .expect("apply the group-child table from the provisioning DDL");
+    // The parent must exist before any replay-row insert: SQLite resolves the
+    // foreign-key target when the statement is prepared.
+    checkpointed
+        .execute_batch(
+            "INSERT INTO runtime_effect_replay(status, commit_state, outcome_json, settlement_seq)
+                 VALUES ('completed', 'drained', '{}', 0);",
+        )
+        .expect("seed a conforming replay row");
     for statement in
         lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
     {
@@ -404,6 +445,9 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
              commit_seq INTEGER,
              group_key TEXT,
              drain_input TEXT,
+             outcome_json TEXT,
+             error_json TEXT,
+             settlement_seq INTEGER,
              CONSTRAINT ck_runtime_effect_replay_status
                  CHECK (status IN ('in_progress', 'completed', 'failed')),
              CONSTRAINT ck_runtime_effect_replay_commit_state
@@ -411,16 +455,35 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
              CONSTRAINT ck_runtime_effect_replay_commit_seq
                  CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
              CONSTRAINT ck_runtime_effect_replay_drain_input
-                 CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained')))
-         );
-         INSERT INTO runtime_effect_replay(status, commit_state) VALUES ('completed', 'drained');",
+                 CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
+             CONSTRAINT ck_runtime_effect_replay_outcome_json
+                 CHECK ((status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)),
+             CONSTRAINT ck_runtime_effect_replay_error_json
+                 CHECK ((status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)),
+             CONSTRAINT ck_runtime_effect_replay_settlement_seq
+                 CHECK ((settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))),
+             CONSTRAINT fk_runtime_effect_replay_group
+                 FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED
+         );",
     )
-    .expect("commit schema and row to the live WAL");
+    .expect("commit schema to the live WAL");
     live.execute_batch(lash_sqlite_store::testing::database_table_ddl(
         SqliteDatabase::EffectReplay,
         "runtime_effect_group",
     ))
     .expect("apply the group table from the provisioning DDL");
+    live.execute_batch(lash_sqlite_store::testing::database_table_ddl(
+        SqliteDatabase::EffectReplay,
+        "runtime_effect_group_child",
+    ))
+    .expect("apply the group-child table from the provisioning DDL");
+    // The parent must exist before any replay-row insert: SQLite resolves the
+    // foreign-key target when the statement is prepared.
+    live.execute_batch(
+        "INSERT INTO runtime_effect_replay(status, commit_state, outcome_json, settlement_seq)
+             VALUES ('completed', 'drained', '{}', 0);",
+    )
+    .expect("commit a conforming replay row to the WAL");
     for statement in
         lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
     {

@@ -513,7 +513,9 @@ pub(crate) async fn read_live_shape(
                        AND attribute.attnum = key.attnum
                     ORDER BY key.ordinality
                 ) AS parent_columns,
-                constraint_catalog.confdeltype::text AS on_delete
+                constraint_catalog.confdeltype::text AS on_delete,
+                constraint_catalog.condeferrable AS deferrable,
+                constraint_catalog.condeferred AS initially_deferred
          FROM pg_catalog.pg_constraint AS constraint_catalog
          JOIN pg_catalog.pg_class AS child ON child.oid = constraint_catalog.conrelid
          JOIN pg_catalog.pg_class AS parent ON parent.oid = constraint_catalog.confrelid
@@ -535,6 +537,8 @@ pub(crate) async fn read_live_shape(
             parent_table: row.get("parent_table"),
             parent_columns: row.get("parent_columns"),
             on_delete: ForeignKeyAction::from_catalog(&row.get::<String, _>("on_delete")),
+            deferrable: row.get("deferrable"),
+            initially_deferred: row.get("initially_deferred"),
         };
         #[expect(
             clippy::expect_used,

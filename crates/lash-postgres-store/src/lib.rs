@@ -433,7 +433,17 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `settled` values beside `live`. No DDL changes — a values-only cutover —
 // but a pre-114 build reads the column as always `live` and would permit the
 // retries §7 forbids, so component-113 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 114;
+// Version 115 (FIG-1947) enforces the effect-replay invariants the §4/§5
+// protocol already writes at the DDL level: a terminal `status` owns exactly
+// its own payload column, a `settlement_seq` rank exists exactly on
+// `drained`/`cancel_decided` rows, and both `group_key` references resolve to
+// `lash_runtime_effect_group` — the membership table's children-before-group
+// write order riding a deferred foreign key. This is the constraint-only
+// generation: component-114 catalogs migrate in place through
+// `ADD CONSTRAINT ... NOT VALID` plus an explicit `VALIDATE CONSTRAINT` for
+// each of the five constraints, and every older catalog is still rejected
+// and recreated.
+const SCHEMA_VERSION: i32 = 115;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

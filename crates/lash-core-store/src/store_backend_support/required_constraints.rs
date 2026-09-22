@@ -7,6 +7,14 @@ use std::collections::BTreeMap;
 
 use crate::StoreError;
 
+mod foreign_keys;
+
+pub use foreign_keys::{
+    EXPECTED_FOREIGN_KEYS, ExpectedForeignKey, InspectedForeignKey, ParsedForeignKeyClause,
+    RenderedForeignKey, RequiredForeignKeyFinding, compare_required_foreign_keys,
+    extract_foreign_key_clauses,
+};
+
 /// One named `CHECK` Lash requires in the published store schemas: the
 /// same logical constraint rendered once per backend, so a row added
 /// here is gated on both stores at once.
@@ -484,6 +492,45 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
+            "runtime_effect_replay",
+            "ck_runtime_effect_replay_outcome_json",
+            "(status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)",
+        ),
+        rendered(
+            "lash_runtime_effect_replay",
+            "ck_runtime_effect_replay_outcome_json",
+            "(status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::EffectReplay],
+        rendered(
+            "runtime_effect_replay",
+            "ck_runtime_effect_replay_error_json",
+            "(status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)",
+        ),
+        rendered(
+            "lash_runtime_effect_replay",
+            "ck_runtime_effect_replay_error_json",
+            "(status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::EffectReplay],
+        rendered(
+            "runtime_effect_replay",
+            "ck_runtime_effect_replay_settlement_seq",
+            "(settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))",
+        ),
+        rendered(
+            "lash_runtime_effect_replay",
+            "ck_runtime_effect_replay_settlement_seq",
+            "(settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::EffectReplay],
+        rendered(
             "runtime_effect_group",
             "ck_runtime_effect_group_lifecycle",
             "json_extract(lifecycle, '$.type') IN ('live', 'closing', 'settled')",
@@ -741,24 +788,38 @@ pub enum RequiredConstraintFinding {
     },
 }
 
-/// Result of one explicit read-only inspection of registered named `CHECK`s.
+/// Result of one explicit read-only inspection of registered named `CHECK`s
+/// and foreign keys.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RequiredConstraintReport {
     findings: Vec<RequiredConstraintFinding>,
+    foreign_key_findings: Vec<RequiredForeignKeyFinding>,
 }
 
 impl RequiredConstraintReport {
-    /// Whether every registered named `CHECK` matched in the inspected snapshot.
+    /// Whether every registered named `CHECK` and foreign key matched in the
+    /// inspected snapshot.
     ///
     /// This does not establish schema-version compatibility, database
     /// openability, the state of unregistered constraints, or row integrity.
     pub fn is_conformant(&self) -> bool {
-        self.findings.is_empty()
+        self.findings.is_empty() && self.foreign_key_findings.is_empty()
     }
 
     /// Missing, altered, unvalidated, and unenforced required checks.
     pub fn findings(&self) -> &[RequiredConstraintFinding] {
         &self.findings
+    }
+
+    /// Missing, altered, unexpected, unvalidated, and unenforced required
+    /// foreign keys.
+    pub fn foreign_key_findings(&self) -> &[RequiredForeignKeyFinding] {
+        &self.foreign_key_findings
+    }
+
+    /// Records the foreign-key half of an inspection.
+    pub fn set_foreign_key_findings(&mut self, findings: Vec<RequiredForeignKeyFinding>) {
+        self.foreign_key_findings = findings;
     }
 }
 
@@ -842,7 +903,10 @@ pub fn compare_required_constraints(
             });
         }
     }
-    Ok(RequiredConstraintReport { findings })
+    Ok(RequiredConstraintReport {
+        findings,
+        foreign_key_findings: Vec::new(),
+    })
 }
 
 /// Extract named `CHECK` bodies from one SQLite `CREATE TABLE` statement.

@@ -88,29 +88,59 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 9] = [
     ("lash_runtime_effect_replay", "commit_seq"),
     ("lash_runtime_effect_replay", "drain_input"),
 ];
+/// The named constraints absent from component 101 on tables that survive the
+/// table drops — component 114's effect-replay additions (FIG-1947), which sit
+/// on the pre-floor replay table. The membership table's own foreign key drops
+/// with it, so only the replay table's four land here. They must drop before
+/// `POST_FLOOR_COLUMNS`: `DROP COLUMN commit_state` cannot proceed while the
+/// rank-pairing CHECK still names the column.
+const POST_FLOOR_CONSTRAINTS: [(&str, &str); 4] = [
+    (
+        "lash_runtime_effect_replay",
+        "ck_runtime_effect_replay_outcome_json",
+    ),
+    (
+        "lash_runtime_effect_replay",
+        "ck_runtime_effect_replay_error_json",
+    ),
+    (
+        "lash_runtime_effect_replay",
+        "ck_runtime_effect_replay_settlement_seq",
+    ),
+    (
+        "lash_runtime_effect_replay",
+        "fk_runtime_effect_replay_group",
+    ),
+];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
 const POST_FLOOR_ARTIFACTS: [&str; 2] = [
     "lash_turn_cancel_affected_inputs",
     "uq_lash_runtime_effect_replay_commit_seq",
 ];
-/// What the newest generation alone introduced — the `introduced_relations` of
-/// the migration out of the immediate predecessor version. The divergent fixture
-/// records that predecessor over the *current* catalog, so these are exactly the
-/// artifacts its refusal must enumerate.
+/// What the newest generation alone introduced — the `introduced_relations`
+/// and `introduced_constraints` of the migration out of the immediate
+/// predecessor version. The divergent fixture records that predecessor over
+/// the *current* catalog, so these are exactly the artifacts its refusal must
+/// enumerate.
 ///
-/// Under the component-114 boundary the retained generation is 113. Its
-/// immediate predecessor, component 112, only carried encoded-payload cutovers
-/// and observer-selection metadata the current walk no longer enumerates, so
-/// no introduced relational artifacts are listed.
-const DIVERGENT_ARTIFACTS: [&str; 0] = [];
+/// Component 115 is a constraint-only generation (FIG-1947), and its 114 → 115
+/// arm introduces no relation at all: the divergence a rewound component-114
+/// stamp presents is exactly the five `pg_constraint` rows the arm adds.
+const DIVERGENT_ARTIFACTS: [&str; 5] = [
+    "ck_runtime_effect_replay_outcome_json",
+    "ck_runtime_effect_replay_error_json",
+    "ck_runtime_effect_replay_settlement_seq",
+    "fk_runtime_effect_replay_group",
+    "fk_runtime_effect_group_child_group",
+];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
-/// reject-and-recreate boundary. Component 114 is destructive (ADR 0099 §7
-/// group lifecycle values, FIG-3410): no arm leaves from component 113, so
-/// the component-113 stamp is refused as having no applicable migration.
-const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
+/// reject-and-recreate boundary. Component 115 is migratable: the 114 → 115 arm
+/// exists, so the component-114 stamp over the current catalog is refused as
+/// divergent on the constraint artifacts it claims not to own.
+const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::DivergentArtifacts;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -632,9 +662,10 @@ async fn seed(database_url: &str) -> Result<()> {
     let probe_before_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
     // Rewind only the ledger stamp: the immediate predecessor's published
-    // catalog is this build's own catalog minus nothing — the window's floor
-    // move changed no shape — so the divergent fixture is the current catalog
-    // wearing the previous component version.
+    // catalog is this build's own catalog minus the five component-114
+    // constraints — so the divergent fixture is the current catalog wearing
+    // the previous component version, and the refusal must enumerate the
+    // constraint artifacts it cannot own.
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
     // The walk now sees the exact predecessor stamp over the current shape.
@@ -739,6 +770,19 @@ async fn refuse(database_url: &str) -> Result<()> {
             .execute(&pool)
             .await
             .with_context(|| format!("remove post-floor index {index} for older-store check"))?;
+    }
+    // Constraints drop before columns: the rank-pairing CHECK names
+    // `commit_state`, so `DROP COLUMN` would refuse while it still stands.
+    // `IF EXISTS`, for the same reason the index drops carry it.
+    for (table, constraint) in POST_FLOOR_CONSTRAINTS {
+        sqlx::query(&format!(
+            "ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"
+        ))
+        .execute(&pool)
+        .await
+        .with_context(|| {
+            format!("remove post-floor constraint {table}.{constraint} for older-store check")
+        })?;
     }
     for (table, column) in POST_FLOOR_COLUMNS {
         sqlx::query(&format!("ALTER TABLE {table} DROP COLUMN {column}"))
