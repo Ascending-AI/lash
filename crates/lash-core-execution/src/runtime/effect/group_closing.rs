@@ -16,8 +16,13 @@
 //!    process is running. The step is complete only when the unsettled read is
 //!    empty; a child owed elsewhere (a live lease on another process, no
 //!    executor) leaves the group `closing` and the report `Pending`.
-//! 2. **Outcome and accounting**: the opener's own commit step, supplied as
-//!    [`OpenerFinalizationSteps`].
+//! 2. **Outcome and accounting**: incorporate every settled rank of the group
+//!    into the opener's execution context through
+//!    [`RuntimeExecutionContext::incorporate_tool_settlement`](crate::RuntimeExecutionContext::incorporate_tool_settlement)
+//!    with `SettlementSource::GroupRank { group_key, rank, child_replay_key }` —
+//!    the `IncorporationLedger` the applicator charges against makes a resumed
+//!    re-run of this step return every rank already incorporated, which is the
+//!    W10 property. Supplied as [`OpenerFinalizationSteps`].
 //! 3. **Parent end**: the opener's own end-record step, supplied the same way.
 //! 4. **Retirement**: the lifecycle goes `settled` and the process-local entry
 //!    is reaped through the same guarded check a settlement applies — never
@@ -76,7 +81,13 @@ pub enum GroupFinalizationReport {
 /// finalization and a double commit.
 #[async_trait::async_trait]
 pub trait OpenerFinalizationSteps: Send + Sync {
-    /// §7 step 2: commit the group's outcome and its accounting.
+    /// §7 step 2: commit the group's outcome and its accounting — incorporate
+    /// every settled rank into the opener's execution context through
+    /// [`RuntimeExecutionContext::incorporate_tool_settlement`](crate::RuntimeExecutionContext::incorporate_tool_settlement)
+    /// under `SettlementSource::GroupRank { group_key, rank, child_replay_key }`.
+    /// The applicator's `IncorporationLedger` already makes a re-run charge no
+    /// rank twice; the method-level idempotence requirement covers whatever a
+    /// real implementation does beyond the applicator.
     async fn commit_outcome_and_accounting(
         &self,
         group_key: &str,
@@ -89,6 +100,17 @@ pub trait OpenerFinalizationSteps: Send + Sync {
 /// A group closed by its consumer alone owes no opener steps — the turn or
 /// process exit that owns the opener (FIG-3397) supplies the real
 /// implementation.
+///
+/// The real implementation cannot live on this driver's own finalizer:
+/// `close_effect_group` reaches the controller through a command channel and
+/// the finalization runs on a spawned `'static` host task, while the
+/// [`RuntimeExecutionContext`](crate::RuntimeExecutionContext) the applicator
+/// belongs to is `'run`-bound to the opener's turn (`ToolDispatchContext`
+/// holds `RuntimeEffectControllerHandle<'run>` and
+/// `DirectCompletionClient<'run>`). A `closing` group can also outlive that
+/// context outright — a `Pending` group settles under a later turn or another
+/// process — so the context must be supplied by the exit path that owns it,
+/// which is FIG-3397's obligation.
 pub struct GroupOnlyFinalization;
 
 #[async_trait::async_trait]

@@ -19,7 +19,11 @@
 //!    finish — live lease elsewhere, no executor — leave the step unrecorded
 //!    and the run reports [`GroupFinalizationReport::Pending`].
 //! 2. **Outcome and accounting.** The opener's step, run through
-//!    [`OpenerFinalizationSteps`] and recorded only after it returns.
+//!    [`OpenerFinalizationSteps`] and recorded only after it returns — defined
+//!    as incorporating every settled rank through
+//!    `RuntimeExecutionContext::incorporate_tool_settlement` under
+//!    `SettlementSource::GroupRank`, which the carried `IncorporationLedger`
+//!    makes idempotent across a crash-and-resume.
 //! 3. **Parent end.** The same, for the opener's end record.
 //! 4. **Retirement.** The lifecycle CASes to `settled` and the process-local
 //!    entry is reaped only through the shared closed-and-complete guard — a

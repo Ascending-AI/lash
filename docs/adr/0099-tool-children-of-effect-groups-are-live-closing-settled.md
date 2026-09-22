@@ -706,7 +706,17 @@ issued stops.
 
 *Status.* The drain, disposition-at-open and work-driver seam **hold today**. The
 durable closing transition, the finalization sequence, the drain budget and the
-deletion exclusion are **new** (FIG-3396, FIG-3397).
+deletion exclusion are **implemented on the SQL and native tiers** (FIG-3410):
+`runtime_effect_group.lifecycle` carries `closing`/`settled` under a
+compare-and-set, finalization resumes from a recorded step cursor, and session
+retirement refuses a live or closing group. Step 2's opener-side incorporation
+is defined as one applicator call per settled rank —
+`RuntimeExecutionContext::incorporate_tool_settlement` under
+`SettlementSource::GroupRank { group_key, rank, child_replay_key }` (FIG-3411) —
+whose `IncorporationLedger` makes the resumed re-run idempotent. The opener's
+own exit path supplying that applicator to the finalizer remains FIG-3397's
+obligation: the driver's finalizer runs on a `'static` host task and the
+execution context is `'run`-bound to the opener's turn.
 
 ---
 
