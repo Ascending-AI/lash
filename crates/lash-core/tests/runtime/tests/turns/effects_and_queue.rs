@@ -615,7 +615,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
                     })
                 })),
                 checkpoint: None,
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: None,
                 external_registrar: None,
             }))

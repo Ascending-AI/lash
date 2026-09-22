@@ -514,7 +514,7 @@ pub mod plugins {
         facade_support::TurnTransformContext,
     };
     pub use lash_plugin_tool_output_budget::{
-        SpillPolicy, ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
+        ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
     };
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};

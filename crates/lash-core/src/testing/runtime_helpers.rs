@@ -605,7 +605,7 @@ impl crate::PluginFactory for RuntimeTestPluginFactory {
 pub struct RuntimeTestPlugin {
     pub before_turn: Option<crate::plugin::BeforeTurnHook>,
     pub checkpoint: Option<crate::plugin::CheckpointHook>,
-    pub tool_result_projector: Option<crate::plugin::ToolResultProjector>,
+    pub presentation_steps: Vec<crate::plugin::ToolPresentationStep>,
     pub runtime_event: Option<crate::plugin::PluginLifecycleEventHook>,
     pub external_registrar: Option<Arc<RuntimeExternalRegistrar>>,
 }
@@ -622,8 +622,8 @@ impl crate::SessionPlugin for RuntimeTestPlugin {
         if let Some(hook) = &self.checkpoint {
             reg.turn().checkpoint(Arc::clone(hook));
         }
-        if let Some(projector) = &self.tool_result_projector {
-            reg.tool_results().projector(Arc::clone(projector))?;
+        for step in &self.presentation_steps {
+            reg.tool_results().presentation_step(Arc::clone(step));
         }
         if let Some(hook) = &self.runtime_event {
             reg.session().on_event(Arc::clone(hook));

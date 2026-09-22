@@ -1025,7 +1025,7 @@ pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() 
                 Ok(Arc::new(RuntimeTestPlugin {
                     before_turn: None,
                     checkpoint: None,
-                    tool_result_projector: None,
+                    presentation_steps: vec![],
                     runtime_event: None,
                     external_registrar: Some(Arc::new(|reg| {
                         reg.operations().command(

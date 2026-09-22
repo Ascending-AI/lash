@@ -8,7 +8,6 @@ use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
     ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
-use lash_sansio::core_support::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -699,6 +698,10 @@ impl RuntimeExecutionContext<'_> {
         let projection_duration_ms = outcome.record.duration_ms;
         let projection_call_id = call_id.clone();
         let plugins = std::sync::Arc::clone(&self.dispatch.plugins);
+        let artifacts =
+            std::sync::Arc::new(crate::runtime::effect::SessionPresentationArtifacts::new(
+                std::sync::Arc::clone(&self.dispatch.attachment_store),
+            ));
         let projection_context = crate::plugin::ToolResultProjectionContext {
             session_id: self.dispatch.session_id.clone(),
             tool_name: projection_tool_name,
@@ -706,27 +709,28 @@ impl RuntimeExecutionContext<'_> {
             output: projection_output,
             duration_ms: projection_duration_ms,
             call_id: projection_call_id,
+            artifacts,
         };
-        let mut model_return = match plugins.project_tool_result(projection_context).await {
-            Ok(projected) => projected,
-            Err(err) => ModelToolReturn::text(
-                call_id.clone(),
-                outcome.record.tool.clone(),
-                err.to_string(),
-            ),
-        };
-        surface_attachment_materialization_notices(
-            self.attachment_acceptance(),
-            &output,
-            &mut model_return,
+        // The settlement exists before the chain so a step can read its facts;
+        // its `model_return` is overwritten by the presented return below.
+        let mut settlement = crate::runtime::effect::ToolSettlement::from_dispatch(
+            &outcome,
+            ModelToolReturn::from_output(call_id.clone(), outcome.record.tool.clone(), &output),
         );
+        let presentation = plugins
+            .present_tool_result(
+                projection_context,
+                std::sync::Arc::new(settlement.clone()),
+                self.attachment_acceptance(),
+            )
+            .await;
+        let mut model_return = presentation.model_return;
         // ADR 0099 §6/§13: the applicator owns possession, committed messages,
         // trigger receipts and usage charging, exactly once per source. A
         // refusal — an unreadable settlement or a spend with no charge sink —
         // fails the call closed rather than presenting a result whose
         // recorded facts were dropped.
-        let settlement =
-            crate::runtime::effect::ToolSettlement::from_dispatch(&outcome, model_return.clone());
+        settlement.model_return = model_return.clone();
         let settlement_source = crate::session::SettlementSource::Invocation {
             call_id: call_id.clone(),
             replay_key: call_id.clone(),

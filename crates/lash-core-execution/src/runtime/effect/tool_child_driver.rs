@@ -61,7 +61,6 @@
 
 use std::sync::Arc;
 
-use lash_sansio::core_support::ModelToolReturnCoreSupport;
 use tokio_util::sync::CancellationToken;
 
 use super::envelope::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome};
@@ -1057,51 +1056,52 @@ fn failed_child_outcome(
     }
 }
 
-/// The child's presentation boundary: the singleton plugin projector, run once
-/// over the settled outcome, with attachment notices computed under the child's
-/// *recorded* environment (ADR 0099 §3 — a reopen uses the recorded facts).
+/// The child's presentation boundary: the registered presentation steps, run
+/// once over the settled outcome, with attachment notices computed under the
+/// child's *recorded* environment (ADR 0099 §3 — a reopen uses the recorded
+/// facts).
 ///
 /// The resolved return is journaled on the settlement so incorporation consumes
-/// a record instead of re-running the projector: a projector that changed
-/// between execution and replay cannot change what the child settled. A
-/// projector *error* resolves to the same recorded fallback the session path
-/// uses, so a broken projector settles a refusal rather than aborting the
-/// settlement.
+/// a record instead of re-running the steps: a step that changed between
+/// execution and replay cannot change what the child settled. A step *error*
+/// resolves to the same recorded fallback the session path uses, so a broken
+/// step settles a refusal rather than aborting the settlement.
 async fn resolve_model_return(
     dispatch: &ToolDispatchContext<'_>,
     request: &ToolChildRequest,
     outcome: &ToolDispatchOutcome,
     intent_outcomes: &[crate::ToolIntentExecutionOutcome],
 ) -> crate::ModelToolReturn {
-    let mut model_return = match dispatch
-        .plugins
-        .project_tool_result(crate::plugin::ToolResultProjectionContext {
-            session_id: dispatch.session_id.clone(),
-            call_id: request.call.call_id.clone(),
-            tool_name: outcome.record.tool.clone(),
-            args: outcome.record.args.clone(),
-            output: outcome.record.output.clone(),
-            duration_ms: outcome.record.duration_ms,
-        })
-        .await
-    {
-        Ok(projected) => projected,
-        Err(error) => crate::ModelToolReturn::text(
-            request.call.call_id.clone(),
-            outcome.record.tool.clone(),
-            error.to_string(),
-        ),
-    };
-    crate::session::tool_execution::surface_attachment_materialization_notices(
-        &dispatch
-            .execution_env_spec
-            .policy
-            .model
-            .capability
-            .attachment_acceptance,
+    let baseline = crate::ModelToolReturn::from_output(
+        request.call.call_id.clone(),
+        outcome.record.tool.clone(),
         &outcome.record.output,
-        &mut model_return,
     );
+    let settlement = ToolSettlement::from_dispatch(outcome, baseline);
+    let presentation = dispatch
+        .plugins
+        .present_tool_result(
+            crate::plugin::ToolResultProjectionContext {
+                session_id: dispatch.session_id.clone(),
+                call_id: request.call.call_id.clone(),
+                tool_name: outcome.record.tool.clone(),
+                args: outcome.record.args.clone(),
+                output: outcome.record.output.clone(),
+                duration_ms: outcome.record.duration_ms,
+                artifacts: Arc::new(crate::runtime::effect::SessionPresentationArtifacts::new(
+                    Arc::clone(&dispatch.attachment_store),
+                )),
+            },
+            Arc::new(settlement),
+            &dispatch
+                .execution_env_spec
+                .policy
+                .model
+                .capability
+                .attachment_acceptance,
+        )
+        .await;
+    let mut model_return = presentation.model_return;
     // The same addenda the session path appends in `complete_tool_call`: the
     // realized intents are part of the presentation the model sees, so the
     // recorded return carries them rather than leaving incorporation to

@@ -17451,7 +17451,8 @@
         "lash-internal-protocol-standard",
         "lash-internal-sansio",
         "serde",
-        "serde_json"
+        "serde_json",
+        "tokio"
       ],
       "doc": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__doc",
       "manifest": "crates/lash-plugin-tool-output-budget/Cargo.toml",

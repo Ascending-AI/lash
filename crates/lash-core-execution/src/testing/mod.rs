@@ -1031,18 +1031,38 @@ pub async fn coordinate_tool_provider_with_services(
         return Err("the literal differential provider unexpectedly deferred".to_string());
     };
     let outcome = *outcome;
+    let baseline = crate::ModelToolReturn::from_output(
+        call.call_id.clone(),
+        outcome.record.tool.clone(),
+        &outcome.record.output,
+    );
+    let settlement = crate::runtime::effect::ToolSettlement::from_dispatch(&outcome, baseline);
     let mut model_return = dispatch
         .plugins
-        .project_tool_result(crate::plugin::ToolResultProjectionContext {
-            session_id: SessionId::from(session_id.to_string()),
-            call_id: call.call_id.clone(),
-            tool_name: outcome.record.tool.clone(),
-            args: outcome.record.args.clone(),
-            output: outcome.record.output.clone(),
-            duration_ms: outcome.record.duration_ms,
-        })
+        .present_tool_result(
+            crate::plugin::ToolResultProjectionContext {
+                session_id: SessionId::from(session_id.to_string()),
+                call_id: call.call_id.clone(),
+                tool_name: outcome.record.tool.clone(),
+                args: outcome.record.args.clone(),
+                output: outcome.record.output.clone(),
+                duration_ms: outcome.record.duration_ms,
+                artifacts: std::sync::Arc::new(
+                    crate::runtime::effect::SessionPresentationArtifacts::new(
+                        std::sync::Arc::clone(&dispatch.attachment_store),
+                    ),
+                ),
+            },
+            std::sync::Arc::new(settlement),
+            &dispatch
+                .execution_env_spec
+                .policy
+                .model
+                .capability
+                .attachment_acceptance,
+        )
         .await
-        .map_err(|error| error.to_string())?;
+        .model_return;
     model_return.parts.extend(
         outcome
             .intent_outcomes

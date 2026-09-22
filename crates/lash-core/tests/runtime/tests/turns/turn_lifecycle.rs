@@ -73,7 +73,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
                 Ok(Arc::new(RuntimeTestPlugin {
                     before_turn: None,
                     checkpoint: None,
-                    tool_result_projector: None,
+                    presentation_steps: vec![],
                     runtime_event: None,
                     external_registrar: Some(Arc::new(|reg| {
                         reg.turn().after(Arc::new(|_| {
