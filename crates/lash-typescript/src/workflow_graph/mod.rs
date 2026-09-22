@@ -160,7 +160,7 @@ pub fn workflow_graph_to_source(graph: &WorkflowGraph) -> Result<String, GraphRe
 
 struct GraphProjector<'a> {
     program: &'a Program,
-    source_hash: String,
+    source_identity: String,
     spans: BTreeMap<lashlang::AstPath, Span>,
     analysis: Option<&'a WorkflowLinkAnalysis>,
     allow_non_sourceable_expressions: bool,
@@ -206,7 +206,7 @@ impl<'a> GraphProjector<'a> {
     ) -> Self {
         Self {
             program,
-            source_hash: hex_digest("lash-workflow-source/v3", canonical.as_bytes()),
+            source_identity: source_identity(canonical),
             spans,
             analysis,
             allow_non_sourceable_expressions,
@@ -255,6 +255,7 @@ impl<'a> GraphProjector<'a> {
         );
         WorkflowGraph {
             schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+            source_identity: self.source_identity.clone(),
             facet_schema_version: self
                 .analysis
                 .map(|_| lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION),
@@ -776,12 +777,21 @@ impl<'a> GraphProjector<'a> {
                 .collect::<Vec<_>>()
                 .join(".")
         };
-        let material = format!("{}\0{owner}\0{path}\0{kind}", self.source_hash);
+        let material = format!("{}\0{owner}\0{path}\0{kind}", self.source_identity);
         WorkflowNodeId::new(format!(
             "{kind}:{}",
             &hex_digest("lash-workflow-node/v2", material.as_bytes())[..24]
         ))
     }
+}
+
+/// Hashes the projector's canonical definition preimage.
+///
+/// `preimage` is canonical TypeScript for sourceable IR. For non-sourceable
+/// IR, [`workflow_graph_from_program`] supplies the serialized [`Program`]
+/// bytes instead. Both paths use the `lash-workflow-source/v3` domain.
+fn source_identity(preimage: &str) -> String {
+    hex_digest("lash-workflow-source/v3", preimage.as_bytes())
 }
 
 #[derive(Clone, Default)]

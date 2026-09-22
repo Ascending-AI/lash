@@ -1275,6 +1275,14 @@ kind = "rust_items"
 paths = ["crates/lash-lashlang-runtime/src/process.rs"]
 symbols = ["LashlangSegmentState"]
 
+# FIG-3460 owns the runtime-side identity cutover. Until it lands, guard the
+# current runtime mint so a preimage edit cannot ship without moving the
+# parked-segment fence whose occurrence counters use those ids.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/tracking.rs"]
+symbols = ["node_id"]
+
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-core-execution/src/runtime/process/engine.rs"]
@@ -1336,13 +1344,16 @@ symbols = [
   "Deserialize for ProcessType",
 ]
 
-# The document's value types stay in lashlang; the projector that mints its
-# node identity and the printer that produces its text live in lash-typescript,
-# so the guard has to watch both or a projection change ships unversioned.
+# The document's value types stay in lashlang. Its identity preimages live in
+# the TypeScript projector and rendering helper, so guard the functions that
+# build those bytes rather than the GraphProjector field list.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-typescript/src/workflow_graph/mod.rs"]
-symbols = ["GraphProjector"]
+paths = [
+  "crates/lash-typescript/src/workflow_graph/mod.rs",
+  "crates/lash-typescript/src/workflow_graph/render_helpers.rs",
+]
+symbols = ["source_identity", "node_id", "edge", "hex_digest"]
 
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
