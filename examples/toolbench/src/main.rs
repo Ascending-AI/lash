@@ -1,5 +1,6 @@
 mod accounting;
 mod grading;
+mod provenance;
 mod provider_log;
 mod reconcile;
 mod runtime;
@@ -313,7 +314,7 @@ async fn main() -> Result<()> {
         row["pack"] = serde_json::to_value(args.pack)?;
         write_row(&mut *writer.lock().await, &row)?;
     }
-    let markdown = summary::markdown(&summaries);
+    let markdown = summary::markdown(&summaries, provenance::current());
     print!("{markdown}");
     let mut summary_path = args.results_file.as_os_str().to_os_string();
     summary_path.push(".summary.md");
@@ -327,6 +328,8 @@ async fn main() -> Result<()> {
 }
 
 fn write_row(file: &mut std::fs::File, row: &Value) -> Result<()> {
+    let mut row = row.clone();
+    provenance::stamp(&mut row).context("stamp row provenance")?;
     writeln!(file, "{row}")?;
     let mut stdout = std::io::stdout().lock();
     writeln!(stdout, "{row}")?;
