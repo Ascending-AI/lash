@@ -407,14 +407,6 @@ impl AwaitEventResolver for JournalController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for JournalController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
-    {
-        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -1375,23 +1367,17 @@ mod tests {
         );
     }
 
-    /// A controller that answers `DurableJournaled` must also name the durable
+    /// A controller that answers `Journaled` must also name the durable
     /// authority that minted its await-event keys, or the runtime refuses the
     /// turn with `invalid_turn_cancel_request` before it reaches the provider
     /// (#1226). This fixture's journal wraps the in-process native controller
     /// and owns no durable authority, so the two answers have to stay
     /// coherent: claiming durable turn control here is what made the drain
     /// flow fail with nothing but `provider effect did not enter`.
-    #[tokio::test]
-    async fn the_drain_journal_never_claims_durable_turn_control_without_an_authority() {
+    #[test]
+    fn the_drain_journal_never_claims_durable_turn_control_without_an_authority() {
         let journal = JournalController::default();
-        if matches!(
-            journal
-                .turn_control_participation()
-                .await
-                .expect("participation"),
-            lash_core::TurnControlParticipation::DurableJournaled
-        ) {
+        if journal.effect_journaling() == lash_core::EffectJournaling::Journaled {
             assert!(
                 journal.await_event_authority_binding_id().is_some(),
                 "a durable-journaled controller must name its await-event authority"

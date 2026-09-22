@@ -38,13 +38,6 @@ pub enum EffectControllerTaskRequest {
         may_defer: bool,
         response: oneshot::Sender<Result<CompletionKeyPreparation, RuntimeError>>,
     },
-    RuntimeEffectFailureDisposition {
-        code: RuntimeErrorCode,
-        response: oneshot::Sender<Result<RuntimeEffectFailureDisposition, RuntimeError>>,
-    },
-    TurnControlParticipation {
-        response: oneshot::Sender<Result<TurnControlParticipation, RuntimeError>>,
-    },
     OpenEffectGroup {
         scope: ExecutionScope,
         group: Box<RuntimeEffectGroup>,
@@ -147,12 +140,6 @@ impl EffectControllerTaskRequest {
                         .await,
                 );
             }),
-            Self::RuntimeEffectFailureDisposition { code, response } => Box::pin(async move {
-                let _ = response.send(controller.runtime_effect_failure_disposition(code).await);
-            }),
-            Self::TurnControlParticipation { response } => Box::pin(async move {
-                let _ = response.send(controller.turn_control_participation().await);
-            }),
             Self::OpenEffectGroup {
                 scope,
                 group,
@@ -219,6 +206,7 @@ pub struct EffectTaskController {
     scope: ExecutionScope,
     supports_concurrent_effects: bool,
     owns_commit_backpressure: bool,
+    effect_journaling: EffectJournaling,
     await_event_authority_binding_id: Option<String>,
 }
 
@@ -239,6 +227,7 @@ impl EffectTaskController {
             scope: admitted.scope().clone(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
+            effect_journaling: controller.effect_journaling(),
             await_event_authority_binding_id: controller.await_event_authority_binding_id(),
         };
         Ok((
@@ -371,50 +360,8 @@ impl RuntimeEffectController for EffectTaskController {
         self.supports_concurrent_effects
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.requests
-            .send(
-                EffectControllerTaskRequest::RuntimeEffectFailureDisposition {
-                    code,
-                    response: response_tx,
-                },
-            )
-            .map_err(|_| {
-                RuntimeError::new(
-                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                    "effect-failure disposition controller task is no longer running",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            RuntimeError::new(
-                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                "effect-failure disposition controller response was dropped",
-            )
-        })?
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.requests
-            .send(EffectControllerTaskRequest::TurnControlParticipation {
-                response: response_tx,
-            })
-            .map_err(|_| {
-                RuntimeError::new(
-                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                    "turn-control participation controller task is no longer running",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            RuntimeError::new(
-                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                "turn-control participation controller response was dropped",
-            )
-        })?
+    fn effect_journaling(&self) -> EffectJournaling {
+        self.effect_journaling
     }
 
     async fn execute_effect(

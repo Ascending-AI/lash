@@ -252,17 +252,8 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.supports_concurrent_effects()
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: crate::RuntimeErrorCode,
-    ) -> Result<crate::RuntimeEffectFailureDisposition, RuntimeError> {
-        self.inner.runtime_effect_failure_disposition(code).await
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<crate::TurnControlParticipation, RuntimeError> {
-        self.inner.turn_control_participation().await
+    fn effect_journaling(&self) -> crate::EffectJournaling {
+        self.inner.effect_journaling()
     }
 
     async fn execute_effect(

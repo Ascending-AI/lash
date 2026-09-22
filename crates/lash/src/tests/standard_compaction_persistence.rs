@@ -106,18 +106,8 @@ impl lash_core::AwaitEventResolver for ProjectionReplayController {
 
 #[async_trait]
 impl lash_core::RuntimeEffectController for ProjectionReplayController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
-    {
-        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        lash_core::EffectJournaling::Journaled
     }
 
     async fn execute_effect(

@@ -44,17 +44,16 @@ pub use envelope::{
 pub use executor::{
     AdmittedScope, AdmittedScopeError, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
     BoundaryReason, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
+    EffectJournalRetirement, EffectJournaling, EffectOpener, EffectRetirementGate, ExecutionScope,
     ExternalCompletionError, NativeRuntimeEffectController, ProcessLocalExecution,
     ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
     QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
     RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
-    ScopeBoundController, ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    TurnControlParticipation, concrete_turn_cancellation_authority,
+    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
+    TurnControlBindingIdError, concrete_turn_cancellation_authority,
     turn_control_binding_id_for_scope,
 };
 pub use group::{
@@ -112,17 +111,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl RuntimeEffectController for ControllerOwnedReplay {
-        async fn runtime_effect_failure_disposition(
-            &self,
-            _code: crate::RuntimeErrorCode,
-        ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
-            Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
-        }
-
-        async fn turn_control_participation(
-            &self,
-        ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
-            Ok(crate::TurnControlParticipation::DurableJournaled)
+        fn effect_journaling(&self) -> crate::EffectJournaling {
+            crate::EffectJournaling::Journaled
         }
 
         async fn execute_effect(
@@ -167,22 +157,13 @@ mod tests {
             .authority_id
             .set(host.turn_control_binding_id())
             .unwrap();
-        assert_eq!(
-            host.runtime_effect_failure_disposition(crate::RuntimeErrorCode::Plugin)
-                .await
-                .expect("disposition"),
-            crate::RuntimeEffectFailureDisposition::AbortInvocation
-        );
+        assert_eq!(host.effect_journaling(), crate::EffectJournaling::Journaled);
         let scoped = host
             .scoped(AdmittedScope::turn("ownership-session", "ownership-turn"))
             .expect("scope wrapped controller");
         assert_eq!(
-            scoped
-                .controller()
-                .turn_control_participation()
-                .await
-                .expect("participation"),
-            crate::TurnControlParticipation::DurableJournaled
+            scoped.controller().effect_journaling(),
+            crate::EffectJournaling::Journaled
         );
         assert!(matches!(
             scoped

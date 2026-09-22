@@ -71,6 +71,7 @@ that stability must journal the choice before emitting either shape.
 - `EffectReplayOwnership` records only the mechanical fact of whether the runtime or
   its controller owns replay. It is not an end-to-end durability claim. The Host
   Application owns that deployment-level assertion.
+  *(Superseded: this fact is now the one sync `RuntimeEffectController::effect_journaling()` → `EffectJournaling { Local, Journaled }` (FIG-2226).)*
 - Signals are named and typed only: declared per-process as event types with payload
   schemas, validated at send time; the unnamed untyped `wait_signal()` is removed.
 - Waiting is an observability facet on a running process (wait state on the record,

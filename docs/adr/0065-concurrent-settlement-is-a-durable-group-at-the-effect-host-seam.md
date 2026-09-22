@@ -501,6 +501,7 @@ coherently, and answers `true` once wiring registers one. Groups add **no second
 durability flag**. The durability claim stays the existing
 `replay_ownership` / journal-addressing fact, which the contract already warns
 is only a routing fact and not an end-to-end durability claim.
+*(Superseded: this fact is now the one sync `RuntimeEffectController::effect_journaling()` → `EffectJournaling { Local, Journaled }` (FIG-2226).)*
 
 - **In-memory/inline** implements the full observable semantics — wake,
   ordering, loser completion, disposition — in memory, durable only within the

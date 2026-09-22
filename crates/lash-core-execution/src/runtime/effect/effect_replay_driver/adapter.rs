@@ -363,17 +363,8 @@ impl<T: StoreReplayHost> EffectHost for T {
 
 #[async_trait]
 impl<T: StoreReplayController> RuntimeEffectController for T {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: RuntimeErrorCode,
-    ) -> Result<crate::RuntimeEffectFailureDisposition, RuntimeError> {
-        Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<crate::TurnControlParticipation, RuntimeError> {
-        Ok(crate::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> crate::EffectJournaling {
+        crate::EffectJournaling::Journaled
     }
 
     async fn execute_effect(

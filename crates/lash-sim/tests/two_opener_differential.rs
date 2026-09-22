@@ -855,12 +855,8 @@ async fn recorded_cancellation_authority(
     admitted: &AdmittedScope,
 ) -> Option<TurnControlBindingId> {
     let scoped = host.scoped(admitted.clone()).expect("the scope binds");
-    if scoped
-        .controller()
-        .turn_control_participation()
-        .await
-        .expect("participation resolves")
-        != lash_core::runtime::effect::TurnControlParticipation::DurableJournaled
+    if scoped.controller().effect_journaling()
+        != lash_core::runtime::effect::EffectJournaling::Journaled
     {
         return None;
     }

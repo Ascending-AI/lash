@@ -595,7 +595,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
             wake_target_session_id: Some(SessionId::from("wake-smoke")),
             tool_effect_id: Some("tool-smoke".to_string()),
             execution_scope_id: "task-smoke".to_string(),
-            turn_control_participation: lash_core::TurnControlParticipation::DurableJournaled,
+            effect_journaling: lash_core::EffectJournaling::Journaled,
         }]
     );
 

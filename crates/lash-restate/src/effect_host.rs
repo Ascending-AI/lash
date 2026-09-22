@@ -12,12 +12,11 @@ use std::sync::{Arc, OnceLock};
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, EffectHost, ExecutionScope, GroupExecutors, GroupSettlement, LoserPolicy,
-    Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
+    EffectGroupHandle, EffectHost, EffectJournaling, ExecutionScope, GroupExecutors,
+    GroupSettlement, LoserPolicy, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimeErrorCode, ScopedEffectController, ToolIntentOutcomeSink, ToolIntentPreparation,
-    TurnControlParticipation,
     facade_support::{RuntimeAwaitEventOptions, ToolChildHost},
 };
 
@@ -585,17 +584,8 @@ impl RuntimeEffectController for FencedRestateController {
         self.controller.wants_segment_boundary(progress)
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        self.controller
-            .runtime_effect_failure_disposition(code)
-            .await
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        self.controller.turn_control_participation().await
+    fn effect_journaling(&self) -> EffectJournaling {
+        self.controller.effect_journaling()
     }
 
     fn register_group_executors(
@@ -1550,15 +1540,8 @@ impl RuntimeEffectController for RestateEffectHostController {
             .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blocked", error))
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        Ok(RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        Ok(TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> EffectJournaling {
+        EffectJournaling::Journaled
     }
 
     async fn execute_effect(

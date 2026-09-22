@@ -8,11 +8,11 @@ use tokio_util::sync::CancellationToken;
 use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectGroupChildCommitOutcome, EffectGroupHandle, EffectHost,
-    EffectJournalRetirement, ExecutionScope, GroupChildFinalCommit, GroupSettlement, LoserPolicy,
-    NativeRuntimeEffectController, RankedGroupSettlement, Resolution, ResolveOutcome,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlParticipation,
+    EffectJournalRetirement, EffectJournaling, ExecutionScope, GroupChildFinalCommit,
+    GroupSettlement, LoserPolicy, NativeRuntimeEffectController, RankedGroupSettlement, Resolution,
+    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
+    SegmentProgress,
 };
 use crate::RuntimeError;
 
@@ -589,15 +589,8 @@ impl RuntimeEffectController for FencedNativeController {
         self.host.supports_concurrent_effects()
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: crate::RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        self.host.runtime_effect_failure_disposition(code).await
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        self.host.turn_control_participation().await
+    fn effect_journaling(&self) -> EffectJournaling {
+        self.host.effect_journaling()
     }
 
     async fn execute_effect(
@@ -694,17 +687,8 @@ impl RuntimeEffectController for NativeEffectHost {
         self.controller.supports_concurrent_effects()
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: crate::RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        self.controller
-            .runtime_effect_failure_disposition(code)
-            .await
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        self.controller.turn_control_participation().await
+    fn effect_journaling(&self) -> EffectJournaling {
+        self.controller.effect_journaling()
     }
 
     async fn execute_effect(
