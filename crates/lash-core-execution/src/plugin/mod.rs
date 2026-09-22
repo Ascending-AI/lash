@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::runtime::AssembledTurn;
 use crate::{
     MessageRole, ProtocolTurnOptions, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider,
-    TurnInput,
 };
 
 pub use lash_sansio::{
@@ -82,8 +81,7 @@ pub use registry::{
 };
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
-    SessionGraphService, SessionLifecycleService, SessionStateService, SessionTurnInput,
-    SessionTurnRequest, SwitchAgentFrameRequest,
+    SessionGraphService, SessionLifecycleService, SessionStateService, SwitchAgentFrameRequest,
 };
 pub use runtime_impl::{
     PluginHost, ProcessEngineContributionTarget, RecordedSessionConfig, SessionAuthorityContext,
@@ -96,11 +94,10 @@ pub use session_obj::PluginSession;
 pub use session_types::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginOwned, SESSION_PLUGIN_INIT_MAX_BYTES,
-    SessionContextOverlay, SessionCreateRequest, SessionHandle, SessionLineage,
-    SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
-    SessionObserverIntentAttribution, SessionPluginInit, SessionPluginSource, SessionRelation,
-    SessionSnapshot, SessionStartPoint, SessionToolAccess, SessionToolAccessError,
-    SubagentSessionContext,
+    SessionCreateRequest, SessionHandle, SessionLineage, SessionObservedProcessOutcome,
+    SessionObservedProcessReceipt, SessionObserverIntent, SessionObserverIntentAttribution,
+    SessionPluginInit, SessionPluginSource, SessionRelation, SessionSnapshot, SessionStartPoint,
+    SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
 };
 pub use state::{
     KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateError,

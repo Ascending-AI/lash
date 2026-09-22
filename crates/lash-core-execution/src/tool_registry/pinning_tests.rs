@@ -243,7 +243,7 @@ fn request_pin_detects_hidden_cross_lane_known_id_collision() {
 
     leaf_active.store(true, Ordering::SeqCst);
     let error = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .err()
         .expect("the new hidden leaf route collides during request pinning");
     assert!(
@@ -282,7 +282,7 @@ async fn request_pin_preserves_transparent_wrapper_delegated_default_resolution(
         .expect("the delegated default initially binds the known resident");
 
     let pinned = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("two-phase capture preserves the delegated default result");
     let entry = pinned
         .export_state()
@@ -323,7 +323,7 @@ async fn pinned_source_rebinds_nonadvertised_orphan_when_its_provider_returns() 
 
     available.store(true, Ordering::SeqCst);
     let pinned = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("returning exact-id route rebinds during request refresh");
     let entry = pinned
         .export_state()
@@ -379,7 +379,7 @@ async fn pinned_source_rebinds_known_id_to_another_nonadvertising_source() {
     a_active.store(false, Ordering::SeqCst);
     b_active.store(true, Ordering::SeqCst);
     let pinned = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("source B rebinds the known resident");
     let result = execute_leaf_by_id(
         &pinned,
@@ -485,7 +485,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
         .expect("the exact-id resident route rebinds under a curated alias");
 
     let pinned = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("source A pins the drifted resident");
     // A deferred grant pins the curated model-facing manifest at grant time;
     // the provider must still see its own advertised manifest.
@@ -527,7 +527,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
     a_active.store(false, Ordering::SeqCst);
     b_active.store(true, Ordering::SeqCst);
     let pinned = registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("source B rebinds the drifted resident");
     let outcome = pinned
         .execute(ToolCall::new(&curated, &json!({}), &attempt))

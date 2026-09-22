@@ -56,7 +56,7 @@ use crate::{SessionError, SessionId, ToolRestoreReport, ToolSourcePolicy, ToolSt
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolRestoreSite {
     /// A runtime being built from persisted state (`from_host_state`): every
-    /// builder open, resume, managed-child materialisation, queued-work driver
+    /// builder open, resume, child-session initialisation, queued-work driver
     /// construction and remote-host open funnels through here.
     SessionOpen,
     /// A host-driven `restore_tool_state` on a live runtime.

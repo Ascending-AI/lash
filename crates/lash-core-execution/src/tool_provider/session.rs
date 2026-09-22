@@ -57,7 +57,7 @@ impl ToolSessionAdmin {
         self.snapshot(&self.session_id).await
     }
 
-    /// Read a snapshot of a named managed session.
+    /// Read a snapshot of a named session.
     ///
     /// # Integrator class
     ///

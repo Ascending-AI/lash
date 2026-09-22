@@ -1,4 +1,3 @@
-use crate::TurnId;
 pub use lash_core_store::turn_input_vocabulary::*;
 use lash_sansio::sync::MutexExt;
 #[cfg(feature = "testing")]
@@ -84,6 +83,8 @@ pub use session_manager::append_receipt_mixed_usage_envelope_conformance;
 #[cfg(any(test, feature = "testing"))]
 pub use session_manager::append_usage_cancellation_exactly_once_conformance;
 #[cfg(any(test, feature = "testing"))]
+pub use session_manager::take_spawned_child_runtimes;
+#[cfg(any(test, feature = "testing"))]
 pub use session_manager::{
     PendingTokenLedgerEntry, StagedTokenLedger, record_reconciled_usage_shared,
     record_token_usage_shared, record_unreported_attempts_shared, stage_token_ledger_shared,
@@ -131,10 +132,9 @@ pub(crate) use lash_core_store::usage;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::llm::types::{
@@ -152,7 +152,7 @@ use crate::session_model::{
 use crate::{
     CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, PromptHookContext,
     RuntimeServices, Session, SessionCreateRequest, SessionError, SessionHandle, SessionSnapshot,
-    SessionStartPoint, TurnFinish, TurnOutcome, TurnStop,
+    TurnFinish, TurnOutcome, TurnStop,
 };
 use crate::{Effect, TurnMachine};
 
@@ -505,14 +505,6 @@ pub struct LashRuntime {
     pub state: RuntimeSessionState,
     pub runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub runtime_lease_executor_id: String,
-    /// Set for the current turn when the lane was busy and the turn proceeded
-    /// under the commit CAS anyway, so a rejected commit still names the writer
-    /// and the generation it knowingly raced.
-    pub managed_sessions: Arc<Mutex<HashMap<SessionId, RuntimeHandle>>>,
-    /// Active managed child turns, keyed by turn id. Guarded by a synchronous
-    /// mutex so a `ManagedTurnLease` can release its registration from `Drop`:
-    /// a cancelled child turn must never leave a ghost "running turn" behind.
-    pub managed_turns: Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here

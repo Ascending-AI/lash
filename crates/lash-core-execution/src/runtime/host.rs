@@ -11,15 +11,6 @@ use super::{
     QueuedWorkSubstrate, SessionStoreFactory, TerminationPolicy,
 };
 
-/// Default registry-wide admission cap for concurrently running managed child
-/// turns in each runtime's opened-session registry, not across the process. It
-/// matches the existing per-turn event channel bound so the registry cannot
-/// admit more independently buffered turn streams than that established
-/// resource envelope without an explicit host override. Runtime-internal
-/// rolling-history compaction remains observable in the registry but is exempt
-/// from this cap so correctness-critical context maintenance cannot be starved.
-pub const DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT: usize = 100;
-
 /// Default attempt bound stamped onto children started by the engine that runs
 /// a script, rather than by a host that states its own budget.
 ///
@@ -99,11 +90,6 @@ pub struct RuntimeControlConfig {
     pub process_wake_delivery_policy: crate::DeliveryPolicy,
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
-    /// Per-runtime registry cap on concurrently running managed child turns.
-    /// Runtime-internal rolling-history compaction bypasses the cap while still
-    /// being registered for observability and collision checks.
-    /// Defaults to the runtime's managed-turn concurrency limit of 100.
-    pub managed_turn_concurrency_limit: std::num::NonZeroUsize,
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases, process leases,
     /// and durable effect-replay leases. Queued-work and turn-input claims are
@@ -169,10 +155,6 @@ impl RuntimeHostConfig {
     /// rather than silently inheriting policy. Use
     /// [`RuntimeHostConfig::in_memory`] to opt into the in-process / in-memory
     /// implementations while still supplying the budget.
-    #[expect(
-        clippy::expect_used,
-        reason = "the concurrency default is a non-zero literal"
-    )]
     pub fn new(
         effect_host: Arc<dyn EffectHost>,
         attachment_store: Arc<dyn crate::AttachmentStore>,
@@ -208,10 +190,6 @@ impl RuntimeHostConfig {
                 process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
                 lease_timings: crate::LeaseTimings::default(),
                 process_tool_visibility_filter: None,
-                managed_turn_concurrency_limit: std::num::NonZeroUsize::new(
-                    DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT,
-                )
-                .expect("the managed-turn concurrency default is non-zero"),
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
                 engine_child_max_attempts: DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
@@ -328,11 +306,8 @@ impl RuntimeHostConfig {
         self
     }
 
-    pub fn with_managed_turn_concurrency_limit(mut self, limit: std::num::NonZeroUsize) -> Self {
-        self.control.managed_turn_concurrency_limit = limit;
-        self
-    }
-
+    /// Set the attempt bound stamped onto children a script engine starts.
+    ///
     /// The bound is resolved when an execution segment begins and recorded on
     /// each child it registers, so a change takes effect for children started
     /// after it and never for one already on the registry.
@@ -624,20 +599,6 @@ impl From<ProcessRuntimeHost> for RuntimeHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn managed_turn_concurrency_limit_defaults_to_event_channel_bound() {
-        let config = RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
-
-        assert_eq!(
-            config.control.managed_turn_concurrency_limit.get(),
-            DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT
-        );
-        assert_eq!(DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT, 100);
-    }
 
     #[test]
     fn attachment_limit_defaults_unbounded_and_accepts_host_override() {

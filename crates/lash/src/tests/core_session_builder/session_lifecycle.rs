@@ -2306,7 +2306,7 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
         .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session("root-with-child-store").open().await?;
 
-    core.session("managed-child-store")
+    core.session("child-store")
         .parent("root-with-child-store")
         .open()
         .await?;
@@ -2315,7 +2315,7 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
         factory.session_ids(),
         vec![
             SessionId::from("root-with-child-store"),
-            SessionId::from("managed-child-store")
+            SessionId::from("child-store")
         ]
     );
     Ok(())

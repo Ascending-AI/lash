@@ -850,3 +850,60 @@ pub async fn standard_runtime_with_transport_and_host(
 ) -> LashRuntime {
     TestRuntime::new(transport).host(host).build().await
 }
+
+/// Reopen a session that session initialisation committed, through the
+/// ordinary resumed-open path — the same open any embedder performs on
+/// durable state. The returned runtime is an ordinary session owned by the
+/// caller; nothing registers it anywhere (FIG-3378).
+pub fn reopen_session_runtime<'a>(
+    parent: &'a LashRuntime,
+    session_id: &'a SessionId,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = LashRuntime> + Send + 'a>> {
+    Box::pin(async move {
+        let factory = parent
+            .host
+            .session_store_factory
+            .as_ref()
+            .expect("session store factory");
+        let store = factory
+            .open_existing_store_by_id(session_id)
+            .await
+            .expect("open child session store")
+            .expect("child session store exists");
+        let state = crate::store::load_persisted_session_state(store.as_ref())
+            .await
+            .expect("load child session state")
+            .expect("persisted child session state");
+        let policy = state.effective_policy().clone();
+        let is_root = state.authority.subagent.is_none();
+        let plugin_host = parent
+            .session
+            .as_ref()
+            .expect("parent session")
+            .plugins()
+            .host()
+            .clone();
+        let mut env = crate::RuntimeEnvironment::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_plugin_host(Arc::new(plugin_host))
+        .with_runtime_host_config(parent.host.core.clone())
+        .with_session_store_factory(Arc::clone(factory))
+        .build();
+        env.work = parent.host.work.clone();
+        let mut child = LashRuntime::from_environment(
+            &env,
+            policy,
+            state,
+            Some(store),
+            parent.runtime_lease_owner.clone(),
+        )
+        .await
+        .expect("reopen child session runtime");
+        child
+            .configure_protocol_on_materialize(&crate::PluginOptions::default(), is_root)
+            .expect("materialize reopened child protocol configuration");
+        child
+    })
+}

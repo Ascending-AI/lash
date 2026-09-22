@@ -408,7 +408,6 @@ impl LashRuntime {
                 .set_context_overlay(
                     prepared_context.tool_providers,
                     prepared_context.prompt_contributions,
-                    prepared_context.include_base_tools,
                 )
                 .map_err(|err| {
                     RuntimeError::new(RuntimeErrorCode::SessionToolRegistry, err.to_string())

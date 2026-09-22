@@ -177,7 +177,7 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
             crate::testing::test_standard_protocol_factories(),
         )),
         runtime_host,
-        Arc::new(TestSessionStoreFactory),
+        Arc::new(TestSessionStoreFactory::default()),
         crate::WorkerProcessWork::External(process_work),
         Arc::new(crate::NoQueuedWork::new()),
         local_owner("terminal-fence-worker", "host-a", "terminal-fence-start"),
@@ -1123,8 +1123,8 @@ async fn saturated_depth_three_chain_completes() {
 }
 
 #[tokio::test]
-async fn managed_child_turn_process_wait_releases_outer_run_permit() {
-    // Managed child turns cross a fresh Tokio task stack through the same
+async fn process_session_turn_wait_releases_outer_run_permit() {
+    // Process session turns cross a fresh Tokio task stack through the same
     // inherited permit scope used here. The wait must park the outer process's
     // only slot so its production-started child can execute.
     run_production_chain(1, 1, 2, true).await;
@@ -1191,7 +1191,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(plugin_factories)),
             runtime_host,
-            Arc::new(TestSessionStoreFactory),
+            Arc::new(TestSessionStoreFactory::default()),
             crate::WorkerProcessWork::External(process_work),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("session-turn-worker", "host-a", "session-turn-start"),
@@ -1287,7 +1287,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
                 crate::testing::test_standard_protocol_factories(),
             )),
             runtime_host,
-            Arc::new(SegmentBoundarySessionStoreFactory),
+            Arc::new(SegmentBoundarySessionStoreFactory::default()),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("segment-worker", "host-a", "start-a"),
@@ -1489,7 +1489,7 @@ async fn snapshot_recovery_fixture(
                 crate::testing::test_standard_protocol_factories(),
             )),
             runtime_host,
-            Arc::new(TestSessionStoreFactory),
+            Arc::new(TestSessionStoreFactory::default()),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner(

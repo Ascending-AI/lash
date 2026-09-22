@@ -688,11 +688,28 @@ impl SessionSnapshot {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 }
+/// Where session initialisation starts the new session.
+///
+/// `Empty` is the only admitted start point: a new session begins with no
+/// inherited history. A session that needs prior content gets it from its
+/// durable store (open, resume, catalog `fork_at`), never from the create
+/// request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionStartPoint {
     Empty,
-    Snapshot { snapshot: Box<SessionSnapshot> },
+    /// A predecessor payload kept for decode only.
+    ///
+    /// `SessionCreateRequest` rides inside durable `ProcessInput::SessionTurn`
+    /// rows and the remote process wire as serialized JSON, so payloads
+    /// recorded before FIG-3378 can carry `{"kind":"snapshot",...}`.
+    /// Session initialisation refuses this start with a typed error — no
+    /// build since FIG-3378 can honor it — but keeping the variant lets
+    /// those rows decode for listing and inspection, and lets the run port
+    /// return a deliberate refusal instead of failing record decode.
+    Snapshot {
+        snapshot: Box<SessionSnapshot>,
+    },
 }
 
 #[derive(Clone)]

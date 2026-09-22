@@ -66,7 +66,7 @@ pub(super) struct HostBridgeConfig<'run> {
 /// All arms are unreachable from the production entry: the turn driver always
 /// installs the code-execution effect as the parent invocation
 /// (`crates/lash-core/src/runtime/turn_driver/effects.rs`), and every scope a
-/// managed turn may run under is an opener — `Turn`, `QueueDrain`, or the
+/// session turn may run under is an opener — `Turn`, `QueueDrain`, or the
 /// `Process` scope a `ProcessInput::SessionTurn` row runs its child turn
 /// under, whose admitted incarnation the controller's admitted scope already
 /// carries. They are refusals rather than fallbacks because the fallback

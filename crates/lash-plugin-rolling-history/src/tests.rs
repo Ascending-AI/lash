@@ -441,8 +441,6 @@ async fn rolling_turn_transform_projects_tail_without_summary() {
 
     let created = manager.created_snapshot();
     assert!(created.is_empty());
-    let turns = manager.turns.lock_recover().clone();
-    assert!(turns.is_empty());
 }
 
 #[tokio::test]
@@ -687,10 +685,6 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     assert!(
         manager.created.lock_recover().is_empty(),
         "compaction must not create a child session"
-    );
-    assert!(
-        manager.turns.lock_recover().is_empty(),
-        "compaction must not start a managed child turn"
     );
     let requests = captured.requests();
     assert_eq!(requests.len(), 1, "exactly one direct provider call");

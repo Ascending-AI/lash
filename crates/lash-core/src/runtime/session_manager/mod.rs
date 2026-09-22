@@ -1,3 +1,14 @@
+//! Session services behind the runtime's session-facing plugin surface.
+//!
+//! What lives here (ADR 0089): session initialisation (`session_init` — the
+//! `SessionCreateRequest` pipeline and the process-origin port that drives a
+//! recorded child's first turn), the process runners, direct completions, and
+//! current-session services (`current`, `graph`, `api`) that resolve only the
+//! runtime's own session id — a foreign id is an unknown-session error, never
+//! a registry lookup. There is no second session model: every executing
+//! session is an ordinary session, and a process-spawned child runtime is
+//! owned by its process run, not held here.
+
 use super::*;
 use crate::ProcessId;
 use crate::SessionId;
@@ -7,15 +18,14 @@ use lash_sansio::sync::MutexExt;
 use std::sync::atomic::AtomicBool;
 
 mod api;
-mod create_plan;
 mod current;
 mod direct;
 mod direct_outcome;
 mod graph;
-mod managed;
-mod materialize;
 mod process_runners;
-mod turns;
+mod session_init;
+#[cfg(any(test, feature = "testing"))]
+pub use session_init::take_spawned_child_runtimes;
 mod usage;
 
 pub use crate::direct_completion_client::DirectCompletionClient;
@@ -50,7 +60,7 @@ enum CurrentSnapshot {
 impl CurrentSnapshot {
     #[expect(
         clippy::expect_used,
-        reason = "a managed read model resolves in its source session graph"
+        reason = "a turn-scoped read model resolves in its source session graph"
     )]
     fn to_runtime_state(&self) -> RuntimeSessionState {
         match self {
@@ -63,19 +73,14 @@ impl CurrentSnapshot {
                 let mut snapshot = meta.clone();
                 snapshot
                     .replace_active_read_state(messages.as_slice())
-                    .expect("managed read-model frame must resolve in its source session graph");
+                    .expect(
+                        "turn-scoped read-model frame must resolve in its source session graph",
+                    );
                 graph_appends.overlay_on_read_state(&mut snapshot);
                 snapshot
             }
         }
     }
-}
-
-pub struct ManagedSessionTurn {
-    pub(super) session_id: SessionId,
-    /// Identity of the registration attempt that created this entry. Only the
-    /// lease carrying the same nonce may release it.
-    pub(super) registration: u64,
 }
 
 #[derive(Clone)]
@@ -94,13 +99,6 @@ pub(in crate::runtime) struct CurrentSessionCapability {
     held_session_execution_lease: Option<BorrowedLaneAuthority>,
     resident_graph_head_stale: Arc<AtomicBool>,
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
-}
-
-#[derive(Clone)]
-struct ManagedSessionCapability {
-    registry: Arc<Mutex<HashMap<SessionId, RuntimeHandle>>>,
-    turns: Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>,
-    turn_concurrency_limit: std::num::NonZeroUsize,
 }
 
 #[derive(Clone)]
@@ -126,7 +124,6 @@ struct DirectCompletionCapability;
 #[derive(Clone)]
 pub struct RuntimeSessionServices {
     current: CurrentSessionCapability,
-    managed: ManagedSessionCapability,
     processes: ProcessCapability,
     usage: UsageCapability,
     direct: DirectCompletionCapability,
@@ -262,16 +259,6 @@ impl CurrentSessionCapability {
         self.host
             .resolve_session_policy(&self.session_id, self.policy.clone())
             .map_err(|err| crate::PluginError::Session(err.to_string()))
-    }
-}
-
-impl ManagedSessionCapability {
-    fn new(runtime: &LashRuntime) -> Self {
-        Self {
-            registry: Arc::clone(&runtime.managed_sessions),
-            turns: Arc::clone(&runtime.managed_turns),
-            turn_concurrency_limit: runtime.host.core.control.managed_turn_concurrency_limit,
-        }
     }
 }
 
@@ -441,7 +428,6 @@ impl RuntimeSessionServices {
                 turn_graph_appends,
                 held_session_execution_lease,
             ),
-            managed: ManagedSessionCapability::new(runtime),
             processes: ProcessCapability::new(runtime),
             usage: UsageCapability::new(runtime, persist_usage_to_store),
             direct: DirectCompletionCapability,

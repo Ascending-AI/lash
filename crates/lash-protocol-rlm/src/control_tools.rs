@@ -206,7 +206,6 @@ mod tests {
     struct BatonManager {
         snapshot: RuntimeSessionState,
         created: Mutex<Vec<SessionCreateRequest>>,
-        closed: Mutex<Vec<String>>,
     }
 
     impl Default for BatonManager {
@@ -216,7 +215,6 @@ mod tests {
                     lash_core::TurnBudget::Unbounded,
                 )),
                 created: Mutex::new(Vec::new()),
-                closed: Mutex::new(Vec::new()),
             }
         }
     }
@@ -268,11 +266,6 @@ mod tests {
                     .expect("test session creation requires an explicit policy"),
                 observed_processes: Vec::new(),
             })
-        }
-
-        async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
-            self.closed.lock_recover().push(session_id.to_string());
-            Ok(())
         }
     }
 
@@ -512,7 +505,6 @@ mod tests {
                 ))
             },
             created: Mutex::new(Vec::new()),
-            ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
             vocabulary: crate::dialect::DialectPromptVocabulary::default(),
@@ -631,7 +623,6 @@ mod tests {
                 ))
             },
             created: Mutex::new(Vec::new()),
-            ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
             vocabulary: crate::dialect::DialectPromptVocabulary::default(),
@@ -699,7 +690,6 @@ mod tests {
                 ))
             },
             created: Mutex::new(Vec::new()),
-            ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
             vocabulary: crate::dialect::DialectPromptVocabulary::default(),
@@ -754,7 +744,6 @@ mod tests {
                 ))
             },
             created: Mutex::new(Vec::new()),
-            ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
             vocabulary: crate::dialect::DialectPromptVocabulary::default(),

@@ -83,6 +83,6 @@ pub(super) fn grant_deferral_registry(may_defer: bool) -> ToolRegistry {
         )))
         .expect("grant source registered");
     registry
-        .compose_session_catalog(true, Vec::new())
+        .compose_session_catalog(Vec::new())
         .expect("resident catalog with live grant sources")
 }

@@ -1279,12 +1279,12 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await
-            .expect("open managed child store")
-            .expect("managed child store exists");
+            .expect("open child store")
+            .expect("child store exists");
         let child_meta = child_store
             .load_session_meta()
             .await?
-            .expect("managed child metadata exists");
+            .expect("child metadata exists");
         assert!(matches!(
             child_meta.relation,
             lash_core::SessionRelation::Child { .. }

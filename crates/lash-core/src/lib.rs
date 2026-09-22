@@ -229,7 +229,6 @@ pub mod facade_support {
     pub use crate::plugin::SessionParam;
     pub use crate::plugin::SessionPlugin;
     pub use crate::plugin::SessionStateChangedContext;
-    pub use crate::plugin::SessionTurnRequest;
     pub use crate::plugin::ShortCircuitToolDirective;
     pub use crate::plugin::ToolCatalogContribution;
     pub use crate::plugin::ToolResultProjectionContext;
@@ -654,19 +653,19 @@ pub use lash_trace::{
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
+pub(crate) use plugin::PluginRuntimeDirective;
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
     AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
     PluginStateError, PluginStateStore, ProcessEngineContributionContext,
-    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
-    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginInit,
-    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
-    SwitchAgentFrameRequest, durable_identity_conflict, is_durable_identity_conflict,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService,
+    SessionLineage, SessionPluginInit, SessionPluginSource, SessionReadView, SessionRelation,
+    SessionSnapshot, SessionStartPoint, SessionStateService, SessionToolAccess,
+    SessionToolAccessError, SubagentSessionContext, SwitchAgentFrameRequest,
+    durable_identity_conflict, is_durable_identity_conflict,
 };
 pub use plugin::{OpenAgentFrameRequest, OpenAgentFrameResult};
-pub(crate) use plugin::{PluginRuntimeDirective, SessionTurnInput};
 
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,

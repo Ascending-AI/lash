@@ -1513,10 +1513,6 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         .session_lifecycle_service()
         .expect("session lifecycle");
     surface.replace(vec![curated.clone(), discovered.clone(), hidden.clone()]);
-    let parent_snapshot = manager
-        .snapshot_session(&SessionId::from("fork-parent"))
-        .await
-        .expect("parent snapshot");
     let plugin_init = manager
         .session_plugin_init(&SessionId::from("fork-parent"))
         .await
@@ -1525,9 +1521,7 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         .create_session(
             lash_core::SessionCreateRequest::child_session(
                 "fork-parent",
-                lash_core::SessionStartPoint::Snapshot {
-                    snapshot: Box::new(parent_snapshot),
-                },
+                lash_core::SessionStartPoint::Empty,
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("fork-child")
@@ -1542,14 +1536,7 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         .await
         .expect("fork child from standing parent");
 
-    let child_handle = runtime
-        .managed_sessions
-        .lock()
-        .await
-        .get(&handle.session_id)
-        .cloned()
-        .expect("managed child runtime");
-    let child = child_handle.runtime.lock().await;
+    let child = reopen_session_runtime(&runtime, &handle.session_id).await;
     let child_state = child.tool_state().expect("child tool state");
     assert!(
         !child_state
@@ -1572,7 +1559,8 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
             .is_member(),
         "child authority must not rewrite ToolId-keyed host curation"
     );
-    let names = manager
+    let child_manager = child.session_state_service().expect("child session state");
+    let names = child_manager
         .tool_catalog(&handle.session_id)
         .await
         .expect("child model-facing catalog")
@@ -1583,17 +1571,15 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     assert!(!names.contains(&curated.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&child, discovered.id).await;
-    drop(child);
 
-    manager
+    child_manager
         .set_tool_membership(&handle.session_id, &[hidden.name.to_string()], false)
         .await
         .expect("explicitly curate the authority-hidden tool out");
-    manager
+    child_manager
         .set_tool_membership(&handle.session_id, &[hidden.name.to_string()], true)
         .await
         .expect("explicitly restore host curation");
-    let child = child_handle.runtime.lock().await;
     assert!(
         child
             .tool_state()

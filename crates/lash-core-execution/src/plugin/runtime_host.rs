@@ -102,6 +102,13 @@ pub trait SessionStateService: Send + Sync {
     }
 }
 
+/// Session initialisation service (ADR 0089).
+///
+/// `create_session` is the one lifecycle verb: it durably commits a new
+/// ordinary session's initial head and returns its handle. There is no close
+/// verb — lash never deletes sessions — and no turn verb: a session runs by
+/// opening it through the ordinary open path, and a process's
+/// `SessionTurn` input is initialized and driven inside the process run.
 #[async_trait::async_trait]
 pub trait SessionLifecycleService: Send + Sync {
     async fn create_session(
@@ -110,30 +117,6 @@ pub trait SessionLifecycleService: Send + Sync {
     ) -> Result<SessionHandle, PluginError> {
         Err(PluginError::Session(
             "session creation is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn close_session(&self, _session_id: &SessionId) -> Result<(), PluginError> {
-        Err(PluginError::Session(
-            "session closing is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    /// A managed turn id must be unique across every managed turn running in
-    /// this process, not merely within its session: registering an id that is
-    /// already running is rejected with
-    /// `` turn `<id>` is already running on session `<other>` ``. Live child
-    /// usage is keyed by turn id alone, so two concurrent turns sharing an id
-    /// would cross their usage accounting. A session also runs at most one turn
-    /// at a time (`` session `<id>` already has a running turn ``). Both
-    /// registrations are released when this future completes *or is dropped*, so
-    /// a cancelled turn frees its session immediately.
-    async fn start_turn(
-        &self,
-        _request: SessionTurnRequest<'_>,
-    ) -> Result<AssembledTurn, PluginError> {
-        Err(PluginError::Session(
-            "session execution is unavailable in this runtime".to_string(),
         ))
     }
 }
@@ -254,113 +237,6 @@ pub struct DirectLlmCompletion {
     pub response: crate::LlmResponse,
     pub usage: crate::TokenUsage,
     pub llm_call: crate::LlmCallRecord,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SessionTurnInput {
-    pub session_id: SessionId,
-    pub turn_id: TurnId,
-    pub input: TurnInput,
-}
-
-pub struct SessionTurnRequest<'run> {
-    turn: SessionTurnInput,
-    scoped_effect_controller: crate::ScopedEffectController<'run>,
-}
-
-impl<'run> SessionTurnRequest<'run> {
-    /// `turn_id` is the turn's stable durable identity and must be unique across
-    /// every managed turn running in this process — process ids and other
-    /// already-unique handles are the intended sources. Reusing an id that is
-    /// still running is rejected by
-    /// [`SessionLifecycleService::start_turn`], not here, because uniqueness is
-    /// only observable against the live registry; the rejection reads
-    /// `` turn `<id>` is already running on session `<other>` ``. The turn's
-    /// registration and its live-usage entry are both released when the turn
-    /// completes or when the running turn future is dropped.
-    pub fn new(
-        session_id: impl Into<SessionId>,
-        turn_id: impl Into<TurnId>,
-        input: TurnInput,
-        scoped_effect_controller: crate::ScopedEffectController<'run>,
-    ) -> Result<Self, PluginError> {
-        let session_id = session_id.into();
-        let turn_id = turn_id.into();
-        if scoped_effect_controller.turn_id() != Some(&turn_id) {
-            return Err(PluginError::Session(format!(
-                "session turn `{turn_id}` requires an effect turn scope with the same id"
-            )));
-        }
-        if scoped_effect_controller.execution_scope().session_id() != Some(&session_id) {
-            return Err(PluginError::Session(format!(
-                "session turn `{turn_id}` requires an execution scope for session `{session_id}`"
-            )));
-        }
-        Self::from_validated_scope(session_id, turn_id, input, scoped_effect_controller)
-    }
-
-    pub fn new_process_backed(
-        session_id: impl Into<SessionId>,
-        turn_id: impl Into<TurnId>,
-        input: TurnInput,
-        process_id: &crate::ProcessId,
-        scoped_effect_controller: crate::ScopedEffectController<'run>,
-    ) -> Result<Self, PluginError> {
-        let session_id = session_id.into();
-        let turn_id = turn_id.into();
-        let required_scope = crate::ExecutionScope::process(process_id);
-        if scoped_effect_controller.execution_scope() != &required_scope {
-            return Err(PluginError::Session(format!(
-                "process-backed session turn `{turn_id}` requires execution scope {required_scope:?}"
-            )));
-        }
-        Self::from_validated_scope(session_id, turn_id, input, scoped_effect_controller)
-    }
-
-    fn from_validated_scope(
-        session_id: SessionId,
-        turn_id: TurnId,
-        mut input: TurnInput,
-        scoped_effect_controller: crate::ScopedEffectController<'run>,
-    ) -> Result<Self, PluginError> {
-        if turn_id.trim().is_empty() {
-            return Err(PluginError::Session(
-                "session turns require a non-empty stable turn id".to_string(),
-            ));
-        }
-        if let Some(input_turn_id) = input.trace_turn_id.as_deref()
-            && input_turn_id != turn_id
-        {
-            return Err(PluginError::Session(format!(
-                "input trace_turn_id `{input_turn_id}` does not match turn id `{turn_id}`"
-            )));
-        }
-        input.trace_turn_id = Some(turn_id.clone());
-        Ok(Self {
-            turn: SessionTurnInput {
-                session_id,
-                turn_id,
-                input,
-            },
-            scoped_effect_controller,
-        })
-    }
-
-    pub fn session_id(&self) -> &str {
-        &self.turn.session_id
-    }
-
-    pub fn turn_id(&self) -> &TurnId {
-        &self.turn.turn_id
-    }
-
-    pub fn input(&self) -> &TurnInput {
-        &self.turn.input
-    }
-
-    pub fn into_parts(self) -> (SessionTurnInput, crate::ScopedEffectController<'run>) {
-        (self.turn, self.scoped_effect_controller)
-    }
 }
 
 /// A plugin-authored append onto a session's history graph.

@@ -162,7 +162,7 @@ impl LashRuntime {
         use futures_util::FutureExt;
 
         // Keep the guard outside the unwinding body. Both streamed facade turns
-        // and managed child turns pass here, so their task JoinError cannot
+        // and process-spawned child turns pass here, so their task JoinError cannot
         // surface before owner-side release has finished. Cancellation still
         // drops the guard and uses its best-effort cleanup / TTL fallback.
         let mut lease = None;

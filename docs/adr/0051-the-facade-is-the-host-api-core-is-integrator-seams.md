@@ -158,7 +158,6 @@ These plugin-namespace items are **integrator seams and stay core-only**:
   `TurnFinalization`, `CheckpointApplication`, `PluginAbort`. These are how the
   runtime drives the registered hooks, not what a hook receives.
 - **Plugin-session internals**: `PluginOperationRegistrations`,
-  `SessionContextOverlay`,
   `SessionPluginSource`, `SessionRelation`, `AgentFrameAssignment`,
   `AgentFrameId`, `AgentFrameReason`, `AgentFrameRecord`,
   `OpenAgentFrameRequest`, `OpenAgentFrameResult`,

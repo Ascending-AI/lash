@@ -474,7 +474,7 @@ pub mod plugins {
         PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
         ProcessEngineRunContext, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
         ProtocolDriverState, ProtocolTurnExtension, ProtocolTurnOptionsError, SegmentHandover,
-        SessionContextOverlay, SessionPluginSource, TurnDriverPreamble,
+        SessionPluginSource, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends

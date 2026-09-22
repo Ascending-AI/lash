@@ -15,13 +15,9 @@ impl PluginSession {
         &self,
         session_id: &SessionId,
     ) -> Result<ResolvedToolSurface, PluginError> {
-        let registry = Arc::new(
-            self.tool_registry
-                .pin_session_surface(true, Vec::new())
-                .map_err(|error| {
-                    PluginError::Session(format!("failed to pin direct tool surface: {error}"))
-                })?,
-        );
+        let registry = Arc::new(self.tool_registry.pin_session_surface(Vec::new()).map_err(
+            |error| PluginError::Session(format!("failed to pin direct tool surface: {error}")),
+        )?);
         let provider = Arc::clone(&registry) as Arc<dyn crate::ToolProvider>;
         let tools = provider.tool_manifests();
         let contract_provider = Arc::clone(&provider);

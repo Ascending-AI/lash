@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Ratified on FIG-2872.
+Accepted. Ratified on FIG-2872. Completed on FIG-3378: the second running
+model described in the Context no longer exists in code.
 
 ## Context
 
@@ -39,10 +40,19 @@ cannot provide a store, creation fails before the session becomes executable.
 The resulting handle owns the new session's binding; an existing handle never
 changes its session id or binding to point at the result.
 
-The managed-session registry remains an implementation detail for resident
-runtimes, not an admission boundary or a second kind of session. APIs may
-create, address, or close related sessions, but they must not swap a different
-runtime identity underneath an opened facade handle.
+The second running model is gone. The managed-session registry, managed-turn
+machinery, and managed lifecycle were deleted; every executing session is an
+ordinary session driven through the shared session/turn path. Session creation
+is named session initialisation: it materializes and commits the session from
+the create request — relation, policy, tool access, subagent context, initial
+state, observer intents, and plugin configuration — and it may reopen an
+already-committed durable session when a process run is redelivered. It may
+not bypass store admission, reuse the parent's exact store handle, publish a
+storeless executable handle, keep a registry or cache of live runtimes for the
+sessions it creates, or swap a different runtime identity underneath an opened
+facade handle. A runtime minted to run a process child turn is owned by that
+process run and dropped when the run ends; the durable session row is the
+continuity a redelivery reopens.
 
 ADR 0011 remains orthogonal. A runtime instantiated solely to execute an
 already-admitted Runtime Process is reconstructed from that process's captured
@@ -70,5 +80,12 @@ input, but canonical admission and binding are shared by every facade session.
   `ChildSessionAdmin`) is removed (FIG-3373): a host-run related session is an
   ordinary session opened with `SessionBuilder::parent`, its spend records on
   its own ledger, and rolling related sessions together is host policy.
+- Session initialisation stays distinct from catalog `fork_at` (FIG-3377):
+  `fork_at` materializes durable fork lineage and retained-frame content under
+  its own failure semantics and carries no live-parent plugin-init payload.
+- A process-spawned child runtime is run-scoped (FIG-3424): owned by the
+  process run, dropped when the run ends in success, failure, or cancellation,
+  and reopenable afterwards only through the ordinary open path against the
+  durable session row.
 - Process reconstruction remains governed by ADR 0011 only where no
   host-addressable facade session is being created.

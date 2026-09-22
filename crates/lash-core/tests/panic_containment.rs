@@ -10,9 +10,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use lash_core::facade_support::{
-    InMemorySessionStoreFactory, LashRuntime, LlmTransportError, NativeRuntimeEffectController,
-    Provider, ProviderComponents, ProviderHandle, ProviderOptions, SessionTurnRequest,
-    SingleProviderResolver, TurnFinish, TurnOutcome,
+    LashRuntime, LlmTransportError, NativeRuntimeEffectController, Provider, ProviderComponents,
+    ProviderHandle, ProviderOptions, SingleProviderResolver, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, PluginSpec,
@@ -25,11 +24,10 @@ use lash_core::sansio::{
 use lash_core::{
     AdmittedScope, AwaitEventResolver, CheckpointKind, DriverAction, DriverContextView,
     GenerationOptions, HostTurnProtocol, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
-    ModelSpec, PluginOptions, ProtocolBuildInput, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, ScopedEffectController, SessionCreateRequest, SessionPluginSource,
-    SessionPolicy, SessionStartPoint, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolContract,
-    ToolDefinition, ToolFailureClass, ToolManifest, ToolProvider, ToolRetryStatus,
+    ModelSpec, ProtocolBuildInput, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ScopedEffectController, SessionPolicy, ToolAttemptOutcome, ToolCall, ToolCallOutcome,
+    ToolContract, ToolDefinition, ToolFailureClass, ToolManifest, ToolProvider, ToolRetryStatus,
     TurnDriverConfig, TurnDriverPreamble, TurnInput,
 };
 
@@ -615,98 +613,6 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         .await
         .expect("next turn");
     assert_eq!(next.assistant_output.safe_text, "next turn works");
-}
-
-#[tokio::test]
-async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
-    let _mode = PANIC_MODE.lock().await;
-    lash_core::panic_containment::set_loud(false);
-    let provider = ScriptedProvider::new(vec![text_response("parent still alive")]).into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
-    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
-    let panic_once = Arc::new(AtomicBool::new(true));
-    let plugin = Arc::new(StaticPluginFactory::new(
-        "child-panic-test",
-        PluginSpec::new().with_prompt_contributor(Arc::new(move |_context| {
-            let panic_once = Arc::clone(&panic_once);
-            Box::pin(async move {
-                if panic_once.swap(false, Ordering::SeqCst) {
-                    panic!("child turn payload only");
-                }
-                Ok(Vec::new())
-            })
-        })),
-    ));
-    let mut runtime = Box::pin(
-        LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            test_runtime_owner(),
-        )
-        .with_session_id("parent-session")
-        .with_policy(policy("scripted-panic-containment"))
-        .with_plugin_factories(vec![protocol_factory(), plugin])
-        .with_runtime_host(host)
-        .with_session_store_factory(Arc::new(InMemorySessionStoreFactory::new()))
-        .build(),
-    )
-    .await
-    .expect("runtime");
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-    let plugin_init = runtime
-        .session_state_service()
-        .expect("session state")
-        .session_plugin_init(&SessionId::from("parent-session"))
-        .await
-        .expect("plugin init");
-    let child = lifecycle
-        .create_session(
-            SessionCreateRequest::child_session(
-                "parent-session",
-                SessionStartPoint::Empty,
-                PluginOptions::default(),
-            )
-            .with_session_id("panicking-child")
-            .with_plugin_source(SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
-        )
-        .await
-        .expect("create child");
-    let error = lifecycle
-        .start_turn(
-            SessionTurnRequest::new(
-                &child.session_id,
-                "panicking-child-turn",
-                TurnInput::text("panic"),
-                turn_scope(&child.session_id, &TurnId::from("panicking-child-turn")),
-            )
-            .expect("child turn request"),
-        )
-        .await
-        .expect_err("typed child failure");
-    assert!(
-        error
-            .to_string()
-            .contains("child_turn_panicked: child turn payload only")
-    );
-
-    let parent = runtime
-        .run_turn_assembled(
-            TurnInput::text("continue parent"),
-            CancellationToken::new(),
-            turn_scope(
-                &SessionId::from("parent-session"),
-                &TurnId::from("parent-after-child-panic"),
-            ),
-        )
-        .await
-        .expect("parent survives child panic");
-    assert_eq!(parent.assistant_output.safe_text, "parent still alive");
 }
 
 #[tokio::test]

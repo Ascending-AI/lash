@@ -407,10 +407,6 @@ mod tests {
         ) -> Result<SessionHandle, PluginError> {
             Err(PluginError::Session("not used".to_string()))
         }
-
-        async fn close_session(&self, _session_id: &SessionId) -> Result<(), PluginError> {
-            Ok(())
-        }
     }
 
     #[async_trait]

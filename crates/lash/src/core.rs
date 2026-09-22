@@ -1044,7 +1044,7 @@ impl LashCoreBuilder {
     /// never refuse.
     ///
     /// The choice is carried on the core's host config, so runtime-initiated
-    /// constructions (managed children, the queued-work driver, resume) honour
+    /// constructions (process-spawned children, the queued-work driver, resume) honour
     /// it too. One open may override it with
     /// [`SessionBuilder::tool_source_policy`](crate::SessionBuilder::tool_source_policy).
     pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {

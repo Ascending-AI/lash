@@ -1096,7 +1096,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// Admit `binding.session_id` to this store and bind this handle to it.
     ///
     /// This is the authoritative durable admission seam for pre-opened stores,
-    /// managed child sessions, and parked resume. `SessionStoreFactory::create_store`
+    /// session-initialisation children, and parked resume. `SessionStoreFactory::create_store`
     /// is a convenience that must produce the same admission decision.
     ///
     /// Implementations must atomically:

@@ -204,7 +204,6 @@ pub(crate) struct WorkbenchContextObservation {
     pub(crate) message_count: usize,
     pub(crate) contribution_count: usize,
     pub(crate) tool_provider_count: usize,
-    pub(crate) include_base_tools: bool,
     pub(crate) committed_message_count: usize,
     pub(crate) max_context_tokens: Option<usize>,
     pub(crate) last_prompt_context_tokens: Option<usize>,
@@ -233,7 +232,6 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
             message_count: input.messages.len(),
             contribution_count: input.prompt_contributions.len(),
             tool_provider_count: input.tool_providers.len(),
-            include_base_tools: input.include_base_tools,
             committed_message_count: ctx.state.messages().len(),
             max_context_tokens: ctx.max_context_tokens,
             last_prompt_context_tokens: ctx
@@ -249,14 +247,8 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
                 lash::prompt::PromptSlot::Environment,
                 "Context budget",
                 format!(
-                    "prepared {} message(s) from {} committed; base tools {}",
-                    observation.message_count,
-                    observation.committed_message_count,
-                    if observation.include_base_tools {
-                        "on"
-                    } else {
-                        "off"
-                    }
+                    "prepared {} message(s) from {} committed",
+                    observation.message_count, observation.committed_message_count,
                 ),
             )
             .with_priority(-100),

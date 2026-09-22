@@ -128,7 +128,7 @@ impl RuntimeSessionAssembly {
         }
     }
 
-    fn resumed(
+    pub(in crate::runtime) fn resumed(
         state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
@@ -226,7 +226,7 @@ impl LashRuntime {
                 Arc::new(crate::attachments::PersistenceManifestAdapter(store));
             // Rebind a fresh facade over the flat backend. Attachment ownership
             // is recorded durably on each intent; no live facade state crosses
-            // rebuilds or managed-child materialization.
+            // rebuilds or child-session initialisation.
             let previous_attachment_store = Arc::clone(&host.core.durability.attachment_store);
             let backend = Arc::clone(previous_attachment_store.backend());
             let scoped = Arc::new(
@@ -332,8 +332,6 @@ impl LashRuntime {
             state,
             runtime_lease_owner,
             runtime_lease_executor_id,
-            managed_sessions: Arc::new(Mutex::new(HashMap::new())),
-            managed_turns: Arc::new(StdMutex::new(HashMap::new())),
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
             unreported_usage_attempts: outstanding_unreported_attempts,
             process_sync_needed: Arc::new(AtomicBool::new(false)),

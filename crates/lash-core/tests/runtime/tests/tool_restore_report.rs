@@ -997,14 +997,14 @@ async fn require_refuses_a_resume_that_lost_a_member() {
     );
 }
 
-/// A managed child that inherits a parent snapshot naming a tool the live
-/// surface no longer advertises is refused under Require, at creation.
+/// A process-spawned child that inherits a parent snapshot naming a tool the
+/// live surface no longer advertises is refused under Require, at creation.
 ///
 /// The child is the construction the FIG-3367 inventory calls out as inheriting
-/// a snapshot (Current, Existing and Snapshot start points do; Empty does not),
-/// so the policy has to reach it below the facade.
+/// a snapshot (Current and Existing start points do; Empty does not), so the
+/// policy has to reach it below the facade.
 #[tokio::test]
-async fn require_refuses_a_managed_child_whose_inherited_snapshot_lost_a_member() {
+async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member() {
     let surface = MutableTools::new(vec![(ALPHA_ID, ALPHA_NAME)]);
     let tools: Arc<dyn lash_core::ToolProvider> =
         Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
