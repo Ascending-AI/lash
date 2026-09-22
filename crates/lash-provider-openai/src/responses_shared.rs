@@ -24,7 +24,7 @@
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
-use crate::schema::{classify_openai_error, responses_error_retry_verdict};
+use crate::schema::{classify_openai_error, sse_error_event_retry_verdict};
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest,
