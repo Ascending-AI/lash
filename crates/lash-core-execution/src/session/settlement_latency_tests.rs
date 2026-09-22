@@ -243,7 +243,13 @@ fn probe_context_with(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle::Shared {
+            controller: controller.clone(),
+            admitted: crate::AdmittedScope::turn(
+                SessionId::from("session"),
+                crate::TurnId::from("test-turn"),
+            ),
+        },
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -263,15 +269,30 @@ fn probe_context_with(
         clock: Arc::new(crate::SystemClock),
         tool_registry: None,
     };
-    crate::RuntimeExecutionContext::new(
+    let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+    let dispatch = Arc::new(dispatch);
+    let host: Arc<dyn crate::EffectHost> = Arc::new(
+        crate::runtime::NativeEffectHost::with_native_controller(controller),
+    );
+    let wiring = crate::testing::wire_test_tool_children(&dispatch, &process_env_store, &host);
+    let mut context = crate::RuntimeExecutionContext::new(
         SessionId::from("session"),
-        Arc::new(dispatch),
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        dispatch,
+        process_env_store,
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         None,
         crate::TurnContext::default(),
-    )
+    );
+    context = context.with_tool_child_host(host);
+    if let Some((guard, issuer)) = wiring {
+        context = context.with_live_opener_guard(Arc::new(guard));
+        if let Some(issuer) = issuer {
+            context = context.with_tool_child_completion_issuer(issuer);
+        }
+    }
+    context
 }
 
 fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
@@ -410,7 +431,12 @@ async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
     assert_eq!(
         replies.settlement_order,
         vec![1, 0],
-        "the fast rejection settled first, so it leads the order"
+        "the fast rejection settled first, so it leads the order; replies: {:?}",
+        replies
+            .replies
+            .iter()
+            .map(|reply| reply.output.value_for_projection())
+            .collect::<Vec<_>>()
     );
     for reply in &replies.replies {
         assert_eq!(

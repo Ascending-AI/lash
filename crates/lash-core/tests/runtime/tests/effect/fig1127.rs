@@ -82,13 +82,13 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
                 .group_child_drain_blocked(group_key, commit_seq)
                 .await
         }
-    }
 
-    fn register_group_executors(
-        &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.register_group_executors(executors)
+        fn register_group_executors(
+            &self,
+            executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+            self.native.register_group_executors(executors)
+        }
     }
 
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());

@@ -80,6 +80,13 @@ pub struct RuntimeExecutionContext<'run> {
     /// would route children to a dead opener.
     #[cfg(any(test, feature = "testing"))]
     live_opener_guard: Option<Arc<crate::runtime::effect::LiveOpenerGuard>>,
+    /// Keeps the effect host that routed this context's tool children alive:
+    /// `ToolChildHost` holds only a `Weak` back to its host (a strong one
+    /// would make host → controller → resolver a cycle), so a test context
+    /// whose host was dropped after wiring would find "the effect host that
+    /// routed this tool child is gone" on every child.
+    #[cfg(any(test, feature = "testing"))]
+    tool_child_host: Option<Arc<dyn crate::EffectHost>>,
 }
 
 #[derive(Clone)]
@@ -445,6 +452,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             tool_child_completion_issuer: None,
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: None,
+            #[cfg(any(test, feature = "testing"))]
+            tool_child_host: None,
         }
     }
 
@@ -477,6 +486,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             tool_child_completion_issuer: self.tool_child_completion_issuer.clone(),
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: self.live_opener_guard.clone(),
+            #[cfg(any(test, feature = "testing"))]
+            tool_child_host: self.tool_child_host.clone(),
         })
     }
 
@@ -680,6 +691,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         guard: Arc<crate::runtime::effect::LiveOpenerGuard>,
     ) -> Self {
         self.live_opener_guard = Some(guard);
+        self
+    }
+
+    /// Retains the effect host this context's tool children route through —
+    /// the `ToolChildHost` resolver holds it weakly (test and conformance
+    /// contexts only).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_tool_child_host(mut self, host: Arc<dyn crate::EffectHost>) -> Self {
+        self.tool_child_host = Some(host);
         self
     }
 
