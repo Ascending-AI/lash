@@ -239,17 +239,14 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
                     ))
                     .await
                     .expect("the group opens under the live opener");
-                eprintln!("L1-crash: group open");
                 // Past the §4 commit and inside the drain: the first intent
                 // write is parked on the sink.
                 sink.await_blocked(&call_0).await;
-                eprintln!("L1-crash: blocked");
                 scoped
                     .controller()
                     .close_effect_group(handle, crate::LoserPolicy::Cancel)
                     .await
                     .expect("the caller closes under Cancel");
-                eprintln!("L1-crash: closed");
                 // Returning drops the runtime with the drain still parked.
             })
         }
@@ -273,9 +270,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
     .await;
     let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
     install_child_host(&successor.host, &env_store);
-    eprintln!("L1: successor world");
     until_claims_lapse(&successor, &group_key).await;
-    eprintln!("L1: claims lapsed");
     let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
     let sink = Arc::new(IntentSink::default());
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
@@ -298,7 +293,6 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         .drain_group(&group_key, &tokio_util::sync::CancellationToken::new())
         .await
         .expect("a drain pass over the journaled group runs");
-    eprintln!("L1: drained");
     assert!(
         report.children.iter().all(|child| matches!(
             child.outcome,
@@ -338,9 +332,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         ))
         .await
         .expect("the identical group reopens on the successor");
-    eprintln!("L1: reopened");
     let settlement = next_settlement(&scoped, &mut handle, 0).await;
-    eprintln!("L1: settlement served");
     assert_eq!(settlement.position, 0);
     let Ok(crate::RuntimeEffectOutcome::ToolInvocation {
         outcome,

@@ -193,34 +193,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         &self,
         request: &EffectCancelRequest,
     ) -> Result<EffectCancelOutcome, RuntimeEffectControllerError> {
-        eprintln!(
-            "DIAG decide_cancel: begin {} (pool size={}, idle={})",
-            request.replay_key,
-            self.pool.size(),
-            self.pool.num_idle()
-        );
-        let mut tx =
-            match tokio::time::timeout(std::time::Duration::from_secs(15), self.pool.begin()).await
-            {
-                Err(_) => {
-                    eprintln!(
-                        "DIAG decide_cancel: pool.begin TIMED OUT size={} idle={}",
-                        self.pool.size(),
-                        self.pool.num_idle()
-                    );
-                    std::future::pending::<()>().await;
-                    unreachable!()
-                }
-                Ok(r) => r.map_err(effect_store_error)?,
-            };
-        eprintln!("DIAG decide_cancel: tx acquired");
-        match select_child_commit_state(&mut tx, &request.group_key, &request.replay_key).await {
-            Err(e) => {
-                eprintln!("DIAG decide_cancel: select err {e}");
-                return Err(e);
-            }
-            Ok(v) => eprintln!("DIAG decide_cancel: commit_state {v:?}"),
-        }
+        let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
         match select_child_commit_state(&mut tx, &request.group_key, &request.replay_key).await? {
             Some(EffectCommitState::Committed) | Some(EffectCommitState::Drained) => {
                 let commit_seq =

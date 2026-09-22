@@ -795,7 +795,6 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         requested: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.group_executors()?;
-        eprintln!("DIAG close: enter {}", handle.group_key());
         let Some(state) = self.groups.get(handle.group_key()) else {
             return Ok(());
         };
@@ -809,7 +808,6 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             inner.closed = true;
             matches!(effective, LoserPolicy::Cancel)
         };
-        eprintln!("DIAG close: resolved cancelled={cancelled}");
         if cancelled {
             let group_key = handle.group_key();
             for (position, child) in state.children.iter().enumerate() {
@@ -827,14 +825,11 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                         envelope_hash: child.envelope_hash.clone(),
                     })
                     .await?;
-                eprintln!("DIAG close: decide_cancel done for {position}");
             }
             state.cancel.cancel();
         }
         state.settled.notify_waiters();
-        eprintln!("DIAG close: reaping");
         self.reap_if_complete(handle.group_key(), &state).await;
-        eprintln!("DIAG close: done");
         Ok(())
     }
 }
