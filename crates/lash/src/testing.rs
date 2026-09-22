@@ -16,6 +16,11 @@ pub use lash_core::testing::run_tool;
 /// Runs one granted tool call with mock contexts, so a provider's granted
 /// branch is exercisable outside a live turn.
 pub use lash_core::testing::run_tool_granted;
+/// A standalone [`ToolRegistry`](crate::tools::ToolRegistry) plus the
+/// [`ToolSourceHandle`](crate::tools::ToolSourceHandle) `provider` registered
+/// under — the same live-source route `session.admin().tools().add_provider`
+/// takes, for host tests that exercise source routing without a live session.
+pub use lash_core::testing::tool_registry_with_live_provider;
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_tool_context, mock_tool_context_with_execution_binding, test_code_protocol_factories,
