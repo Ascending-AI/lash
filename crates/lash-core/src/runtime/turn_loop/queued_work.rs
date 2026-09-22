@@ -333,8 +333,7 @@ impl LashRuntime {
                 admission.terminal,
                 Some(crate::store::QueuedRunTerminal::Failed { .. })
             ) {
-                self.end_queue_drain(&admission.scope, &lease, &store, false)
-                    .await;
+                Box::pin(self.end_queue_drain(&admission.scope, &lease, &store, false)).await;
             }
             lease
                 .release_if_live()
@@ -516,8 +515,7 @@ impl LashRuntime {
                 )
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
-            self.end_queue_drain(&selection.admission.scope, &lease, &store, false)
-                .await;
+            Box::pin(self.end_queue_drain(&selection.admission.scope, &lease, &store, false)).await;
             lease
                 .release_if_live()
                 .await
@@ -570,8 +568,7 @@ impl LashRuntime {
         if result.is_ok()
             && let Some(held) = lease.as_ref()
         {
-            self.end_queue_drain(&admission.scope, held, &store, true)
-                .await;
+            Box::pin(self.end_queue_drain(&admission.scope, held, &store, true)).await;
         }
         let result = self
             .settle_session_execution_lease(lease.as_ref(), result)
