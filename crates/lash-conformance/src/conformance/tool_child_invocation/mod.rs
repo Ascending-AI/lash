@@ -952,13 +952,17 @@ fn register_opener_with_processes(
         .expect("the opener's scope and incarnation agree");
     let dispatch =
         opener_dispatch_with_processes(host, &admitted, provider, processes, process_env_store);
+    let lent_controller = host
+        .scoped_static(admitted)
+        .expect("the host lends a scoped controller")
+        .expect("this host hands out owned scoped controllers");
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
     let context = crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(
         &dispatch,
+        lent_controller,
         event_tx,
         cooperative,
-    )
-    .expect("the law's dispatch context is 'static");
+    );
     let (guard, ended) = installed.openers().register(opener, context);
     crate::task::spawn(async move {
         tokio::select! {
