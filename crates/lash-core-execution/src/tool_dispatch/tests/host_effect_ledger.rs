@@ -180,7 +180,7 @@ impl HostEffectLedger {
             .values_mut()
             .filter(|row| row.seq >= seq_floor && row.stage == Stage::Applied)
             .collect();
-        targets.sort_by(|a, b| b.seq.cmp(&a.seq));
+        targets.sort_by_key(|row| std::cmp::Reverse(row.seq));
         let mut undone = 0;
         for row in targets {
             if undone == budget {

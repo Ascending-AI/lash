@@ -214,6 +214,7 @@ pub struct ToolResultHookContext {
 }
 
 impl ToolResultHookContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         session_id: SessionId,
         call_id: String,

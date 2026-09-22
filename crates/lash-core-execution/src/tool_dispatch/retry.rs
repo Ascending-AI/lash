@@ -271,6 +271,7 @@ pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOu
 /// from the journaled park rather than read out of it — the pending row does
 /// not carry it — so the after-tool observation still names the call it
 /// settles.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn settle_completed_pending_tool_call(
     context: &ToolDispatchContext<'_>,
     call_id: &str,
