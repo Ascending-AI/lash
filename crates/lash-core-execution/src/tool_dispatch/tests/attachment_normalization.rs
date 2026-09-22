@@ -389,7 +389,7 @@ async fn after_tool_attachment_replacement_is_normalized_before_orchestrating_re
     let call = prepared(&definition, "after-hook-orchestrating-call");
     let tool_context = tool_context_for_prepared(&context, &call);
 
-    let outcome = execute_orchestrating_tool(&context, call, tool_context).await;
+    let outcome = Box::pin(execute_orchestrating_tool(&context, call, tool_context)).await;
 
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;
@@ -527,7 +527,7 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
     let call = prepared(&definition, "orchestrating-attachment-call");
     let tool_context = tool_context_for_prepared(&context, &call);
 
-    let outcome = execute_orchestrating_tool(&context, call, tool_context).await;
+    let outcome = Box::pin(execute_orchestrating_tool(&context, call, tool_context)).await;
 
     assert_single_stored_attachment(&outcome.record.output);
     let entries = persistence.list_uncommitted(u64::MAX).await.unwrap();

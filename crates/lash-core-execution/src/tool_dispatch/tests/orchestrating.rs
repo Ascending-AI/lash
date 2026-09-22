@@ -31,8 +31,12 @@ async fn resumed_orchestrating_dispatch_hidden_from_catalog_returns_tool_unavail
     let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
         .build();
-    let outcome =
-        crate::tool_dispatch::execute_orchestrating_tool(&context, prepared, tool_context).await;
+    let outcome = Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
+        &context,
+        prepared,
+        tool_context,
+    ))
+    .await;
     assert_eq!(
         outcome.record.call_id.as_deref(),
         Some("orchestrating:batch:resumed")
