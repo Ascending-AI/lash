@@ -47,12 +47,10 @@ gate`: the `tee` runs outside the gate body, so set it to an absolute path the
 caller owns.
 
 ```bash
-kiln gate lash "$LASH_EFFECT_LEDGER_FORK" -- bash -lc '
-  . ./env.sh
-  cargo nextest run --locked -p lash-internal-core-execution -E "
-    test(~host_effect_ledger)
-  "
-' | tee "$LASH_EFFECT_LEDGER_EVIDENCE_DIR/host-effect-ledger.log"
+kiln gate lash "$LASH_EFFECT_LEDGER_FORK" -- \
+  kiln test //crates/lash-core-execution:lash-core-execution__unit_test --test_output=all \
+  --test_arg=host_effect_ledger \
+  | tee "$LASH_EFFECT_LEDGER_EVIDENCE_DIR/host-effect-ledger.log"
 ```
 
 Expect exactly seven tests and `7 passed; 0 failed`. What each proves:
@@ -89,7 +87,7 @@ exits `0` having proved nothing, so require `7 passed` in the log.
 
 ## Abort and score
 
-Abort on a nextest count other than `7 passed; 0 failed`, a provider or
+Abort on a test count other than `7 passed; 0 failed`, a provider or
 network call in the log, or a test that passes while the ledger rows it
 prints contradict the claim its name makes. This rehearsal drives in-memory
 providers only; a run that needed a real token is a harness defect, not a

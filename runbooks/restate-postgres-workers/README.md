@@ -71,8 +71,9 @@ protocol seam, where it can splice the first worker incarnation's exact command
 journal into a fresh handler incarnation deterministically:
 
 ```sh
-cargo test -p lash-internal-restate \
-  fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once -- --nocapture
+kiln test //crates/lash-restate:lash-restate__unit_test \
+  --test_arg=fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once \
+  --test_arg=--nocapture
 ```
 
 That test parks a journaled pending tool on its completion key, discards the

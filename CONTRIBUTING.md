@@ -70,9 +70,12 @@ local run reading the service-shaped cases it did **not** cover, each with the
 exact recipe. See
 [`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md).
 
-The remaining Cargo-owned set comprises Restate and `lash-runtime` unit tests;
-nested and heavy suites; trybuild; TypeScript and frontend assets; feature
-matrices; Clippy; and formatting.
+Cargo remains for tests that invoke nested Cargo, trybuild fixtures, service
+gates that need local infrastructure, nightly fuzzing, publishing, and judged
+or release profiles. Use `kiln build //:feature_lanes`, `kiln test
+//:feature_lane_tests`, and `kiln clippy //:feature_lane_clippy` for feature
+coverage. Use `kiln clippy` for workspace linting and `kiln fmt -- --check`
+for formatting.
 
 Install the repository's commit hook in each regular checkout with
 `prek install --hook-type pre-commit`; new warm forks install it automatically.

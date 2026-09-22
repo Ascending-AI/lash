@@ -118,7 +118,8 @@ loop. The docs walk through them at <https://lash.run/examples.html>.
 
 ```bash
 # Durable chat app: SQLite or Postgres, RLM, app-owned tools, Restate turns
-OPENROUTER_API_KEY=sk-or-... cargo run -p agent-service        # then open http://127.0.0.1:3000
+OPENROUTER_API_KEY=sk-or-... AGENT_SERVICE_DATA_DIR="$PWD/.agent-service" \
+  kiln run //examples/agent-service:agent-service  # then open http://127.0.0.1:3000
 
 # Adds durable background work: durable processes, subagents, cron triggers (Restate required)
 OPENROUTER_API_KEY=sk-or-... just agent-workbench 3000         # then open http://127.0.0.1:3000

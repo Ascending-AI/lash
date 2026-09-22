@@ -156,9 +156,8 @@ source behind the app's projection. Cover those host-only outcomes with the dete
 embedding acceptance in this same example package:
 
 ```bash
-cargo test -p agent-service \
-  host_can_rewind_from_a_retained_anchor_after_deleting_its_source \
-  --all-targets
+kiln test --test_output=all //examples/agent-service:agent-service__unit_test \
+  --test_arg=host_can_rewind_from_a_retained_anchor_after_deleting_its_source
 ```
 
 Save the command's complete output as `07-host-fork-rewind-contract.txt` and require exit 0

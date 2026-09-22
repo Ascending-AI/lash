@@ -148,7 +148,7 @@ bound, not a discovered runtime invariant violation.
 
 ## Implemented DST substance
 
-Each item below is landed and gated by `cargo test -p lash-sim`:
+Each item below is landed and gated by `kiln test //crates/lash-sim:all`:
 
 - The scheduler actually interleaves work: provider turns are spawned as live
   futures whose scripted-transport SSE chunks are released by

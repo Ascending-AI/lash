@@ -13,7 +13,7 @@ visible wording and final state are objective gates.
 
 **Deterministic companion.** `just agent-workbench-restate-e2e` asserts the auth terminal,
 same-session recovery, retry attempt reset, and single-copy live/replay observations.
-`cargo nextest run -p lash-internal-core-llm --lib -E 'test(charge_safety)'` asserts the
+`kiln test --test_output=all //crates/lash-core-llm:lash-core-llm__unit_test --test_arg=charge_safety` asserts the
 paid-output refusal and the charge-safety decision surface — six tests; require that count,
 because a name filter that matches nothing still exits 0. (The previously named
 `retryable_mid_stream_failure_preserves_paid_output_without_retry` does not exist, and the

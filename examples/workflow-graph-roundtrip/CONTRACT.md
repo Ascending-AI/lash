@@ -5,8 +5,7 @@ demo address is selected explicitly with
 `WORKFLOW_GRAPH_ADDR=127.0.0.1:3057`; any other `IP:PORT` is also accepted.
 
 ```sh
-CARGO_TARGET_DIR=/tmp/lash-workflow-graph \
-  cargo run -p workflow-graph-roundtrip
+just workflow-graph-roundtrip
 ```
 
 All JSON property names are camelCase. CORS permits `GET`, `POST`, and

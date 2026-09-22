@@ -9,17 +9,20 @@ projection, graph validation/rendering, and execution-site correlation. Canvas
 layout is deliberately frontend-owned and never appears in source or API graph
 documents.
 
-Run it from the repository root:
+Run the frontend and backend from the repository root:
 
 ```sh
-CARGO_TARGET_DIR=/tmp/lash-workflow-graph \
-  cargo run -p workflow-graph-roundtrip
+just workflow-graph-roundtrip
 ```
 
 The code default is `http://127.0.0.1:3031`. The conventional demo uses
 `WORKFLOW_GRAPH_ADDR=127.0.0.1:3057`; set that variable to any available
 `IP:PORT`. See [CONTRACT.md](CONTRACT.md) for the complete API used by the
 frontend.
+
+The recipe builds the frontend and starts the judged backend with its
+repository-relative frontend lookup. For the local integration check, run
+`just workflow-graph-integration-verify`.
 
 The server serves files from `frontend/dist/` (or directly from `frontend/`)
 when present. A frontend dev server

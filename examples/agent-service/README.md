@@ -7,7 +7,8 @@ Restate-backed turns.
 Run it:
 
 ```bash
-OPENROUTER_API_KEY=... cargo run -p agent-service
+OPENROUTER_API_KEY=... AGENT_SERVICE_DATA_DIR="$PWD/.agent-service" \
+  kiln run //examples/agent-service:agent-service
 ```
 
 ## Raw turn activities
@@ -33,7 +34,7 @@ the Restate section below.
 Validate the example build and unit tests:
 
 ```bash
-cargo test -p agent-service --all-targets
+kiln test //examples/agent-service:agent-service__unit_test //examples/agent-service:fresh_boot__test
 ```
 
 ## Retention

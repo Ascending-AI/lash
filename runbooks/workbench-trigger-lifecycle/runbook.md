@@ -91,9 +91,9 @@ and work registry are.
 - The account compose form posts mail to `/api/accounts/{slug}/messages` as
   `{"title":"<title>","text":"<text>"}`; both `title` and `text` are required.
 - Before judged execution, the deterministic companion should be green:
-  `cargo test -p agent-workbench button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn`.
+  `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn`.
 - Also capture the deferred-link replay companion before judged execution:
-  `cargo test --workspace --all-targets --locked --no-fail-fast deferred`. Save the
+  `kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test --test_arg=deferred`. Save the
   complete output as `00-deferred-link-replay.txt`. This companion is operator-run and
   deterministic: the judge only inspects its artifact and does not invoke a model tool,
   provider, account, subscription, process, or other host-affecting operation.
@@ -117,7 +117,7 @@ The deferred-link companion must show all of these named cases green:
   cannot silently acquire replacement authority.
 
 Also capture the dedicated deferred-trigger-definition companion:
-`cargo test --workspace --all-targets --locked deferred_trigger -- --nocapture`. Save its
+`kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test --test_arg=deferred_trigger --test_arg=--nocapture`. Save its
 complete output as `00-deferred-trigger-definition.txt`. This is a deterministic,
 operator-run link test: it reads definitions from in-memory test providers but does not
 activate a provider, create a subscription, execute a provider route, call a model, or
