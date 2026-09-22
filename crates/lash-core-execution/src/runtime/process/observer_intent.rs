@@ -1,10 +1,7 @@
 use super::{ProcessObserverBy, ProcessRegistry};
 use crate::SessionId;
 use crate::store::{RuntimePersistence, StoreError};
-use crate::{
-    SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
-    SessionObserverIntentAttribution,
-};
+use crate::{SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent};
 
 /// Source of the relation whose process-observer intents must be settled.
 pub enum SessionObserverIntentSource<'a> {
@@ -22,7 +19,7 @@ pub enum SessionObserverIntentSource<'a> {
 /// Publish and consume every pending process-observer intent for a session.
 ///
 /// Observer publication is best effort per process. The returned results cover
-/// both host-requested and fork-inherited intents and preserve that attribution.
+/// every host-selected intent, including exact runs selected for a fork.
 /// Unknown, pruned, or temporarily unavailable processes never prevent the
 /// durable intent set from reaching its fully settled empty form. This is
 /// deliberate: hosts can add an observer again after a transient failure,
@@ -73,17 +70,11 @@ async fn apply_process_observers(
 ) -> Vec<SessionObservedProcessReceipt> {
     let mut results = Vec::with_capacity(intents.len());
     for intent in intents {
-        let observer_by = match intent.attribution {
-            SessionObserverIntentAttribution::HostRequested => {
-                ProcessObserverBy::host(format!("session-create:{session_id}"))
-            }
-            SessionObserverIntentAttribution::ForkInherited => ProcessObserverBy::ForkInheritance,
-        };
+        let observer_by = ProcessObserverBy::host(format!("session-create:{session_id}"));
         let outcome =
             apply_process_observer(process_registry, session_id, intent, observer_by).await;
         results.push(SessionObservedProcessReceipt {
             process_id: intent.process_id.clone(),
-            attribution: intent.attribution,
             outcome,
         });
     }
@@ -219,7 +210,7 @@ mod tests {
     use crate::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
 
     #[tokio::test]
-    async fn noproc_receipts_preserve_both_attributions() {
+    async fn noproc_receipts_preserve_missing_and_pruned_outcomes() {
         let registry = crate::TestLocalProcessRegistry::default();
         registry
             .register_process(crate::ProcessRegistration::new(
@@ -260,27 +251,15 @@ mod tests {
             &SessionId::from("noproc-session"),
             SessionObserverIntentSource::Unstored(vec![
                 SessionObserverIntent::host_requested("unknown-host"),
-                SessionObserverIntent::fork_inherited("unknown-fork"),
+                SessionObserverIntent::host_requested("unknown-fork"),
                 SessionObserverIntent::host_requested("pruned-process"),
-                SessionObserverIntent::fork_inherited("pruned-process"),
+                SessionObserverIntent::host_requested("pruned-process"),
             ]),
         )
         .await
         .expect("noproc settlement remains best effort");
 
         assert_eq!(receipts.len(), 4);
-        assert_eq!(
-            receipts
-                .iter()
-                .map(|receipt| receipt.attribution)
-                .collect::<Vec<_>>(),
-            vec![
-                SessionObserverIntentAttribution::HostRequested,
-                SessionObserverIntentAttribution::ForkInherited,
-                SessionObserverIntentAttribution::HostRequested,
-                SessionObserverIntentAttribution::ForkInherited,
-            ]
-        );
         assert!(
             receipts[..2]
                 .iter()
@@ -290,5 +269,70 @@ mod tests {
             receipt.outcome,
             SessionObservedProcessOutcome::NoLongerRetained { .. }
         )));
+    }
+    #[tokio::test]
+    async fn selected_incarnation_never_retargets_a_reused_process_name() {
+        let registry = crate::TestLocalProcessRegistry::default();
+        let registration = crate::ProcessRegistration::new(
+            "reused-observer-name",
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::RecoveryContract::ExternallyOwned,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        let first = registry
+            .register_process(registration.clone())
+            .await
+            .expect("first run");
+        let selected = crate::ProcessRef::from_record(&first);
+        let terminal = registry
+            .complete_process(
+                &first.id,
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("finish first run");
+        registry
+            .prune_terminal_processes(
+                terminal.updated_at_ms.saturating_add(1),
+                None,
+                crate::ProjectionWatermark::NoProjector,
+            )
+            .await
+            .expect("prune selected run");
+        let newer = registry
+            .register_process(registration)
+            .await
+            .expect("new incarnation");
+        let session_id = SessionId::from("selected-observer");
+        let receipts = reconcile_session_process_observer_intents(
+            Some(&registry),
+            &session_id,
+            SessionObserverIntentSource::Unstored(vec![SessionObserverIntent::host_requested_ref(
+                selected.clone(),
+            )]),
+        )
+        .await
+        .expect("best effort receipt");
+        assert_eq!(
+            receipts[0].outcome,
+            SessionObservedProcessOutcome::IncarnationSuperseded {
+                requested_incarnation: selected.incarnation,
+                current_incarnation: newer.incarnation,
+            }
+        );
+        assert!(
+            !crate::ProcessObserverRegistry::is_observer(&registry, &session_id, &newer.id)
+                .await
+                .expect("read newer observers")
+        );
     }
 }

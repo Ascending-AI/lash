@@ -40,16 +40,13 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
             .get::<Option<String>, _>("source_session_id")
             .map(SessionId::from),
         source_node_id: row.get("source_node_id"),
-        observer_inheritance_kind: row.get("observer_inheritance_kind"),
         pending_observer_intents: Vec::new(),
-        fork_inheritance_processes: Vec::new(),
     }
 }
 
 pub(crate) fn decode_catalog_relation(
     stored: StoredRelation,
     observer_intent_rows_json: &str,
-    fork_inheritance_rows_json: &str,
 ) -> Result<lash_core::SessionRelation, StoreError> {
     let observer_intent_rows =
         serde_json::from_str(observer_intent_rows_json).map_err(|error| {
@@ -58,18 +55,10 @@ pub(crate) fn decode_catalog_relation(
                 format!("invalid observer-intent process rows JSON: {error}"),
             )
         })?;
-    let fork_inheritance_rows =
-        serde_json::from_str(fork_inheritance_rows_json).map_err(|error| {
-            SessionMetaCodec::corrupt(
-                SESSION_META_CODEC,
-                format!("invalid fork inheritance process rows JSON: {error}"),
-            )
-        })?;
     Ok(SessionMetaCodec::decode_with_process_rows(
         SESSION_META_CODEC,
         stored,
         observer_intent_rows,
-        fork_inheritance_rows,
     )?
     .relation)
 }
@@ -77,7 +66,7 @@ pub(crate) fn decode_catalog_relation(
 /// Read the durable lineage recorded for `session_id`, if the row exists.
 ///
 /// Admission calls this inside its own transaction and needs only the lineage
-/// columns, so it avoids the observer-intent and fork-inheritance joins a full
+/// columns, so it avoids the observer-intent joins a full
 /// metadata load performs.
 pub(crate) async fn load_recorded_lineage_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -132,7 +121,6 @@ pub(crate) async fn write_session_meta_tx(
         .bind(&stored.cause.node_id)
         .bind(stored.source_session_id.as_deref())
         .bind(&stored.source_node_id)
-        .bind(&stored.observer_inheritance_kind)
         .bind(i64::try_from(created_at_ms).unwrap_or(i64::MAX))
         .bind(lash_core::store::CURRENT_SESSION_STATE_VERSION as i32)
         .execute(&mut **tx)
@@ -142,16 +130,11 @@ pub(crate) async fn write_session_meta_tx(
         return Ok(false);
     }
 
-    for statement in [
-        session_sql().observer_intents.delete_by_session.sql(),
-        session_sql().fork_inheritance.delete_by_session.sql(),
-    ] {
-        sqlx::query(statement)
-            .bind(stored.session_id.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    }
+    sqlx::query(session_sql().observer_intents.delete_by_session.sql())
+        .bind(stored.session_id.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
         sqlx::query(session_sql().observer_intents.insert.sql())
             .bind(stored.session_id.as_str())
@@ -162,13 +145,10 @@ pub(crate) async fn write_session_meta_tx(
             )?)
             .bind(intent.process_id.as_str())
             .bind(intent.process_incarnation)
-            .bind(&intent.attribution)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
     }
-    write_fork_inheritance_processes(tx, &stored.session_id, &stored.fork_inheritance_processes)
-        .await?;
     Ok(true)
 }
 
@@ -205,14 +185,14 @@ pub(crate) async fn load_session_meta(
         return Ok(None);
     };
     let mut stored = stored_relation_from_row(&row);
-    let observer_rows = sqlx::query_as::<_, (i64, String, Option<i64>, String)>(
+    let observer_rows = sqlx::query_as::<_, (i64, String, Option<i64>)>(
         session_sql().observer_intents.select_for_session.sql(),
     )
     .bind(stored.session_id.as_str())
     .fetch_all(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
-    for (process_index, process_id, process_incarnation, attribution) in observer_rows {
+    for (process_index, process_id, process_incarnation) in observer_rows {
         let process_index = SessionMetaCodec::read_index(
             SESSION_META_CODEC,
             process_index,
@@ -228,59 +208,10 @@ pub(crate) async fn load_session_meta(
             lash_core::store_backend_support::StoredObserverIntent {
                 process_id: ProcessId::from(process_id),
                 process_incarnation,
-                attribution,
             },
         );
     }
-    stored.fork_inheritance_processes =
-        read_fork_inheritance_processes(&mut tx, &stored.session_id).await?;
     let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(Some(meta))
-}
-
-async fn write_fork_inheritance_processes(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-    process_ids: &[ProcessId],
-) -> Result<(), StoreError> {
-    for (process_index, process_id) in process_ids.iter().enumerate() {
-        sqlx::query(session_sql().fork_inheritance.insert.sql())
-            .bind(session_id.as_str())
-            .bind(SessionMetaCodec::write_index(
-                SESSION_META_CODEC,
-                process_index,
-                "process",
-            )?)
-            .bind(process_id.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    }
-    Ok(())
-}
-
-async fn read_fork_inheritance_processes(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
-) -> Result<Vec<ProcessId>, StoreError> {
-    let rows =
-        sqlx::query_as::<_, (i64, String)>(session_sql().fork_inheritance.select_for_session.sql())
-            .bind(session_id.as_str())
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    let mut process_ids = Vec::with_capacity(rows.len());
-    for (process_index, process_id) in rows {
-        if SessionMetaCodec::read_index(SESSION_META_CODEC, process_index, "process_index")?
-            != process_ids.len()
-        {
-            return Err(SessionMetaCodec::corrupt(
-                SESSION_META_CODEC,
-                "process indexes are not contiguous",
-            ));
-        }
-        process_ids.push(ProcessId::from(process_id));
-    }
-    Ok(process_ids)
 }

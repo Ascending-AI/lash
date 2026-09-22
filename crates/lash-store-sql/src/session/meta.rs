@@ -12,7 +12,7 @@ pub const INSERT_COLUMNS: &str =
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms";
+              source_node_id, created_at_ms, last_commit_at_ms";
 
 /// The stored relation, as `StoredRelation` decodes it positionally.
 ///
@@ -27,13 +27,13 @@ pub const RELATION_COLUMNS: &str = "session_id, relation_kind, parent_session_id
     caused_by_process_event_sequence, caused_by_occurrence_id,
     caused_by_subscription_id, caused_by_subscription_incarnation,
     caused_by_subscription_revision, caused_by_node_id, source_session_id,
-    source_node_id, observer_inheritance_kind";
+    source_node_id";
 
 /// The four lineage columns alone.
 ///
 /// Admission reads this inside its own transaction to decide whether a re-bind
 /// agrees with what was recorded, so it must not open a nested one and must
-/// not pay for the observer-intent and fork-inheritance reads a full metadata
+/// not pay for the observer-intent reads a full metadata
 /// load performs.
 pub const LINEAGE_COLUMNS: &str =
     "relation_kind, parent_session_id, source_session_id, source_node_id";
@@ -56,7 +56,7 @@ pub const CATALOG_COLUMNS_SQLITE: &str =
                     meta.caused_by_subscription_incarnation,
                     meta.caused_by_subscription_revision, meta.caused_by_node_id,
                     meta.source_session_id, meta.source_node_id,
-                    meta.observer_inheritance_kind, meta.created_at_ms,
+                    meta.created_at_ms,
                     meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted";
 
 /// The PostgreSQL spelling of [`CATALOG_COLUMNS_SQLITE`].
@@ -75,7 +75,6 @@ pub const CATALOG_COLUMNS_POSTGRES: &str =
                     meta.caused_by_subscription_incarnation,
                     meta.caused_by_subscription_revision, meta.caused_by_node_id,
                     meta.source_session_id, meta.source_node_id,
-                    meta.observer_inheritance_kind,
                     COALESCE(meta.created_at_ms, 0) AS created_at_ms,
                     meta.last_commit_at_ms,
                     COALESCE(session.head_revision, 0) AS head_revision,

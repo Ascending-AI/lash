@@ -626,12 +626,12 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         .remove_observer(
             &SessionId::from("session-audit"),
             &ProcessId::from(process_id),
-            ProcessObserverBy::ForkInheritance,
+            ProcessObserverBy::host("observer-test"),
         )
         .await
         .expect("remove inherited observer");
-    let inherited_observer = ProcessObserverBy::ForkInheritance;
-    assert_eq!(inherited_observer.replay_component(), "fork_inheritance");
+    let inherited_observer = ProcessObserverBy::host("observer-test");
+    assert_eq!(inherited_observer.replay_component(), "observer-test");
 
     let external_ref = ProcessExternalRef {
         backend: "restate".to_string(),

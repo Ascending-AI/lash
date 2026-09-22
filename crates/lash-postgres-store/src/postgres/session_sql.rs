@@ -20,9 +20,9 @@ use std::sync::LazyLock;
 use lash_store_sql::Dialect;
 use lash_store_sql::session::{
     fork_lineage::ForkLineageStatements, graph_nodes::GraphNodeStatements,
-    meta::SessionMetaStatements, meta_fork_inheritance_processes::ForkInheritanceStatements,
-    meta_pending_observer_intents::ObserverIntentStatements, node_anchors::NodeAnchorStatements,
-    turn_commits::TurnCommitStatements, usage_deltas::UsageDeltaStatements,
+    meta::SessionMetaStatements, meta_pending_observer_intents::ObserverIntentStatements,
+    node_anchors::NodeAnchorStatements, turn_commits::TurnCommitStatements,
+    usage_deltas::UsageDeltaStatements,
 };
 
 lash_store_sql::statements! {
@@ -35,9 +35,9 @@ lash_store_sql::statements! {
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES (?1, ?20, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)
+              source_node_id, created_at_ms, last_commit_at_ms)
+             VALUES (?1, ?19, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     ?13, ?14, ?15, ?16, ?17, ?18, NULL)
              ON CONFLICT (session_id) DO NOTHING";
 
         upsert = "INSERT INTO session_meta
@@ -47,9 +47,9 @@ lash_store_sql::statements! {
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES (?1, ?20, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)
+              source_node_id, created_at_ms, last_commit_at_ms)
+             VALUES (?1, ?19, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     ?13, ?14, ?15, ?16, ?17, ?18, NULL)
              ON CONFLICT (session_id) DO UPDATE SET
                relation_kind = EXCLUDED.relation_kind,
                parent_session_id = EXCLUDED.parent_session_id,
@@ -66,15 +66,14 @@ lash_store_sql::statements! {
                caused_by_subscription_revision = EXCLUDED.caused_by_subscription_revision,
                caused_by_node_id = EXCLUDED.caused_by_node_id,
                source_session_id = EXCLUDED.source_session_id,
-               source_node_id = EXCLUDED.source_node_id,
-               observer_inheritance_kind = EXCLUDED.observer_inheritance_kind";
+               source_node_id = EXCLUDED.source_node_id";
 
         /// The stored relation of `?1`, share-locked for the duration of the
         /// metadata load's transaction.
         ///
         /// The lock is the fork. SQLite's read runs under the database's own
         /// single-writer lock and needs none; here the observer-intent and
-        /// fork-inheritance reads that follow must see the same row this one
+        /// observer-intent reads that follow must see the same row this one
         /// did.
         select_relation_for_share = "SELECT session_id, relation_kind, parent_session_id,
     caused_by_kind, caused_by_session_id, caused_by_turn_id,
@@ -82,7 +81,7 @@ lash_store_sql::statements! {
     caused_by_process_event_sequence, caused_by_occurrence_id,
     caused_by_subscription_id, caused_by_subscription_incarnation,
     caused_by_subscription_revision, caused_by_node_id, source_session_id,
-    source_node_id, observer_inheritance_kind FROM session_meta WHERE session_id = ?1 FOR SHARE";
+    source_node_id FROM session_meta WHERE session_id = ?1 FOR SHARE";
 
         /// The sole recorded session's relation, if this database holds
         /// exactly one.
@@ -92,7 +91,7 @@ lash_store_sql::statements! {
     caused_by_process_event_sequence, caused_by_occurrence_id,
     caused_by_subscription_id, caused_by_subscription_incarnation,
     caused_by_subscription_revision, caused_by_node_id, source_session_id,
-    source_node_id, observer_inheritance_kind FROM session_meta
+    source_node_id FROM session_meta
              ORDER BY session_id ASC LIMIT 2 FOR SHARE";
 
         /// The durable session-state version marker of `?1`, row-locked so a
@@ -120,7 +119,7 @@ lash_store_sql::statements! {
                 )";
 
         /// Every session this database knows, live and deleted, with the
-        /// observer-intent and fork-inheritance rows of each.
+        /// observer-intent rows of each.
         select_catalog = "WITH catalog AS (
              SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
                     meta.caused_by_kind,
@@ -131,7 +130,6 @@ lash_store_sql::statements! {
                     meta.caused_by_subscription_incarnation,
                     meta.caused_by_subscription_revision, meta.caused_by_node_id,
                     meta.source_session_id, meta.source_node_id,
-                    meta.observer_inheritance_kind,
                     COALESCE(meta.created_at_ms, 0) AS created_at_ms,
                     meta.last_commit_at_ms,
                     COALESCE(session.head_revision, 0) AS head_revision,
@@ -141,7 +139,7 @@ lash_store_sql::statements! {
              UNION ALL
              SELECT session_id, COALESCE(relation_kind, 'root'),
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     COALESCE(created_at_ms, 0), last_commit_at_ms,
                     COALESCE(head_revision, 0), TRUE
              FROM deleted_sessions
@@ -150,21 +148,13 @@ lash_store_sql::statements! {
                 CASE WHEN deleted THEN '[]' ELSE COALESCE((
                     SELECT jsonb_agg(
                                jsonb_build_array(
-                                   process_index, process_id, process_incarnation, attribution
+                                   process_index, process_id, process_incarnation
                                )
                                ORDER BY process_index
                            )::TEXT
                     FROM session_meta_pending_observer_intents
                     WHERE session_id = catalog.session_id
-                ), '[]') END AS observer_intent_rows_json,
-                CASE WHEN deleted THEN '[]' ELSE COALESCE((
-                    SELECT jsonb_agg(
-                               jsonb_build_array(process_index, process_id)
-                               ORDER BY process_index
-                           )::TEXT
-                    FROM session_meta_fork_inheritance_processes
-                    WHERE session_id = catalog.session_id
-                ), '[]') END AS fork_inheritance_rows_json
+                ), '[]') END AS observer_intent_rows_json
          FROM catalog
          ORDER BY created_at_ms ASC, session_id ASC";
     }
@@ -860,8 +850,6 @@ pub(crate) struct SessionSql {
     pub(crate) meta_postgres: SessionMetaPostgresStatements,
     /// `session_meta_pending_observer_intents` statements.
     pub(crate) observer_intents: ObserverIntentStatements,
-    /// `session_meta_fork_inheritance_processes` statements.
-    pub(crate) fork_inheritance: ForkInheritanceStatements,
     /// `sessions` statements. PostgreSQL's alone, by ADR 0098.
     pub(crate) head: SessionsStatements,
     /// `graph_nodes` statements both backends issue verbatim.
@@ -896,7 +884,6 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         meta: SessionMetaStatements::render(dialect),
         meta_postgres: SessionMetaPostgresStatements::render(dialect),
         observer_intents: ObserverIntentStatements::render(dialect),
-        fork_inheritance: ForkInheritanceStatements::render(dialect),
         head: SessionsStatements::render(dialect),
         graph: GraphNodeStatements::render(dialect),
         graph_postgres: GraphNodePostgresStatements::render(dialect),

@@ -118,7 +118,7 @@ pub(crate) use lash_sansio::{
 };
 pub(crate) use plugin_state::PluginState;
 pub(crate) use process_identity::{
-    ObserverInheritance, ProcessExecutionEnvSpec, ProcessIncarnation, ProcessRef, ProcessStatus,
+    ProcessExecutionEnvSpec, ProcessIncarnation, ProcessRef, ProcessStatus,
 };
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
@@ -129,8 +129,8 @@ pub(crate) use queued_work_vocabulary::{
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, SessionLineage,
-    SessionObserverIntent, SessionObserverIntentAttribution, SessionRelation, SessionSnapshot,
-    SessionToolAccess, SubagentSessionContext,
+    SessionObserverIntent, SessionRelation, SessionSnapshot, SessionToolAccess,
+    SubagentSessionContext,
 };
 pub(crate) use session_policy::SessionPolicy;
 pub(crate) use session_read_view::SessionReadView;

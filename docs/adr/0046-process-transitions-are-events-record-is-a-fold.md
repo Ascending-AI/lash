@@ -71,12 +71,17 @@ events. Observer removal never changes lifecycle or retention. Session ids are
 single-use under [ADR 0049](0049-session-ids-are-used-once.md), so an observer
 edge cannot suffer delete-and-reuse ABA ambiguity.
 
-Forks select observer inheritance explicitly: `All`, `None`, or
-`Only(process_ids)`. The selected ids are stored in the durable fork relation
-as pending apply intent. Publishing the fork precedes idempotent observer-event
-application, and session open replays any uncleared intent before clearing it.
-This gives hosts customizable branch visibility without coupling observation
-to wake routing.
+Forks take the host's exact `ProcessRef` selections, including incarnation.
+The host lists the intended session's current observed processes and filters
+that snapshot; an empty selection is history-only. Historical writer provenance
+and host-declared lineage do not select observers. A retained point remains
+forkable after its writer is deleted.
+
+Fork creation persists those exact references as pending observer intents.
+Publication uses per-process best-effort reconciliation, with typed receipts
+for unavailable, missing, pruned, and superseded runs. Opening the session
+reconciles an interrupted publication idempotently. A reused process name never
+retargets a selected reference. This is not a cross-store atomic transaction.
 
 ## Host policy surface
 
@@ -91,8 +96,8 @@ points:
    intent left by a crash. The returned `SessionHandle::observed_processes`
    reports a typed outcome for every id; unknown and pruned processes do not
    fail session creation.
-3. Fork creation records `ObserverInheritance::{All,None,Only}` and its pending
-   replay intent.
+3. `ForkRequest::observed_processes` supplies incarnation-pinned runs and
+   fork creation persists their pending replay intents.
 4. Hosts may add or remove an observer explicitly through the standard
    replay-keyed observer-event path.
 
@@ -100,6 +105,12 @@ No path creates an unnamed edge: a tool-start request names its initiating
 session in `ProcessStartRequest::observers` before the start reaches the
 registry, while host starts, session creation, forks, and explicit observer
 mutations use the recorded choices above.
+
+Historical observer-event authors remain opaque audit payloads. A stored
+`by.kind = "fork_inheritance"` neither selects observers nor changes the process
+fold; readers preserve it as the recorded historical fact. Current fork
+selectors and intent attribution fields are removed at the session-store and
+remote-protocol cutover.
 
 Hosts may also register one factory-scoped
 `ProcessToolVisibilityFilter`. It applies only to the session process tools

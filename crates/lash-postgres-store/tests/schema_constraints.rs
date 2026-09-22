@@ -260,15 +260,7 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         "ck_session_meta_caused_by_kind",
     )
     .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_session_meta (
-             session_id, relation_kind, source_session_id, source_node_id,
-             observer_inheritance_kind
-         ) VALUES ('bad-inheritance', 'fork', 'source', 'source-node', 'selected')",
-        "ck_session_meta_observer_inheritance_kind",
-    )
-    .await;
+
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_session_meta (session_id, relation_kind)

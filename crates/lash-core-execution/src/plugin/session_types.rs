@@ -1,9 +1,8 @@
 pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage, SessionObservedProcessOutcome,
-    SessionObservedProcessReceipt, SessionObserverIntent, SessionObserverIntentAttribution,
-    SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess, SessionToolAccessError,
-    SubagentSessionContext,
+    SessionObservedProcessReceipt, SessionObserverIntent, SessionRelation, SessionSnapshot,
+    SessionStartPoint, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
 };
 
 use crate::SessionId;

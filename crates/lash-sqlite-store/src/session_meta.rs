@@ -34,16 +34,13 @@ pub(crate) fn stored_relation_from_row(
         },
         source_session_id: row.get::<_, Option<String>>(15)?.map(SessionId::from),
         source_node_id: row.get(16)?,
-        observer_inheritance_kind: row.get(17)?,
         pending_observer_intents: Vec::new(),
-        fork_inheritance_processes: Vec::new(),
     })
 }
 
 pub(crate) fn decode_catalog_relation(
     stored: StoredRelation,
     observer_intent_rows_json: &str,
-    fork_inheritance_rows_json: &str,
 ) -> Result<lash_core::SessionRelation, StoreError> {
     let observer_intent_rows =
         serde_json::from_str(observer_intent_rows_json).map_err(|error| {
@@ -52,18 +49,10 @@ pub(crate) fn decode_catalog_relation(
                 format!("invalid observer-intent process rows JSON: {error}"),
             )
         })?;
-    let fork_inheritance_rows =
-        serde_json::from_str(fork_inheritance_rows_json).map_err(|error| {
-            SessionMetaCodec::corrupt(
-                SESSION_META_CODEC,
-                format!("invalid fork inheritance process rows JSON: {error}"),
-            )
-        })?;
     Ok(SessionMetaCodec::decode_with_process_rows(
         SESSION_META_CODEC,
         stored,
         observer_intent_rows,
-        fork_inheritance_rows,
     )?
     .relation)
 }
@@ -100,7 +89,6 @@ pub(crate) fn write_session_meta(
                 stored.cause.node_id,
                 stored.source_session_id.as_deref(),
                 stored.source_node_id,
-                stored.observer_inheritance_kind,
                 crate::clamp_epoch_ms(created_at_ms),
                 lash_core::store::CURRENT_SESSION_STATE_VERSION,
             ],
@@ -109,13 +97,11 @@ pub(crate) fn write_session_meta(
     if changed == 0 {
         return Ok(false);
     }
-    for statement in [
+    conn.execute(
         session_sql().observer_intents.delete_by_session.sql(),
-        session_sql().fork_inheritance.delete_by_session.sql(),
-    ] {
-        conn.execute(statement, params![stored.session_id.as_str()])
-            .map_err(sqlite_error)?;
-    }
+        params![stored.session_id.as_str()],
+    )
+    .map_err(sqlite_error)?;
     for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
         conn.execute(
             session_sql().observer_intents.insert.sql(),
@@ -128,12 +114,10 @@ pub(crate) fn write_session_meta(
                 )?,
                 intent.process_id.as_str(),
                 intent.process_incarnation,
-                intent.attribution,
             ],
         )
         .map_err(sqlite_error)?;
     }
-    write_fork_inheritance_processes(conn, &stored.session_id, &stored.fork_inheritance_processes)?;
     Ok(true)
 }
 
@@ -222,14 +206,13 @@ pub(crate) fn load_session_meta(
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<i64>>(2)?,
-                row.get::<_, String>(3)?,
             ))
         })
         .map_err(sqlite_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite_error)?;
     drop(stmt);
-    for (process_index, process_id, process_incarnation, attribution) in observer_rows {
+    for (process_index, process_id, process_incarnation) in observer_rows {
         if SessionMetaCodec::read_index(
             SESSION_META_CODEC,
             process_index,
@@ -245,60 +228,10 @@ pub(crate) fn load_session_meta(
             lash_core::store_backend_support::StoredObserverIntent {
                 process_id: ProcessId::from(process_id),
                 process_incarnation,
-                attribution,
             },
         );
     }
-    stored.fork_inheritance_processes = read_fork_inheritance_processes(&tx, &stored.session_id)?;
     let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
     tx.commit().map_err(sqlite_error)?;
     Ok(Some(meta))
-}
-
-fn write_fork_inheritance_processes(
-    conn: &Connection,
-    session_id: &SessionId,
-    process_ids: &[ProcessId],
-) -> Result<(), StoreError> {
-    for (process_index, process_id) in process_ids.iter().enumerate() {
-        conn.execute(
-            session_sql().fork_inheritance.insert.sql(),
-            params![
-                session_id.as_str(),
-                SessionMetaCodec::write_index(SESSION_META_CODEC, process_index, "process")?,
-                process_id.as_str()
-            ],
-        )
-        .map_err(sqlite_error)?;
-    }
-    Ok(())
-}
-
-fn read_fork_inheritance_processes(
-    conn: &Connection,
-    session_id: &SessionId,
-) -> Result<Vec<ProcessId>, StoreError> {
-    let mut stmt = conn
-        .prepare(session_sql().fork_inheritance.select_for_session.sql())
-        .map_err(sqlite_error)?;
-    let rows = stmt
-        .query_map(params![session_id.as_str()], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(sqlite_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sqlite_error)?;
-    let mut process_ids = Vec::with_capacity(rows.len());
-    for (process_index, process_id) in rows {
-        if SessionMetaCodec::read_index(SESSION_META_CODEC, process_index, "process_index")?
-            != process_ids.len()
-        {
-            return Err(SessionMetaCodec::corrupt(
-                SESSION_META_CODEC,
-                "process indexes are not contiguous",
-            ));
-        }
-        process_ids.push(ProcessId::from(process_id));
-    }
-    Ok(process_ids)
 }

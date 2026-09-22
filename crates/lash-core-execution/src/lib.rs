@@ -206,7 +206,6 @@ pub mod facade_support {
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
     pub use crate::plugin::SessionObserverIntent;
-    pub use crate::plugin::SessionObserverIntentAttribution;
     pub use crate::plugin::SessionParam;
     pub use crate::plugin::SessionPlugin;
     pub use crate::plugin::SessionStateChangedContext;
@@ -470,7 +469,7 @@ pub(crate) use crate::attachments::{
 };
 pub(crate) use crate::plugin::{
     RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
-    SessionObserverIntent, SessionObserverIntentAttribution,
+    SessionObserverIntent,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use crate::runtime::UnavailableProcessService;
@@ -749,8 +748,8 @@ pub use runtime::{
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupDrainReport,
     GroupExecutors, GroupSettlement, GroupWakePolicy, HandleId, InMemoryProcessExecutionEnvStore,
     InputItem, LedgerUsageDisposition, LlmRequestSpec, LoserPolicy, NativeProcessWork,
-    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance,
-    OnParentEnd, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, OnParentEnd,
+    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
     PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope, ParentScopeStorageError, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,

@@ -35,9 +35,9 @@ pub struct ForkSessionRequest {
 pub struct ForkSessionReceipt {
     pub session_id: SessionId,
     pub node_id: NodeId,
-    /// Session that originally wrote `node_id`. This is process-observer
-    /// provenance, not a required source-session argument to the fork.
+    /// Session that originally wrote `node_id`. This is history
+    /// provenance, independent of host-declared lineage and observer selection.
     pub source_session_id: SessionId,
-    /// Uniform settlement receipts for every fork-inherited observer intent.
+    /// Settlement receipts for the host-selected process observer intents.
     pub observed_processes: Vec<crate::session_identity::SessionObservedProcessReceipt>,
 }

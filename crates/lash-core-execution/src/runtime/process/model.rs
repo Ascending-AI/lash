@@ -1553,7 +1553,6 @@ pub struct ProcessSessionDeleteReport {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProcessObserverBy {
     Host { operation_id: String },
-    ForkInheritance,
 }
 
 impl ProcessObserverBy {
@@ -1566,11 +1565,10 @@ impl ProcessObserverBy {
     }
 
     /// Returns the stable observer-authority component process-store implementors include in
-    /// add/remove replay keys; fork inheritance uses one reserved literal.
+    /// add/remove replay keys.
     pub fn replay_component(&self) -> &str {
         match self {
             Self::Host { operation_id } => operation_id,
-            Self::ForkInheritance => "fork_inheritance",
         }
     }
 }

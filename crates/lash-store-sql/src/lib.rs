@@ -152,7 +152,6 @@ pub const TABLES: &[&str] = &[
     session::graph_nodes::TABLE,
     session::head::TABLE,
     session::meta::TABLE,
-    session::meta_fork_inheritance_processes::TABLE,
     session::meta_pending_observer_intents::TABLE,
     session::node_anchors::TABLE,
     session::release_stamp::TABLE,
@@ -195,9 +194,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session::fork_lineage::ForkLineageStatements::NEUTRAL);
     statements.extend_from_slice(session::graph_nodes::GraphNodeStatements::NEUTRAL);
     statements.extend_from_slice(session::meta::SessionMetaStatements::NEUTRAL);
-    statements.extend_from_slice(
-        session::meta_fork_inheritance_processes::ForkInheritanceStatements::NEUTRAL,
-    );
     statements.extend_from_slice(
         session::meta_pending_observer_intents::ObserverIntentStatements::NEUTRAL,
     );

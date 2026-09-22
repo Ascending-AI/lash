@@ -28,7 +28,7 @@ mod runtime {
         };
         pub(crate) use lash_core::plugin::{
             RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
-            SessionObserverIntent, SessionObserverIntentAttribution,
+            SessionObserverIntent,
         };
         pub(crate) use lash_core::runtime::*;
         pub(crate) use lash_core::sansio::{LlmCallError, Response};

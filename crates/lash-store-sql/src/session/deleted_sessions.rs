@@ -25,7 +25,7 @@ pub const INSERT_COLUMNS: &str =
 /// `deleted` flag — tells the decoder.
 pub const CATALOG_UNION_COLUMNS_SQLITE: &str = "session_id, COALESCE(relation_kind, 'root'),
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     created_at_ms, last_commit_at_ms, head_revision, 1";
 
 /// The PostgreSQL spelling of [`CATALOG_UNION_COLUMNS_SQLITE`]: the `deleted`
@@ -33,6 +33,6 @@ pub const CATALOG_UNION_COLUMNS_SQLITE: &str = "session_id, COALESCE(relation_ki
 /// because PostgreSQL's columns admit `NULL` where SQLite's do not.
 pub const CATALOG_UNION_COLUMNS_POSTGRES: &str = "session_id, COALESCE(relation_kind, 'root'),
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     COALESCE(created_at_ms, 0), last_commit_at_ms,
                     COALESCE(head_revision, 0), TRUE";

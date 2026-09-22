@@ -1295,7 +1295,6 @@ impl BackendRunner {
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id.into(),
-                            observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -2515,6 +2514,7 @@ async fn cross_backend_store_differential_agrees() {
     ))
     .await;
     assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
+    fork_cases::selected_observer_intents(sqlite_root.path(), &postgres, &run_nonce).await;
     eprintln!(
         "PASSED cross-backend store differential; \
          compared_backends=[in-memory,sqlite,postgres]"

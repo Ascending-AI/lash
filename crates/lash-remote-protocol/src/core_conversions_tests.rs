@@ -981,26 +981,13 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
 }
 
 #[test]
-fn observer_audit_and_fork_selector_types_round_trip() {
+fn observer_audit_type_round_trips() {
     let by = lash_core::ProcessObserverBy::host("fork-operation");
     let remote_by = RemoteProcessObserverBy::from(by.clone());
     remote_by
         .validate("observer round trip")
         .expect("valid observer");
     assert_eq!(lash_core::ProcessObserverBy::from(remote_by), by);
-
-    let selector = lash_core::ObserverInheritance::Only(vec![
-        ProcessId::from("process-a".to_string()),
-        ProcessId::from("process-b".to_string()),
-    ]);
-    let remote_selector = RemoteObserverInheritance::from(selector.clone());
-    remote_selector
-        .validate("selector round trip")
-        .expect("valid selector");
-    assert_eq!(
-        lash_core::ObserverInheritance::from(remote_selector),
-        selector
-    );
 }
 
 #[test]

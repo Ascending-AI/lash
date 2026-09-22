@@ -135,9 +135,17 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
     // that retains the node and continues from it as a new session, so the
     // second turn's line of history is abandoned — and the note still in
     // flight was derived from it.
-    core.fork_at(first_leaf.clone(), "workbench-derived-notes-rewound")
-        .await
-        .expect("rewind the conversation to the first turn");
+    core.fork_at(lash::ForkRequest {
+        session_id: ("workbench-derived-notes-rewound").into(),
+        node_id: (first_leaf.clone()).into(),
+        relation: lash::persistence::SessionRelation::Fork {
+            source_session_id: ("workbench-derived-notes").into(),
+            source_node_id: (first_leaf.clone()).into(),
+        },
+        observed_processes: Vec::new(),
+    })
+    .await
+    .expect("rewind the conversation to the first turn");
     let rewound = core
         .session("workbench-derived-notes-rewound")
         .open()

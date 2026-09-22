@@ -265,6 +265,23 @@ pub(crate) async fn fork_chat(
     if node_id.is_empty() {
         return Err(AppError::bad_request("branch point is required"));
     }
+    let observed_processes = if let Some(registry) = state.core().process_registry() {
+        registry
+            .list_observed_by(
+                &source_chat_id.clone().into(),
+                &lash::process::ProcessListFilter {
+                    status: lash::process::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|error| AppError::internal(error.to_string()))?
+            .iter()
+            .map(lash::process::ProcessRef::from_record)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let target_chat_id = uuid::Uuid::new_v4().to_string();
     state
         .with_db({
@@ -274,7 +291,19 @@ pub(crate) async fn fork_chat(
             move |db| db.prepare_chat_fork(&source_chat_id, &node_id, &target_chat_id)
         })
         .await?;
-    if let Err(error) = state.core().fork_at(node_id, target_chat_id.clone()).await {
+    if let Err(error) = state
+        .core()
+        .fork_at(lash::ForkRequest {
+            session_id: target_chat_id.clone().into(),
+            node_id: node_id.clone().into(),
+            relation: lash::persistence::SessionRelation::Fork {
+                source_session_id: source_chat_id.into(),
+                source_node_id: node_id.into(),
+            },
+            observed_processes,
+        })
+        .await
+    {
         // Both abort paths run the same compensator: `fork_at` can fail after
         // the fork's session store exists, and only `discard_pending_chat_fork`
         // reclaims it. A compensator failure must not mask the fork error the

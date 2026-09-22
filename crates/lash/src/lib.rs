@@ -623,8 +623,8 @@ pub mod remote {
             RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
             RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
             RemoteObservedProcess, RemoteObservedProcessEvent, RemoteObservedProcessFailure,
-            RemoteObservedWorkItemState, RemoteObserverInheritance, RemoteOnParentEnd,
-            RemoteParentScope, RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
+            RemoteObservedWorkItemState, RemoteOnParentEnd, RemoteParentScope,
+            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
             RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
             RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
@@ -733,11 +733,11 @@ pub mod process {
     pub use lash_core::runtime::publish_process_execution_env;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
-        ObserverInheritance, ParentEndPlan, ProcessChange, ProcessCompletionOutcome,
-        ProcessExecutionWriteAuthority, ProcessOutcome, ProcessStartOutcome,
-        ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, WaitKind, WaitState,
-        WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryDisposition,
-        WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+        ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
+        ProcessOutcome, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
+        ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+        WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+        WakeDiscardReason,
     };
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, ArtifactOwner,
@@ -1056,3 +1056,5 @@ pub mod provider {
         ProviderEndpointError, facade_support::LlmTransportError,
     };
 }
+
+pub use crate::core::ForkRequest;

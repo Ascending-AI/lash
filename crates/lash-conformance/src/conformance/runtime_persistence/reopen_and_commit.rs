@@ -22,7 +22,7 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
         pending_observer_intents: vec![
             crate::SessionObserverIntent::host_requested("observer-a"),
-            crate::SessionObserverIntent::fork_inherited("observer-b"),
+            crate::SessionObserverIntent::host_requested("observer-b"),
         ],
         session_id: SessionId::from("root"),
         relation: SessionRelation::Root,
@@ -97,7 +97,6 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimePersi
             SessionRelation::Fork {
                 source_session_id: SessionId::from("other-source"),
                 source_node_id: crate::NodeId::from("other-node"),
-                observer_inheritance: crate::ObserverInheritance::None,
             },
         ),
     ] {

@@ -1405,7 +1405,6 @@ impl RemotePersistProcessEnvReceipt {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteProcessObserverBy {
     Host { operation_id: String },
-    ForkInheritance,
 }
 
 impl RemoteProcessObserverBy {
@@ -1414,27 +1413,7 @@ impl RemoteProcessObserverBy {
             Self::Host { operation_id } => {
                 require_non_empty(type_name, "observer_by.operation_id", operation_id)
             }
-            Self::ForkInheritance => Ok(()),
         }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteObserverInheritance {
-    All,
-    None,
-    Only(Vec<ProcessId>),
-}
-
-impl RemoteObserverInheritance {
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        if let Self::Only(process_ids) = self {
-            for process_id in process_ids {
-                require_non_empty(type_name, "observer_inheritance.only", process_id)?;
-            }
-        }
-        Ok(())
     }
 }
 

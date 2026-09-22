@@ -36,7 +36,6 @@ pub(crate) async fn list_sessions(
             Some(crate::session_meta::decode_catalog_relation(
                 stored,
                 row.get("observer_intent_rows_json"),
-                row.get("fork_inheritance_rows_json"),
             )?)
         };
         let summary = SessionSummary {

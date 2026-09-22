@@ -526,7 +526,6 @@ impl From<lash_core::ProcessObserverBy> for RemoteProcessObserverBy {
     fn from(value: lash_core::ProcessObserverBy) -> Self {
         match value {
             lash_core::ProcessObserverBy::Host { operation_id } => Self::Host { operation_id },
-            lash_core::ProcessObserverBy::ForkInheritance => Self::ForkInheritance,
         }
     }
 }
@@ -535,27 +534,6 @@ impl From<RemoteProcessObserverBy> for lash_core::ProcessObserverBy {
     fn from(value: RemoteProcessObserverBy) -> Self {
         match value {
             RemoteProcessObserverBy::Host { operation_id } => Self::Host { operation_id },
-            RemoteProcessObserverBy::ForkInheritance => Self::ForkInheritance,
-        }
-    }
-}
-
-impl From<lash_core::ObserverInheritance> for RemoteObserverInheritance {
-    fn from(value: lash_core::ObserverInheritance) -> Self {
-        match value {
-            lash_core::ObserverInheritance::All => Self::All,
-            lash_core::ObserverInheritance::None => Self::None,
-            lash_core::ObserverInheritance::Only(process_ids) => Self::Only(process_ids),
-        }
-    }
-}
-
-impl From<RemoteObserverInheritance> for lash_core::ObserverInheritance {
-    fn from(value: RemoteObserverInheritance) -> Self {
-        match value {
-            RemoteObserverInheritance::All => Self::All,
-            RemoteObserverInheritance::None => Self::None,
-            RemoteObserverInheritance::Only(process_ids) => Self::Only(process_ids),
         }
     }
 }

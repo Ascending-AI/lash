@@ -91,10 +91,6 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
         "SELECT * FROM session_meta_pending_observer_intents WHERE session_id = ?1",
     ),
     (
-        "session_meta_fork_inheritance_processes",
-        "SELECT * FROM session_meta_fork_inheritance_processes WHERE session_id = ?1",
-    ),
-    (
         "wake_redelivery_fences",
         "SELECT * FROM wake_redelivery_fences WHERE session_id = ?1",
     ),
@@ -185,11 +181,6 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
     (
         "session_meta_pending_observer_intents",
         "SELECT to_jsonb(t)::text FROM lash_session_meta_pending_observer_intents t \
-         WHERE session_id = $1",
-    ),
-    (
-        "session_meta_fork_inheritance_processes",
-        "SELECT to_jsonb(t)::text FROM lash_session_meta_fork_inheritance_processes t \
          WHERE session_id = $1",
     ),
     (

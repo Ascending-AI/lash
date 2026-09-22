@@ -91,7 +91,6 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
         relation: crate::SessionRelation::Fork {
             source_session_id: SessionId::from("admission-parent"),
             source_node_id: "admission-node".into(),
-            observer_inheritance: crate::ObserverInheritance::None,
         },
     };
     assert!(matches!(
@@ -177,7 +176,6 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
         crate::SessionRelation::Fork {
             source_session_id: fork_source_session_id.clone(),
             source_node_id: "admission-fork-node".into(),
-            observer_inheritance: crate::ObserverInheritance::None,
         },
     );
     let fork_store = factory
@@ -212,7 +210,6 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
                 relation: crate::SessionRelation::Fork {
                     source_session_id: fork_source_session_id.clone(),
                     source_node_id: "admission-fork-other-node".into(),
-                    observer_inheritance: crate::ObserverInheritance::None,
                 },
             })
             .await

@@ -537,9 +537,6 @@ async fn session_listing_statement_count_is_session_count_invariant() {
             lash_core::SessionRelation::Fork {
                 source_session_id: SessionId::from("listing-statement-count-0"),
                 source_node_id: format!("source-node-{index}").into(),
-                observer_inheritance: lash_core::ObserverInheritance::Only(vec![ProcessId::from(
-                    format!("inherited-process-{index}"),
-                )]),
             }
         };
         factory

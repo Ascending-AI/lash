@@ -15,7 +15,6 @@ pub mod fork_lineage;
 pub mod graph_nodes;
 pub mod head;
 pub mod meta;
-pub mod meta_fork_inheritance_processes;
 pub mod meta_pending_observer_intents;
 pub mod node_anchors;
 pub mod release_stamp;

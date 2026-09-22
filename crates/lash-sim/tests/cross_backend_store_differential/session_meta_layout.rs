@@ -23,7 +23,6 @@ struct RawSessionMetaRow {
     caused_by_node_id: Option<String>,
     source_session_id: Option<SessionId>,
     source_node_id: Option<String>,
-    observer_inheritance_kind: Option<String>,
 }
 
 impl RawSessionMetaRow {
@@ -46,7 +45,6 @@ impl RawSessionMetaRow {
             caused_by_node_id: None,
             source_session_id: None,
             source_node_id: None,
-            observer_inheritance_kind: None,
         }
     }
 }
@@ -57,14 +55,6 @@ struct RawObserverIntentProcessRow {
     process_index: i64,
     process_id: ProcessId,
     process_incarnation: Option<i64>,
-    attribution: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct RawProcessRow {
-    session_id: SessionId,
-    process_index: i64,
-    process_id: ProcessId,
 }
 
 #[derive(Clone, Debug)]
@@ -72,7 +62,6 @@ struct SessionMetaLayoutCase {
     meta: SessionMeta,
     row: RawSessionMetaRow,
     pending_observer_intents: Vec<RawObserverIntentProcessRow>,
-    fork_inheritance_processes: Vec<RawProcessRow>,
 }
 
 #[expect(
@@ -80,7 +69,7 @@ struct SessionMetaLayoutCase {
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
-    use lash_core::{CausalRef, ObserverInheritance};
+    use lash_core::CausalRef;
 
     let child = |session_id: &SessionId, caused_by| SessionMeta {
         pending_observer_intents: Vec::new(),
@@ -99,7 +88,6 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
             },
             row: RawSessionMetaRow::literal(&SessionId::from("layout-root-literal"), "root"),
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(&SessionId::from("layout-child-none-literal"), None),
@@ -108,7 +96,6 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 ..RawSessionMetaRow::literal(&SessionId::from("layout-child-none-literal"), "child")
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -126,7 +113,6 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 ..RawSessionMetaRow::literal(&SessionId::from("layout-child-turn-literal"), "child")
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -152,10 +138,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                     )
                     .expect("serialize operation effect address"),
                 ),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-effect-no-turn-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-effect-no-turn-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -187,10 +175,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                     )
                     .expect("serialize turn effect address"),
                 ),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-effect-with-turn-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-effect-with-turn-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -205,10 +195,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 caused_by_kind: Some("tool_call".to_string()),
                 caused_by_session_id: Some(SessionId::from("layout-tool-session-literal")),
                 caused_by_call_id: Some("layout-tool-call-literal".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-tool-call-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-tool-call-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -221,10 +213,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 parent_session_id: Some(SessionId::from("layout-parent-literal")),
                 caused_by_kind: Some("process".to_string()),
                 caused_by_process_id: Some(ProcessId::from("layout-cause-process-literal")),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-process-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-process-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -239,10 +233,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 caused_by_kind: Some("process_event".to_string()),
                 caused_by_process_id: Some(ProcessId::from("layout-event-process-literal")),
                 caused_by_process_event_sequence: Some("18446744073709551615".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-process-event-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-process-event-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -258,10 +254,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 parent_session_id: Some(SessionId::from("layout-parent-literal")),
                 caused_by_kind: Some("trigger_occurrence".to_string()),
                 caused_by_occurrence_id: Some("layout-occurrence-minimal-literal".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-trigger-minimal-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-trigger-minimal-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -280,10 +278,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 caused_by_subscription_id: Some("layout-subscription-literal".to_string()),
                 caused_by_subscription_incarnation: Some("layout-incarnation-literal".to_string()),
                 caused_by_subscription_revision: Some("18446744073709551615".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-trigger-complete-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-trigger-complete-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: child(
@@ -298,110 +298,62 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 caused_by_kind: Some("session_node".to_string()),
                 caused_by_session_id: Some(SessionId::from("layout-node-session-literal")),
                 caused_by_node_id: Some("layout-cause-node-literal".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-child-session-node-literal"), "child")
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-child-session-node-literal"),
+                    "child",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: SessionMeta {
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from("layout-fork-all-literal"),
+                session_id: SessionId::from("layout-fork-history-literal"),
                 relation: SessionRelation::Fork {
-                    source_session_id: SessionId::from("layout-source-all-literal"),
-                    source_node_id: "layout-source-node-all-literal".to_string().into(),
-                    observer_inheritance: ObserverInheritance::All,
+                    source_session_id: SessionId::from("layout-source-history-literal"),
+                    source_node_id: "layout-source-node-history-literal".to_string().into(),
                 },
             },
             row: RawSessionMetaRow {
-                source_session_id: Some(SessionId::from("layout-source-all-literal")),
-                source_node_id: Some("layout-source-node-all-literal".to_string()),
-                observer_inheritance_kind: Some("all".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-fork-all-literal"), "fork")
+                source_session_id: Some(SessionId::from("layout-source-history-literal")),
+                source_node_id: Some("layout-source-node-history-literal".to_string()),
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-fork-history-literal"),
+                    "fork",
+                )
             },
             pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
-        },
-        SessionMetaLayoutCase {
-            meta: SessionMeta {
-                pending_observer_intents: Vec::new(),
-                session_id: SessionId::from("layout-fork-none-literal"),
-                relation: SessionRelation::Fork {
-                    source_session_id: SessionId::from("layout-source-none-literal"),
-                    source_node_id: "layout-source-node-none-literal".to_string().into(),
-                    observer_inheritance: ObserverInheritance::None,
-                },
-            },
-            row: RawSessionMetaRow {
-                source_session_id: Some(SessionId::from("layout-source-none-literal")),
-                source_node_id: Some("layout-source-node-none-literal".to_string()),
-                observer_inheritance_kind: Some("none".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-fork-none-literal"), "fork")
-            },
-            pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![],
         },
         SessionMetaLayoutCase {
             meta: SessionMeta {
                 pending_observer_intents: vec![
-                    lash_core::facade_support::SessionObserverIntent::fork_inherited(
-                        "layout-pending-only-literal",
+                    lash_core::facade_support::SessionObserverIntent::host_requested_ref(
+                        lash_core::ProcessRef::new(
+                            "layout-pending-selected-literal",
+                            lash_core::ProcessIncarnation::from_registration_sequence(42),
+                        ),
                     ),
                 ],
-                session_id: SessionId::from("layout-fork-only-empty-literal"),
+                session_id: SessionId::from("layout-fork-selected-literal"),
                 relation: SessionRelation::Fork {
-                    source_session_id: SessionId::from("layout-source-only-empty-literal"),
-                    source_node_id: "layout-source-node-only-empty-literal".to_string().into(),
-                    observer_inheritance: ObserverInheritance::Only(vec![]),
+                    source_session_id: SessionId::from("layout-source-selected-literal"),
+                    source_node_id: "layout-source-node-selected-literal".to_string().into(),
                 },
             },
             row: RawSessionMetaRow {
-                source_session_id: Some(SessionId::from("layout-source-only-empty-literal")),
-                source_node_id: Some("layout-source-node-only-empty-literal".to_string()),
-                observer_inheritance_kind: Some("only".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-fork-only-empty-literal"), "fork")
+                source_session_id: Some(SessionId::from("layout-source-selected-literal")),
+                source_node_id: Some("layout-source-node-selected-literal".to_string()),
+                ..RawSessionMetaRow::literal(
+                    &SessionId::from("layout-fork-selected-literal"),
+                    "fork",
+                )
             },
             pending_observer_intents: vec![RawObserverIntentProcessRow {
-                session_id: SessionId::from("layout-fork-only-empty-literal"),
+                session_id: SessionId::from("layout-fork-selected-literal"),
                 process_index: 0,
-                process_id: ProcessId::from("layout-pending-only-literal"),
-                process_incarnation: None,
-                attribution: "fork_inherited".to_string(),
+                process_id: ProcessId::from("layout-pending-selected-literal"),
+                process_incarnation: Some(42),
             }],
-            fork_inheritance_processes: vec![],
-        },
-        SessionMetaLayoutCase {
-            meta: SessionMeta {
-                pending_observer_intents: Vec::new(),
-                session_id: SessionId::from("layout-fork-only-processes-literal"),
-                relation: SessionRelation::Fork {
-                    source_session_id: SessionId::from("layout-source-only-literal"),
-                    source_node_id: "layout-source-node-only-literal".to_string().into(),
-                    observer_inheritance: ObserverInheritance::Only(vec![
-                        ProcessId::from("layout-inherit-a-literal"),
-                        ProcessId::from("layout-inherit-b-literal"),
-                    ]),
-                },
-            },
-            row: RawSessionMetaRow {
-                source_session_id: Some(SessionId::from("layout-source-only-literal")),
-                source_node_id: Some("layout-source-node-only-literal".to_string()),
-                observer_inheritance_kind: Some("only".to_string()),
-                ..RawSessionMetaRow::literal(&SessionId::from("layout-fork-only-processes-literal"), "fork")
-            },
-            pending_observer_intents: vec![],
-            fork_inheritance_processes: vec![
-                RawProcessRow {
-                    session_id: SessionId::from("layout-fork-only-processes-literal"),
-                    process_index: 0,
-                    process_id: ProcessId::from("layout-inherit-a-literal"),
-                },
-                RawProcessRow {
-                    session_id: SessionId::from("layout-fork-only-processes-literal"),
-                    process_index: 1,
-                    process_id: ProcessId::from("layout-inherit-b-literal"),
-                },
-            ],
         },
         SessionMetaLayoutCase {
             meta: SessionMeta {
@@ -412,30 +364,29 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                     lash_core::facade_support::SessionObserverIntent {
                         process_id: ProcessId::from("layout-observer-root-b-literal"),
                         process_incarnation: Some(42),
-                        attribution: lash_core::facade_support::SessionObserverIntentAttribution::ForkInherited,
                     },
                 ],
                 session_id: SessionId::from("layout-observer-root-literal"),
                 relation: SessionRelation::Root,
             },
-            row: RawSessionMetaRow::literal(&SessionId::from("layout-observer-root-literal"), "root"),
+            row: RawSessionMetaRow::literal(
+                &SessionId::from("layout-observer-root-literal"),
+                "root",
+            ),
             pending_observer_intents: vec![
                 RawObserverIntentProcessRow {
                     session_id: SessionId::from("layout-observer-root-literal"),
                     process_index: 0,
                     process_id: ProcessId::from("layout-observer-root-a-literal"),
                     process_incarnation: None,
-                    attribution: "host_requested".to_string(),
                 },
                 RawObserverIntentProcessRow {
                     session_id: SessionId::from("layout-observer-root-literal"),
                     process_index: 1,
                     process_id: ProcessId::from("layout-observer-root-b-literal"),
                     process_incarnation: Some(42),
-                    attribution: "fork_inherited".to_string(),
                 },
             ],
-            fork_inheritance_processes: vec![],
         },
     ]
 }
@@ -446,7 +397,7 @@ const RAW_SESSION_META_SELECT: &str = "session_id, relation_kind, parent_session
     caused_by_process_event_sequence, caused_by_occurrence_id,
     caused_by_subscription_id, caused_by_subscription_incarnation,
     caused_by_subscription_revision, caused_by_node_id, source_session_id,
-    source_node_id, observer_inheritance_kind";
+    source_node_id";
 
 fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawSessionMetaRow> {
     Ok(RawSessionMetaRow {
@@ -467,7 +418,6 @@ fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawS
         caused_by_node_id: row.get(14)?,
         source_session_id: row.get::<_, Option<String>>(15)?.map(SessionId::from),
         source_node_id: row.get(16)?,
-        observer_inheritance_kind: row.get(17)?,
     })
 }
 
@@ -490,7 +440,6 @@ fn postgres_raw_session_meta_row(row: sqlx::postgres::PgRow) -> RawSessionMetaRo
         caused_by_node_id: row.get(14),
         source_session_id: row.get::<Option<String>, _>(15).map(SessionId::from),
         source_node_id: row.get(16),
-        observer_inheritance_kind: row.get(17),
     }
 }
 
@@ -519,7 +468,7 @@ fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayout
         let pending_observer_intents = {
             let mut statement = connection
                 .prepare(
-                    "SELECT session_id, process_index, process_id, process_incarnation, attribution
+                    "SELECT session_id, process_index, process_id, process_incarnation
                      FROM session_meta_pending_observer_intents
                      WHERE session_id = ?1 ORDER BY process_index",
                 )
@@ -531,7 +480,6 @@ fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayout
                         process_index: row.get(1)?,
                         process_id: ProcessId::from(row.get::<_, String>(2)?),
                         process_incarnation: row.get(3)?,
-                        attribution: row.get(4)?,
                     })
                 })
                 .expect("read SQLite observer-intent layout")
@@ -541,32 +489,6 @@ fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayout
         assert_eq!(
             pending_observer_intents, case.pending_observer_intents,
             "SQLite production write must preserve literal observer-intent rows for {}",
-            case.row.session_id
-        );
-
-        let fork_inheritance_processes = {
-            let mut statement = connection
-                .prepare(
-                    "SELECT session_id, process_index, process_id
-                     FROM session_meta_fork_inheritance_processes
-                     WHERE session_id = ?1 ORDER BY process_index",
-                )
-                .expect("prepare SQLite fork-inheritance layout read");
-            statement
-                .query_map([case.row.session_id.as_str()], |row| {
-                    Ok(RawProcessRow {
-                        session_id: SessionId::from(row.get::<_, String>(0)?),
-                        process_index: row.get(1)?,
-                        process_id: ProcessId::from(row.get::<_, String>(2)?),
-                    })
-                })
-                .expect("read SQLite fork-inheritance layout")
-                .collect::<Result<Vec<_>, _>>()
-                .expect("decode SQLite fork-inheritance layout")
-        };
-        assert_eq!(
-            fork_inheritance_processes, case.fork_inheritance_processes,
-            "SQLite production write must preserve literal fork-inheritance rows for {}",
             case.row.session_id
         );
     }
@@ -592,54 +514,30 @@ async fn assert_postgres_raw_session_meta_layout(pool: &PgPool, cases: &[Session
             case.row.session_id
         );
 
-        let pending_observer_intents =
-            sqlx::query_as::<_, (String, i64, String, Option<i64>, String)>(
-                "SELECT session_id, process_index, process_id, process_incarnation, attribution
+        let pending_observer_intents = sqlx::query_as::<_, (String, i64, String, Option<i64>)>(
+            "SELECT session_id, process_index, process_id, process_incarnation
              FROM lash_session_meta_pending_observer_intents
-             WHERE session_id = $1 ORDER BY process_index",
-            )
-            .bind(case.row.session_id.as_str())
-            .fetch_all(pool)
-            .await
-            .expect("read PostgreSQL observer-intent layout")
-            .into_iter()
-            .map(
-                |(session_id, process_index, process_id, process_incarnation, attribution)| {
-                    RawObserverIntentProcessRow {
-                        session_id: SessionId::from(session_id),
-                        process_index,
-                        process_id: ProcessId::from(process_id),
-                        process_incarnation,
-                        attribution,
-                    }
-                },
-            )
-            .collect::<Vec<_>>();
-        assert_eq!(
-            pending_observer_intents, case.pending_observer_intents,
-            "PostgreSQL production write must preserve literal observer-intent rows for {}",
-            case.row.session_id
-        );
-
-        let fork_inheritance_processes = sqlx::query_as::<_, (String, i64, String)>(
-            "SELECT session_id, process_index, process_id
-             FROM lash_session_meta_fork_inheritance_processes
              WHERE session_id = $1 ORDER BY process_index",
         )
         .bind(case.row.session_id.as_str())
         .fetch_all(pool)
         .await
-        .expect("read PostgreSQL fork-inheritance layout")
+        .expect("read PostgreSQL observer-intent layout")
         .into_iter()
-        .map(|(session_id, process_index, process_id)| RawProcessRow {
-            session_id: SessionId::from(session_id),
-            process_index,
-            process_id: ProcessId::from(process_id),
-        })
+        .map(
+            |(session_id, process_index, process_id, process_incarnation)| {
+                RawObserverIntentProcessRow {
+                    session_id: SessionId::from(session_id),
+                    process_index,
+                    process_id: ProcessId::from(process_id),
+                    process_incarnation,
+                }
+            },
+        )
         .collect::<Vec<_>>();
         assert_eq!(
-            fork_inheritance_processes, case.fork_inheritance_processes,
-            "PostgreSQL production write must preserve literal fork-inheritance rows for {}",
+            pending_observer_intents, case.pending_observer_intents,
+            "PostgreSQL production write must preserve literal observer-intent rows for {}",
             case.row.session_id
         );
     }
@@ -673,9 +571,9 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
                   caused_by_process_event_sequence, caused_by_occurrence_id,
                   caused_by_subscription_id, caused_by_subscription_incarnation,
                   caused_by_subscription_revision, caused_by_node_id, source_session_id,
-                  source_node_id, observer_inheritance_kind)
+                  source_node_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                         ?14, ?15, ?16, ?17, ?18)",
+                         ?14, ?15, ?16, ?17)",
                 rusqlite::params![
                     case.row.session_id.as_str(),
                     case.row.relation_kind,
@@ -700,7 +598,6 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
                     case.row.caused_by_node_id,
                     case.row.source_session_id.as_ref().map(SessionId::as_str),
                     case.row.source_node_id,
-                    case.row.observer_inheritance_kind,
                 ],
             )
             .expect("insert literal SQLite metadata row");
@@ -708,30 +605,16 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
             transaction
                 .execute(
                     "INSERT INTO session_meta_pending_observer_intents
-                     (session_id, process_index, process_id, process_incarnation, attribution)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                     (session_id, process_index, process_id, process_incarnation)
+                     VALUES (?1, ?2, ?3, ?4)",
                     rusqlite::params![
                         row.session_id.as_str(),
                         row.process_index,
                         row.process_id.as_str(),
                         row.process_incarnation,
-                        row.attribution,
                     ],
                 )
                 .expect("insert literal SQLite observer-intent row");
-        }
-        for row in &case.fork_inheritance_processes {
-            transaction
-                .execute(
-                    "INSERT INTO session_meta_fork_inheritance_processes
-                     (session_id, process_index, process_id) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![
-                        row.session_id.as_str(),
-                        row.process_index,
-                        row.process_id.as_str()
-                    ],
-                )
-                .expect("insert literal SQLite fork-inheritance row");
         }
     }
     transaction
@@ -779,9 +662,9 @@ async fn replace_postgres_session_meta_with_raw_rows(
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind)
+              source_node_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                     $14, $15, $16, $17, $18)",
+                     $14, $15, $16, $17)",
         )
         .bind(case.row.session_id.as_str())
         .bind(&case.row.relation_kind)
@@ -810,36 +693,22 @@ async fn replace_postgres_session_meta_with_raw_rows(
         .bind(&case.row.caused_by_node_id)
         .bind(case.row.source_session_id.as_ref().map(SessionId::as_str))
         .bind(&case.row.source_node_id)
-        .bind(&case.row.observer_inheritance_kind)
         .execute(&mut *transaction)
         .await
         .expect("insert literal PostgreSQL metadata row");
         for row in &case.pending_observer_intents {
             sqlx::query(
                 "INSERT INTO lash_session_meta_pending_observer_intents
-                 (session_id, process_index, process_id, process_incarnation, attribution)
-                 VALUES ($1, $2, $3, $4, $5)",
+                 (session_id, process_index, process_id, process_incarnation)
+                 VALUES ($1, $2, $3, $4)",
             )
             .bind(row.session_id.as_str())
             .bind(row.process_index)
             .bind(row.process_id.as_str())
             .bind(row.process_incarnation)
-            .bind(&row.attribution)
             .execute(&mut *transaction)
             .await
             .expect("insert literal PostgreSQL observer-intent row");
-        }
-        for row in &case.fork_inheritance_processes {
-            sqlx::query(
-                "INSERT INTO lash_session_meta_fork_inheritance_processes
-                 (session_id, process_index, process_id) VALUES ($1, $2, $3)",
-            )
-            .bind(row.session_id.as_str())
-            .bind(row.process_index)
-            .bind(row.process_id.as_str())
-            .execute(&mut *transaction)
-            .await
-            .expect("insert literal PostgreSQL fork-inheritance row");
         }
     }
     transaction
