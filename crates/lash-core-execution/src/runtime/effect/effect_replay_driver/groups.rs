@@ -655,6 +655,9 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             let scope = scope.clone();
             let cancel = state.cancel.child_token();
             let replay_key = child.invocation.replay_key().to_string();
+            // The child inherits its opener's process execution permit, as a
+            // batch leaf did, so a nested process await releases and
+            // reacquires the slot the worker granted this run.
             crate::task::spawn(
                 lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
                     // The result is discarded here on purpose: a child's outcome is
