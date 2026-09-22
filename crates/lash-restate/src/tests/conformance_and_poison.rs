@@ -242,30 +242,44 @@ lash_conformance::durable_queued_drain_wait_resolver_tests!({
     )
 });
 
-lash_conformance::signal_intent_tests!({
-    let context = Arc::new(RecordingContext::default());
-    let effect_host: Arc<dyn EffectHost> =
-        Arc::new(RestateRuntimeEffectController::new_for_test(context));
-    let registry =
-        Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-        serde_json::json!({"signal": "observed"}),
-    ));
-    let (process_work, wait_transport) =
-        conformance_restate_process_work(Arc::clone(&registry), terminal);
-    let verify_transport = Arc::clone(&wait_transport);
-    (
-        wait_transport,
-        "restate-public-signal-intent",
-        effect_host,
-        registry,
-        process_work,
-        move || async move {
-            verify_transport
-                .assert_reattached_to(&ProcessId::from("restate-public-signal-intent-target"));
-        },
-    )
-});
+// The turn runs inside a live handler: its tool call opens a real Restate
+// effect group whose child runs in the endpoint's dispatch invocation, which
+// the recording contexts cannot serve (FIG-3397).
+lash_conformance::signal_intent_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let registry =
+            Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+        let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            serde_json::json!({"signal": "observed"}),
+        ));
+        let (process_work, wait_transport) =
+            conformance_restate_process_work(Arc::clone(&registry), terminal);
+        let verify_transport = Arc::clone(&wait_transport);
+        // Restate state outlives a run: a fixed prefix would reopen the last
+        // run's retired group and replay its settlement instead of running
+        // the tool, so each run names its own session, turn and target.
+        let prefix: &'static str = Box::leak(
+            format!("restate-public-signal-intent-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        let target = ProcessId::from(format!("{prefix}-target"));
+        (
+            (harness, wait_transport),
+            prefix,
+            effect_host,
+            registry,
+            process_work,
+            turn_runner,
+            move || async move {
+                verify_transport.assert_reattached_to(&target);
+            },
+        )
+    }
+);
 
 lash_conformance::wake_delivery_ordering_tests!({
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
