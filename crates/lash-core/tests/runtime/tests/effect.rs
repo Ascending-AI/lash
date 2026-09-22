@@ -1043,6 +1043,17 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
             vec![retry_once_tool_definition().manifest()]
         }
 
+        async fn read_group_settlement(
+            &self,
+            group_key: &str,
+            rank: u64,
+        ) -> Result<
+            Option<lash_core::runtime::effect::RankedGroupSettlement>,
+            lash_core::RuntimeEffectControllerError,
+        > {
+            self.native.read_group_settlement(group_key, rank).await
+        }
+
         fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
             (name == "retry_once").then(|| Arc::new(retry_once_tool_definition().contract()))
         }

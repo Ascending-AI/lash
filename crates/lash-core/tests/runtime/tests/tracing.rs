@@ -635,6 +635,17 @@ impl lash_core::AwaitEventResolver for PendingToolResolutionController {
         Some(format!("pending-resolution-controller:{:p}", self))
     }
 
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
     async fn await_event_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -704,6 +715,17 @@ impl lash_core::RuntimeEffectController for PendingToolResolutionController {
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         self.inner.open_effect_group(group).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
     }
 
     fn register_group_executors(

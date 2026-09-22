@@ -101,15 +101,9 @@ pub struct NativeRuntimeEffectController {
 
 impl Default for NativeRuntimeEffectController {
     fn default() -> Self {
-        let groups = Arc::new(NativeEffectGroups::default());
-        eprintln!(
-            "PROBE native-controller-created table={:?}\n{}",
-            Arc::as_ptr(&groups),
-            std::backtrace::Backtrace::force_capture()
-        );
         Self {
             await_events: Arc::new(AwaitEventRegistry::new()),
-            groups,
+            groups: Arc::new(NativeEffectGroups::default()),
             process_lifetime_completion_keys_enabled: false,
         }
     }
@@ -779,7 +773,6 @@ impl NativeEffectGroups {
         &self,
         executors: Arc<dyn GroupExecutors>,
     ) -> Result<(), RuntimeEffectControllerError> {
-        eprintln!("PROBE register-executors table={:?}", self as *const Self);
         let Err(rejected) = self.executors.set(executors) else {
             return Ok(());
         };
@@ -809,11 +802,6 @@ impl NativeEffectGroups {
         &self,
     ) -> Result<Arc<dyn GroupExecutors>, RuntimeEffectControllerError> {
         self.executors.get().cloned().ok_or_else(|| {
-            eprintln!(
-                "PROBE unregistered-native-groups table={:?}\n{}",
-                self as *const Self,
-                std::backtrace::Backtrace::force_capture()
-            );
             RuntimeEffectControllerError::new(
                 RuntimeErrorCode::EffectGroupUnsupported,
                 "this native effect controller has no registered group executor \
@@ -954,8 +942,17 @@ impl NativeEffectGroups {
             // cannot remove a position that was never inserted.
             state.state.lock_recover().running.insert(position);
             let controller = controller.clone();
+            // The wait a cancellable `AwaitEvent` child is parked on: dropping
+            // the execution future never polls the waiter's own release arm,
+            // so the cancel arm below resolves the promise itself — the same
+            // release the store tier's `execute_effect_cancellable` writes
+            // (ADR 0099 §12, FIG-3411).
+            let cancel_wait_key = match &child.command {
+                RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
+                _ => None,
+            };
             let child_task = tracing::Instrument::instrument(
-                async move {
+                lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
                     // Dispatch through `execute_effect`, not the executor
                     // directly: some resolved executors are wait *options* an
                     // `execute` refuses (an `AwaitEvent` child), and this arm
@@ -977,6 +974,11 @@ impl NativeEffectGroups {
                             if committed {
                                 execution.await
                             } else {
+                                if let Some(key) = &cancel_wait_key {
+                                    let _ = controller
+                                        .resolve_await_event(key, crate::Resolution::Cancelled)
+                                        .await;
+                                }
                                 Err(child_cancelled_error(&group_key, position))
                             }
                         }
@@ -991,7 +993,7 @@ impl NativeEffectGroups {
                         inner.decided_at.remove(&position);
                     }
                     state.task_finished.notify_waiters();
-                },
+                }),
                 tracing::Span::current(),
             );
             task_owner.tasks.lock_recover().spawn(child_task);

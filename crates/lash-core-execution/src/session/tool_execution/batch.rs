@@ -411,7 +411,7 @@ impl RuntimeExecutionContext<'_> {
                     ));
                 }
                 ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = self
+                    let completed = context
                         .complete_undispatched_tool_call(call.id, None, *outcome)
                         .await;
                     replies[index] = Some(

@@ -29,9 +29,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_core::facade_support::{
-    EmbeddedRuntimeHost, InMemorySessionStoreFactory, LashRuntime, NativeRuntimeEffectController,
-    PersistentRuntimeServices, PluginHost, PluginSession, PluginSpec, RuntimeHostConfig,
-    SingleProviderResolver, TurnFinish, TurnOutcome,
+    EmbeddedRuntimeHost, InMemorySessionStoreFactory, LashRuntime, PersistentRuntimeServices,
+    PluginHost, PluginSession, PluginSpec, RuntimeHostConfig, SingleProviderResolver, TurnFinish,
+    TurnOutcome,
 };
 use lash_core::plugin::{
     PluginFactory, PromptHookContext, RecordedSessionConfig, RuntimeServices, SessionStateService,
@@ -39,7 +39,7 @@ use lash_core::plugin::{
 };
 use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
 use lash_core::{
-    AdmittedScope, AppendSessionNodesRequest, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
+    AppendSessionNodesRequest, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
     PersistedSessionConfig, ProtocolTurnOptions, QueuedWorkBatchingConfig, RuntimeCommit,
     RuntimePersistence, RuntimeSessionState, ScopedEffectController, SessionAppendNode,
     SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
@@ -520,11 +520,10 @@ fn continue_as_response() -> String {
 /// Admitted on the runtime's own host: a group child opened under a foreign
 /// controller resolves no opener/env on the host the turn runs on (ADR 0099).
 fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
-    let session_id = runtime
+    let view = runtime
         .read_view()
-        .expect("test runtime frame scope resolves")
-        .session_id()
-        .clone();
+        .expect("test runtime frame scope resolves");
+    let session_id = SessionId::from(view.session_id());
     lash_core::testing::runtime_helpers::host_turn_scope(&runtime.host.core, &session_id, turn_id)
 }
 

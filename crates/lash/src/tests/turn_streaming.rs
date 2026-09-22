@@ -728,13 +728,8 @@ impl lash_core::ProcessExecutionEnvStore for DurableInMemoryProcessEnvStore {
 struct DurableNoopEffectHost {
     selected_scopes: StdMutex<Vec<lash_core::ExecutionScope>>,
     controller: Arc<RecordingDurableEffectController>,
-    /// A native host over the recorder's inner controller, lending the
-    /// group-child-bound controllers and executor registration this facade
-    /// host cannot mint itself (the recorder's group state lives in the
-    /// native substrate underneath it).
-    group_host: std::sync::OnceLock<Arc<lash_core::facade_support::NativeEffectHost>>,
-    /// The installed `ToolChildHost` this host owns: it must live here, not on
-    /// the native `group_host`, because a child's recorded cancellation
+    /// The installed `ToolChildHost` this host owns: it must live here because
+    /// a child's recorded cancellation
     /// authority is derived from *this* host's `turn_control_binding_id` (the
     /// recorder's durable-journaled authority) and the child-run check
     /// re-derives it from the host the executors route through.
@@ -742,16 +737,6 @@ struct DurableNoopEffectHost {
 }
 
 impl DurableNoopEffectHost {
-    fn group_host(&self) -> &Arc<lash_core::facade_support::NativeEffectHost> {
-        self.group_host.get_or_init(|| {
-            Arc::new(
-                lash_core::facade_support::NativeEffectHost::with_native_controller(Arc::clone(
-                    &self.controller.native,
-                )),
-            )
-        })
-    }
-
     fn selected_scopes(&self) -> Vec<lash_core::ExecutionScope> {
         self.selected_scopes.lock_recover().clone()
     }
@@ -892,9 +877,11 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         candidate: Arc<lash_core::facade_support::ToolChildHost>,
     ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
         let installed = self.tool_children.get_or_init(|| candidate);
-        self.controller
-            .register_group_executors(Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>)
-            .ok()?;
+        lash_core::RuntimeEffectController::register_group_executors(
+            self.controller.as_ref(),
+            Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>,
+        )
+        .ok()?;
         Some(Arc::clone(installed))
     }
 }
