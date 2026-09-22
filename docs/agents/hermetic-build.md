@@ -669,3 +669,31 @@ by the captured action log instead. The diagnostic manifest is an observation,
 not a reusable validation receipt. Capture is opt-in: remote logs add I/O and
 result decoding has its own measured duration. Compare like target/features,
 cache state and host load, and keep upload/queue time separate from execution.
+
+### Compile source ownership
+
+`tools/bazel/source-ownership.json` records reviewed source boundaries that the
+Cargo target list cannot express. A test entry names its crate root and all
+module/include source patterns it compiles, including shared helpers. Its
+patterns apply to both the default target and every feature-lane variant.
+Unlisted targets retain conservative package source inputs. Python interpreter
+bytecode caches are excluded from package input and runfiles globs so executing
+a script cannot invalidate Rust actions. The generator
+rejects missing roots, stale patterns, unknown targets and paths outside the
+package; `kiln sync` writes the declarations into BUILD files.
+
+`library_test_sources` names individual external modules that are reachable
+only under `cfg(test)`. Normal and feature-variant libraries exclude these
+files from compilation inputs; the unit-test crate retains them. Do not put
+`cfg(feature = "testing")` fixtures here: libraries compile those fixtures.
+If a module becomes production-reachable, remove its test-only declaration in
+the same change. Rustc must still find every real compile input in a hermetic
+build, so a missing declaration fails compilation instead of silently hiding
+the dependency. Runtime source-scanning tests continue to declare their files
+through `extra_data`; compile ownership does not remove those witnesses.
+
+When narrowing a boundary, compare action inputs and run a controlled sibling
+edit and shared-helper edit. The sibling edit should compile only its owner;
+the shared edit should compile both. Count Rustc executions independently of
+test executions, since package source runfiles can still re-run source-reading
+tests without recompiling them.

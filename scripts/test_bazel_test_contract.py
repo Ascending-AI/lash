@@ -120,6 +120,44 @@ def generated_nextest_terms() -> set[tuple[str, str, str | None]]:
 
 
 class BazelTestContractTests(unittest.TestCase):
+    def test_source_ownership_keeps_shared_helpers_without_sibling_suites(self) -> None:
+        policy = json.loads((ROOT / "tools/bazel/source-ownership.json").read_text())
+        package = ROOT / "crates/lash-core"
+        sources = {
+            name: {path.relative_to(package).as_posix() for pattern in patterns for path in package.glob(pattern)}
+            for name, patterns in policy["crates/lash-core"]["tests"].items()
+        }
+        shared = "tests/runtime_support/effect_controller_doubles.rs"
+        self.assertIn(shared, sources["runtime_effect"] & sources["runtime_scenarios"])
+        self.assertIn("tests/runtime/tests/effect/turn_cancel_modes.rs", sources["runtime_effect"])
+        scenarios = "tests/runtime/tests/runtime_scenarios/cases.rs"
+        self.assertIn(scenarios, sources["runtime_scenarios"])
+        self.assertNotIn(scenarios, sources["runtime_effect"])
+        self.assertNotIn("tests/runtime/tests/effect/turn_cancel_modes.rs", sources["runtime_scenarios"])
+
+    def test_source_ownership_rejects_stale_and_escaping_patterns(self) -> None:
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+        from unittest.mock import patch
+
+        package = "crates/lash-core"
+        metadata = {
+            "workspace_members": ["core"],
+            "packages": [{
+                "id": "core",
+                "manifest_path": str(ROOT / package / "Cargo.toml"),
+                "targets": [{"name": "runtime_effect", "kind": ["test"], "src_path": str(ROOT / package / "tests/runtime_effect.rs")}],
+            }],
+        }
+        for patterns in [
+            ["tests/runtime_effect.rs", "tests/removed/**/*.rs"],
+            ["tests/runtime_effect.rs", "../lash-core-execution/src/lib.rs"],
+            ["tests/runtime/tests/effect.rs"],
+        ]:
+            with self.subTest(patterns=patterns), patch.object(generator, "SOURCE_OWNERSHIP", {package: {"tests": {"runtime_effect": patterns}}}):
+                with self.assertRaises(ValueError):
+                    generator.validate_source_ownership(metadata)
+
     def test_generated_inventory_is_current(self) -> None:
         subprocess.run(
             ["python3", "tools/bazel/generate_build_files.py", "--check"],

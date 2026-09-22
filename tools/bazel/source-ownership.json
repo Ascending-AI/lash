@@ -1,0 +1,69 @@
+{
+  "crates/lash-core": {
+    "tests": {
+      "runtime_effect": [
+        "tests/runtime_effect.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/effect.rs",
+        "tests/runtime/tests/effect/**/*.rs",
+        "tests/runtime/tests/effect_direct_llm.rs",
+        "tests/runtime/tests/effect_response_hook.rs"
+      ],
+      "runtime_scenarios": [
+        "tests/runtime_scenarios.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/attempt_atomicity.rs",
+        "tests/runtime/tests/attempt_atomicity/**/*.rs",
+        "tests/runtime/tests/runtime_scenarios.rs",
+        "tests/runtime/tests/runtime_scenarios/**/*.rs"
+      ]
+    }
+  },
+  "crates/lash-core-execution": {
+    "library_test_sources": [
+      "src/plugin/state/tests.rs",
+      "src/runtime/effect/effect_replay_driver/tests.rs",
+      "src/runtime/effect/executor/control/tests.rs",
+      "src/runtime/effect/live_openers/tests.rs",
+      "src/runtime/effect/tool_child_driver/tests.rs",
+      "src/runtime/effect/tool_settlement/tests.rs",
+      "src/runtime/native_substrate/awaiter/tests.rs",
+      "src/runtime/process/engine_resolve_tests.rs",
+      "src/runtime/process/lease_serde_tests.rs",
+      "src/runtime/process/model_filter_tests.rs",
+      "src/runtime/process/testing/atomic_execution_write_tests.rs",
+      "src/runtime/process/tests.rs",
+      "src/runtime/process/validation_tests.rs",
+      "src/runtime/turn_control/tests.rs",
+      "src/session/execution_context/tests.rs",
+      "src/session/fig790_tests.rs",
+      "src/session/settlement_incorporation_tests.rs",
+      "src/session/settlement_latency_tests.rs",
+      "src/session/tool_execution/turn_cancel_gate_tests.rs",
+      "src/tool_dispatch/tests.rs",
+      "src/tool_dispatch/tests/attachment_normalization.rs",
+      "src/tool_dispatch/tests/context_source.rs",
+      "src/tool_dispatch/tests/directives.rs",
+      "src/tool_dispatch/tests/granted_dispatch.rs",
+      "src/tool_dispatch/tests/intent_drain.rs",
+      "src/tool_dispatch/tests/intent_laws.rs",
+      "src/tool_dispatch/tests/internal_activation.rs",
+      "src/tool_dispatch/tests/orchestrating.rs",
+      "src/tool_dispatch/tests/pending_park_laws.rs",
+      "src/tool_dispatch/tests/protocol_version_refusal.rs",
+      "src/tool_dispatch/tests/rebind_checklist.rs",
+      "src/tool_dispatch/tests/retry_effect_controllers.rs",
+      "src/tool_dispatch/tests/retry_turn_cancel_gate.rs",
+      "src/tool_dispatch/tests/settlement_order.rs",
+      "src/tool_dispatch/tests/single_gate.rs",
+      "src/tool_registry/admission_tests.rs",
+      "src/tool_registry/pinning_tests.rs",
+      "src/tool_registry/tests.rs",
+      "src/tool_registry/tests/grant_support.rs",
+      "src/tool_registry/tests/restore_tests.rs",
+      "src/trace_feedback_tests.rs",
+      "src/triggers/router/tests.rs",
+      "src/triggers/tests.rs"
+    ]
+  }
+}
