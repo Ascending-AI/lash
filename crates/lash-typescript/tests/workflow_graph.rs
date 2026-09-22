@@ -21,10 +21,11 @@ use lashlang::{
     TypeExpr, TypeField, VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION,
     WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument, WorkflowContainer, WorkflowDeclaration,
     WorkflowDiagnosticClass, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind,
-    WorkflowExpectedArgument, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode,
-    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets,
-    WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTypeDiagnostic,
-    node_id_for_execution_site, workflow_call_to_ir, workflow_slot_value,
+    WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide,
+    WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSlotPath, WorkflowSlotPathSegment,
+    WorkflowSubgraph, WorkflowTypeDiagnostic, node_id_for_execution_site, reconcile,
+    workflow_call_to_ir, workflow_slot_value,
 };
 
 /// The one process a fixture lifts.
@@ -187,11 +188,256 @@ finish(items);
     ));
 
     let legacy_json = json.replacen("\"container_kind\":\"if\"", "\"kind\":\"if\"", 1);
-    let legacy_error = serde_json::from_str::<WorkflowGraph>(&legacy_json)
+    let legacy_error = WorkflowGraph::decode_json(&legacy_json)
         .expect_err("the colliding legacy container representation must stay refused");
+    assert!(matches!(
+        legacy_error,
+        WorkflowGraphDecodeError::Document(_)
+    ));
+    assert!(legacy_error.to_string().contains("unknown variant `if`"));
+}
+
+#[test]
+fn workflow_graph_decode_checks_version_before_shape() {
+    let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
+    let mut value = serde_json::to_value(graph).expect("graph serializes");
+    value["schema_version"] = serde_json::json!(WORKFLOW_GRAPH_SCHEMA_VERSION - 1);
+    value["main"]["nodes"][0]["kind"] = serde_json::json!({ "kind": "future_node" });
+
+    let encoded = serde_json::to_string(&value).expect("fixture JSON encodes");
+    assert!(matches!(
+        WorkflowGraph::decode_json(&encoded),
+        Err(WorkflowGraphDecodeError::UnsupportedSchemaVersion {
+            found,
+            expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        }) if found == WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+    ));
+}
+
+#[test]
+fn workflow_graph_decode_refuses_unknown_fields_and_variants() {
+    let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
+    let mut unknown_field = serde_json::to_value(&graph).expect("graph serializes");
+    unknown_field["future"] = serde_json::json!(true);
+    let error = WorkflowGraph::decode_json(
+        &serde_json::to_string(&unknown_field).expect("fixture JSON encodes"),
+    )
+    .expect_err("same-version unknown fields are refused");
+    assert!(error.to_string().contains("unknown field `future`"));
+
+    let mut unknown_variant = serde_json::to_value(graph).expect("graph serializes");
+    unknown_variant["main"]["nodes"][0]["kind"] = serde_json::json!({ "kind": "future_node" });
+    let error = WorkflowGraph::decode_json(
+        &serde_json::to_string(&unknown_variant).expect("fixture JSON encodes"),
+    )
+    .expect_err("same-version unknown variants are refused");
+    assert!(error.to_string().contains("unknown variant `future_node`"));
+}
+
+#[test]
+fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
+    let golden = include_str!("fixtures/workflow_graph_with_facets.json");
+    WorkflowGraph::decode_json(golden).expect("the untouched graph golden decodes");
+
+    let golden_value =
+        serde_json::from_str::<serde_json::Value>(golden).expect("the graph golden is JSON");
+    let mut cases = Vec::new();
+
+    let mut source_span = golden_value.clone();
+    source_span["main"]["nodes"][0]["source_span"]["future"] = serde_json::json!(true);
+    cases.push(("source_span", "future", source_span));
+
+    let mut source_span_facet_collision = golden_value.clone();
+    source_span_facet_collision["main"]["nodes"][0]["source_span"]["type_facets"] =
+        serde_json::json!({});
+    cases.push((
+        "source_span type_facets collision",
+        "type_facets",
+        source_span_facet_collision,
+    ));
+
+    let mut root_facet_collision = golden_value.clone();
+    root_facet_collision["type_facets"] = serde_json::json!({});
+    cases.push((
+        "root type_facets collision",
+        "type_facets",
+        root_facet_collision,
+    ));
+
+    let mut execution_site = golden_value.clone();
+    execution_site["main"]["nodes"][0]["execution_sites"][0]["future"] = serde_json::json!(true);
+    cases.push(("execution site", "future", execution_site));
+
+    let mut ast_payload = golden_value.clone();
+    ast_payload["main"]["nodes"][0]["kind"]["binding"]["future"] = serde_json::json!(true);
+    cases.push(("AssignTarget", "future", ast_payload));
+
+    let function_graph = WorkflowGraph {
+        schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        source_identity: "fixture".to_string(),
+        facet_schema_version: None,
+        declarations: vec![WorkflowDeclaration::Function(lashlang::FunctionDecl {
+            name: "describe".into(),
+            params: vec![lashlang::FunctionParam {
+                name: "name".into(),
+                ty: TypeExpr::Str,
+            }],
+            return_ty: TypeExpr::Str,
+            body: lashlang::Expr::Variable("name".into()),
+        })],
+        main: WorkflowSubgraph::default(),
+    };
+    let mut function_decl =
+        serde_json::to_value(function_graph).expect("the function graph serializes");
+    function_decl["declarations"][0]["future"] = serde_json::json!(true);
+    cases.push(("FunctionDecl", "future", function_decl));
+
+    for (name, field, value) in cases {
+        let error = match WorkflowGraph::decode_json(
+            &serde_json::to_string(&value).expect("the mutated graph encodes"),
+        ) {
+            Ok(_) => panic!("{name} accepted an unknown nested field"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("unknown field `{field}`")),
+            "{name} mutation returned the wrong error: {error}"
+        );
+    }
+
+    let mut extended_facet = golden_value;
+    extended_facet["main"]["nodes"][0]["type_facets"]["future"] = serde_json::json!(true);
+    WorkflowGraph::decode_json(
+        &serde_json::to_string(&extended_facet).expect("the facet extension encodes"),
+    )
+    .expect("known facet objects remain tolerant of unknown fields");
+}
+
+#[test]
+fn source_identity_tracks_canonical_definition_not_input_formatting() {
+    let compact = workflow_graph_from_source("const value=1;finish(value);\n")
+        .expect("compact source projects");
+    let formatted = workflow_graph_from_source("const value = 1;\n\nfinish(value);\n")
+        .expect("formatted source projects");
+    assert_eq!(compact.source_identity, formatted.source_identity);
+
+    let program = parse("const value = 1;\nfinish(value);\n").expect("fixture parses");
+    let artifact = workflow_graph_from_program(&program);
+    assert_eq!(formatted.source_identity, artifact.source_identity);
+
+    let labeled = workflow_graph_from_source(
+        "/** @label Finish value */\nconst value = 1;\nfinish(value);\n",
+    )
+    .expect("labeled source projects");
+    assert_ne!(formatted.source_identity, labeled.source_identity);
+}
+
+#[test]
+fn non_sourceable_program_source_identity_uses_serialized_program_fallback() {
+    let mut program = parse("const value = 1;\n").expect("fixture parses");
+    program.main = lashlang::Expr::Block(vec![lashlang::Expr::SleepUntil(Box::new(
+        lashlang::Expr::String("tomorrow".into()),
+    ))]);
+    assert!(typescript_program_source(&program).is_err());
+    assert_eq!(
+        workflow_graph_from_program(&program).source_identity,
+        "05a32bb1d435bdadd1604800482ecbedce57432fee9cf6aa744d37d63e89f7ec"
+    );
+}
+
+#[test]
+fn reconcile_pairs_inserted_nodes_by_structural_location() {
+    let mut submitted = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
+    let inserted_id = WorkflowNodeId::new("new:inserted".to_string());
+    submitted.main.nodes.insert(
+        0,
+        WorkflowNode {
+            id: inserted_id.clone(),
+            name: "computation".to_string(),
+            description: None,
+            name_source: WorkflowNodeNameSource::Derived,
+            kind: WorkflowNodeKind::Computation {
+                binding: None,
+                expression: lashlang::Expr::Number(2.0),
+            },
+            available_variables: Vec::new(),
+            type_facets: None,
+            outputs: Vec::new(),
+            execution_sites: Vec::new(),
+            source_span: None,
+        },
+    );
+    let source = workflow_graph_to_source(&submitted).expect("submitted graph renders");
+    let reprojected = workflow_graph_from_source(&source).expect("source reprojects");
+
+    let result = reconcile(&submitted, &reprojected);
+    assert!(result.unmatched.is_empty());
+    assert!(result.ambiguous.is_empty());
+    assert_eq!(result.pairs.len(), 2);
     assert!(
-        legacy_error.to_string().contains("duplicate field `kind`"),
-        "unexpected legacy decode error: {legacy_error}"
+        result
+            .pairs
+            .iter()
+            .any(|pair| pair.submitted == inserted_id)
+    );
+}
+
+#[test]
+fn reconcile_reports_unmatched_and_ambiguous_ids_without_guessing() {
+    let submitted = workflow_graph_from_source("1;\nfinish(1);\n").expect("fixture projects");
+    let mut missing = submitted.clone();
+    missing.main.nodes.remove(0);
+    let unmatched = reconcile(&submitted, &missing);
+    assert_eq!(unmatched.unmatched.len(), 1);
+    assert!(unmatched.ambiguous.is_empty());
+
+    let mut duplicate_ids = submitted.clone();
+    duplicate_ids.main.nodes[1].id = duplicate_ids.main.nodes[0].id.clone();
+    let ambiguous = reconcile(&duplicate_ids, &duplicate_ids);
+    assert!(ambiguous.unmatched.is_empty());
+    assert_eq!(ambiguous.ambiguous.len(), 2);
+    assert!(ambiguous.pairs.is_empty());
+}
+
+#[test]
+fn reconcile_suppresses_pairs_for_ids_duplicated_at_unmatched_locations() {
+    let two_nodes = workflow_graph_from_source("1;\nfinish(1);\n").expect("fixture projects");
+    let one_node = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
+
+    let mut duplicate_submitted = two_nodes.clone();
+    duplicate_submitted.main.nodes[1].id = duplicate_submitted.main.nodes[0].id.clone();
+    let submitted_result = reconcile(&duplicate_submitted, &one_node);
+    assert!(submitted_result.pairs.is_empty());
+    assert_eq!(submitted_result.unmatched.len(), 1);
+    assert_eq!(submitted_result.ambiguous.len(), 1);
+    assert_eq!(
+        submitted_result.ambiguous[0].side,
+        WorkflowGraphReconcileSide::Submitted
+    );
+    assert_eq!(submitted_result.ambiguous[0].locations.len(), 2);
+    assert!(
+        submitted_result.ambiguous[0]
+            .locations
+            .contains(&submitted_result.unmatched[0].location)
+    );
+
+    let mut duplicate_reprojected = two_nodes;
+    duplicate_reprojected.main.nodes[1].id = duplicate_reprojected.main.nodes[0].id.clone();
+    let reprojected_result = reconcile(&one_node, &duplicate_reprojected);
+    assert!(reprojected_result.pairs.is_empty());
+    assert_eq!(reprojected_result.unmatched.len(), 1);
+    assert_eq!(reprojected_result.ambiguous.len(), 1);
+    assert_eq!(
+        reprojected_result.ambiguous[0].side,
+        WorkflowGraphReconcileSide::Reprojected
+    );
+    assert_eq!(reprojected_result.ambiguous[0].locations.len(), 2);
+    assert!(
+        reprojected_result.ambiguous[0]
+            .locations
+            .contains(&reprojected_result.unmatched[0].location)
     );
 }
 
@@ -200,7 +446,7 @@ fn workflow_graph_ir_json_golden_is_exact() {
     let graph =
         workflow_graph_from_source("await tools.lookup({ query: \"x\" });\nawait sleep(\"1s\");\n")
             .expect("fixture projects");
-    assert_eq!(graph.schema_version, 12);
+    assert_eq!(graph.schema_version, 13);
     let kinds = serde_json::Value::Array(
         graph
             .main
@@ -267,9 +513,36 @@ fn workflow_type_facet_slot_json_golden_is_exact() {
 }
 
 #[test]
+fn workflow_graph_with_facets_json_golden_is_exact() {
+    let graph = workflow_graph_from_source_with_facets(
+        "const answer = await tools.lookup({ query: \"x\" });\nfinish(answer);\n",
+        Some(&facet_environment()),
+    )
+    .expect("golden fixture projects");
+    let actual = serde_json::to_string_pretty(&graph).expect("golden graph serializes") + "\n";
+    assert_eq!(
+        actual,
+        include_str!("fixtures/workflow_graph_with_facets.json"),
+        "nodes={:?}, edges={:?}, source_identity={}",
+        graph
+            .nodes()
+            .map(|node| node.id.to_string())
+            .collect::<Vec<_>>(),
+        graph
+            .main
+            .edges
+            .iter()
+            .map(|edge| edge.id.as_str())
+            .collect::<Vec<_>>(),
+        graph.source_identity,
+    );
+}
+
+#[test]
 fn workflow_graph_refuses_unknown_type_expr_variant() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        source_identity: "fixture".to_string(),
         facet_schema_version: None,
         declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
             name: "Name".into(),
@@ -307,6 +580,7 @@ fn facet_reader_refuses_unknown_type_expr_variant() {
 fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        source_identity: "fixture".to_string(),
         facet_schema_version: None,
         declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
             name: "Record".into(),

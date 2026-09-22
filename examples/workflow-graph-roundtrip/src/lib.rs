@@ -260,13 +260,28 @@ async fn save_workflow(
     }
     let graph = graph::graph_from_document(document.clone(), &current.graph)?;
     let source = workflow_graph_to_source(&graph).map_err(RenderErrorResponse::from)?;
-    let graph = workflow_graph_from_source(&source).map_err(RenderErrorResponse::projection)?;
-    let saved = state.save(source, graph);
+    let canonical_graph =
+        workflow_graph_from_source(&source).map_err(RenderErrorResponse::projection)?;
+    let reconciliation = lashlang::reconcile(&graph, &canonical_graph);
+    if !reconciliation.unmatched.is_empty() || !reconciliation.ambiguous.is_empty() {
+        return Err(RenderErrorResponse::document(
+            "submitted workflow does not reconcile with its canonical reprojection",
+            serde_json::json!({
+                "unmatched": reconciliation.unmatched,
+                "ambiguous": reconciliation.ambiguous,
+            }),
+        ));
+    }
+    let id_map = reconciliation
+        .pairs
+        .into_iter()
+        .map(|pair| (pair.submitted.to_string(), pair.reprojected.to_string()))
+        .collect();
+    let saved = state.save(source, canonical_graph);
     let environment = runtime::host_environment();
     let faceted_graph = workflow_graph_from_source_with_facets(&saved.source, Some(&environment))
         .map_err(RenderErrorResponse::projection)?;
     let reprojected = graph::document_from_graph(saved.version, saved.source, faceted_graph);
-    let id_map = graph::reconcile_node_ids(&document, &reprojected);
     Ok(Json(SaveWorkflowResponse {
         document: reprojected,
         id_map,

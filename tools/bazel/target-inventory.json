@@ -19754,6 +19754,7 @@
         "rustc-hash",
         "ryu-js",
         "serde",
+        "serde_ignored",
         "serde_json",
         "sha2",
         "smallvec",
