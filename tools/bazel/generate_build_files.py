@@ -1464,6 +1464,7 @@ class FeatureLaneGraph:
         # (package, features) -> label, and the chunk that defines it
         self.variants: dict[tuple[str, tuple[str, ...]], str] = {}
         self.chunks: dict[str, list[tuple[str, str]]] = {}
+        self._chunk_names: set[tuple[str, str]] = set()
         self.lanes: dict[str, dict[str, list[str]]] = {}
         self.units: list[dict] = []
         self.clippy: set[str] = set()
@@ -1493,10 +1494,11 @@ class FeatureLaneGraph:
         return None
 
     def add_chunk(self, package_name: str, name: str, text: str) -> None:
-        self.chunks.setdefault(package_name, [])
-        if any(existing == name for existing, _ in self.chunks[package_name]):
+        key = (package_name, name)
+        if key in self._chunk_names:
             return
-        self.chunks[package_name].append((name, text))
+        self._chunk_names.add(key)
+        self.chunks.setdefault(package_name, []).append((name, text))
 
     def variant_deps_argument(
         self, owner: str, resolution: dict[str, list[str]], indent: int = 4
@@ -1744,7 +1746,10 @@ class FeatureLaneGraph:
         package = self.by_name[package_name]
         library = self.library_of(package_name)
         directory = self.dirs[package_name]
-        if label == f"//{directory}:{self.primary[package_name]}":
+        if (
+            label == f"//{directory}:{self.primary[package_name]}"
+            or (package_name, name) in self._chunk_names
+        ):
             return label
         has_build_script = any(
             "custom-build" in target["kind"] for target in package["targets"]
