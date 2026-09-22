@@ -1695,6 +1695,28 @@ where
         .await
 }
 
+/// The standalone-registry counterpart of `session.admin().tools().add_provider`:
+/// a fresh [`crate::ToolRegistry`] with `provider` registered through the same
+/// live-source route a session admin call takes.
+///
+/// Host tests that exercise the registry's source routing — e.g. the route a
+/// resolved deferred grant follows in production — build the registry here
+/// rather than through the facade-internal registry ops. The returned
+/// [`crate::tool_registry::ToolSourceHandle`] is the source the provider's
+/// calls route to; [`crate::ToolRegistry::from_tool_provider`] is the
+/// plugin-source lane instead.
+pub fn tool_registry_with_live_provider(
+    provider: Arc<dyn crate::ToolProvider>,
+) -> (crate::ToolRegistry, crate::tool_registry::ToolSourceHandle) {
+    use crate::tool_registry::facade_ops::ToolRegistryFacadeOps as _;
+
+    let registry = crate::ToolRegistry::empty();
+    let handle = registry
+        .add_tool_provider(provider)
+        .expect("registering a provider on a fresh tool registry cannot fail");
+    (registry, handle)
+}
+
 pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTurn {
     AssembledTurn {
         state: SessionSnapshot {

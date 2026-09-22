@@ -237,9 +237,9 @@ pub mod tools {
         ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient,
         ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
         derive_tool_intent_identity, facade_support::OrchestrationContext,
-        facade_support::ReconfigureError, facade_support::ToolRegistryFacadeOps,
-        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
-        facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
+        facade_support::ReconfigureError, facade_support::ToolSourceHandle,
+        facade_support::ToolStateFacadeOps, facade_support::ToolTriggerClient,
+        turn_outcome_from_tool_control,
     };
     pub use lash_core::{
         InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
