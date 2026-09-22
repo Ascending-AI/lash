@@ -106,7 +106,7 @@ pub use span::Span;
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 17;
+pub const BYTECODE_FORMAT_VERSION: u32 = 18;
 pub use tracking::{
     LashlangBranchSite, LashlangExecutionCallSite, LashlangExecutionChild,
     LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection,

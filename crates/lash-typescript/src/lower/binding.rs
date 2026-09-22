@@ -271,7 +271,9 @@ pub(super) fn called_binding_names(statements: &[Stmt]) -> BTreeSet<String> {
 
 fn collect_statement_called_names(statement: &Stmt, called: &mut BTreeSet<String>) {
     match statement {
-        Stmt::Labeled { stmt, .. } => collect_statement_called_names(stmt, called),
+        Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => {
+            collect_statement_called_names(stmt, called)
+        }
         Stmt::Empty | Stmt::Break | Stmt::Continue => {}
         Stmt::Function { function, .. } => match &function.body {
             FunctionBody::Block(statements) => {
@@ -326,7 +328,7 @@ fn collect_statement_called_names(statement: &Stmt, called: &mut BTreeSet<String
             collect_expression_called_names(test, called);
             collect_statement_called_names(body, called);
         }
-        Stmt::DoWhile { body, test } => {
+        Stmt::DoWhile { body, test, .. } => {
             collect_expression_called_names(test, called);
             collect_statement_called_names(body, called);
         }

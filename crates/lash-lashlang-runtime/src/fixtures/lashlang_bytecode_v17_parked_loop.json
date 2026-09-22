@@ -1,0 +1,100 @@
+{
+  "bytecode_format_version": 17,
+  "input": {
+    "args": {},
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bytecode-v17-parked-loop",
+    "module_ref": "lashlang:v2:blake3:bytecode-v17-parked-loop",
+    "process_name": "loop_fixture",
+    "process_ref": {
+      "component": "bytecode-v17-parked-loop",
+      "pos": 0
+    }
+  },
+  "program": "for (const item of [1]) { await sleep(item); } finish(null);",
+  "program_hash": "blake3:2b8b72c2d8e4e7ac98e08bab937fb84534a9ee4e0c311e8ed7be49fccf72d82c",
+  "segment_state": {
+    "child_max_attempts": 5,
+    "event_sequence": 0,
+    "signal_wait_ordinals": {},
+    "sleep_sequence": 0,
+    "started_process_ids": [],
+    "version": 12,
+    "vm": {
+      "active_execution_elapsed": {
+        "nanos": 0,
+        "secs": 0
+      },
+      "active_function": null,
+      "execution_nonce": 958985677965949815,
+      "finally_stack": [],
+      "format_version": 16,
+      "frame_stack": [],
+      "globals": {
+        "kind": "record",
+        "value": []
+      },
+      "handler_stack": [],
+      "heap": {
+        "allocation_counter": 1,
+        "live_logical_bytes": 0,
+        "next_id": 2,
+        "objects": [],
+        "size_schedule_version": 2
+      },
+      "instruction_pointer": 6,
+      "instructions_executed": 6,
+      "iterator_stack": [
+        {
+          "binding_slot": 0,
+          "cursor": {
+            "List": {
+              "next_index": 1,
+              "values": [
+                {
+                  "kind": "number",
+                  "value": {
+                    "bits": 4607182418800017408,
+                    "version": 1
+                  }
+                }
+              ]
+            }
+          },
+          "restore_value": {
+            "kind": "unset"
+          }
+        }
+      ],
+      "last_value": {
+        "kind": "set",
+        "value": {
+          "kind": "null"
+        }
+      },
+      "mode": "Process",
+      "occurrence_counters": {},
+      "operand_stack": [
+        {
+          "kind": "null"
+        }
+      ],
+      "pending_error_span": null,
+      "pending_tools": {},
+      "profile": null,
+      "reference_semantics": false,
+      "slots": [
+        {
+          "kind": "set",
+          "value": {
+            "kind": "number",
+            "value": {
+              "bits": 4607182418800017408,
+              "version": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "source_commit": "4f96c76629575e46b8d7f29526bb0cab7c16625b"
+}

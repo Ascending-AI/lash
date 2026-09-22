@@ -247,6 +247,7 @@ fn child_expression_accessors_reach_every_expression_and_statement_field() {
         Stmt::DoWhile {
             body: Box::new(Stmt::Expr(marker("DoWhile.body"))),
             test: marker("DoWhile.test"),
+            test_span: SourceSpan { start: 0, end: 0 },
         },
         Stmt::For {
             init: Some(Box::new(Stmt::Expr(marker("For.init")))),

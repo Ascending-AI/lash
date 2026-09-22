@@ -10,7 +10,8 @@
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
     GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError, typescript_program_source,
-    workflow_graph_from_source, workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    workflow_graph_from_program, workflow_graph_from_source,
+    workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangExecutionSite, LashlangHostCatalog, LashlangHostEnvironment,
@@ -751,6 +752,203 @@ finish(1);
     );
 }
 
+fn source_slice<'a>(source: &'a str, node: &WorkflowNode) -> &'a str {
+    let span = node
+        .source_span
+        .expect("a projected node with canonical text carries a source span");
+    source
+        .get(span.start..span.end)
+        .expect("the source span addresses canonical UTF-8 boundaries")
+}
+
+#[test]
+fn canonical_source_spans_cover_bound_and_inline_process_bodies_without_shape_matching() {
+    let authored = r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});return "done";};
+await triggers.register({source:{expr:"0 8 * * *"},target:async(event)=>{await tools.echo({value:"inline"});return event;}});
+"#;
+    let canonical = canonical(authored);
+    let graph = workflow_graph_from_source(authored).expect("formatted source projects");
+    assert_eq!(
+        graph,
+        workflow_graph_from_source(&canonical).expect("canonical source projects"),
+        "formatting-only changes resolve to the same canonical spans"
+    );
+    let mut processes = graph.declarations.iter().filter_map(|declaration| {
+        let WorkflowDeclaration::Process(process) = declaration else {
+            return None;
+        };
+        Some(process)
+    });
+    let bound = processes.next().expect("the bound process projects");
+    let inline = processes.next().expect("the inline process projects");
+    assert!(processes.next().is_none(), "exactly two processes project");
+
+    let repeated = &bound.body.nodes[..2];
+    assert_eq!(
+        repeated
+            .iter()
+            .map(|node| source_slice(&canonical, node))
+            .collect::<Vec<_>>(),
+        [
+            "await (tools.echo({ value: \"same\" }))",
+            "await (tools.echo({ value: \"same\" }))",
+        ]
+    );
+    assert!(
+        repeated[0].source_span.expect("first span").start
+            < repeated[1].source_span.expect("second span").start,
+        "identical expressions retain their distinct canonical positions"
+    );
+    assert_eq!(
+        source_slice(
+            &canonical,
+            bound.body.nodes.last().expect("bound return node")
+        ),
+        "return \"done\";"
+    );
+    assert_eq!(
+        source_slice(&canonical, &inline.body.nodes[0]),
+        "await (tools.echo({ value: \"inline\" }))"
+    );
+    assert_eq!(
+        source_slice(
+            &canonical,
+            inline.body.nodes.last().expect("inline return node")
+        ),
+        "return event;"
+    );
+}
+
+#[test]
+fn cloned_do_while_conditions_keep_provenance_for_every_destination_path() {
+    for (source, expected_condition_paths) in [
+        ("do { continue; } while (false);", 2),
+        ("do { continue; continue; } while (false);", 3),
+    ] {
+        let program = parse(source).expect("a do-while with continues must lower without panic");
+        let condition_paths = program
+            .spans
+            .iter()
+            .filter_map(|(path, span)| {
+                (source.get(span.start..span.end) == Some("false")).then_some(path)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            condition_paths.len(),
+            expected_condition_paths,
+            "every cloned condition keeps the marker's source span: {condition_paths:?}; all spans: {:?}",
+            program
+                .spans
+                .iter()
+                .map(|(path, span)| (path, source.get(span.start..span.end), span))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn program_projection_rebuilds_canonical_spans_for_lifted_processes() {
+    let authored = "const worker=async()=>{await sleep(1);return 1;};";
+    let program = parse(authored).expect("compact process source parses");
+    let canonical = typescript_program_source(&program).expect("program prints canonically");
+    assert_ne!(authored, canonical, "the fixture must change formatting");
+
+    let graph = workflow_graph_from_program(&program);
+    let process = only_process(&graph);
+    assert_eq!(
+        process
+            .body
+            .nodes
+            .iter()
+            .map(|node| source_slice(&canonical, node))
+            .collect::<Vec<_>>(),
+        ["sleep(1)", "return 1;"]
+    );
+    assert_eq!(
+        graph,
+        workflow_graph_from_source(authored).expect("source projection succeeds"),
+        "the public program entry point must derive the same canonical provenance as the source entry point"
+    );
+}
+
+#[test]
+fn unprintable_program_projection_exposes_no_source_spans() {
+    use lashlang::testing::ast_builders as b;
+
+    let mut program = b::program(vec![b::assign(
+        "joined",
+        b::builtin("join", vec![b::list(vec![]), b::string(",")]),
+    )]);
+    program.spans.insert(
+        lashlang::AstPath::main(vec![0]),
+        lashlang::Span { start: 0, end: 1 },
+    );
+
+    let graph = workflow_graph_from_program(&program);
+    assert!(
+        graph.nodes().all(|node| node.source_span.is_none()),
+        "an IR with no canonical TypeScript text must not expose unrelated offsets"
+    );
+}
+
+#[test]
+fn canonical_span_goldens_cover_every_textual_node() {
+    let fixtures: Vec<(&str, &str, &[&str])> = vec![
+        (
+            "named-nested-repeated",
+            r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});if(true){for(const value of [1]){while(false){await sleep(value);}}}return "done";};"#,
+            &[
+                r#"const worker = async () => {
+  await (tools.echo({ value: "same" }));
+  await (tools.echo({ value: "same" }));
+  if (true) {
+    for (const value of [1]) {
+      while (false) {
+        await sleep(value);
+      }
+    }
+  }
+  return "done";
+};"#,
+                r#"await (tools.echo({ value: "same" }))"#,
+                r#"await (tools.echo({ value: "same" }))"#,
+                "if (true) {\n    for (const value of [1]) {\n      while (false) {\n        await sleep(value);\n      }\n    }\n  }",
+                "for (const value of [1]) {\n      while (false) {\n        await sleep(value);\n      }\n    }",
+                "while (false) {\n        await sleep(value);\n      }",
+                "sleep(value)",
+                r#"return "done";"#,
+            ],
+        ),
+        (
+            "lifted-inline",
+            r#"await triggers.register({source:{expr:"0 8 * * *"},target:async(event)=>{await tools.echo({value:"inline"});return event;}});"#,
+            &[
+                "await (triggers.register({ source: { expr: \"0 8 * * *\" }, target: async (event) => {\n  await (tools.echo({ value: \"inline\" }));\n  return event;\n} }))",
+                r#"await (tools.echo({ value: "inline" }))"#,
+                "return event;",
+            ],
+        ),
+    ];
+    assert!(
+        !fixtures.is_empty(),
+        "the span golden corpus must not be empty"
+    );
+
+    for (name, source, expected) in fixtures {
+        assert!(
+            !expected.is_empty(),
+            "the `{name}` oracle must not be empty"
+        );
+        let canonical = canonical(source);
+        let graph = workflow_graph_from_source(source).expect("span golden projects");
+        let actual = graph
+            .nodes()
+            .map(|node| source_slice(&canonical, node))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "exact canonical slices for `{name}`");
+    }
+}
+
 fn facet_environment() -> LashlangHostEnvironment {
     let mut catalog = LashlangHostCatalog::new();
     catalog
@@ -922,9 +1120,9 @@ fn while_collects_condition_sites_without_duplicating_body_sites() {
     assert_eq!(
         node.execution_sites
             .iter()
-            .map(|site| site.label.as_str())
+            .map(|site| (site.kind.as_str(), site.label.as_str()))
             .collect::<Vec<_>>(),
-        vec!["ready"]
+        vec![("loop", "while"), ("resource_operation", "ready")]
     );
     assert_eq!(body.nodes[0].execution_sites[0].label, "tick");
     assert_lens_laws(source);

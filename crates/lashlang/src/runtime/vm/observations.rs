@@ -72,18 +72,38 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         &mut self,
         site: LashlangExecutionSite,
     ) -> ActiveLashlangExecutionNode {
-        let occurrence = self
-            .lashlang_execution_occurrences
-            .entry(site.node_id.clone())
-            .and_modify(|value| *value += 1)
-            .or_insert(1);
-        let occurrence = *occurrence;
+        let occurrence = next_occurrence(&mut self.lashlang_execution_occurrences, &site.node_id);
         self.host
             .observe_lashlang_execution(LashlangExecutionObservation::NodeStarted {
                 site: site.clone(),
                 occurrence,
             });
         ActiveLashlangExecutionNode { site, occurrence }
+    }
+
+    pub(super) fn observe_lashlang_execution_step(&mut self, instruction_ip: usize) {
+        let Some(site) = self
+            .chunk
+            .lashlang_execution_sites
+            .get(instruction_ip)
+            .and_then(Option::as_ref)
+        else {
+            return;
+        };
+        let occurrence = next_occurrence(
+            &mut self.lashlang_execution_occurrences,
+            site.node_id.as_str(),
+        );
+        self.host
+            .observe_lashlang_execution(LashlangExecutionObservation::NodeStarted {
+                site: site.clone(),
+                occurrence,
+            });
+        self.host
+            .observe_lashlang_execution(LashlangExecutionObservation::NodeCompleted {
+                site: site.clone(),
+                occurrence,
+            });
     }
 
     pub(super) fn complete_lashlang_execution(&self, active: &ActiveLashlangExecutionNode) {
@@ -118,11 +138,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let Some(branch) = site.branch.as_ref() else {
             return;
         };
-        let occurrence = self
-            .lashlang_execution_occurrences
-            .entry(site.node_id.clone())
-            .and_modify(|value| *value += 1)
-            .or_insert(1);
+        let occurrence = next_occurrence(&mut self.lashlang_execution_occurrences, &site.node_id);
         let edge_id = match selected {
             ProcessBranchSelection::Then => branch.then_edge_id.clone(),
             ProcessBranchSelection::Else => branch.else_edge_id.clone(),
@@ -130,9 +146,18 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.host
             .observe_lashlang_execution(LashlangExecutionObservation::BranchSelected {
                 site,
-                occurrence: *occurrence,
+                occurrence,
                 edge_id,
                 selected,
             });
     }
+}
+
+fn next_occurrence(occurrences: &mut FxHashMap<String, u64>, node_id: &str) -> u64 {
+    if let Some(occurrence) = occurrences.get_mut(node_id) {
+        *occurrence += 1;
+        return *occurrence;
+    }
+    occurrences.insert(node_id.to_owned(), 1);
+    1
 }

@@ -105,9 +105,11 @@ fn collect_execution_sites(
             collect_execution_sites(condition, owner, &child_path(path, 0), None, sites);
         }
         Expr::For { iterable, .. } => {
+            push_execution_site_descriptor(expression, owner, path, sites);
             collect_execution_sites(iterable, owner, &child_path(path, 0), None, sites);
         }
         Expr::While { condition, .. } => {
+            push_execution_site_descriptor(expression, owner, path, sites);
             collect_execution_sites(condition, owner, &child_path(path, 0), None, sites);
         }
         Expr::ListComprehension { clauses, .. } => {

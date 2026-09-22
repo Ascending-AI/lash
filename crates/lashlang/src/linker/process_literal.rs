@@ -160,6 +160,7 @@ impl<'module> Linker<'module> {
                 body,
             }),
             span,
+            path.child(0),
         ));
         Ok((
             Expr::ProcessRef {

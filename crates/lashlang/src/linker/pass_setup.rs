@@ -61,7 +61,7 @@ pub(super) struct Linker<'module> {
     /// records its await-site expected payload here.
     pub(super) collect_signals: Cell<bool>,
     pub(super) inferred_signals: RefCell<BTreeMap<String, TypeExpr>>,
-    pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>)>>,
+    pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>, AstPath)>>,
     /// Cell locals bound to a lifted process literal, by source name: the
     /// lifted declaration's digest name and the process type the lift settled.
     ///
@@ -154,10 +154,23 @@ impl<'module> Linker<'module> {
             .0;
         let mut declarations = declarations;
         let mut spans = self.program.spans.clone();
-        for (declaration, span) in self.lifted_declarations.borrow_mut().drain(..) {
+        for (declaration, span, source_root) in self.lifted_declarations.borrow_mut().drain(..) {
+            let index = u32::try_from(declarations.len()).expect("declaration index fits u32");
             if let Some(span) = span {
-                let index = u32::try_from(declarations.len()).expect("declaration index fits u32");
                 spans.insert(AstPath::declaration(index, Vec::new()), span);
+            }
+            for (source_path, source_span) in &self.program.spans {
+                if source_path.root == source_root.root
+                    && source_path.steps.starts_with(&source_root.steps)
+                {
+                    spans.insert(
+                        AstPath::declaration(
+                            index,
+                            source_path.steps[source_root.steps.len()..].to_vec(),
+                        ),
+                        *source_span,
+                    );
+                }
             }
             declarations.push(declaration);
         }

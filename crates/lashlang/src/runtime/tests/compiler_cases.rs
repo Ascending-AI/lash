@@ -66,6 +66,18 @@ fn labeled_branch_program() -> Program {
     ])
 }
 
+fn loop_container_program() -> Program {
+    builders::program(vec![
+        builders::for_in(
+            "value",
+            builders::list(vec![builders::num(1.0)]),
+            builders::block(vec![builders::var("value")]),
+        ),
+        builders::while_loop(builders::bool_lit(false), builders::block(Vec::new())),
+        builders::finish(builders::null()),
+    ])
+}
+
 #[test]
 fn label_on_await_assignment_attaches_to_await_instruction() {
     // `@label(title: "Wait for child")` / `result = await handle` / `finish result`
@@ -1413,6 +1425,15 @@ fn existing_execution_site_ids_are_unchanged() {
                 "terminal:a082d25e7834a4336778c54c",
             ],
             "e228cedab83aeeb459fe65926fefdbe25f168a372cdb549522ed4e9394092929",
+        ),
+        (
+            loop_container_program(),
+            &[
+                "loop:e040a92bb019f88c2bd5a86f",
+                "loop:fc41ca13fc6b48882acee36e",
+                "terminal:9ee3f33b020477976d819aaa",
+            ][..],
+            "0000000000000000000000000000000000000000000000000000000000000001",
         ),
     ];
 

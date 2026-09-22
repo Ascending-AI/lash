@@ -13,7 +13,7 @@ use crate::adapter::{
 };
 use crate::node_label::NodeLabel;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
-use spans::SpanNote;
+use spans::SpanMarkers;
 
 mod stdlib;
 use stdlib::*;
@@ -103,10 +103,9 @@ struct Lowerer {
     continue_epilogues: Vec<Option<LashExpr>>,
     process_depth: usize,
     declarations: Vec<Declaration>,
-    /// One note per lowered TypeScript expression that carries a source span,
-    /// in lowering (post-)order. Resolved against the finished program by
-    /// `spans::source_spans`.
-    span_notes: Vec<SpanNote>,
+    /// Private markers that move with sourced nodes until the finished
+    /// program resolves them into root-qualified `AstPath` entries.
+    span_markers: SpanMarkers,
     /// The span of the TypeScript expression currently being lowered, which is
     /// what a declaration emitted mid-lowering is positioned by.
     current_span: Option<SourceSpan>,
@@ -348,6 +347,11 @@ impl Lowerer {
 
     fn lower_stmt(&mut self, stmt: &Stmt) -> Result<Vec<LashExpr>, Diagnostic> {
         Ok(match stmt {
+            Stmt::Spanned(span, stmt) => self
+                .lower_stmt(stmt)?
+                .into_iter()
+                .map(|expression| self.span_markers.annotate(*span, expression))
+                .collect(),
             Stmt::Empty => Vec::new(),
             Stmt::Labeled { label, stmt } => {
                 let lowered = self.lower_stmt(stmt)?;
@@ -518,13 +522,16 @@ impl Lowerer {
                     body: Box::new(body),
                 }]
             }
-            Stmt::DoWhile { body, test } => {
+            Stmt::DoWhile {
+                body,
+                test,
+                test_span,
+            } => {
                 let (epilogue, body) = self.with_loop(|lowerer| {
+                    let condition = lowerer.lower_expr(test)?;
+                    let condition = lowerer.span_markers.annotate(*test_span, condition);
                     let epilogue = LashExpr::If {
-                        condition: Box::new(js_unary(
-                            JavaScriptUnaryOp::Not,
-                            lowerer.lower_expr(test)?,
-                        )),
+                        condition: Box::new(js_unary(JavaScriptUnaryOp::Not, condition)),
                         then_block: Box::new(LashExpr::Break),
                         else_block: Box::new(LashExpr::Undefined),
                     };
@@ -805,7 +812,14 @@ impl Lowerer {
             }
         }
         let tail = match &function.body {
-            FunctionBody::Expression(expr) => LashExpr::Return(Box::new(self.lower_expr(expr)?)),
+            FunctionBody::Expression(expr) => {
+                let lowered = LashExpr::Return(Box::new(self.lower_expr(expr)?));
+                if let Some(span) = source_span(expr) {
+                    self.span_markers.annotate(span, lowered)
+                } else {
+                    lowered
+                }
+            }
             FunctionBody::Block(statements) => {
                 let mut body = self.lower_statements(statements, true)?;
                 body.push(LashExpr::Undefined);
@@ -848,8 +862,7 @@ impl Lowerer {
         let lowered = self.lower_expr_inner(expr);
         self.current_span = enclosing;
         let lowered = lowered?;
-        self.span_notes.push(SpanNote::new(source, &lowered));
-        Ok(lowered)
+        Ok(self.span_markers.annotate(source, lowered))
     }
 
     fn lower_expr_inner(&mut self, expr: &Expr) -> Result<LashExpr, Diagnostic> {

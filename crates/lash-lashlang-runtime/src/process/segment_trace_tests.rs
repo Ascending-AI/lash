@@ -56,18 +56,106 @@ const UNVERSIONED_SEGMENT_STATE: &[u8] =
     include_bytes!("../fixtures/lashlang_segment_state_unversioned.json");
 const VM_V10_SEGMENT_STATE: &[u8] =
     include_bytes!("../fixtures/lashlang_segment_state_vm_v10.json");
+const BYTECODE_V17_PARKED_LOOP: &[u8] =
+    include_bytes!("../fixtures/lashlang_bytecode_v17_parked_loop.json");
 
 struct SegmentFixtureHost;
 
 impl lashlang::ExecutionHost for SegmentFixtureHost {
     async fn perform(
         &self,
-        _op: lashlang::AbilityOp,
+        op: lashlang::AbilityOp,
     ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
-        Err(lashlang::ExecutionHostError::new(
-            "the segment fixture does not execute effects",
-        ))
+        match op {
+            lashlang::AbilityOp::Sleep(_) => {
+                Ok(lashlang::AbilityResult::Value(lashlang::Value::Null))
+            }
+            _ => Err(lashlang::ExecutionHostError::new(
+                "the segment fixture executes only its loop sleep",
+            )),
+        }
     }
+}
+
+fn bytecode_v17_loop_input() -> crate::LashlangProcessInput {
+    let hash = lashlang::ContentHash::new("bytecode-v17-parked-loop");
+    crate::LashlangProcessInput {
+        module_ref: lashlang::ModuleRef::new(&hash),
+        process_ref: lashlang::ProcessRef::new(hash.clone(), 0),
+        host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
+        process_name: "loop_fixture".to_string(),
+        args: serde_json::Map::new(),
+    }
+}
+
+fn bytecode_v17_loop_program() -> lashlang::Program {
+    use lashlang::testing::ast_builders as b;
+
+    b::program(vec![
+        b::for_in(
+            "item",
+            b::list(vec![b::num(1.0)]),
+            b::block(vec![b::sleep_for(b::var("item"))]),
+        ),
+        b::finish(b::null()),
+    ])
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "run only against the version-17 compiler before the loop-site cutover"]
+async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
+    assert_eq!(
+        lashlang::BYTECODE_FORMAT_VERSION,
+        17,
+        "capture this fixture only from the version-17 predecessor writer"
+    );
+    let compiled = lashlang::compile_ast(&bytecode_v17_loop_program()).expect("compile loop");
+    let mut state = lashlang::State::new();
+    let host = SegmentFixtureHost;
+    let environment = lashlang::ExecutionEnvironment::new(&host).process();
+    let mut vm = lashlang::Vm::from_state(&compiled, &mut state, &environment)
+        .expect("construct loop fixture VM");
+    assert_eq!(
+        vm.run_process_until_effect().await.expect("park in loop"),
+        lashlang::VmRunOutcome::EffectCompleted
+    );
+    let continuation = vm.suspend().expect("capture parked loop continuation");
+    assert_eq!(
+        continuation.iterator_stack.len(),
+        1,
+        "the predecessor must be parked inside its loop"
+    );
+    let segment_state = LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: continuation,
+        ordinals: ReplayOrdinalsState {
+            sleep_sequence: 0,
+            event_sequence: 0,
+            signal_wait_ordinals: Default::default(),
+        },
+        started_process_ids: Vec::new(),
+        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+    };
+    let input = bytecode_v17_loop_input();
+    let mut fixture = serde_json::json!({
+        "bytecode_format_version": 17,
+        "source_commit": "4f96c76629575e46b8d7f29526bb0cab7c16625b",
+        "program": "for (const item of [1]) { await sleep(item); } finish(null);",
+        "input": input,
+        "program_hash": super::lashlang_program_hash(&input),
+        "segment_state": segment_state,
+    });
+    fixture["segment_state"]["vm"]["execution_nonce"] = serde_json::json!(958985677965949815_u64);
+    fixture["segment_state"]["vm"]["active_execution_elapsed"] =
+        serde_json::json!({"nanos": 0, "secs": 0});
+    let mut bytes = serde_json::to_vec_pretty(&fixture).expect("serialize parked loop fixture");
+    bytes.push(b'\n');
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/fixtures/lashlang_bytecode_v17_parked_loop.json"),
+        bytes,
+    )
+    .expect("write version-17 parked loop fixture");
 }
 
 #[test]
@@ -201,6 +289,44 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
             if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
                 if failure.code == "restate_segment_program_hash_mismatch")
     ));
+}
+
+#[test]
+fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
+    let fixture: serde_json::Value = serde_json::from_slice(BYTECODE_V17_PARKED_LOOP)
+        .expect("the version-17 parked-loop fixture is JSON");
+    assert_eq!(fixture["bytecode_format_version"], 17);
+    assert_eq!(
+        fixture["source_commit"],
+        "4f96c76629575e46b8d7f29526bb0cab7c16625b"
+    );
+    let input: crate::LashlangProcessInput =
+        serde_json::from_value(fixture["input"].clone()).expect("fixture input decodes");
+    let persisted = fixture["program_hash"]
+        .as_str()
+        .expect("fixture program hash");
+    let current = super::lashlang_program_hash(&input);
+    assert_ne!(
+        persisted, current,
+        "the bytecode version must move identity"
+    );
+
+    let output = validate_lashlang_program_hash(persisted, &current)
+        .expect_err("the predecessor must fail at the program-identity fence");
+    assert!(matches!(
+        *output,
+        lash_core::ProcessAwaitOutput::Settled { output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
+                if failure.code == "restate_segment_program_hash_mismatch")
+    ));
+
+    let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
+        .expect("the fixture carries a structurally valid current-envelope continuation");
+    assert_eq!(
+        segment.vm.iterator_stack.len(),
+        1,
+        "the refused continuation is parked inside the predecessor loop"
+    );
 }
 
 /// The v11 envelope no longer carries `signal_send_sequence`: its only

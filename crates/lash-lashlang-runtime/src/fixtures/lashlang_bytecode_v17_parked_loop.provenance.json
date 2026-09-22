@@ -1,0 +1,13 @@
+{
+  "schema": "lash.bytecode-predecessor-provenance.v1",
+  "source_commit": "4f96c76629575e46b8d7f29526bb0cab7c16625b",
+  "captured_by": "process::segment_trace_tests::capture_bytecode_v17_parked_loop_from_predecessor_writer",
+  "capture_command": ". ./env.sh && cargo test -p lash-internal-lashlang-runtime process::segment_trace_tests::capture_bytecode_v17_parked_loop_from_predecessor_writer --locked -- --ignored --exact",
+  "capture_setup": "Run the ignored writer with BYTECODE_FORMAT_VERSION 17 and the pre-loop-site compiler, before emit_loop_execution_step is called for for/while bodies.",
+  "relationship": "origin/main immediately before FIG-3468 added loop ObserveStep instructions",
+  "bytecode_format_version": 17,
+  "artifact": {
+    "path": "lashlang_bytecode_v17_parked_loop.json",
+    "sha256": "3b379f1b083119ac4c323da6a85f5252516ed57b1ee4b940550c6595b52099f1"
+  }
+}

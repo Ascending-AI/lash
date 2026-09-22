@@ -1,105 +1,152 @@
 //! Carrying TypeScript source positions into the lashlang span table.
 //!
-//! The lashlang diagnostic renderer prints `--> line N, column M`, the source
-//! line and a caret only when the error it renders carries a `Span`, and every
-//! span it can reach comes out of `Program::spans`, which addresses an
-//! expression by an [`AstPath`]: a root plus the `Expr::children()` index
-//! chain that reaches it. The lashlang parser could fill that table directly
-//! because it built each node and its span together.
+//! Lowering changes tree shape: it synthesizes nodes, moves authored values
+//! into wrappers, and lifts process literals into declarations. Matching the
+//! finished tree by expression shape loses provenance when two expressions are
+//! identical and cannot distinguish `main` from declaration roots.
 //!
-//! Lowering cannot: a TypeScript expression becomes a *tree* of lashlang
-//! expressions, the lowerer synthesizes nodes that no source position owns,
-//! and the lowered value is moved into its parent, so nothing about a node
-//! survives from the moment it is built to the moment the program is finished.
-//!
-//! So the lowerer records a note per lowered TypeScript expression — the
-//! source span, plus the shape of the lashlang subtree it produced (the root's
-//! variant and the number of nodes beneath it) — and this module matches those
-//! notes against the finished program. The notes are recorded in post-order
-//! (children lower before their parent), so they are a *subsequence* of the
-//! finished tree's post-order walk, and a single left-to-right pass assigns
-//! each note the first later node whose shape it matches. A note that matches
-//! nothing is dropped rather than forced onto a node: an expression with no
-//! recorded span still renders, it just falls back to the enclosing span the
-//! linker is already carrying.
+//! Instead, lowering temporarily wraps each sourced node in a private label.
+//! The wrapper moves with the node through every lowering transform. Once the
+//! complete program exists, one mutable walk removes the wrappers and records
+//! their root-qualified [`AstPath`]s in `Program::spans`. The private labels
+//! never leave this module and therefore change neither the IR nor identity.
 
-use std::collections::BTreeMap;
-use std::mem::Discriminant;
+use std::collections::{BTreeMap, BTreeSet};
 
-use lashlang::{AstPath, Expr as LashExpr, Span};
+use lashlang::{AstPath, AstRoot, Declaration, Expr as LashExpr, LabelMetadata, Program, Span};
 
 use crate::SourceSpan;
 
-/// One lowered TypeScript expression: where it came from in the source, and
-/// the shape of the lashlang subtree it lowered to.
-pub(super) struct SpanNote {
-    span: Span,
-    variant: Discriminant<LashExpr>,
-    nodes: usize,
+const MARKER_DESCRIPTION: &str = "\0s";
+
+#[derive(Default)]
+pub(super) struct SpanMarkers {
+    spans: Vec<Span>,
 }
 
-impl SpanNote {
-    pub(super) fn new(source: SourceSpan, lowered: &LashExpr) -> Self {
-        Self {
-            span: Span {
-                start: source.start,
-                end: source.end,
+impl SpanMarkers {
+    pub(super) fn annotate(&mut self, source: SourceSpan, expression: LashExpr) -> LashExpr {
+        let marker = self.spans.len().to_string();
+        self.spans.push(Span {
+            start: source.start,
+            end: source.end,
+        });
+        LashExpr::LabelAnnotated {
+            label: LabelMetadata {
+                title: marker.into(),
+                description: Some(MARKER_DESCRIPTION.into()),
             },
-            variant: std::mem::discriminant(lowered),
-            nodes: node_count(lowered),
+            expr: Box::new(expression),
         }
     }
-}
 
-fn node_count(expr: &LashExpr) -> usize {
-    1 + expr.children().map(node_count).sum::<usize>()
-}
-
-struct PositionedNode {
-    path: Vec<u32>,
-    variant: Discriminant<LashExpr>,
-    nodes: usize,
-}
-
-/// Post-order walk of `main`, collecting each node's `children()` path.
-fn positions(expr: &LashExpr, path: &mut Vec<u32>, out: &mut Vec<PositionedNode>) -> usize {
-    let mut nodes = 1;
-    for (index, child) in expr.children().enumerate() {
-        #[expect(
-            clippy::expect_used,
-            reason = "the parser refuses a program long before a single node reaches u32::MAX children"
-        )]
-        let child_index = u32::try_from(index).expect("AST child index fits u32");
-        path.push(child_index);
-        nodes += positions(child, path, out);
-        path.pop();
+    pub(super) fn resolve(self, program: &mut Program) {
+        let mut resolved = BTreeMap::new();
+        let mut resolved_markers = BTreeSet::new();
+        for (index, declaration) in program.declarations.iter_mut().enumerate() {
+            let Ok(index) = u32::try_from(index) else {
+                unreachable!("the source bound keeps the declaration count within u32")
+            };
+            let root = AstRoot::Declaration(index);
+            match declaration {
+                Declaration::Process(process) => extract(
+                    &mut process.body,
+                    AstPath {
+                        root,
+                        steps: Vec::new(),
+                    },
+                    &self.spans,
+                    &mut resolved_markers,
+                    &mut resolved,
+                ),
+                Declaration::Function(function) => extract(
+                    &mut function.body,
+                    AstPath {
+                        root,
+                        steps: Vec::new(),
+                    },
+                    &self.spans,
+                    &mut resolved_markers,
+                    &mut resolved,
+                ),
+                Declaration::Type(_) => {}
+            }
+        }
+        extract(
+            &mut program.main,
+            AstPath::main(Vec::new()),
+            &self.spans,
+            &mut resolved_markers,
+            &mut resolved,
+        );
+        debug_assert!(
+            (0..self.spans.len()).all(|marker| resolved_markers.contains(&marker)),
+            "every allocated source marker is accounted for"
+        );
+        program.spans = resolved;
     }
-    out.push(PositionedNode {
-        path: path.clone(),
-        variant: std::mem::discriminant(expr),
-        nodes,
-    });
-    nodes
 }
 
-pub(super) fn source_spans(main: &LashExpr, notes: &[SpanNote]) -> BTreeMap<AstPath, Span> {
-    let mut nodes = Vec::new();
-    positions(main, &mut Vec::new(), &mut nodes);
-    let mut resolved = BTreeMap::new();
-    let mut cursor = 0;
-    for note in notes {
-        let Some(offset) = nodes[cursor..]
-            .iter()
-            .position(|node| node.variant == note.variant && node.nodes == note.nodes)
-        else {
-            continue;
+pub(super) fn unmarked(mut expression: &LashExpr) -> &LashExpr {
+    while let LashExpr::LabelAnnotated { label, expr } = expression {
+        if label.description.as_deref() != Some(MARKER_DESCRIPTION) {
+            break;
+        }
+        expression = expr;
+    }
+    expression
+}
+
+pub(super) fn unmarked_mut(expression: &mut LashExpr) -> &mut LashExpr {
+    let is_marker = matches!(
+        expression,
+        LashExpr::LabelAnnotated { label, .. }
+            if label.description.as_deref() == Some(MARKER_DESCRIPTION)
+    );
+    if is_marker {
+        let LashExpr::LabelAnnotated { expr, .. } = expression else {
+            unreachable!("the marker predicate matched")
         };
-        let index = cursor + offset;
-        // `main` itself is not an expression the table addresses.
-        if !nodes[index].path.is_empty() {
-            resolved.insert(AstPath::main(nodes[index].path.clone()), note.span);
-        }
-        cursor = index + 1;
+        return unmarked_mut(expr);
     }
-    resolved
+    expression
+}
+
+fn extract(
+    expression: &mut LashExpr,
+    path: AstPath,
+    markers: &[Span],
+    resolved_markers: &mut BTreeSet<usize>,
+    resolved: &mut BTreeMap<AstPath, Span>,
+) {
+    while let LashExpr::LabelAnnotated { label, expr } = expression {
+        if label.description.as_deref() != Some(MARKER_DESCRIPTION) {
+            break;
+        }
+        let Some((marker, span)) = label
+            .title
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| markers.get(index).copied().map(|span| (index, span)))
+        else {
+            break;
+        };
+        let inner = std::mem::replace(expr, Box::new(LashExpr::Undefined));
+        *expression = *inner;
+        resolved_markers.insert(marker);
+        resolved.insert(path.clone(), span);
+    }
+
+    for (index, child) in expression.children_mut().enumerate() {
+        let Ok(index) = u32::try_from(index) else {
+            unreachable!("the source bound keeps a node's child count within u32")
+        };
+        extract(
+            child,
+            path.child(index),
+            markers,
+            resolved_markers,
+            resolved,
+        );
+    }
 }

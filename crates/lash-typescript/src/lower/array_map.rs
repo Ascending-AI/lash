@@ -11,7 +11,7 @@ use lashlang::{
     fold_expr_children,
 };
 
-use super::{GENERATED_BINDING_PREFIX, Lowerer};
+use super::{GENERATED_BINDING_PREFIX, Lowerer, spans};
 use crate::adapter::Expr;
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -175,7 +175,7 @@ impl ExprFolder for SettleReturns {
 }
 
 fn settle_async_callback(mut callback: LashExpr, reason: String) -> LashExpr {
-    let function = match &mut callback {
+    let function = match spans::unmarked_mut(&mut callback) {
         LashExpr::Function(function) => function.as_mut(),
         LashExpr::BuiltinCall { name, args } if name.as_str() == "__typescript_closure" => {
             let Some(LashExpr::Function(function)) = args.first_mut() else {

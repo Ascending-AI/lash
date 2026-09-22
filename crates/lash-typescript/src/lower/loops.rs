@@ -142,7 +142,9 @@ pub(super) fn continue_under_finally(
     nested_loop_depth: usize,
 ) -> bool {
     match stmt {
-        Stmt::Labeled { stmt, .. } => continue_under_finally(stmt, protected, nested_loop_depth),
+        Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => {
+            continue_under_finally(stmt, protected, nested_loop_depth)
+        }
         Stmt::Continue => protected && nested_loop_depth == 0,
         Stmt::Block(statements) => statements
             .iter()
