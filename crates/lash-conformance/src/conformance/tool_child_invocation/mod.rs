@@ -1617,10 +1617,6 @@ fn install_child_host(
 /// "this worker's opener is gone" edge the recovery phase drives. The
 /// event-channel forwarder is bounded by the registration, exactly as the turn
 /// path's is.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 fn register_opener(
     host: &Arc<dyn crate::EffectHost>,
     scope: &crate::ExecutionScope,
@@ -1648,6 +1644,10 @@ fn register_opener(
 
 /// [`register_opener`] with the dispatch extras the presentation laws carry —
 /// step factories and an attachment store the law observes (FIG-3420).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the registration's fields are the law's parameters; a struct would only rename the list"
+)]
 fn register_opener_with_extras(
     host: &Arc<dyn crate::EffectHost>,
     scope: &crate::ExecutionScope,

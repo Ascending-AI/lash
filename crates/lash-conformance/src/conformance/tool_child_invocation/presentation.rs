@@ -68,6 +68,10 @@ fn presented_text(settlement: &crate::runtime::effect::ToolSettlement) -> String
 
 /// The rank-0 tool-invocation settlement of `settlement`, or a panic naming
 /// what it actually is.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn invocation_settlement(
     settlement: &crate::GroupSettlement,
 ) -> &crate::runtime::effect::ToolSettlement {
@@ -101,6 +105,10 @@ fn presentation_group(
 }
 
 /// Opens `group` on `host` and serves the rank-0 settlement.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn settle_rank_zero<'a>(
     host: &'a Arc<dyn crate::EffectHost>,
     scope: &crate::ExecutionScope,
