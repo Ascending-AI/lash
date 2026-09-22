@@ -859,6 +859,21 @@ impl NativeEffectGroups {
     /// with the process rather than accumulating in a store. Closing is the
     /// caller's obligation under the contract; dropping a handle is not a
     /// supported way to end a group.
+    fn reap(&self, group_key: &str, state: &Arc<NativeEffectGroup>) {
+        let mut open = self.open.write_recover();
+        if open
+            .get(group_key)
+            .is_some_and(|current| Arc::ptr_eq(current, state))
+        {
+            open.remove(group_key);
+            #[cfg(any(test, feature = "testing"))]
+            self.retired.lock_recover().insert(
+                group_key.to_string(),
+                Self::snapshot(&state.state.lock_recover()),
+            );
+        }
+    }
+
     /// The children still unsettled in open groups under `scope` — seats
     /// (`children`) minus recorded settlements (`order`). This is what a
     /// quiescent-gated retirement reads (ADR 0099 §14): a group closed under
@@ -882,21 +897,6 @@ impl NativeEffectGroups {
     pub(crate) fn open_group_task_count(&self, group_key: &str) -> Option<usize> {
         self.get(group_key)
             .map(|state| state.tasks.lock_recover().len())
-    }
-
-    fn reap(&self, group_key: &str, state: &Arc<NativeEffectGroup>) {
-        let mut open = self.open.write_recover();
-        if open
-            .get(group_key)
-            .is_some_and(|current| Arc::ptr_eq(current, state))
-        {
-            open.remove(group_key);
-            #[cfg(any(test, feature = "testing"))]
-            self.retired.lock_recover().insert(
-                group_key.to_string(),
-                Self::snapshot(&state.state.lock_recover()),
-            );
-        }
     }
 
     /// The settlements recorded for a group, as `(position, sequence,
