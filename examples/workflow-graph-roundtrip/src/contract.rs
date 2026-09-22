@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash_typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
-use lashlang::{Span, WorkflowNodeNameSource};
+use lash::rlm::lang::{Span, WorkflowNodeNameSource};
+use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
@@ -110,8 +110,18 @@ pub enum ValidationKind {
 impl ValidationKind {
     pub(crate) fn error_code(self) -> &'static str {
         match self {
-            Self::Expression => "invalid_expression",
-            Self::AssignmentTarget => "invalid_assignment_target",
+            Self::Expression => GraphRenderError::InvalidExpression {
+                node_id: String::new(),
+                field: String::new(),
+                message: String::new(),
+            }
+            .code(),
+            Self::AssignmentTarget => GraphRenderError::InvalidAssignmentTarget {
+                node_id: String::new(),
+                field: "target",
+                message: String::new(),
+            }
+            .code(),
             Self::Identifier => "invalid_identifier",
         }
     }
@@ -647,54 +657,38 @@ pub struct RenderErrorResponse {
 impl RenderErrorResponse {
     pub(crate) fn render(error: GraphRenderError) -> Self {
         let message = error.to_string();
-        let (code, details) = match &error {
-            GraphRenderError::UnsupportedSchemaVersion { found, expected } => (
-                "unsupported_schema_version",
-                json!({ "found": found, "expected": expected }),
-            ),
-            GraphRenderError::DuplicateNodeId { id } => ("duplicate_node_id", json!({ "id": id })),
+        let code = error.code();
+        let mut details = match &error {
+            GraphRenderError::UnsupportedSchemaVersion { found, expected } => {
+                json!({ "found": found, "expected": expected })
+            }
+            GraphRenderError::DuplicateNodeId { id } => json!({ "id": id }),
             GraphRenderError::UnknownNodeReference {
-                edge_id,
-                endpoint,
-                node_id,
-            } => (
-                "unknown_node_reference",
-                json!({ "edgeId": edge_id, "endpoint": endpoint, "nodeId": node_id }),
-            ),
-            GraphRenderError::InvalidNodePayload { node_id, message } => (
-                "invalid_node_payload",
-                json!({ "nodeId": node_id, "reason": message }),
-            ),
-            GraphRenderError::InvalidExpression {
-                node_id,
-                field,
-                message,
-            } => (
-                "invalid_expression",
-                json!({ "nodeId": node_id, "field": field, "reason": message }),
-            ),
-            GraphRenderError::InvalidAssignmentTarget {
-                node_id,
-                field,
-                message,
-            } => (
-                "invalid_assignment_target",
-                json!({ "nodeId": node_id, "field": field, "reason": message }),
-            ),
-            GraphRenderError::InvalidOpaqueSource { node_id, message } => (
-                "invalid_opaque_source",
-                json!({ "nodeId": node_id, "reason": message }),
-            ),
-            GraphRenderError::DuplicateProcessName { name } => {
-                ("duplicate_process_name", json!({ "name": name }))
+                edge_id, endpoint, ..
+            } => json!({ "edgeId": edge_id, "endpoint": endpoint }),
+            GraphRenderError::InvalidNodePayload { message, .. }
+            | GraphRenderError::InvalidExpression { message, .. }
+            | GraphRenderError::InvalidAssignmentTarget { message, .. }
+            | GraphRenderError::InvalidOpaqueSource { message, .. } => {
+                json!({ "reason": message })
             }
-            GraphRenderError::CanonicalSource(_) => ("canonical_source", json!({})),
+            GraphRenderError::DuplicateProcessName { name } => json!({ "name": name }),
+            GraphRenderError::CanonicalSource(_) => json!({}),
             GraphRenderError::RenderedSourceInvalid { message } => {
-                ("rendered_source_invalid", json!({ "reason": message }))
+                json!({ "reason": message })
             }
-            // Future render failures keep their message without inventing structured details.
-            _ => ("render_failed", json!({})),
+            // Future render failures retain their stable library code without
+            // the example inventing an unowned detail schema.
+            _ => json!({}),
         };
+        if !matches!(&error, GraphRenderError::DuplicateNodeId { .. })
+            && let Some(node_id) = error.node_id()
+        {
+            details["nodeId"] = json!(node_id);
+        }
+        if let Some(field) = error.field() {
+            details["field"] = json!(field);
+        }
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message, details)
     }
 
@@ -721,13 +715,11 @@ impl RenderErrorResponse {
         field: &str,
         message: impl Into<String>,
     ) -> Self {
-        let message = message.into();
-        Self::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_expression",
-            format!("node `{node_id}` has invalid `{field}` expression text: {message}"),
-            json!({ "nodeId": node_id, "field": field, "reason": message }),
-        )
+        Self::render(GraphRenderError::InvalidExpression {
+            node_id: node_id.to_string(),
+            field: field.to_string(),
+            message: message.into(),
+        })
     }
 
     pub(crate) fn invalid_assignment_target(
@@ -735,23 +727,22 @@ impl RenderErrorResponse {
         field: &'static str,
         message: impl Into<String>,
     ) -> Self {
-        let message = message.into();
-        Self::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_assignment_target",
-            format!("node `{node_id}` has invalid `{field}` assignment target text: {message}"),
-            json!({ "nodeId": node_id, "field": field, "reason": message }),
-        )
+        Self::render(GraphRenderError::InvalidAssignmentTarget {
+            node_id: node_id.to_string(),
+            field,
+            message: message.into(),
+        })
     }
 
     pub(crate) fn invalid_node_payload(node_id: &str, message: impl Into<String>) -> Self {
         let message = message.into();
-        Self::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_node_payload",
-            format!("node `{node_id}` has an invalid payload: {message}"),
-            json!({ "nodeId": node_id, "reason": message }),
-        )
+        let host_message = format!("node `{node_id}` has an invalid payload: {message}");
+        let mut response = Self::render(GraphRenderError::InvalidNodePayload {
+            node_id: node_id.to_string(),
+            message,
+        });
+        response.body.error.message = host_message;
+        response
     }
 
     pub(crate) fn unknown_node_kind(node_id: &str, kind: &str, subkind: Option<&str>) -> Self {

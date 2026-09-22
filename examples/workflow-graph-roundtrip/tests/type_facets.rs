@@ -11,7 +11,7 @@ fn facet_diagnostic_http_json_golden_is_exact() {
         class: "definite".to_string(),
         slot: Some("arg[0][\"query\"]".to_string()),
         message: "expected enum, got incompatible literal \"bad\"".to_string(),
-        span: Some(lashlang::Span { start: 4, end: 9 }),
+        span: Some(lash::rlm::lang::Span { start: 4, end: 9 }),
     };
     assert_eq!(
         serde_json::to_value(diagnostic).expect("diagnostic serializes"),
@@ -61,7 +61,7 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
         serde_json::from_value(body["document"].clone()).expect("typed document");
     assert_eq!(
         document.facet_schema_version,
-        Some(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     let call = document
         .nodes
@@ -116,7 +116,7 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
     assert_eq!(saved.document.source, canonical_source);
     assert_eq!(
         saved.document.facet_schema_version,
-        Some(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     assert!(saved.document.nodes.iter().all(|node| {
         node.data
@@ -269,7 +269,7 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
 fn assert_clean_facets(document: &WorkflowDocument) {
     assert_eq!(
         document.facet_schema_version,
-        Some(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     assert!(
         document

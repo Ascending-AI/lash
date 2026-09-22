@@ -32,6 +32,9 @@ use lashlang::{
 };
 use thiserror::Error;
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use crate::GENERATED_BINDING_PREFIX;
 use crate::node_label::render_label_comment;
 
@@ -57,7 +60,24 @@ type Printed = Result<String, TypeScriptSourceError>;
 
 /// Print a lowered program as a canonical TypeScript module.
 pub fn typescript_program_source(program: &Program) -> Printed {
+    #[cfg(test)]
+    PROGRAM_PRINT_COUNT.with(|count| count.set(count.get() + 1));
     Printer.program(program)
+}
+
+#[cfg(test)]
+thread_local! {
+    static PROGRAM_PRINT_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn reset_program_print_count() {
+    PROGRAM_PRINT_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(super) fn program_print_count() -> usize {
+    PROGRAM_PRINT_COUNT.with(Cell::get)
 }
 
 /// Print one expression as canonical TypeScript.

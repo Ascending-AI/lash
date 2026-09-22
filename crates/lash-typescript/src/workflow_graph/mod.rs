@@ -32,6 +32,7 @@ use crate::Diagnostic;
 
 mod editable_text;
 mod literals;
+mod render_error;
 mod render_helpers;
 use render_helpers::*;
 mod printer;
@@ -75,6 +76,8 @@ pub enum WorkflowGraphBuildError {
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
+#[cfg_attr(test, derive(strum::EnumDiscriminants))]
+#[cfg_attr(test, strum_discriminants(derive(strum::EnumIter, PartialOrd, Ord)))]
 #[non_exhaustive]
 pub enum GraphRenderError {
     #[error("unsupported workflow graph schema version {found}; expected {expected}")]
@@ -92,7 +95,7 @@ pub enum GraphRenderError {
     #[error("node `{node_id}` has invalid `{field}` expression text: {message}")]
     InvalidExpression {
         node_id: String,
-        field: &'static str,
+        field: String,
         message: String,
     },
     #[error("node `{node_id}` has invalid `{field}` assignment target text: {message}")]
@@ -147,15 +150,84 @@ pub fn workflow_graph_from_program(program: &Program) -> WorkflowGraph {
     GraphProjector::new_without_spans(&hash_input, program, None, true).project()
 }
 
+/// Validate a graph with every check used by rendering.
+///
+/// This checks document-wide invariants, converts every node back to IR, and
+/// verifies that the resulting program has a canonical TypeScript spelling
+/// which parses back successfully. The final-parse check prints once to an
+/// internal buffer, but this function returns no source.
+pub fn validate(graph: &WorkflowGraph) -> Result<(), GraphRenderError> {
+    validated_source(graph)?;
+    Ok(())
+}
+
 /// Validate and render a graph through the canonical TypeScript printer.
 pub fn workflow_graph_to_source(graph: &WorkflowGraph) -> Result<String, GraphRenderError> {
-    validate_graph(graph)?;
-    let program = graph_to_program(graph)?;
+    validated_source(graph)
+}
+
+fn validated_source(graph: &WorkflowGraph) -> Result<String, GraphRenderError> {
+    let program = validated_program(graph)?;
     let source = typescript_program_source(&program)?;
     crate::parse(&source).map_err(|error| GraphRenderError::RenderedSourceInvalid {
         message: error.to_string(),
     })?;
     Ok(source)
+}
+
+fn validated_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> {
+    validate_graph(graph)?;
+    graph_to_program(graph)
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn final_parse_failure_graph() -> WorkflowGraph {
+        let mut graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
+        let terminal = graph
+            .main
+            .nodes
+            .iter_mut()
+            .find_map(|node| match &mut node.kind {
+                WorkflowNodeKind::Terminal { expression, .. } => Some(expression),
+                _ => None,
+            })
+            .expect("fixture contains a terminal node");
+        *terminal = Expr::Return(Box::new(Expr::Number(1.0)));
+        graph
+    }
+
+    #[test]
+    fn final_parse_fixture_passes_every_preceding_check() {
+        let graph = final_parse_failure_graph();
+        validate_graph(&graph).expect("graph invariants hold");
+        let program = graph_to_program(&graph).expect("graph converts to IR");
+        let source = typescript_program_source(&program).expect("IR prints");
+        assert_eq!(source, "return 1;\n");
+        assert!(
+            crate::parse(&source).is_err(),
+            "printed source must not parse"
+        );
+        assert!(matches!(
+            validate(&graph),
+            Err(GraphRenderError::RenderedSourceInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_prints_once_per_call_for_the_final_parse_check() {
+        let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
+        printer::reset_program_print_count();
+
+        const VALIDATIONS: usize = 4;
+        for _ in 0..VALIDATIONS {
+            validate(&graph).expect("valid graph validates");
+        }
+
+        assert_eq!(printer::program_print_count(), VALIDATIONS);
+    }
 }
 
 struct GraphProjector<'a> {

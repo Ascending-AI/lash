@@ -13,7 +13,7 @@ use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
     GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError,
     parse_typescript_assign_target, parse_typescript_expression, typescript_program_source,
-    workflow_graph_from_program, workflow_graph_from_source,
+    validate, workflow_graph_from_program, workflow_graph_from_source,
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
@@ -698,6 +698,92 @@ fn invalid_graphs_are_refused() {
         workflow_graph_to_source(&graph),
         Err(GraphRenderError::UnknownNodeReference { .. })
     ));
+}
+
+#[test]
+fn validate_and_render_agree_on_every_graph_failure_class() {
+    let fixture = || {
+        workflow_graph_from_source(
+            "const child = async () => { return 1; };\nconst value = 1;\nfinish(value);\n",
+        )
+        .expect("fixture projects")
+    };
+
+    let mut unsupported_schema = fixture();
+    unsupported_schema.schema_version -= 1;
+
+    let mut duplicate_node_id = fixture();
+    duplicate_node_id.main.nodes[1].id = duplicate_node_id.main.nodes[0].id.clone();
+
+    let mut unknown_node_reference = fixture();
+    unknown_node_reference.main.edges.push(WorkflowEdge {
+        id: "dangling".to_string(),
+        from: unknown_node_reference.main.nodes[0].id.clone(),
+        to: WorkflowNodeId::new("missing".to_string()),
+        kind: WorkflowEdgeKind::Sequence,
+    });
+
+    let mut invalid_node_payload = fixture();
+    let expression = invalid_node_payload
+        .main
+        .nodes
+        .iter_mut()
+        .find_map(|node| match &mut node.kind {
+            WorkflowNodeKind::Data { expression, .. } => Some(expression),
+            _ => None,
+        })
+        .expect("fixture contains a data node");
+    *expression = lashlang::Expr::SleepFor(Box::new(lashlang::Expr::Number(1.0)));
+
+    let mut invalid_opaque_source = fixture();
+    invalid_opaque_source.main.nodes[0].kind = WorkflowNodeKind::Opaque {
+        source: "let =".to_string(),
+    };
+
+    let mut duplicate_process_name = fixture();
+    let process = duplicate_process_name
+        .declarations
+        .iter()
+        .find(|declaration| matches!(declaration, WorkflowDeclaration::Process(_)))
+        .expect("fixture declares a process")
+        .clone();
+    duplicate_process_name.declarations.push(process);
+
+    let mut canonical_source = fixture();
+    canonical_source.main.nodes[0].name_source = WorkflowNodeNameSource::Label;
+    canonical_source.main.nodes[0].name = "Close */ me".into();
+
+    let mut rendered_source_invalid =
+        workflow_graph_from_source("finish(1);\n").expect("final-parse fixture projects");
+    let terminal = rendered_source_invalid
+        .main
+        .nodes
+        .iter_mut()
+        .find_map(|node| match &mut node.kind {
+            WorkflowNodeKind::Terminal { expression, .. } => Some(expression),
+            _ => None,
+        })
+        .expect("fixture contains a terminal node");
+    *terminal = lashlang::Expr::Return(Box::new(lashlang::Expr::Number(1.0)));
+
+    let cases = [
+        ("unsupported_schema_version", unsupported_schema),
+        ("duplicate_node_id", duplicate_node_id),
+        ("unknown_node_reference", unknown_node_reference),
+        ("invalid_node_payload", invalid_node_payload),
+        ("invalid_opaque_source", invalid_opaque_source),
+        ("duplicate_process_name", duplicate_process_name),
+        ("canonical_source", canonical_source),
+        ("rendered_source_invalid", rendered_source_invalid),
+    ];
+    for (expected_code, graph) in cases {
+        let validation_error = validate(&graph).expect_err(expected_code);
+        let render_error = workflow_graph_to_source(&graph).expect_err(expected_code);
+        assert_eq!(validation_error.code(), expected_code);
+        assert_eq!(validation_error.code(), render_error.code());
+        assert_eq!(validation_error.node_id(), render_error.node_id());
+        assert_eq!(validation_error.field(), render_error.field());
+    }
 }
 
 #[test]

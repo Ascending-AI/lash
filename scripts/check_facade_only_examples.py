@@ -33,13 +33,6 @@ RLM_LASHLANG_SOURCES = frozenset(
     )
 )
 
-# This example is itself a Lashlang workflow-graph editor, not a host consuming
-# the Lash runtime facade, so its single library target is intentionally
-# Lashlang-specific. The manifest check below makes the ruling self-expire if
-# that target stops depending on Lashlang.
-LASHLANG_ONLY_PACKAGES = frozenset({"workflow-graph-roundtrip"})
-
-
 def dependency_tables(
     document: dict[str, Any],
     sections: frozenset[str] = frozenset(
@@ -72,20 +65,13 @@ def is_lashlang_context(source: Path, manifest: Path) -> bool:
         return False
 
     rlm_enabled = False
-    lashlang_dependency = False
     for dependencies in dependency_tables(document, frozenset({"dependencies"})):
         if "rlm" in dependency_features(dependencies.get("lash")):
             rlm_enabled = True
-    for dependencies in dependency_tables(document):
-        if "lashlang" in dependencies:
-            lashlang_dependency = True
 
     if source_path in RLM_LASHLANG_SOURCES:
         return rlm_enabled
-
-    package = document.get("package", {})
-    package_name = package.get("name") if isinstance(package, dict) else None
-    return package_name in LASHLANG_ONLY_PACKAGES and lashlang_dependency
+    return False
 
 
 def example_manifest(source: Path) -> Path | None:

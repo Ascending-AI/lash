@@ -19527,6 +19527,7 @@
         "serde",
         "serde_json",
         "serde_yaml",
+        "strum",
         "swc_common",
         "swc_ecma_ast",
         "swc_ecma_parser",
@@ -19637,7 +19638,8 @@
       "resolved_features": [
         "default",
         "rlm",
-        "testing"
+        "testing",
+        "typescript"
       ],
       "targets": [
         {
@@ -20137,8 +20139,6 @@
         "anyhow",
         "axum",
         "compact_str",
-        "lash-internal-lashlang",
-        "lash-internal-typescript",
         "lash-runtime",
         "reqwest",
         "serde",

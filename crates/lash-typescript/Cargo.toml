@@ -40,6 +40,7 @@ lashlang = { workspace = true, features = ["testing"] }
 lash-typescript = { package = "lash-internal-typescript", path = ".", features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"
+strum = { workspace = true }
 swc_common = { workspace = true }
 swc_ecma_ast = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
