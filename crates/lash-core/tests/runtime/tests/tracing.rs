@@ -12,14 +12,15 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
 fn composition_change_entries(path: &std::path::Path) -> Vec<serde_json::Value> {
-    std::fs::read_to_string(path)
-        .expect("read composition trace")
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace record"))
-        .filter(|entry| {
-            entry.get("type").and_then(serde_json::Value::as_str) == Some("composition_changed")
-        })
-        .collect()
+    lash_trace::parse_jsonl_records::<serde_json::Value>(
+        &std::fs::read_to_string(path).expect("read composition trace"),
+    )
+    .expect("trace records")
+    .into_iter()
+    .filter(|entry| {
+        entry.get("type").and_then(serde_json::Value::as_str) == Some("composition_changed")
+    })
+    .collect()
 }
 
 fn composition_tool_contract<'a>(
@@ -357,9 +358,11 @@ async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_
         .expect("runtime graph service should route trace records");
 
     let logged = std::fs::read_to_string(&trace_path).expect("read runtime trace sink");
-    let record: lash_core::facade_support::TraceRecord =
-        serde_json::from_str(logged.lines().next().expect("one trace record"))
-            .expect("typed trace record");
+    let record: lash_core::facade_support::TraceRecord = lash_trace::parse_jsonl_records(&logged)
+        .expect("typed trace records")
+        .into_iter()
+        .next()
+        .expect("one trace record");
     assert_eq!(record.context.session_id.as_deref(), Some("root"));
     assert!(matches!(
         record.event,
@@ -507,10 +510,8 @@ async fn assert_standard_tool_lifecycle(
     assert_eq!(turn.tool_calls[0].output.is_success(), expected_success);
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-    let entries = logged
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
-        .collect::<Vec<_>>();
+    let entries =
+        lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("json log entries");
 
     let started = entries
         .iter()
@@ -765,11 +766,10 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
 
     assert_eq!(turn.tool_calls.len(), 1);
     assert_eq!(turn.tool_calls[0].call_id.as_deref(), Some(call_id));
-    let entries = std::fs::read_to_string(&trace_path)
-        .expect("read pending trace")
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace entry"))
-        .collect::<Vec<_>>();
+    let entries = lash_trace::parse_jsonl_records::<serde_json::Value>(
+        &std::fs::read_to_string(&trace_path).expect("read pending trace"),
+    )
+    .expect("trace entries");
     assert_eq!(
         entries
             .iter()
@@ -941,10 +941,8 @@ async fn standard_runtime_trace_records_stream_event_entries() {
     );
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-    let entries = logged
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
-        .collect::<Vec<_>>();
+    let entries =
+        lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("json log entries");
 
     assert!(
         entries
@@ -1144,10 +1142,8 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
     ));
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-    let entries = logged
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
-        .collect::<Vec<_>>();
+    let entries =
+        lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("json log entries");
     let provider_events = entries
         .iter()
         .filter(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("provider_stream_event"))
@@ -1345,10 +1341,8 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
     ));
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-    let entries = logged
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
-        .collect::<Vec<_>>();
+    let entries =
+        lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("json log entries");
 
     assert!(
         !entries.iter().any(
@@ -1420,10 +1414,8 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
     assert_eq!(turn.errors[0].raw.as_deref(), Some("transport raw body"));
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-    let entries = logged
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
-        .collect::<Vec<_>>();
+    let entries =
+        lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("json log entries");
     let error_entry = entries
         .iter()
         .find(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("llm_call_failed"))

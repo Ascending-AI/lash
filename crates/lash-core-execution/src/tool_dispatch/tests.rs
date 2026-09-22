@@ -1994,12 +1994,12 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
         None,
         &crate::facade_support::SystemClock,
     );
-    let emitted: lash_trace::TraceRecord = serde_json::from_str(
-        std::fs::read_to_string(path)
-            .expect("read tool trace")
-            .trim(),
-    )
-    .expect("parse emitted tool trace");
+    let emitted: lash_trace::TraceRecord =
+        lash_trace::parse_jsonl_records(&std::fs::read_to_string(path).expect("read tool trace"))
+            .expect("parse emitted tool trace")
+            .into_iter()
+            .next()
+            .expect("one emitted tool trace record");
     let lash_trace::TraceEvent::ToolCallCompleted { attempts, .. } = emitted.event else {
         panic!("expected emitted tool completion");
     };

@@ -68,11 +68,10 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
     core.flush_trace_sink()
         .expect("flush provider request trace");
 
-    let entries = std::fs::read_to_string(&trace_path)
-        .expect("trace file")
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("trace entry"))
-        .collect::<Vec<_>>();
+    let entries = lash_core::facade_support::parse_jsonl_records::<Value>(
+        &std::fs::read_to_string(&trace_path).expect("trace file"),
+    )
+    .expect("trace entries");
     let requests = entries
         .iter()
         .filter(|entry| entry["type"] == "provider_request")

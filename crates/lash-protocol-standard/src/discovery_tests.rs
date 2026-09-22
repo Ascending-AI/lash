@@ -356,11 +356,10 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         "Tool `catalog_only` was not listed in this request; use a listed discovery operation or batch."
     );
 
-    let entries = std::fs::read_to_string(&trace_path)
-        .expect("read discovery trace")
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("trace entry"))
-        .collect::<Vec<_>>();
+    let entries = lash_core::facade_support::parse_jsonl_records::<Value>(
+        &std::fs::read_to_string(&trace_path).expect("read discovery trace"),
+    )
+    .expect("trace entries");
     for call_id in if mixed {
         vec!["refused-call", "admitted-call"]
     } else {

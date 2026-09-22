@@ -495,6 +495,7 @@ pub mod facade_support {
     pub use lash_sansio::resolve_schema;
     pub use lash_sansio::shared_parts;
     pub use lash_sansio::visible_response_text_from_parts;
+    pub use lash_trace::JsonlTraceReadError;
     pub use lash_trace::JsonlTraceSink;
     pub use lash_trace::TraceBranchSelection;
     pub use lash_trace::TraceLabelMetadata;
@@ -504,6 +505,7 @@ pub mod facade_support {
     pub use lash_trace::TraceRuntimeSubject;
     pub use lash_trace::TraceSink;
     pub use lash_trace::TraceSinkError;
+    pub use lash_trace::parse_jsonl_records;
     pub use schemars::JsonSchema;
 
     pub fn native_queued_work_with_execution_concurrency_and_work_cadence(

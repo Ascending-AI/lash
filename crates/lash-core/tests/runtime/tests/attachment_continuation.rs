@@ -215,9 +215,9 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
     }
 
     let trace = std::fs::read_to_string(&trace_path).expect("read degradation trace");
-    let degradation = trace
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace record"))
+    let degradation = lash_trace::parse_jsonl_records::<serde_json::Value>(&trace)
+        .expect("trace records")
+        .into_iter()
         .find(|record| record["type"] == "attachment_degraded")
         .expect("typed attachment degradation trace");
     assert_eq!(degradation["media_type"], "application/octet-stream");

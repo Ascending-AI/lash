@@ -742,10 +742,8 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     core.flush_trace_sink()?;
 
     let trace = std::fs::read_to_string(trace_path).expect("read standard-compaction trace");
-    let records = trace
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("decode trace record"))
-        .collect::<Vec<_>>();
+    let records =
+        lash_trace::parse_jsonl_records::<serde_json::Value>(&trace).expect("decode trace records");
     for event_type in ["compaction_started", "compaction_completed"] {
         let record = records
             .iter()

@@ -904,10 +904,11 @@ pub mod tracing {
         TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
         TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
         TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
-        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
-        facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
-        facade_support::TraceRecord, facade_support::TraceRuntimeScope,
-        facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
+        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceReadError,
+        facade_support::JsonlTraceSink, facade_support::TraceBranchSelection,
+        facade_support::TraceLabelMetadata, facade_support::TraceRecord,
+        facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+        facade_support::TraceSinkError, facade_support::parse_jsonl_records,
     };
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
     /// can name — match on, take in a signature, or build in a test — what a
