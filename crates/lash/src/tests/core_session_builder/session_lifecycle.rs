@@ -990,9 +990,9 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         "the committed terminal answer must occur exactly once in turn 2"
     );
     let trace = std::fs::read_to_string(&trace_path).expect("read FIG-461 trace");
-    let llm_starts = trace
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace event JSON"))
+    let llm_starts = lash_trace::parse_jsonl_records::<serde_json::Value>(&trace)
+        .expect("trace event JSON")
+        .into_iter()
         .filter(|event| event["type"] == "llm_call_started")
         .collect::<Vec<_>>();
     assert_eq!(llm_starts.len(), 2);

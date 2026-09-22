@@ -329,14 +329,13 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_in_memory() -> Resul
         .expect("recommitted session head");
     let committed = read.config.prompt.expect("new host prompt is present");
     assert!(format!("{committed:?}").contains("NEW HOST PROMPT"));
-    let composition_events = std::fs::read_to_string(trace.path())
-        .expect("read composition trace")
-        .lines()
-        .map(serde_json::from_str::<serde_json::Value>)
-        .collect::<std::result::Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|record| record["type"] == "composition_changed")
-        .count();
+    let composition_events = lash_trace::parse_jsonl_records::<serde_json::Value>(
+        &std::fs::read_to_string(trace.path()).expect("read composition trace"),
+    )
+    .expect("composition trace records")
+    .into_iter()
+    .filter(|record| record["type"] == "composition_changed")
+    .count();
     assert_eq!(composition_events, 1, "the changed composition is emitted");
     Ok(())
 }
@@ -550,14 +549,13 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
         format!("{:?}", committed.config.prompt.expect("present prompt"))
             .contains("SQLITE NEW HOST PROMPT")
     );
-    let composition_events = std::fs::read_to_string(trace.path())
-        .expect("read SQLite composition trace")
-        .lines()
-        .map(serde_json::from_str::<serde_json::Value>)
-        .collect::<std::result::Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|record| record["type"] == "composition_changed")
-        .count();
+    let composition_events = lash_trace::parse_jsonl_records::<serde_json::Value>(
+        &std::fs::read_to_string(trace.path()).expect("read SQLite composition trace"),
+    )
+    .expect("SQLite composition trace records")
+    .into_iter()
+    .filter(|record| record["type"] == "composition_changed")
+    .count();
     assert_eq!(composition_events, 1, "the changed composition is emitted");
     Ok(())
 }

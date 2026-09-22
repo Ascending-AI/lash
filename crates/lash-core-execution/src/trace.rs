@@ -1016,12 +1016,13 @@ mod span_identity_tests {
             Some(&record),
             &crate::facade_support::SystemClock,
         );
-        let emitted: TraceRecord = serde_json::from_str(
-            std::fs::read_to_string(path)
-                .expect("read LLM trace")
-                .trim(),
+        let emitted: TraceRecord = lash_trace::parse_jsonl_records(
+            &std::fs::read_to_string(path).expect("read LLM trace"),
         )
-        .expect("parse emitted LLM trace");
+        .expect("parse emitted LLM trace")
+        .into_iter()
+        .next()
+        .expect("one emitted LLM trace record");
         let TraceEvent::LlmCallFailed { attempts, .. } = emitted.event else {
             panic!("expected emitted LLM failure");
         };
@@ -1081,11 +1082,10 @@ mod span_identity_tests {
             &clock,
         );
 
-        let lines = std::fs::read_to_string(path).expect("trace file");
-        let records = lines
-            .lines()
-            .map(|line| serde_json::from_str::<TraceRecord>(line).expect("trace record"))
-            .collect::<Vec<_>>();
+        let records = lash_trace::parse_jsonl_records::<TraceRecord>(
+            &std::fs::read_to_string(path).expect("trace file"),
+        )
+        .expect("trace records");
         assert_eq!(
             records.len(),
             2,

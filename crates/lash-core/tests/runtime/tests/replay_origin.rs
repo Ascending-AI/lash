@@ -36,12 +36,13 @@ fn foreign_replay_message() -> Message {
 }
 
 fn trace_events(path: &std::path::Path) -> Vec<lash_trace::TraceEvent> {
-    std::fs::read_to_string(path)
-        .expect("read caller-shaped trace")
-        .lines()
-        .map(|line| serde_json::from_str::<lash_trace::TraceRecord>(line).expect("trace row"))
-        .map(|record| record.event)
-        .collect()
+    lash_trace::parse_jsonl_records::<lash_trace::TraceRecord>(
+        &std::fs::read_to_string(path).expect("read caller-shaped trace"),
+    )
+    .expect("trace rows")
+    .into_iter()
+    .map(|record| record.event)
+    .collect()
 }
 
 fn assert_drop_survived(turn: &AssembledTurn, events: &[lash_trace::TraceEvent]) {

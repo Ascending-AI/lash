@@ -637,9 +637,9 @@ fn retired_session_http_refusals_record_structured_admission_evidence() {
             !records.contains("agent_workbench.api.turn.request"),
             "a refused turn must not be traced as accepted"
         );
-        let surfaces = records
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).expect("decode refusal trace record"))
+        let surfaces = lash::tracing::parse_jsonl_records::<Value>(&records)
+            .expect("decode refusal trace records")
+            .into_iter()
             .filter(|record| {
                 record.get("name").and_then(Value::as_str)
                     == Some("agent_workbench.session.admission_refused")

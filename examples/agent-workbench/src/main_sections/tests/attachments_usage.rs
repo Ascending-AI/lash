@@ -512,15 +512,16 @@ fn assert_usage_report_consistent(report: &lash::usage::SessionUsageReport) {
 }
 
 fn completed_llm_call_usage(trace_path: &std::path::Path) -> Vec<lash::tracing::TraceTokenUsage> {
-    std::fs::read_to_string(trace_path)
-        .expect("read gate trace")
-        .lines()
-        .map(|line| serde_json::from_str::<TraceRecord>(line).expect("decode gate trace record"))
-        .filter_map(|record| match record.event {
-            TraceEvent::LlmCallCompleted { usage, .. } => usage,
-            _ => None,
-        })
-        .collect()
+    lash::tracing::parse_jsonl_records::<TraceRecord>(
+        &std::fs::read_to_string(trace_path).expect("read gate trace"),
+    )
+    .expect("decode gate trace records")
+    .into_iter()
+    .filter_map(|record| match record.event {
+        TraceEvent::LlmCallCompleted { usage, .. } => usage,
+        _ => None,
+    })
+    .collect()
 }
 
 fn trace_usage_total(usage: &lash::tracing::TraceTokenUsage) -> i64 {

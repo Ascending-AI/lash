@@ -33,9 +33,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod jsonl_records;
 mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
+
+use jsonl_records::truncate_torn_tail;
+pub use jsonl_records::{JsonlTraceReadError, parse_jsonl_records};
 
 pub use lash_sansio::llm::types::GenerationReceipt;
 pub use lash_sansio::{
@@ -1799,8 +1803,17 @@ impl JsonlTraceSink {
     reason = "JsonlTraceSink is the filesystem trace sink; the host injects the path (FIG-2971)"
 )]
 impl TraceSink for JsonlTraceSink {
+    /// Write the record as one `line\n` call.
+    ///
+    /// The record and its newline go out in a single `write_all`: issuing them
+    /// as two writes (`writeln!` on a fresh handle does exactly that) lets a
+    /// kill or a short write tear between the record and its terminator, and
+    /// the next append would glue onto the partial line. When the file's last
+    /// line is already unterminated — a torn record left behind — the tail is
+    /// truncated first, so every line in the file stays a complete record.
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let line = serde_json::to_string(record)?;
+        let mut line = serde_json::to_string(record)?;
+        line.push('\n');
         let _guard = self.lock.lock_recover();
         if let Some(parent) = self.path.parent()
             && !parent.as_os_str().is_empty()
@@ -1812,16 +1825,19 @@ impl TraceSink for JsonlTraceSink {
         }
         let mut file = OpenOptions::new()
             .create(true)
+            .read(true)
             .append(true)
             .open(&self.path)
             .map_err(|source| TraceSinkError::Open {
                 path: self.path.clone(),
                 source,
             })?;
-        writeln!(file, "{line}").map_err(|source| TraceSinkError::Write {
-            path: self.path.clone(),
-            source,
-        })
+        truncate_torn_tail(&mut file)
+            .and_then(|()| file.write_all(line.as_bytes()))
+            .map_err(|source| TraceSinkError::Write {
+                path: self.path.clone(),
+                source,
+            })
     }
 
     /// `fsync` the trace file to durable storage.
