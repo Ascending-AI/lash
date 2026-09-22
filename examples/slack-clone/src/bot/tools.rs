@@ -29,6 +29,22 @@ pub const CHANNEL_HISTORY: &str = "channel_history";
 /// How many messages `channel_history` will return at most.
 const MAX_HISTORY: u32 = 50;
 
+/// The channel the model named resolves to nothing.
+///
+/// Typed so the rendered text is presentation, not a contract: the model sees
+/// the Slack code it already knows, and anything that ever needs to classify
+/// the failure matches on the type rather than on prose.
+#[derive(Debug)]
+struct ChannelNotFound;
+
+impl std::fmt::Display for ChannelNotFound {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("channel_not_found")
+    }
+}
+
+impl std::error::Error for ChannelNotFound {}
+
 /// `list_channels` takes no arguments.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -176,7 +192,7 @@ impl WorkspaceTools {
     async fn resolve_channel(&self, requested: &str) -> anyhow::Result<String> {
         let wanted = requested.trim().trim_start_matches('#');
         if wanted.is_empty() {
-            anyhow::bail!("channel_not_found");
+            anyhow::bail!(ChannelNotFound);
         }
         let mut cursor: Option<String> = None;
         loop {
@@ -196,7 +212,7 @@ impl WorkspaceTools {
                 .map(|metadata| metadata.next_cursor)
                 .filter(|next| !next.is_empty());
             if cursor.is_none() {
-                anyhow::bail!("channel_not_found");
+                anyhow::bail!(ChannelNotFound);
             }
         }
     }
