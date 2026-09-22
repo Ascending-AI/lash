@@ -9,6 +9,7 @@ use axum::{Json, RequestExt as _};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use super::state::AuthError;
 use crate::log_err;
 use crate::wire::ApiErrorBody;
 
@@ -133,6 +134,17 @@ impl ApiError {
     pub fn internal(context: &str, error: impl std::fmt::Display) -> Self {
         log_err!("slack-clone-platform: {context}: {error}");
         Self::new("internal_error")
+    }
+}
+
+impl From<AuthError> for ApiError {
+    /// Slack renders auth failure like every other failure: HTTP 200 with the
+    /// code in the body.
+    fn from(error: AuthError) -> Self {
+        Self::new(match error {
+            AuthError::NotAuthed => "not_authed",
+            AuthError::InvalidAuth => "invalid_auth",
+        })
     }
 }
 

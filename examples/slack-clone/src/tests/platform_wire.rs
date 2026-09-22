@@ -137,6 +137,54 @@ async fn an_unauthorized_call_reports_not_authed_rather_than_401() {
 }
 
 #[tokio::test]
+async fn the_platform_surface_reports_real_status_codes() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let client = reqwest::Client::new();
+
+    // `/platform/*` is not Slack: the 200-with-ok:false quirk is scoped to
+    // `/api/*`, and a missing resource is a real 404 with the code in the body.
+    let user = platform.identify("ada").await;
+    let missing = client
+        .post(format!("{}/platform/messages", platform.base_url))
+        .json(&serde_json::json!({
+            "channel": "C000NOPE00",
+            "user_id": user,
+            "text": "hi",
+        }))
+        .send()
+        .await
+        .expect("post to a missing channel");
+    assert_eq!(missing.status(), reqwest::StatusCode::NOT_FOUND);
+    let body: Value = missing.json().await.expect("decode error body");
+    assert_eq!(body["error"], Value::String("channel_not_found".into()));
+
+    // A malformed request is a 400, and a rejected token is a 401 rather than
+    // Slack's 200.
+    let empty = client
+        .post(format!("{}/platform/messages", platform.base_url))
+        .json(&serde_json::json!({
+            "channel": "C000NOPE00",
+            "user_id": user,
+            "text": "  ",
+        }))
+        .send()
+        .await
+        .expect("post empty text");
+    assert_eq!(empty.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: Value = empty.json().await.expect("decode error body");
+    assert_eq!(body["error"], Value::String("no_text".into()));
+
+    let unauthenticated = client
+        .post(format!("{}/platform/apps", platform.base_url))
+        .json(&serde_json::json!({ "request_url": "http://127.0.0.1:1/" }))
+        .send()
+        .await
+        .expect("register without a token");
+    assert_eq!(unauthenticated.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn conversations_list_returns_slacks_channel_object_shape() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;

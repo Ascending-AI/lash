@@ -875,6 +875,9 @@ The two `/api/*` and `/platform/*` namespaces are kept visibly apart so a reader
 can tell at a glance which routes are contract and which are scaffolding. The UI
 reads its backlog from `/platform/history`, never from `conversations.history`:
 that method needs the bot token, and a bot token has no business in a browser.
+The error contract differs too: `/api/*` answers failures Slack's way (HTTP 200
+with `ok: false`), while `/platform/*` reports real status codes (`4xx`/`5xx`)
+with the error code still in the body.
 
 ## Configuration
 

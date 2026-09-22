@@ -10,24 +10,83 @@ mod ndjson;
 
 use axum::Json;
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio_stream::wrappers::BroadcastStream;
 
-use super::args::ApiError;
-use super::db::{self, Author};
-use super::state::{LiveEvent, PlatformState};
+use super::db::{self, Author, PostError};
+use super::state::{AuthError, LiveEvent, PlatformState};
 use super::{apps, web_api};
 use crate::ids::Ts;
 use crate::log_err;
+use crate::wire::ApiErrorBody;
+
+/// A failure on the product's own `/platform/*` surface.
+///
+/// [`super::args::ApiError`] is Slack's contract — HTTP 200 with `ok: false`
+/// in the body — and this surface has no Slack contract to honor, so it
+/// reports the status honestly: `4xx` when the request is the problem, `5xx`
+/// when the store is. The body keeps the `{ "error": "code" }` shape the UI
+/// reads.
+#[derive(Clone, Debug)]
+pub struct PlatformError {
+    status: StatusCode,
+    body: ApiErrorBody,
+}
+
+impl PlatformError {
+    fn with_status(status: StatusCode, code: &'static str) -> Self {
+        Self {
+            status,
+            body: ApiErrorBody::new(code),
+        }
+    }
+
+    /// The request itself is the problem: `400`.
+    fn request(code: &'static str) -> Self {
+        Self::with_status(StatusCode::BAD_REQUEST, code)
+    }
+
+    /// The named thing is not there: `404`.
+    fn not_found(code: &'static str) -> Self {
+        Self::with_status(StatusCode::NOT_FOUND, code)
+    }
+
+    /// The request collides with existing state: `409`.
+    fn conflict(code: &'static str) -> Self {
+        Self::with_status(StatusCode::CONFLICT, code)
+    }
+
+    /// A store or projection failure: `500`, with the cause in the log rather
+    /// than the response.
+    fn internal(context: &str, error: impl std::fmt::Display) -> Self {
+        log_err!("slack-clone-platform: {context}: {error}");
+        Self::with_status(StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
+    }
+}
+
+impl From<AuthError> for PlatformError {
+    fn from(error: AuthError) -> Self {
+        match error {
+            AuthError::NotAuthed => Self::with_status(StatusCode::UNAUTHORIZED, "not_authed"),
+            AuthError::InvalidAuth => Self::with_status(StatusCode::FORBIDDEN, "invalid_auth"),
+        }
+    }
+}
+
+impl IntoResponse for PlatformError {
+    fn into_response(self) -> Response {
+        (self.status, Json(self.body)).into_response()
+    }
+}
 
 /// Liveness, workspace identity and delivery counters.
 pub async fn healthz(
     State(state): State<PlatformState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<serde_json::Value>, PlatformError> {
     let stats = state
         .database()
         .call(|connection| {
@@ -37,7 +96,7 @@ pub async fn healthz(
             ))
         })
         .await
-        .map_err(|error| ApiError::internal("read health", error))?;
+        .map_err(|error| PlatformError::internal("read health", error))?;
     let (delivery, app) = stats;
     Ok(Json(json!({
         "service": "slack-clone-platform",
@@ -58,7 +117,7 @@ pub async fn register_app(
     State(state): State<PlatformState>,
     headers: HeaderMap,
     Json(request): Json<RegisterAppRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<serde_json::Value>, PlatformError> {
     state.authorize(&headers)?;
     state
         .verify_and_register(&request.request_url)
@@ -67,7 +126,7 @@ pub async fn register_app(
             // Verification failure is the caller's problem, not an internal one:
             // it means the URL did not echo the challenge.
             log_err!("slack-clone-platform url_verification failed: {error:#}");
-            ApiError::new("request_url_verification_failed")
+            PlatformError::request("request_url_verification_failed")
         })?;
     let identity = state.identity();
     Ok(Json(json!({
@@ -102,24 +161,24 @@ pub struct IdentifyResponse {
 pub async fn identify(
     State(state): State<PlatformState>,
     Json(request): Json<IdentifyRequest>,
-) -> Result<Json<IdentifyResponse>, ApiError> {
+) -> Result<Json<IdentifyResponse>, PlatformError> {
     let display_name = request.name.trim().to_string();
     if display_name.is_empty() {
-        return Err(ApiError::new("name_required"));
+        return Err(PlatformError::request("name_required"));
     }
     let handle = normalize_handle(&display_name);
     if handle.is_empty() {
-        return Err(ApiError::new("name_required"));
+        return Err(PlatformError::request("name_required"));
     }
     if handle == state.identity().bot_handle {
-        return Err(ApiError::new("name_taken"));
+        return Err(PlatformError::conflict("name_taken"));
     }
     let id = state.ids().mint("U");
     let user = state
         .database()
         .call(move |connection| db::upsert_user(connection, &id, &handle, &display_name, false))
         .await
-        .map_err(|error| ApiError::internal("claim identity", error))?;
+        .map_err(|error| PlatformError::internal("claim identity", error))?;
     Ok(Json(IdentifyResponse {
         user_id: user.id,
         handle: user.handle,
@@ -130,7 +189,7 @@ pub async fn identify(
 /// Everything the UI needs on load.
 pub async fn bootstrap(
     State(state): State<PlatformState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<serde_json::Value>, PlatformError> {
     let (channels, users) = state
         .database()
         .call(|connection| {
@@ -140,7 +199,7 @@ pub async fn bootstrap(
             ))
         })
         .await
-        .map_err(|error| ApiError::internal("bootstrap", error))?;
+        .map_err(|error| PlatformError::internal("bootstrap", error))?;
     Ok(Json(json!({
         "identity": state.identity(),
         "channels": channels
@@ -168,10 +227,10 @@ pub struct CreateChannelRequest {
 pub async fn create_channel(
     State(state): State<PlatformState>,
     Json(request): Json<CreateChannelRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<serde_json::Value>, PlatformError> {
     let name = normalize_handle(request.name.trim_start_matches('#'));
     if name.is_empty() {
-        return Err(ApiError::new("invalid_name_specials"));
+        return Err(PlatformError::request("invalid_name_specials"));
     }
     let id = state.ids().mint("C");
     let creator = request.user_id;
@@ -179,7 +238,7 @@ pub async fn create_channel(
         .database()
         .call(move |connection| db::upsert_channel(connection, &id, &name, &creator, false))
         .await
-        .map_err(|error| ApiError::internal("create channel", error))?;
+        .map_err(|error| PlatformError::internal("create channel", error))?;
     state.publish_live(LiveEvent::ChannelCreated {
         channel: channel.id.clone(),
         name: channel.name.clone(),
@@ -206,22 +265,24 @@ pub struct PostAsUserRequest {
 pub async fn post_as_user(
     State(state): State<PlatformState>,
     Json(request): Json<PostAsUserRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<serde_json::Value>, PlatformError> {
     let text = request.text.trim().to_string();
     if text.is_empty() {
-        return Err(ApiError::new("no_text"));
+        return Err(PlatformError::request("no_text"));
     }
     let user_id = request.user_id.clone();
     let known = state
         .database()
         .call(move |connection| db::user_by_id(connection, &user_id))
         .await
-        .map_err(|error| ApiError::internal("resolve author", error))?;
+        .map_err(|error| PlatformError::internal("resolve author", error))?;
     if known.is_none() {
-        return Err(ApiError::new("user_not_found"));
+        return Err(PlatformError::not_found("user_not_found"));
     }
     let thread_ts = match request.thread_ts.as_deref().filter(|raw| !raw.is_empty()) {
-        Some(raw) => Some(Ts::parse(raw).ok_or_else(|| ApiError::new("invalid_thread_ts"))?),
+        Some(raw) => {
+            Some(Ts::parse(raw).ok_or_else(|| PlatformError::request("invalid_thread_ts"))?)
+        }
         None => None,
     };
     let stored = state
@@ -236,16 +297,15 @@ pub async fn post_as_user(
             None,
         )
         .await
-        .map_err(|error| match error.to_string().as_str() {
-            "channel_not_found" => ApiError::new("channel_not_found"),
-            "thread_not_found" => ApiError::new("thread_not_found"),
-            _ => ApiError::internal("post message", error),
+        .map_err(|error| match error.downcast_ref::<PostError>() {
+            Some(post) => PlatformError::not_found(post.code()),
+            None => PlatformError::internal("post message", error),
         })?;
     Ok(Json(json!({
         "ok": true,
         "ts": stored.ts.to_string(),
         "message": web_api::message_object(&stored, false)
-            .map_err(|error| ApiError::internal("project posted message", error))?,
+            .map_err(|error| PlatformError::internal("project posted message", error))?,
     })))
 }
 
@@ -266,23 +326,23 @@ pub struct ChannelQuery {
 pub async fn history(
     State(state): State<PlatformState>,
     Query(query): Query<ChannelQuery>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<serde_json::Value>, PlatformError> {
     let channel = query.channel;
     let thread_ts = query
         .thread_ts
         .as_deref()
         .filter(|raw| !raw.is_empty())
-        .map(|raw| Ts::parse(raw).ok_or_else(|| ApiError::new("invalid_thread_ts")))
+        .map(|raw| Ts::parse(raw).ok_or_else(|| PlatformError::request("invalid_thread_ts")))
         .transpose()?;
     let (rows, users, summaries) = state
         .database()
         .call(move |connection| {
             if db::channel_by_id(connection, &channel)?.is_none() {
-                anyhow::bail!("channel_not_found");
+                anyhow::bail!(PostError::ChannelNotFound);
             }
             let rows = if let Some(parent_ts) = thread_ts {
                 let Some(parent) = db::message_by_ts(connection, &channel, parent_ts)? else {
-                    anyhow::bail!("thread_not_found");
+                    anyhow::bail!(PostError::ThreadNotFound);
                 };
                 let mut rows = vec![parent];
                 rows.extend(db::thread_replies(
@@ -307,10 +367,9 @@ pub async fn history(
             Ok((rows, db::list_users(connection)?, summaries))
         })
         .await
-        .map_err(|error| match error.to_string().as_str() {
-            "channel_not_found" => ApiError::new("channel_not_found"),
-            "thread_not_found" => ApiError::new("thread_not_found"),
-            _ => ApiError::internal("read history", error),
+        .map_err(|error| match error.downcast_ref::<PostError>() {
+            Some(post) => PlatformError::not_found(post.code()),
+            None => PlatformError::internal("read history", error),
         })?;
     let names: std::collections::HashMap<String, String> = users
         .into_iter()
