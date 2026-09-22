@@ -2150,6 +2150,22 @@ macro_rules! tool_child_invocation_tests {
                 a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks,
                 "tool-child-group-prefix-incorporation"
             ),
+            (
+                two_presentation_steps_compose_deterministically_on_first_run_and_replay,
+                "tool-child-presentation-composition"
+            ),
+            (
+                a_changed_presentation_environment_on_replay_does_not_change_the_recorded_presentation,
+                "tool-child-presentation-recorded-env"
+            ),
+            (
+                the_oracle_and_the_budget_plugin_coexist,
+                "tool-child-presentation-coexistence"
+            ),
+            (
+                a_retained_full_output_is_a_durable_artifact_not_a_path,
+                "tool-child-presentation-artifact"
+            ),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

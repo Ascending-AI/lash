@@ -2077,6 +2077,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-worker",
  "lash-internal-lashlang",
+ "lash-internal-plugin-tool-output-budget",
  "lash-internal-sansio",
  "pretty_assertions",
  "proptest",
