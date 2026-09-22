@@ -144,6 +144,7 @@ fn lent_with_direct_completions(
         session_id: SessionId::from("opener-session"),
         agent_frame_id: FrameNodeId::new("opener-frame").expect("a valid frame id"),
         event_tx,
+        turn_activity_tx: None,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),

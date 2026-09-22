@@ -384,6 +384,7 @@ fn tool_context_with_provider<'run>(
         session_id: SessionId::from(SESSION.to_string()),
         agent_frame_id: lash_core::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
+        turn_activity_tx: None,
         checkpoint_messages: lash_core::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: lash_core::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),

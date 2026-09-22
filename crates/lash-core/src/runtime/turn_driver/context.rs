@@ -146,12 +146,14 @@ impl<'run> RuntimeTurnDriver<'run> {
             return;
         };
         let (child_event_tx, mut child_event_rx) = mpsc::channel::<SessionStreamEvent>(64);
+        let (child_activity_tx, mut child_activity_rx) = mpsc::channel::<crate::TurnActivity>(64);
         let context = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
             dispatch.as_ref(),
             lent_controller,
             child_event_tx,
             self.cooperative_cancel.clone(),
-        );
+        )
+        .with_turn_activity_sender(child_activity_tx);
         let (registration, ended) = tool_children.openers().register(opener, context);
         let stream_event_tx = stream_event_tx.clone();
         crate::task::spawn(async move {
@@ -165,6 +167,12 @@ impl<'run> RuntimeTurnDriver<'run> {
                     event = child_event_rx.recv() => {
                         let Some(event) = event else { break };
                         send_session_event(&stream_event_tx, event).await;
+                    }
+                    activity = child_activity_rx.recv() => {
+                        let Some(activity) = activity else { break };
+                        let _ = stream_event_tx
+                            .send(RuntimeStreamEvent::Turn(activity))
+                            .await;
                     }
                 }
             }
