@@ -82,29 +82,6 @@ impl From<lash_core::MessageOrigin> for RemoteMessageOrigin {
     }
 }
 
-impl From<lash_core::PruneState> for RemotePruneState {
-    fn from(value: lash_core::PruneState) -> Self {
-        match value {
-            lash_core::PruneState::Intact => Self::Intact,
-            lash_core::PruneState::Cleared => Self::Cleared,
-            lash_core::PruneState::Deleted {
-                breadcrumb,
-                archive_hash,
-            } => Self::Deleted {
-                breadcrumb,
-                archive_hash,
-            },
-            lash_core::PruneState::Summarized {
-                summary,
-                archive_hash,
-            } => Self::Summarized {
-                summary,
-                archive_hash,
-            },
-        }
-    }
-}
-
 impl From<lash_core::session_model::message::PartAttachment> for RemotePartAttachment {
     fn from(value: lash_core::session_model::message::PartAttachment) -> Self {
         let lash_core::session_model::message::PartAttachment { source } = value;
@@ -136,18 +113,14 @@ impl From<lash_core::PluginMessage> for RemotePluginMessage {
         let lash_core::PluginMessage {
             id,
             role,
-            content,
             origin,
             parts,
-            attachments,
         } = value;
         Self {
             id,
             role: role.into(),
-            content,
             origin: origin.map(Into::into),
             parts: parts.into_iter().map(Into::into).collect(),
-            attachments: attachments.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -164,7 +137,6 @@ impl From<lash_core::Part> for RemotePart {
             tool_call_id: value.tool_call_id().map(str::to_string),
             tool_name: value.tool_name().map(str::to_string),
             tool_replay: value.tool_replay().cloned().map(Into::into),
-            prune_state: value.prune_state().clone().into(),
             reasoning_meta: value.reasoning_meta().cloned().map(Into::into),
             response_meta: value.response_meta().cloned().map(Into::into),
         }

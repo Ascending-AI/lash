@@ -202,7 +202,6 @@ symbols = [
   "push_attachment_ref",
   "push_attachment_source",
   "push_part_kind",
-  "push_prune_state",
   "push_part",
   "append_node_identity_bytes",
   "append_request_identity_bytes",
@@ -531,7 +530,6 @@ symbols = [
   "FlatPartRef",
   "PartAttachment",
   "PartKind",
-  "PruneState",
   "TokenUsage",
   "LlmCallId",
   "AttachmentSource",
@@ -615,7 +613,6 @@ symbols = [
   "FlatPartRef",
   "PartAttachment",
   "PartKind",
-  "PruneState",
   "AttachmentSource",
   "ProviderFileScope",
   "ProviderReplayMeta",
@@ -900,7 +897,6 @@ symbols = [
   "Part",
   "PartKind",
   "PartAttachment",
-  "PruneState",
 ]
 
 [[surface.guard]]

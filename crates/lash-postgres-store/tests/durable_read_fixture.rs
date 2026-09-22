@@ -72,6 +72,9 @@ const SUBSIDING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const LAPSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-94-b66a55237/postgres-expected.json",
 ];
+const EXPIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-95-ad054e56f/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -801,6 +804,11 @@ async fn refresh_prior_fixture_node_bodies(pool: &sqlx::PgPool) {
     for (node_id, parent_node_id, node_json) in rows {
         let mut body: serde_json::Value =
             serde_json::from_str(&node_json).expect("parse prior fixture node body");
+        // FIG-1952/FIG-1955 retired `prune_state` from the part vocabulary;
+        // stripping the retired key here is author-time refresh of the
+        // fixture's enclosing envelope, not a migration path — the witness is
+        // the component-v1 checkpoint, which is left untouched.
+        strip_retired_part_fields(&mut body);
         body["schema_version"] =
             serde_json::Value::from(lash_core::SESSION_NODE_BODY_SCHEMA_VERSION);
         let record = lash_core::SessionNodeRecord::decode_storage_body(
@@ -818,6 +826,25 @@ async fn refresh_prior_fixture_node_bodies(pool: &sqlx::PgPool) {
             .execute(pool)
             .await
             .expect("write refreshed node body");
+    }
+}
+
+/// Recursively remove the retired `prune_state` key from a parsed node body so
+/// the author-time envelope refresh can re-encode it at the current part shape.
+fn strip_retired_part_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("prune_state");
+            for child in map.values_mut() {
+                strip_retired_part_fields(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                strip_retired_part_fields(item);
+            }
+        }
+        _ => {}
     }
 }
 

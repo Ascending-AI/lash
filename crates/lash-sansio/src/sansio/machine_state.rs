@@ -12,7 +12,7 @@ use super::*;
 /// `stream_block_completed` and required `block` identities on text and
 /// reasoning deltas, so v4 checkpoints holding pending text effects cannot
 /// deserialize faithfully.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 6;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1

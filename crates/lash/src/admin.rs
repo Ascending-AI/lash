@@ -931,14 +931,25 @@ impl SessionAdmin {
 }
 
 fn turn_input_from_plugin_message(message: PluginMessage) -> TurnInput {
+    // The single parts body maps onto turn input's two item kinds in order:
+    // an attachment part carrying a stored source becomes an attachment item,
+    // everything else contributes its text. Turn input has no richer item
+    // vocabulary, so the mapping is lossy by design.
     let mut input = TurnInput::empty();
-    if !message.content.is_empty() {
-        input.items.push(InputItem::Text {
-            text: message.content,
-        });
-    }
-    for source in message.attachments {
-        input.items.push(InputItem::attachment(source));
+    for part in message.parts {
+        if let lash_core::PartKind::Attachment = part.kind()
+            && let Some(attachment) = part.attachment()
+        {
+            input
+                .items
+                .push(InputItem::attachment(attachment.source.clone()));
+            continue;
+        }
+        if !part.content().is_empty() {
+            input
+                .items
+                .push(InputItem::text(part.content().to_string()));
+        }
     }
     input
 }

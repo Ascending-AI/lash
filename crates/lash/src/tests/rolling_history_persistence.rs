@@ -747,10 +747,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("decode trace record"))
         .collect::<Vec<_>>();
-    for event_type in [
-        "rolling_history_compaction_started",
-        "rolling_history_compaction_completed",
-    ] {
+    for event_type in ["context_compaction_started", "context_compaction_completed"] {
         let record = records
             .iter()
             .find(|record| {

@@ -28,7 +28,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
                 messages,
                 checkpoint: lash_core::CheckpointKind::AfterWork,
             },
-            serde_json::json!({"type":"queued_messages_committed","messages":[{"role":"Event","content":"ready"}],"checkpoint":"after_work"}),
+            serde_json::json!({"type":"queued_messages_committed","messages":[{"role":"Event","parts":[{"id":"p0","kind":"Text","content":"ready"}]}],"checkpoint":"after_work"}),
         ),
         (
             lash_core::TurnEvent::PluginRuntime {
@@ -62,7 +62,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
             RemoteTurnActivity::decode_json(&serde_json::to_vec(&old).unwrap()),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 52,
-                expected: 85
+                expected: 86
             })
         ));
     }
@@ -149,29 +149,33 @@ fn queued_event_closed_vocabularies_have_independent_literal_pins() {
             origin
         );
     }
-    for (state, literal) in [
-        (RemotePruneState::Intact, serde_json::json!("Intact")),
-        (RemotePruneState::Cleared, serde_json::json!("Cleared")),
+}
+
+#[test]
+fn queued_message_wire_refuses_retired_body_and_part_fields() {
+    for (message, label) in [
         (
-            RemotePruneState::Deleted {
-                breadcrumb: "b".into(),
-                archive_hash: "a".into(),
-            },
-            serde_json::json!({"Deleted":{"breadcrumb":"b","archive_hash":"a"}}),
+            serde_json::json!({"role": "Event", "content": "legacy"}),
+            "retired content field",
         ),
         (
-            RemotePruneState::Summarized {
-                summary: "s".into(),
-                archive_hash: "a".into(),
-            },
-            serde_json::json!({"Summarized":{"summary":"s","archive_hash":"a"}}),
+            serde_json::json!({"role": "Event", "attachments": []}),
+            "retired attachments field",
+        ),
+        (
+            serde_json::json!({
+                "role": "Event",
+                "parts": [{"id": "p0", "kind": "Text", "content": "t", "prune_state": "Intact"}]
+            }),
+            "retired part prune_state field",
         ),
     ] {
-        assert_eq!(serde_json::to_value(&state).unwrap(), literal);
-        assert_eq!(
-            serde_json::from_value::<RemotePruneState>(literal).unwrap(),
-            state
+        assert!(
+            serde_json::from_value::<RemotePluginMessage>(message.clone()).is_err(),
+            "{label} must be refused"
         );
+        // The same refusal applies to the durable core shape.
+        assert!(serde_json::from_value::<lash_core::PluginMessage>(message).is_err());
     }
 }
 

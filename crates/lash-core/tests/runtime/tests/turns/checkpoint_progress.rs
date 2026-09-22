@@ -1162,13 +1162,17 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
                             lash_core::MessageRole::System,
                             "plugin upload",
                         );
-                        message
-                            .attachments
-                            .push(lash_core::AttachmentSource::external_url(
-                                lash_core::MediaType::parse("application/pdf")
-                                    .expect("valid test media type"),
-                                "https://example.test/checkpoint.pdf",
-                            ));
+                        message.parts.push(lash_core::Part::attachment_part(
+                            "p1".to_string(),
+                            String::new(),
+                            Some(lash_core::session_model::message::PartAttachment {
+                                source: lash_core::AttachmentSource::external_url(
+                                    lash_core::MediaType::parse("application/pdf")
+                                        .expect("valid test media type"),
+                                    "https://example.test/checkpoint.pdf",
+                                ),
+                            }),
+                        ));
                         Ok(vec![
                             lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
                                 lash_core::facade_support::EnqueueMessagesDirective {
@@ -1355,7 +1359,11 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
             saw_injected_accept = inputs.iter().any(|input| {
                 input.id.as_deref() == Some("follow-up-id")
                     && input.message.role == lash_core::MessageRole::User
-                    && input.message.content == "follow up"
+                    && input
+                        .message
+                        .parts
+                        .iter()
+                        .any(|part| part.content() == "follow up")
             });
         }
     }

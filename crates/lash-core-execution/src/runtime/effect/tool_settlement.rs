@@ -127,7 +127,7 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// own spend. Version 3 adds
 /// `ToolIntentRefusalReason::MintingGroupChildCancelled`, the §4 refusal an
 /// intent minted by a cancel-decided group child carries.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 3;
+pub const TOOL_SETTLEMENT_VERSION: u16 = 4;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
@@ -135,7 +135,7 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 3;
 /// and [`ToolUsageDelta`], which the capture's `usage` list is made of.
 /// Version 1 is the shape FIG-2266 minted; version 2 is the same
 /// [`ToolUsageDelta`] rename [`TOOL_SETTLEMENT_VERSION`] records.
-pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 2;
+pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 3;
 
 /// One provider spend attributable to one attempt of a tool child.
 ///

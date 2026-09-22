@@ -546,7 +546,10 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "queued_messages_committed",
-                "messages": [{ "role": "Assistant", "content": "done" }],
+                "messages": [{
+                    "role": "Assistant",
+                    "parts": [{ "id": "p0", "kind": "Text", "content": "done" }],
+                }],
                 "checkpoint": "before_completion",
             }),
         ),

@@ -20,6 +20,14 @@ fn prompt_usage(context_budget_tokens: usize) -> PromptUsage {
     }
 }
 
+/// First displayable body text of an injected message — the read the deleted
+/// `PluginMessage::first_text` collapse rule used to make.
+fn first_text(message: &lash_core::PluginMessage) -> Option<&str> {
+    message.parts.iter().find_map(|part| {
+        matches!(part.kind(), PartKind::Text | PartKind::Prose).then_some(part.content())
+    })
+}
+
 /// Mirrors what the turn transform asks of the pressure: no pressure, no decisions.
 fn rolling_history_decisions(
     usage: Option<&PromptUsage>,
@@ -493,7 +501,7 @@ async fn rolling_turn_transform_traces_threshold_and_prompt_pruning() {
     );
     assert_eq!(
         events[0].1,
-        lash_core::TraceEvent::RollingHistoryCompactionNeeded {
+        lash_core::TraceEvent::ContextCompactionNeeded {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
@@ -501,7 +509,7 @@ async fn rolling_turn_transform_traces_threshold_and_prompt_pruning() {
     );
     assert_eq!(
         events[1].1,
-        lash_core::TraceEvent::RollingHistoryPromptPruned {
+        lash_core::TraceEvent::PromptViewPruned {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 2,
@@ -552,7 +560,7 @@ async fn rolling_turn_transform_records_needed_when_no_cut_point_exists() {
     assert_eq!(events.len(), 2);
     assert_eq!(
         events[1].1,
-        lash_core::TraceEvent::RollingHistoryPromptPruned {
+        lash_core::TraceEvent::PromptViewPruned {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 0,
@@ -672,8 +680,7 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     };
     assert_eq!(message.role, MessageRole::Assistant);
     assert!(
-        message
-            .first_text()
+        first_text(message)
             .expect("summary text")
             .contains("Compacted work summary")
     );
@@ -714,14 +721,14 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     assert_eq!(events[0].0.turn_id, None);
     assert_eq!(
         events[0].1,
-        lash_core::TraceEvent::RollingHistoryCompactionStarted {
+        lash_core::TraceEvent::ContextCompactionStarted {
             source_messages: 3,
             instructions_present: true,
         }
     );
     assert_eq!(
         events[1].1,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 }
+        lash_core::TraceEvent::ContextCompactionCompleted { summary_nodes: 1 }
     );
 }
 
@@ -787,7 +794,7 @@ async fn rolling_compactor_records_zero_node_completion_for_none() {
     assert!(compaction.is_none());
     assert_eq!(
         trace.events()[1].1,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+        lash_core::TraceEvent::ContextCompactionCompleted { summary_nodes: 0 }
     );
 }
 
@@ -834,7 +841,7 @@ async fn rolling_compactor_records_zero_node_completion_before_error() {
     );
     assert_eq!(
         trace.events()[1].1,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+        lash_core::TraceEvent::ContextCompactionCompleted { summary_nodes: 0 }
     );
 }
 
@@ -897,12 +904,17 @@ fn empty_direct() -> Arc<RecordingLlmCompletions> {
 
 fn recovery_record_node_message(record: OverflowRecoveryRecord) -> Message {
     let plugin_message = recovery_record_message(record);
+    let content = plugin_message
+        .parts
+        .first()
+        .map(|part| part.content().to_string())
+        .unwrap_or_default();
     Message {
-        id: format!("m_recover_record_{}", plugin_message.content.len()),
+        id: format!("m_recover_record_{}", content.len()),
         role: MessageRole::System,
         parts: vec![Part::text(
-            format!("m_recover_record_{}p.p0", plugin_message.content.len()),
-            plugin_message.content,
+            format!("m_recover_record_{}p.p0", content.len()),
+            content,
             None,
         )]
         .into(),
@@ -972,8 +984,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         other => panic!("expected enqueue directive, got {other:?}"),
     };
     assert!(
-        marker
-            .first_text()
+        first_text(marker)
             .unwrap()
             .starts_with(OVERFLOW_RECOVERY_MARKER)
     );
@@ -1180,20 +1191,18 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
     assert_eq!(appends.len(), 1);
     assert_eq!(appends[0].1.nodes.len(), 1);
     let completed_kind = match &appends[0].1.nodes[0] {
-        lash_core::SessionAppendNode::Message { message } => {
-            message.first_text().and_then(|text| {
-                recovery_record_kind(&Message {
-                    id: "probe".to_string(),
-                    role: MessageRole::System,
-                    parts: vec![Part::text("probe.p0".to_string(), text.to_string(), None)].into(),
-                    origin: Some(MessageOrigin::Plugin {
-                        plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
-                        transient: false,
-                    }),
-                })
-                .expect("committed recovery record parses")
+        lash_core::SessionAppendNode::Message { message } => first_text(message).and_then(|text| {
+            recovery_record_kind(&Message {
+                id: "probe".to_string(),
+                role: MessageRole::System,
+                parts: vec![Part::text("probe.p0".to_string(), text.to_string(), None)].into(),
+                origin: Some(MessageOrigin::Plugin {
+                    plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+                    transient: false,
+                }),
             })
-        }
+            .expect("committed recovery record parses")
+        }),
         _ => None,
     };
     assert_eq!(
@@ -1217,7 +1226,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
     );
     assert_eq!(switches[0].1.initial_nodes.len(), 1);
     let seed_summary = match &switches[0].1.initial_nodes[0] {
-        lash_core::SessionAppendNode::Message { message } => message.first_text(),
+        lash_core::SessionAppendNode::Message { message } => first_text(message),
         _ => None,
     };
     assert!(

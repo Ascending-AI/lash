@@ -75,9 +75,7 @@ pub(crate) use lash_sansio::llm::types::{
     AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, ProtocolPosition,
     ProviderFileScope,
 };
-pub(crate) use lash_sansio::session_model::{
-    ConversationRecord, ProtocolEvent, PruneState, TurnBudget,
-};
+pub(crate) use lash_sansio::session_model::{ConversationRecord, ProtocolEvent, TurnBudget};
 pub(crate) use lash_sansio::session_model::{
     NoProgressBudget, message::BaseRenderCache, message::MessageSequence,
 };

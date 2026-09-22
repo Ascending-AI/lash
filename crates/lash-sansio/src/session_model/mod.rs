@@ -5,7 +5,7 @@ pub mod prompt;
 pub use failure::{FailureCode, TurnFailureCode, TurnFailureKind};
 pub use message::{
     BaseRenderCache, InvalidPartCombination, Message, MessageRole, MessageSequence, Part,
-    PartAttachment, PartKind, PruneState, RenderedPrompt, append_rendered_prompt,
+    PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
     messages_are_prompt_resume_safe, render_prompt, render_transcript_prompt, shared_parts,
 };
 pub use prompt::{

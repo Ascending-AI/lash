@@ -12,7 +12,6 @@ fn part_field_additions_trip_this_exhaustive_destructure() {
             id: _,
             content: _,
             response_meta: _,
-            prune_state: _,
         } => {}
         super::Part::Attachment {
             id: _,
@@ -20,28 +19,14 @@ fn part_field_additions_trip_this_exhaustive_destructure() {
             attachment: _,
             tool_call_id: _,
             tool_name: _,
-            prune_state: _,
         } => {}
-        super::Part::Code {
-            id: _,
-            content: _,
-            prune_state: _,
-        }
-        | super::Part::Output {
-            id: _,
-            content: _,
-            prune_state: _,
-        }
-        | super::Part::Error {
-            id: _,
-            content: _,
-            prune_state: _,
-        } => {}
+        super::Part::Code { id: _, content: _ }
+        | super::Part::Output { id: _, content: _ }
+        | super::Part::Error { id: _, content: _ } => {}
         super::Part::Prose {
             id: _,
             content: _,
             response_meta: _,
-            prune_state: _,
         } => {}
         super::Part::ToolCall {
             id: _,
@@ -49,20 +34,17 @@ fn part_field_additions_trip_this_exhaustive_destructure() {
             tool_call_id: _,
             tool_name: _,
             tool_replay: _,
-            prune_state: _,
         } => {}
         super::Part::ToolResult {
             id: _,
             content: _,
             tool_call_id: _,
             tool_name: _,
-            prune_state: _,
         } => {}
         super::Part::Reasoning {
             id: _,
             content: _,
             reasoning_meta: _,
-            prune_state: _,
         } => {}
     }
 }
@@ -867,16 +849,16 @@ fn message_origins_written_before_turn_input_provenance_still_deserialize() {
     let legacy = r#"[
         {
             "id":"m_turn_old_input","role":"User",
-            "parts":[{"id":"m_turn_old_input.p0","kind":"Text","content":"hi","prune_state":"Intact"}]
+            "parts":[{"id":"m_turn_old_input.p0","kind":"Text","content":"hi"}]
         },
         {
             "id":"m1","role":"System",
-            "parts":[{"id":"m1.p0","kind":"Text","content":"note","prune_state":"Intact"}],
+            "parts":[{"id":"m1.p0","kind":"Text","content":"note"}],
             "origin":{"kind":"plugin","plugin_id":"compactor"}
         },
         {
             "id":"m2","role":"Event",
-            "parts":[{"id":"m2.p0","kind":"Text","content":"woke","prune_state":"Intact"}],
+            "parts":[{"id":"m2.p0","kind":"Text","content":"woke"}],
             "origin":{"kind":"process","process_id":"p1","event_type":"finished","sequence":3}
         }
     ]"#;
@@ -934,7 +916,6 @@ fn part_serializes_to_the_flat_wire_shape() {
             "content": "{}",
             "tool_call_id": "call-1",
             "tool_name": "lookup",
-            "prune_state": "Intact",
         })
     );
 }
@@ -1002,7 +983,7 @@ fn every_kind_round_trips_through_the_flat_form() {
 fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
     // A Text part with a tool_call_id was representable in the old flat
     // struct; the enum reader refuses it with a typed error.
-    let bad = r#"{"id":"m.p0","kind":"Text","content":"x","tool_call_id":"call-1","prune_state":"Intact"}"#;
+    let bad = r#"{"id":"m.p0","kind":"Text","content":"x","tool_call_id":"call-1"}"#;
     let err = serde_json::from_str::<Part>(bad).expect_err("invalid pairing must fail");
     assert!(
         err.to_string().contains("tool_call_id"),
@@ -1010,7 +991,7 @@ fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
     );
 
     // A tool result missing its call pair is likewise unrepresentable.
-    let missing = r#"{"id":"m.p0","kind":"ToolResult","content":"x","prune_state":"Intact"}"#;
+    let missing = r#"{"id":"m.p0","kind":"ToolResult","content":"x"}"#;
     let err = serde_json::from_str::<Part>(missing).expect_err("missing call pair must fail");
     assert!(
         err.to_string().contains("tool_call_id"),
@@ -1018,6 +999,15 @@ fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
     );
 
     // A lone half of the attachment call pair is rejected too.
-    let lone = r#"{"id":"m.p0","kind":"Attachment","content":"","tool_call_id":"call-1","prune_state":"Intact"}"#;
+    let lone = r#"{"id":"m.p0","kind":"Attachment","content":"","tool_call_id":"call-1"}"#;
     serde_json::from_str::<Part>(lone).expect_err("lone tool_call_id must fail");
+}
+
+#[test]
+fn retired_prune_state_field_is_refused() {
+    // FIG-1952/FIG-1955 removed `prune_state` from the part vocabulary. Old
+    // persisted bytes carrying it are refused as unknown fields, never
+    // silently normalized into the current shape.
+    let retired = r#"{"id":"m.p0","kind":"Text","content":"x","prune_state":"Intact"}"#;
+    serde_json::from_str::<Part>(retired).expect_err("retired prune_state must fail");
 }

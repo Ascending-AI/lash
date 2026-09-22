@@ -113,7 +113,7 @@ pub use lashlang_graph::{
 /// Version 24 (FIG-3371) adds `block_id` to [`TraceRuntimeStreamEvent`] so a
 /// provider item's sub-blocks — e.g. OpenAI `rs_*:summary:0` / `:summary:1` —
 /// stay distinguishable; `item_id` alone collapses them to the item.
-pub const TRACE_SCHEMA_VERSION: u32 = 24;
+pub const TRACE_SCHEMA_VERSION: u32 = 25;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,19 +370,19 @@ pub enum TraceEvent {
         /// even when empty so the event is a self-contained snapshot.
         tool_schemas: Vec<TraceToolSpec>,
     },
-    RollingHistoryCompactionNeeded {
+    ContextCompactionNeeded {
         context_budget_tokens: usize,
         max_context_tokens: usize,
         threshold_tokens: usize,
     },
-    RollingHistoryCompactionStarted {
+    ContextCompactionStarted {
         source_messages: usize,
         instructions_present: bool,
     },
-    RollingHistoryCompactionCompleted {
+    ContextCompactionCompleted {
         summary_nodes: usize,
     },
-    RollingHistoryPromptPruned {
+    PromptViewPruned {
         context_budget_tokens: usize,
         max_context_tokens: usize,
         dropped_prefix_messages: usize,
@@ -733,10 +733,10 @@ impl TraceEvent {
             | Self::PromptBuilt { .. }
             | Self::AttachmentDegraded { .. }
             | Self::CompositionChanged { .. }
-            | Self::RollingHistoryCompactionNeeded { .. }
-            | Self::RollingHistoryCompactionStarted { .. }
-            | Self::RollingHistoryCompactionCompleted { .. }
-            | Self::RollingHistoryPromptPruned { .. }
+            | Self::ContextCompactionNeeded { .. }
+            | Self::ContextCompactionStarted { .. }
+            | Self::ContextCompactionCompleted { .. }
+            | Self::PromptViewPruned { .. }
             | Self::LlmCallStarted { .. }
             | Self::LlmCallCompleted { .. }
             | Self::ProviderRequest { .. }
@@ -768,12 +768,10 @@ impl TraceEvent {
             Self::PromptBuilt { .. } => "prompt_built",
             Self::AttachmentDegraded { .. } => "attachment_degraded",
             Self::CompositionChanged { .. } => "composition_changed",
-            Self::RollingHistoryCompactionNeeded { .. } => "rolling_history_compaction_needed",
-            Self::RollingHistoryCompactionStarted { .. } => "rolling_history_compaction_started",
-            Self::RollingHistoryCompactionCompleted { .. } => {
-                "rolling_history_compaction_completed"
-            }
-            Self::RollingHistoryPromptPruned { .. } => "rolling_history_prompt_pruned",
+            Self::ContextCompactionNeeded { .. } => "context_compaction_needed",
+            Self::ContextCompactionStarted { .. } => "context_compaction_started",
+            Self::ContextCompactionCompleted { .. } => "context_compaction_completed",
+            Self::PromptViewPruned { .. } => "prompt_view_pruned",
             Self::LlmCallStarted { .. } => "llm_call_started",
             Self::LlmCallCompleted { .. } => "llm_call_completed",
             Self::LlmCallFailed { .. } => "llm_call_failed",

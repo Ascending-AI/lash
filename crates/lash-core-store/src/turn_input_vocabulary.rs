@@ -851,27 +851,36 @@ pub struct QueuedCheckpointTurnInput {
     pub turn_causes: Vec<TurnCause>,
 }
 pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<PluginMessage> {
-    let mut text = Vec::new();
-    let mut attachments = Vec::new();
+    let mut parts = Vec::new();
     for item in &input.items {
         match item {
             crate::InputItem::Text { text: item_text } if !item_text.is_empty() => {
-                text.push(item_text.clone());
+                parts.push(crate::Part::text(
+                    format!("p{}", parts.len()),
+                    item_text.clone(),
+                    None,
+                ));
             }
             crate::InputItem::Text { .. } => {}
-            crate::InputItem::Attachment { source } => attachments.push(source.clone()),
+            crate::InputItem::Attachment { source } => {
+                parts.push(crate::Part::attachment_part(
+                    format!("p{}", parts.len()),
+                    String::new(),
+                    Some(crate::session_model::message::PartAttachment {
+                        source: source.clone(),
+                    }),
+                ));
+            }
         }
     }
-    if text.is_empty() && attachments.is_empty() {
+    if parts.is_empty() {
         return None;
     }
     Some(PluginMessage {
         id: None,
         role: crate::MessageRole::User,
-        content: text.join("\n"),
         origin: None,
-        parts: Vec::new(),
-        attachments,
+        parts,
     })
 }
 async fn committed_message_from_pending_input(

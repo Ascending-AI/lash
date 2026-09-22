@@ -8,8 +8,7 @@ fn reasoning_part_roundtrips_when_snapshot_predates_field() {
     let legacy = r#"[{
         "id":"m0","role":"Assistant",
         "parts":[{
-            "id":"m0.p0","kind":"Prose","content":"Hi",
-            "prune_state":"Intact"
+            "id":"m0.p0","kind":"Prose","content":"Hi"
         }]
     }]"#;
     let msgs: Vec<Message> = serde_json::from_str(legacy).expect("legacy snapshot");

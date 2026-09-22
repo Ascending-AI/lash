@@ -351,7 +351,7 @@ async fn runtime_session_graph_service_routes_rolling_history_event_to_real_sink
     graph
         .emit_trace_event(
             lash_core::TraceContext::default().for_session("emitter-supplied-id"),
-            lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 },
+            lash_core::TraceEvent::ContextCompactionCompleted { summary_nodes: 0 },
         )
         .await
         .expect("runtime graph service should route trace records");
@@ -363,7 +363,7 @@ async fn runtime_session_graph_service_routes_rolling_history_event_to_real_sink
     assert_eq!(record.context.session_id.as_deref(), Some("root"));
     assert!(matches!(
         record.event,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+        lash_core::TraceEvent::ContextCompactionCompleted { summary_nodes: 0 }
     ));
     let _ = std::fs::remove_file(trace_path);
 }

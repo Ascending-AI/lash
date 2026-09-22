@@ -779,7 +779,7 @@ impl TurnContextTransform for RollingTurnTransform {
             ctx.session_graph
                 .emit_trace_event(
                     trace_context.clone(),
-                    lash_core::TraceEvent::RollingHistoryCompactionNeeded {
+                    lash_core::TraceEvent::ContextCompactionNeeded {
                         context_budget_tokens: pressure.context_budget_tokens,
                         max_context_tokens: pressure.max_context_tokens,
                         threshold_tokens: compaction_threshold(pressure.max_context_tokens),
@@ -805,7 +805,7 @@ impl TurnContextTransform for RollingTurnTransform {
             ctx.session_graph
                 .emit_trace_event(
                     trace_context,
-                    lash_core::TraceEvent::RollingHistoryPromptPruned {
+                    lash_core::TraceEvent::PromptViewPruned {
                         context_budget_tokens: pressure.context_budget_tokens,
                         max_context_tokens: pressure.max_context_tokens,
                         dropped_prefix_messages: 0,
@@ -824,7 +824,7 @@ impl TurnContextTransform for RollingTurnTransform {
         ctx.session_graph
             .emit_trace_event(
                 trace_context,
-                lash_core::TraceEvent::RollingHistoryPromptPruned {
+                lash_core::TraceEvent::PromptViewPruned {
                     context_budget_tokens: pressure.context_budget_tokens,
                     max_context_tokens: pressure.max_context_tokens,
                     dropped_prefix_messages,
@@ -862,7 +862,7 @@ impl ContextCompactor for RollingContextCompactor {
         ctx.session_graph
             .emit_trace_event(
                 trace_context.clone(),
-                lash_core::TraceEvent::RollingHistoryCompactionStarted {
+                lash_core::TraceEvent::ContextCompactionStarted {
                     source_messages: ctx.state.messages().len(),
                     instructions_present: ctx
                         .instructions
@@ -892,7 +892,7 @@ impl ContextCompactor for RollingContextCompactor {
         ctx.session_graph
             .emit_trace_event(
                 trace_context,
-                lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes },
+                lash_core::TraceEvent::ContextCompactionCompleted { summary_nodes },
             )
             .await?;
         compaction

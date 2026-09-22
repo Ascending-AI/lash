@@ -24,8 +24,11 @@ pub struct OperationId {
     pub key: String,
 }
 
-pub(super) const LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
+/// The only append-request identity generation. FIG-1952 collapsed the
+/// injected-message body to a single ordered parts list and removed
+/// `prune_state`; generations 1–4 are retired wholesale — no decode-only
+/// encoders and no payload-dependent version selection survive.
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 5;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).
 /// These are `FAMILY_DOMAINS`-registered names whose preimages carry no
@@ -498,37 +501,7 @@ fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: 
     });
 }
 
-fn push_prune_state(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    state: &crate::PruneState,
-) {
-    match state {
-        crate::PruneState::Intact => identity.tag(0),
-        crate::PruneState::Cleared => identity.tag(1),
-        crate::PruneState::Deleted {
-            breadcrumb,
-            archive_hash,
-        } => {
-            identity.tag(2);
-            identity.string(breadcrumb);
-            identity.string(archive_hash);
-        }
-        crate::PruneState::Summarized {
-            summary,
-            archive_hash,
-        } => {
-            identity.tag(3);
-            identity.string(summary);
-            identity.string(archive_hash);
-        }
-    }
-}
-
-fn push_part(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    part: &crate::Part,
-    encoding_version: u32,
-) {
+fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crate::Part) {
     identity.string(part.id());
     push_part_kind(identity, part.kind());
     identity.string(part.content());
@@ -548,11 +521,8 @@ fn push_part(
         } = replay;
         identity.optional(item_id.as_ref(), |identity, value| identity.string(value));
         identity.optional(opaque.as_ref(), |identity, value| identity.string(value));
-        if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-        }
+        identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
     });
-    push_prune_state(identity, part.prune_state());
     identity.optional(part.reasoning_meta(), |identity, replay| {
         let lash_sansio::llm::types::ProviderReasoningReplay {
             item_id,
@@ -569,9 +539,7 @@ fn push_part(
         identity.optional(signature.as_ref(), |identity, value| identity.string(value));
         identity.u8(u8::from(*redacted));
         identity.sequence(summary, |identity, value| identity.string(value));
-        if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-        }
+        identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
     });
     identity.optional(part.response_meta(), |identity, response| {
         let lash_sansio::llm::types::ResponseTextMeta {
@@ -580,8 +548,7 @@ fn push_part(
             phase,
             provider_payload,
             origin,
-            legacy_origin_provider,
-            legacy_origin_model,
+            ..
         } = response;
         for value in [
             id.as_deref(),
@@ -591,30 +558,11 @@ fn push_part(
         ] {
             identity.optional(value, crate::stable_identity::IdentityEncoder::string);
         }
-        if encoding_version == LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            // ResponseTextMeta carried provider/model before the unified
-            // route. Project those two legacy leaves and deliberately omit
-            // endpoint so migrated values retain their exact v1 preimage.
-            let provider = legacy_origin_provider
-                .as_ref()
-                .map(String::as_str)
-                .or_else(|| origin.as_ref().map(|route| route.provider.as_ref()));
-            let model = legacy_origin_model
-                .as_ref()
-                .map(String::as_str)
-                .or_else(|| origin.as_ref().map(|route| route.model.as_ref()));
-            identity.optional(provider, crate::stable_identity::IdentityEncoder::string);
-            identity.optional(model, crate::stable_identity::IdentityEncoder::string);
-        } else {
-            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-        }
+        identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
     });
 }
 
-fn append_node_identity_bytes_with_version(
-    node: &crate::SessionAppendNode,
-    encoding_version: u32,
-) -> Result<Vec<u8>, StoreError> {
+fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>, StoreError> {
     let mut identity =
         crate::stable_identity::IdentityEncoder::new_unframed(APPEND_REQUEST_IDENTITY_DOMAIN);
     match node {
@@ -622,20 +570,14 @@ fn append_node_identity_bytes_with_version(
             let crate::PluginMessage {
                 id,
                 role,
-                content,
                 origin,
                 parts,
-                attachments,
             } = message;
             identity.tag(0);
             identity.optional(id.as_ref(), |identity, value| identity.string(value));
             push_message_role(&mut identity, *role);
-            identity.string(content);
             identity.optional(origin.as_ref(), push_message_origin);
-            identity.sequence(parts, |identity, part| {
-                push_part(identity, part, encoding_version)
-            });
-            identity.sequence(attachments, push_attachment_source);
+            identity.sequence(parts, push_part);
         }
         crate::SessionAppendNode::ProtocolEvent { event } => {
             let crate::ProtocolEvent { plugin_id, payload } = event;
@@ -652,38 +594,13 @@ fn append_node_identity_bytes_with_version(
     Ok(identity.finish())
 }
 
-#[cfg(test)]
-fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>, StoreError> {
-    append_node_identity_bytes_with_version(node, LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION)
-}
-
-pub(super) fn append_request_identity_encoding_version(nodes: &[crate::SessionAppendNode]) -> u32 {
-    let has_current_identity_vocabulary = nodes.iter().any(|node| match node {
-        crate::SessionAppendNode::Message { message } => {
-            matches!(
-                message.origin.as_ref(),
-                Some(crate::MessageOrigin::Process {
-                    caused_by: Some(crate::CausalRef::Effect { .. }),
-                    ..
-                })
-            ) || message.parts.iter().any(|part| {
-                part.tool_replay()
-                    .and_then(|replay| replay.origin.as_ref())
-                    .or_else(|| {
-                        part.reasoning_meta()
-                            .and_then(|replay| replay.origin.as_ref())
-                    })
-                    .or_else(|| part.response_meta().and_then(|meta| meta.origin.as_ref()))
-                    .is_some()
-            })
-        }
-        _ => false,
-    });
-    if has_current_identity_vocabulary {
-        APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-    } else {
-        LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-    }
+/// The single append-request identity generation stamped onto receipts.
+/// Payload sniffing is gone with the retired generations: every request
+/// encodes under `APPEND_REQUEST_IDENTITY_ENCODING_VERSION`, and receipts
+/// minted by older generations fail the stored-version equality check in
+/// `decide_runtime_commit_receipt` rather than replaying.
+pub(super) fn append_request_identity_encoding_version() -> u32 {
+    APPEND_REQUEST_IDENTITY_ENCODING_VERSION
 }
 
 /// Canonical request bytes, in order:
@@ -707,7 +624,6 @@ fn append_request_identity_bytes(
     requested_ancestor_node_id: Option<&str>,
     nodes: &[crate::SessionAppendNode],
 ) -> Result<Vec<u8>, StoreError> {
-    let encoding_version = append_request_identity_encoding_version(nodes);
     let operation_key = operation.storage_key()?;
     let mut identity =
         crate::stable_identity::IdentityEncoder::new_unframed(APPEND_REQUEST_IDENTITY_DOMAIN);
@@ -717,7 +633,7 @@ fn append_request_identity_bytes(
     });
     identity.u64(nodes.len() as u64);
     for node in nodes {
-        let semantic_node = append_node_identity_bytes_with_version(node, encoding_version)?;
+        let semantic_node = append_node_identity_bytes(node)?;
         identity.bytes(&semantic_node);
     }
     Ok(identity.finish())
@@ -733,10 +649,6 @@ pub(super) fn append_request_identity_hash(
         &append_request_identity_bytes(operation, requested_ancestor_node_id, nodes)?,
     ))
 }
-
-#[cfg(test)]
-#[path = "commit_identity_v4_effect_tests.rs"]
-mod commit_identity_v4_effect_tests;
 
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
@@ -895,10 +807,14 @@ mod append_request_identity_tests {
     }
 
     #[test]
-    fn append_request_identity_v1_golden_byte_corpus() {
-        // Versioned durability corpus. These are the exact v1 bytes, not merely
-        // relational hashes. Any projection change requires an explicit
-        // APPEND_REQUEST_IDENTITY_ENCODING_VERSION bump and corpus replacement.
+    fn append_request_identity_v5_golden_byte_corpus() {
+        // Versioned durability corpus for the single FIG-1952 generation:
+        // exact v5 bytes, not merely relational hashes. Any projection change
+        // requires an explicit APPEND_REQUEST_IDENTITY_ENCODING_VERSION bump
+        // and corpus replacement.
+        //
+        // To refresh after an intentional grammar change:
+        // UPDATE_APPEND_REQUEST_IDENTITY_V5_GOLDEN=1 <test-command>
         let numeric_payload: serde_json::Value = serde_json::from_str(
             r#"{
                 "null": null,
@@ -919,7 +835,6 @@ mod append_request_identity_tests {
             "message": {
                 "id": "message-id",
                 "role": "Assistant",
-                "content": "message-content",
                 "origin": {
                     "kind": "process",
                     "process_id": "process-id",
@@ -935,24 +850,34 @@ mod append_request_identity_tests {
                     }
                 },
                 "parts": [
+                    {"id": "p0", "kind": "Text", "content": "message-content"},
                     {
-                        "id": "p0", "kind": "ToolCall", "content": "tool-call",
+                        "id": "p1", "kind": "ToolCall", "content": "tool-call",
                         "tool_call_id": "call-id",
                         "tool_name": "tool-name",
-                        "tool_replay": {"item_id": "item-id", "opaque": "opaque"},
-                        "prune_state": {"Deleted": {"breadcrumb": "crumb", "archive_hash": "archive"}}
+                        "tool_replay": {
+                            "item_id": "item-id", "opaque": "opaque",
+                            "origin": {
+                                "provider": "openai-compatible",
+                                "endpoint": "https://gateway.example/v1",
+                                "model": "shared-model"
+                            }
+                        }
                     },
                     {
-                        "id": "p1", "kind": "Text", "content": "text",
+                        "id": "p2", "kind": "Text", "content": "text",
                         "response_meta": {
                             "id": "response-id", "status": "complete", "phase": "final_answer",
                             "provider_payload": "payload",
-                            "origin_provider": "provider", "origin_model": "model"
-                        },
-                        "prune_state": "Intact"
+                            "origin": {
+                                "provider": "openai-compatible",
+                                "endpoint": "https://gateway.example/v1",
+                                "model": "shared-model"
+                            }
+                        }
                     },
                     {
-                        "id": "p2", "kind": "Attachment", "content": "attachment",
+                        "id": "p3", "kind": "Attachment", "content": "attachment",
                         "attachment": {"source": {
                             "source": "stored",
                             "attachment_ref": {
@@ -961,37 +886,41 @@ mod append_request_identity_tests {
                                 "type_metadata": {"type": "image", "width": 0, "height": 4294967295_u32},
                                 "label": "attachment-label"
                             }
-                        }},
-                        "prune_state": "Cleared"
+                        }}
                     },
-                    {"id": "p3", "kind": "Code", "content": "code", "prune_state": {"Summarized": {"summary": "short", "archive_hash": "hash"}}},
-                    {"id": "p4", "kind": "Output", "content": "output", "prune_state": "Intact"},
-                    {"id": "p5", "kind": "Error", "content": "error", "prune_state": "Intact"},
-                    {"id": "p6", "kind": "Prose", "content": "prose", "prune_state": "Intact"},
+                    {"id": "p4", "kind": "Code", "content": "code"},
+                    {"id": "p5", "kind": "Output", "content": "output"},
+                    {"id": "p6", "kind": "Error", "content": "error"},
+                    {"id": "p7", "kind": "Prose", "content": "prose"},
                     {
-                        "id": "p7", "kind": "ToolResult", "content": "tool-result",
-                        "tool_call_id": "call-id", "tool_name": "tool-name",
-                        "prune_state": "Intact"
+                        "id": "p8", "kind": "ToolResult", "content": "tool-result",
+                        "tool_call_id": "call-id", "tool_name": "tool-name"
                     },
                     {
-                        "id": "p8", "kind": "Reasoning", "content": "reasoning",
+                        "id": "p9", "kind": "Reasoning", "content": "reasoning",
                         "reasoning_meta": {
                             "item_id": "reason-id", "encrypted_content": "encrypted",
                             "signature": "signature", "redacted": true,
-                            "summary": ["summary-a", "summary-b"]
-                        },
-                        "prune_state": "Intact"
-                    }
-                ],
-                "attachments": [
-                    {"source": "inline", "media_type": "application/octet-stream", "bytes": [0, 255]},
-                    {"source": "stored", "attachment_ref": {
-                        "id": "stored-min", "media_type": "text/plain", "byte_len": 0
-                    }},
-                    {"source": "external_url", "media_type": "image/jpeg", "url": "https://example.test/image.jpg"},
-                    {"source": "provider_file", "provider_scope": {
-                        "provider": "openai", "credential_scope": "account"
-                    }, "id": "file-id", "media_type": "application/pdf"}
+                            "summary": ["summary-a", "summary-b"],
+                            "origin": {
+                                "provider": "openai-compatible",
+                                "endpoint": "https://gateway.example/v1",
+                                "model": "shared-model"
+                            }
+                        }
+                    },
+                    {"id": "p10", "kind": "Attachment", "content": "",
+                        "attachment": {"source": {"source": "inline", "media_type": "application/octet-stream", "bytes": [0, 255]}}},
+                    {"id": "p11", "kind": "Attachment", "content": "",
+                        "attachment": {"source": {"source": "stored", "attachment_ref": {
+                            "id": "stored-min", "media_type": "text/plain", "byte_len": 0
+                        }}}},
+                    {"id": "p12", "kind": "Attachment", "content": "",
+                        "attachment": {"source": {"source": "external_url", "media_type": "image/jpeg", "url": "https://example.test/image.jpg"}}},
+                    {"id": "p13", "kind": "Attachment", "content": "",
+                        "attachment": {"source": {"source": "provider_file", "provider_scope": {
+                            "provider": "openai", "credential_scope": "account"
+                        }, "id": "file-id", "media_type": "application/pdf"}}}
                 ]
             }
         }));
@@ -999,15 +928,34 @@ mod append_request_identity_tests {
             "kind": "message",
             "message": {
                 "role": "Event",
-                "content": "event",
-                "origin": {"kind": "plugin", "plugin_id": "plugin-id", "transient": true}
+                "origin": {"kind": "plugin", "plugin_id": "plugin-id", "transient": true},
+                "parts": [{"id": "p0", "kind": "Text", "content": "event"}]
             }
         }));
-        assert_eq!(
-            append_request_identity_encoding_version(std::slice::from_ref(&comprehensive_message)),
-            LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
-            "actual base-era ResponseTextMeta JSON must stay in the v1 family"
-        );
+        let effect_cause_message = |scope: crate::ExecutionScope| {
+            node_fixture(serde_json::json!({
+                "kind": "message",
+                "message": {
+                    "role": "Event",
+                    "origin": {
+                        "kind": "process",
+                        "process_id": "target-process",
+                        "event_type": "signal.resume",
+                        "sequence": 7,
+                        "caused_by": {
+                            "type": "effect",
+                            "address": {
+                                "execution_scope": scope,
+                                "replay_key": "effect-replay"
+                            }
+                        }
+                    },
+                    "parts": [{"id": "p0", "kind": "Text", "content": "effect wake"}]
+                }
+            }))
+        };
+        let turn_effect_node = effect_cause_message(crate::ExecutionScope::turn("session", "turn"));
+        let process_effect_node = effect_cause_message(crate::ExecutionScope::process("process"));
         let system_message = crate::SessionAppendNode::message(crate::PluginMessage::text(
             crate::MessageRole::System,
             "system",
@@ -1026,6 +974,8 @@ mod append_request_identity_tests {
                 "message_all_fields_and_nested_variants",
                 comprehensive_message,
             ),
+            ("message_turn_effect_cause", turn_effect_node),
+            ("message_process_effect_cause", process_effect_node),
             (
                 "protocol_event",
                 crate::SessionAppendNode::protocol_event(crate::ProtocolEvent {
@@ -1043,6 +993,10 @@ mod append_request_identity_tests {
             crate::CausalRef::Turn {
                 session_id: SessionId::from("s"),
                 turn_id: TurnId::from("t"),
+            },
+            crate::CausalRef::Effect {
+                address: crate::EffectAddress::new(crate::ExecutionScope::turn("s", "t"), "k")
+                    .expect("valid effect address"),
             },
             crate::CausalRef::ToolCall {
                 session_id: SessionId::from("s"),
@@ -1069,6 +1023,7 @@ mod append_request_identity_tests {
 
         let causal_names = [
             "causal_variant_0",
+            "causal_variant_1",
             "causal_variant_2",
             "causal_variant_3",
             "causal_variant_4",
@@ -1118,154 +1073,65 @@ mod append_request_identity_tests {
             .chain(whole_requests)
             .chain(std::iter::once(empty_request))
             .collect::<Vec<_>>();
-        let expected = include_str!("testdata/append_request_identity_v1.hex")
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| line.split_once('=').expect("name=hex golden corpus row"))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(
-            expected.get("causal_variant_1"),
-            Some(&"0100000000000000017300000000000000000165"),
-            "the unrepresentable pre-address Effect cause remains frozen as historical v1 bytes"
-        );
-        let rendered_len = rendered.len();
-        for (name, actual) in rendered {
-            let Some(expected) = expected.get(name) else {
-                panic!("missing golden corpus row {name}={actual}");
-            };
-            assert_eq!(actual, **expected, "v1 bytes moved for {name}");
-        }
-        assert_eq!(
-            rendered_len + 1,
-            expected.len(),
-            "golden corpus row count includes one historical Effect cause that current types cannot manufacture"
-        );
-    }
-
-    #[test]
-    fn base_response_text_meta_json_retains_its_exact_v1_preimage() {
-        // This is the ResponseTextMeta vocabulary emitted by 01aaf70cc: the
-        // provider/model leaves are siblings and no endpoint exists.
-        let node = node_fixture(
-            serde_json::from_str(
-                r#"{"kind":"message","message":{"role":"Assistant","content":"base-era response","parts":[{"id":"p0","kind":"Prose","content":"answer","prune_state":"Intact","response_meta":{"id":"response-id","status":"complete","phase":"final_answer","provider_payload":"signature","origin_provider":"google_oauth","origin_model":"gemini-base"}}]}}"#,
-            )
-            .expect("literal base-commit JSON"),
-        );
-        assert_eq!(
-            append_request_identity_encoding_version(std::slice::from_ref(&node)),
-            LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-        );
-        assert_eq!(
-            hex(&append_node_identity_bytes(&node).expect("encode legacy node")),
-            include_str!("testdata/response_text_meta_base_v1.hex").trim(),
-            "the v1 preimage of actual base-era JSON must never move"
-        );
-    }
-
-    #[test]
-    fn append_request_identity_v2_golden_byte_corpus() {
-        // To refresh after an intentional v2 grammar change:
-        // UPDATE_APPEND_REQUEST_IDENTITY_V2_GOLDEN=1 cargo test -p lash-core \
-        //   append_request_identity_v2_golden_byte_corpus -- --exact
-        // The v1 corpus above is never regenerated by this procedure.
-        let node = node_fixture(serde_json::json!({
-            "kind": "message",
-            "message": {
-                "role": "Assistant",
-                "content": "route-owned replay",
-                "parts": [
-                    {
-                        "id": "p0",
-                        "kind": "ToolCall",
-                        "content": "tool",
-                        "tool_call_id": "call-id",
-                        "tool_name": "tool-name",
-                        "tool_replay": {
-                            "item_id": "tool-item",
-                            "opaque": "tool-opaque",
-                            "origin": {
-                                "provider": "openai-compatible",
-                                "endpoint": "https://gateway.example/v1",
-                                "model": "shared-model"
-                            }
-                        },
-                        "prune_state": "Intact"
-                    },
-                    {
-                        "id": "p1",
-                        "kind": "Reasoning",
-                        "content": "reasoning",
-                        "reasoning_meta": {
-                            "signature": "reasoning-signature",
-                            "origin": {
-                                "provider": "openai-compatible",
-                                "endpoint": "https://gateway.example/v1",
-                                "model": "shared-model"
-                            }
-                        },
-                        "prune_state": "Intact"
-                    },
-                    {
-                        "id": "p2",
-                        "kind": "Prose",
-                        "content": "response",
-                        "response_meta": {
-                            "id": "response-id",
-                            "status": "completed",
-                            "phase": "final_answer",
-                            "origin": {
-                                "provider": "openai-compatible",
-                                "endpoint": "https://gateway.example/v1",
-                                "model": "shared-model"
-                            }
-                        },
-                        "prune_state": "Intact"
-                    }
-                ]
-            }
-        }));
-        assert_eq!(
-            append_request_identity_encoding_version(std::slice::from_ref(&node)),
-            APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-        );
-        let rows = [
-            (
-                "route_node",
-                hex(&append_node_identity_bytes_with_version(
-                    &node,
-                    APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
-                )
-                .expect("encode v2 node")),
-            ),
-            (
-                "route_request",
-                hex(&append_request_identity_bytes(
-                    &operation("route-request"),
-                    Some("ancestor"),
-                    std::slice::from_ref(&node),
-                )
-                .expect("encode v2 request")),
-            ),
-        ];
-        let rendered = rows
+        let rendered_text = rendered
             .iter()
             .map(|(name, value)| format!("{name}={value}"))
             .collect::<Vec<_>>()
             .join("\n")
             + "\n";
-        if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_V2_GOLDEN").is_some() {
+        if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_V5_GOLDEN").is_some() {
             std::fs::write(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("src/store/testdata/append_request_identity_v2.hex"),
-                &rendered,
+                    .join("src/store/testdata/append_request_identity_v5.hex"),
+                &rendered_text,
             )
-            .expect("write v2 golden corpus");
+            .expect("write v5 golden corpus");
+        }
+        let expected = include_str!("testdata/append_request_identity_v5.hex")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| line.split_once('=').expect("name=hex golden corpus row"))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let rendered_len = rendered.len();
+        for (name, actual) in rendered {
+            let Some(expected) = expected.get(name) else {
+                panic!("missing golden corpus row {name}={actual}");
+            };
+            assert_eq!(actual, **expected, "v5 bytes moved for {name}");
         }
         assert_eq!(
-            rendered,
-            include_str!("testdata/append_request_identity_v2.hex"),
-            "v2 bytes moved; use the documented refresh command only for an intentional grammar change"
+            rendered_len,
+            expected.len(),
+            "golden corpus row count must match the rendered corpus"
+        );
+    }
+
+    #[test]
+    fn retired_message_body_json_is_refused() {
+        // The pre-FIG-1952 ingress shape carried parallel `content`,
+        // `parts`, and `attachments` authorities plus per-part
+        // `prune_state`. Every one of those keys is now an unknown field
+        // and must be refused rather than normalized.
+        for message in [
+            serde_json::json!({"role": "User", "content": "legacy text"}),
+            serde_json::json!({"role": "User", "attachments": []}),
+            serde_json::json!({
+                "role": "User",
+                "parts": [{"id": "p0", "kind": "Text", "content": "t", "prune_state": "Intact"}]
+            }),
+        ] {
+            assert!(
+                serde_json::from_value::<crate::PluginMessage>(message.clone()).is_err(),
+                "retired message shape must be refused: {message}"
+            );
+        }
+        let node = serde_json::json!({
+            "kind": "message",
+            "message": {"role": "User", "content": "legacy text"}
+        });
+        assert!(
+            serde_json::from_value::<crate::SessionAppendNode>(node).is_err(),
+            "append nodes carrying the retired body fields must be refused"
         );
     }
 

@@ -1,21 +1,25 @@
 use std::sync::Arc;
 
-use crate::llm::types::AttachmentSource;
 use crate::{MessageOrigin, MessageRole, Part};
 use serde::{Deserialize, Serialize};
 
+/// A message a host or plugin injects into session history.
+///
+/// The body is exactly one ordered list of typed parts — text, attachments,
+/// and every other part kind live in `parts` in the order they should read.
+/// There is no parallel text or attachment field to disagree with; part ids
+/// are reassigned to `{message_id}.p{i}` when the message is committed. The
+/// retired `content`/`attachments` fields are refused rather than normalized.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PluginMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     pub role: MessageRole,
-    pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<MessageOrigin>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<Part>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<AttachmentSource>,
 }
 
 impl PluginMessage {
@@ -23,10 +27,18 @@ impl PluginMessage {
         Self {
             id: None,
             role,
-            content: content.into(),
             origin: None,
-            parts: Vec::new(),
-            attachments: Vec::new(),
+            parts: vec![Part::text("p0".to_string(), content.into(), None)],
+        }
+    }
+
+    /// A message whose body is the given ordered parts.
+    pub fn parts(role: MessageRole, parts: Vec<Part>) -> Self {
+        Self {
+            id: None,
+            role,
+            origin: None,
+            parts,
         }
     }
 
@@ -40,14 +52,20 @@ impl PluginMessage {
         self
     }
 
-    pub fn first_text(&self) -> Option<&str> {
-        if !self.content.is_empty() {
-            return Some(self.content.as_str());
-        }
-        self.parts.iter().find_map(|part| {
-            matches!(part.kind(), crate::PartKind::Text | crate::PartKind::Prose)
-                .then_some(part.content())
-        })
+    /// Appends a stored-attachment part under the `{message_id}.p{i}` id
+    /// convention that commit-time id reassignment already applies.
+    pub fn push_stored_attachment(&mut self, attachment: crate::AttachmentRef) {
+        let part_id = match self.id.as_deref() {
+            Some(id) => format!("{id}.p{}", self.parts.len()),
+            None => format!("p{}", self.parts.len()),
+        };
+        self.parts.push(Part::attachment_part(
+            part_id,
+            String::new(),
+            Some(crate::PartAttachment {
+                source: crate::llm::types::AttachmentSource::stored(attachment),
+            }),
+        ));
     }
 }
 

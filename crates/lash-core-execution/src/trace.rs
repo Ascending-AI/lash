@@ -246,8 +246,8 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         TraceEvent::PromptBuilt { .. }
         | TraceEvent::AttachmentDegraded { .. }
         | TraceEvent::CompositionChanged { .. }
-        | TraceEvent::RollingHistoryCompactionNeeded { .. }
-        | TraceEvent::RollingHistoryPromptPruned { .. }
+        | TraceEvent::ContextCompactionNeeded { .. }
+        | TraceEvent::PromptViewPruned { .. }
         | TraceEvent::EffectEnvelopeDiff { .. }
         | TraceEvent::ProtocolStep { .. }
         | TraceEvent::ExecCodeStarted { .. }
@@ -262,8 +262,8 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::DurableTimerResolved { .. }
         | TraceEvent::DurableSegmentBoundary { .. }
         | TraceEvent::StoreErrorObserved { .. } => set_span(context, None, turn_node),
-        TraceEvent::RollingHistoryCompactionStarted { .. }
-        | TraceEvent::RollingHistoryCompactionCompleted { .. } => {
+        TraceEvent::ContextCompactionStarted { .. }
+        | TraceEvent::ContextCompactionCompleted { .. } => {
             set_span(context, None, turn_node.or(session_node));
         }
         // Events that already carry their own node identity in the payload, and
@@ -929,7 +929,7 @@ mod span_identity_tests {
         let mut context = TraceContext::default().for_session("compact-session");
         assign_span_identity(
             &mut context,
-            &TraceEvent::RollingHistoryCompactionStarted {
+            &TraceEvent::ContextCompactionStarted {
                 source_messages: 3,
                 instructions_present: false,
             },

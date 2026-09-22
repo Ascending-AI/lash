@@ -1,12 +1,14 @@
 use super::StoreError;
 use crate::SessionId;
 
-/// Oldest session-state generation this runtime can admit.
-pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;
+/// Oldest session-state generation this runtime can admit. The FIG-1952
+/// format cutover retired generation 1 wholesale: pre-cutover node bodies,
+/// turn checkpoints, and append identities are refused, never migrated.
+pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 2;
 
 /// Complete mutable-continuation generation emitted and admitted by this runtime.
 /// ADR 0078 refuses the snapshot generation; no converter crosses this cutover.
-pub const CURRENT_SESSION_STATE_VERSION: u32 = 1;
+pub const CURRENT_SESSION_STATE_VERSION: u32 = 2;
 
 /// Successful lease-fenced admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]

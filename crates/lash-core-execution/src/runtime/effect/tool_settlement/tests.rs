@@ -67,14 +67,7 @@ fn spent(input: i64) -> TokenUsage {
 }
 
 fn message(content: &str) -> PluginMessage {
-    PluginMessage {
-        id: None,
-        role: MessageRole::Assistant,
-        content: content.to_string(),
-        origin: None,
-        parts: Vec::new(),
-        attachments: Vec::new(),
-    }
+    PluginMessage::text(MessageRole::Assistant, content)
 }
 
 fn delta(attempt: u32, call_id: &str, provider_attempt: u32, usage: TokenUsage) -> ToolUsageDelta {

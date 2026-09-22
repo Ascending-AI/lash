@@ -732,9 +732,6 @@ async fn normalize_plugin_message_attachments(
     policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<(), RuntimeError> {
     for message in messages {
-        for source in &mut message.attachments {
-            normalize_plugin_attachment_source(source, attachment_store, policy).await?;
-        }
         for part in &mut message.parts {
             if let Some(slot) = part.attachment_mut()
                 && let Some(attachment) = slot.as_mut()

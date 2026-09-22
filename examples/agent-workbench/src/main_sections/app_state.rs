@@ -1121,7 +1121,6 @@ pub(crate) async fn commit_assistant_transcript(
         // transcript seam as a resumed production turn. Keep its visible text
         // ordinary, while retaining provider-owned replay state in a hidden
         // reasoning part for the next request's route filter to inspect.
-        message.content.clear();
         message.parts = vec![
             lash::messages::Part::text(format!("{message_id}.p0"), assistant_text, None),
             lash::messages::Part::reasoning(

@@ -366,14 +366,11 @@ fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
 #[test]
 fn the_child_gets_fresh_checkpoint_and_trigger_buffers() {
     let lent = lent();
-    lent.checkpoint_messages.enqueue(vec![crate::PluginMessage {
-        id: None,
-        role: crate::MessageRole::Assistant,
-        content: "the opener's".to_string(),
-        origin: None,
-        parts: Vec::new(),
-        attachments: Vec::new(),
-    }]);
+    lent.checkpoint_messages
+        .enqueue(vec![crate::PluginMessage::text(
+            crate::MessageRole::Assistant,
+            "the opener's",
+        )]);
     lent.trigger_outcomes
         .enqueue(crate::tool_dispatch::ToolTriggerEffectOutcome {
             source_type: "watcher".to_string(),
