@@ -688,6 +688,13 @@ impl lash_core::RuntimeEffectController for PendingToolResolutionController {
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        // The turn's cancel watch issues peek effects the local executor does
+        // not cover; the embedded registry answers them.
+        if let lash_core::RuntimeEffectCommand::PeekAwaitEvent { key } = &envelope.command {
+            return Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent {
+                resolution: self.inner.peek_await_event(key).await?,
+            });
+        }
         local_executor.execute(envelope).await
     }
 
@@ -852,7 +859,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
         Vec::new(),
         tools,
         transport,
-        lash_core::EmbeddedRuntimeHost::new(config),
+        EmbeddedRuntimeHost::new(config),
     )
     .await;
     let turn_events = RecordingTurnEvents::default();

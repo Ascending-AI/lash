@@ -390,23 +390,18 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 })
         };
         // A foreign controller double that forwards effect-group operations
-        // to an inner native controller needs a host over the same native
-        // substrate so bound-child admission sees the groups it opened.
+        // to an inner substrate needs a host over that same substrate so
+        // bound-child admission sees the groups it opened.
         let effect_host = self
             .effect_host
             .clone()
             .or_else(|| match &self.effect_controller {
                 TestEffectController::Shared(controller) => {
-                    controller.shared_native_group_substrate().map(|native| {
-                        Arc::new(
-                            crate::runtime::NativeEffectHost::with_controller_sharing_native_groups(
-                                Arc::clone(controller),
-                                &native,
-                            ),
-                        ) as Arc<dyn crate::EffectHost>
-                    })
+                    controller.as_ref().shared_effect_host()
                 }
-                TestEffectController::Borrowed(_) => None,
+                TestEffectController::Borrowed(controller) => {
+                    controller.controller().shared_effect_host()
+                }
             });
         let effect_controller = match self.effect_controller {
             TestEffectController::Shared(effect_controller) => {
