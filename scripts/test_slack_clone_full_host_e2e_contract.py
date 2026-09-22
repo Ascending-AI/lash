@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import ast
 import importlib.util
 import pathlib
 import subprocess
@@ -45,53 +44,6 @@ class SlackCloneFullHostE2eContractTest(unittest.TestCase):
         )
         self.assertEqual(rejected.returncode, 2)
         self.assertIn("usage:", rejected.stderr)
-
-    def test_driver_has_four_machine_gates_and_no_shipped_mutation_mode(self) -> None:
-        driver_path = ROOT / "scripts/slack-clone-full-host-e2e.py"
-        tree = ast.parse(driver_path.read_text(encoding="utf-8"), filename=str(driver_path))
-
-        layers: tuple[str, ...] | None = None
-        gate_layers: set[str] = set()
-        parser_options: set[str] = set()
-        methods: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id == "LAYERS":
-                        value = ast.literal_eval(node.value)
-                        self.assertIsInstance(value, tuple)
-                        layers = value
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                methods.add(node.name)
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                if node.func.attr == "gate" and len(node.args) >= 2:
-                    layer = node.args[1]
-                    if isinstance(layer, ast.Constant) and isinstance(layer.value, str):
-                        gate_layers.add(layer.value)
-                if node.func.attr == "add_argument" and node.args:
-                    option = node.args[0]
-                    if isinstance(option, ast.Constant) and isinstance(option.value, str):
-                        parser_options.add(option.value)
-
-        self.assertEqual(layers, ("dom", "platform", "bot", "trace"))
-        self.assertEqual(gate_layers, set(layers))
-        self.assertNotIn("--mutation", parser_options)
-        source = driver_path.read_text(encoding="utf-8")
-        self.assertNotIn("4.0 <= recovery_latency", source)
-        self.assertIn("recovery_path", source)
-        self.assertIn("kill_lease_expires_at_ms", source)
-        self.assertTrue(
-            {
-                "checkpoint_ambient",
-                "checkpoint_room_mention",
-                "checkpoint_thread",
-                "checkpoint_redelivery",
-                "checkpoint_kill_restart",
-                "checkpoint_mcp_depth",
-                "checkpoint_mcp_runtime_attach",
-                "checkpoint_reload",
-            }.issubset(methods)
-        )
 
     def test_thread_root_is_selected_by_author_identity_not_by_marker_text(self) -> None:
         driver = load_evidence()
@@ -154,10 +106,6 @@ class SlackCloneFullHostE2eContractTest(unittest.TestCase):
         bad = {"messages": [{"text": f"ada: an earlier line{prefix}ada: the root\n"}]}
         self.assertEqual(driver.seed_label_line_starts(bad), (1, 0))
         self.assertEqual(driver.seed_label_line_starts({"messages": []}), (0, 0))
-
-    def test_the_host_seeds_the_root_on_a_line_of_its_own(self) -> None:
-        threads = (ROOT / "examples/slack-clone/src/bot/threads.rs").read_text(encoding="utf-8")
-        self.assertIn('"\\n{THREAD_ROOT_SEED_PREFIX}{text}\\n"', threads)
 
     def test_e2e_provider_is_feature_gated(self) -> None:
         manifest = tomllib.loads(

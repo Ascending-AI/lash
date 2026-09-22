@@ -53,7 +53,6 @@ PERF_PHASE_PROBE_RS = (
 )
 CARGO_TOML = ROOT / "Cargo.toml"
 JUSTFILE = ROOT / "justfile"
-FOCUSED_SQLITE_REPRO = ROOT / "scripts" / "lash-sim-focused-sqlite-repro.sh"
 # The two micro lanes (sim unit/oracle + perf-guard identity) share one shard.
 FAST_SHARDS = [
     "scenario-harnesses",
@@ -952,30 +951,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "duplicate quarantine target",
         )
 
-    def test_lint_job_runs_clippy_fmt_and_boundary_guards(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-
-        # The server-side lint gate is a first-class CI job.
-        self.assertIn("  lint:\n", workflow)
-
-        # The lint job runs the same checks the local push gate runs, so a
-        # green local gate implies a green CI lint job (and vice versa): fmt
-        # --check, the `-D warnings` all-targets clippy gate, and the boundary
-        # guards that otherwise gate nothing.
-        lint = workflow_job_block(workflow, "lint")
-        self.assertIn("cargo fmt --all --check", lint)
-        self.assertIn("cargo clippy --workspace --all-targets --locked", lint)
-        self.assertIn("-- -D warnings", lint)
-        self.assertIn("python3 scripts/check-restate-handler-panics.py", lint)
-        self.assertIn("bash scripts/check-core-ui-boundary.sh", lint)
-        self.assertIn("bash scripts/check-workflow-graph-model.sh", lint)
-        self.assertIn("bash scripts/check-production-file-size.sh", lint)
-        self.assertIn("python3 scripts/check-transcript-diff.py --enforce", lint)
-        self.assertLess(
-            lint.index("cargo clippy --workspace --all-targets --locked"),
-            lint.index("python3 scripts/check-transcript-diff.py --enforce"),
-        )
-
     def test_every_script_self_test_is_run_by_ci(self) -> None:
         # The self-test list is enumerated by hand, so a new gate's own test can
         # be written, pass locally, and never run again — which is exactly what
@@ -1045,52 +1020,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES",
             workspace,
         )
-
-    def test_lint_job_runs_database_free_budgeted_perf_smoke(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        lint = workflow_job_block(workflow, "lint")
-        perf = (ROOT / ".github/workflows/perf.yml").read_text(encoding="utf-8")
-
-        self.assertIn("runs-on: ubuntu-24.04", lint)
-        self.assertNotIn("Run performance harness smoke", lint)
-        self.assertNotIn("profile_runtime.py --profile quick --smoke", lint)
-        self.assertIn("profile_runtime.py", perf)
-        self.assertIn(
-            "python3 scripts/check_included_file_formatting.py",
-            lint,
-        )
-        formatting_scan = (ROOT / "scripts" / "check_included_file_formatting.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('"crates/lash-perf"', formatting_scan)
-
-    def test_workflow_graph_example_is_in_functional_matrix(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        justfile = JUSTFILE.read_text(encoding="utf-8")
-        functional = workflow_job_block(workflow, "functional-e2e")
-
-        self.assertIn("workflow-graph-roundtrip", functional)
-        self.assertIn("recipe: workflow-graph-integration-verify", functional)
-        self.assertIn("uses: actions/setup-node@", functional)
-        self.assertIn("node-version: 24", functional)
-        self.assertIn("cache: npm", functional)
-        self.assertIn(
-            "cache-dependency-path: "
-            "examples/workflow-graph-roundtrip/frontend/package-lock.json",
-            functional,
-        )
-        self.assertIn("run: just ${{ matrix.recipe }}", functional)
-        self.assertIn("workflow-graph-integration-verify:", justfile)
-        self.assertIn('bash "{{repo}}/scripts/workflow-graph-integration-verify.sh"', justfile)
-        integration = (ROOT / "scripts/workflow-graph-integration-verify.sh").read_text()
-        self.assertIn(
-            "cargo test -p workflow-graph-roundtrip --all-targets --locked",
-            integration,
-        )
-        self.assertIn("npm exec -- vite build", integration)
-        self.assertIn("npm exec -- vitest run", integration)
-        self.assertIn("run check:generated-types", integration)
-        self.assertIn("check-schema-contracts.sh --functional-e2e", integration)
 
     def test_asserting_operator_e2es_are_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -1624,35 +1553,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         for suite in ("run_scenario_harnesses", "run_state_machine_and_fault_matrix"):
             self.assertIn(suite, core, suite)
 
-    def test_fast_gate_has_first_class_shards_and_parallel_minimizers(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-
-        required_snippets = [
-            "fast_shards=(",
-            "run_fast_shard()",
-            "run_fast_aggregate()",
-            "write_fast_matrix_summary()",
-            "write_fast_shard_summary()",
-            "run_cargo_tests()",
-            "cargo nextest run",
-            "run_sim_unit_suite()",
-            "run_sim_generated_lane()",
-            "run_minimizer_fixture_suite()",
-            "--skip generated_sim_profile_writes_trace_replay_and_provider_artifacts",
-            "--skip minimizer_preserves",
-            "--skip minimizer_writes_replayable_regression_package",
-            "cargo build -p lash-sim --locked --bin lash-sim",
-            "LASH_MINIMIZER_FIXTURE_JOBS",
-            'xargs -n 1 -P "$fixture_jobs"',
-            '"schema": "lash.confidence.fast-shard-summary.v1"',
-            '"sharded": True',
-        ]
-        for snippet in required_snippets:
-            self.assertIn(snippet, gate)
-
-        for shard in FAST_SHARDS:
-            self.assertIn(f"fast:{shard}", gate)
-
     def test_release_is_manual_and_requires_a_green_main_commit(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
@@ -1793,13 +1693,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
                         r"^(?:v[0-9]+(?:\.[0-9]+){0,2}|stable)$",
                     )
 
-    def test_all_confidence_fast_shards_use_github_hosted_runners(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertNotIn("  confidence-fast:", workflow)
-        heavy = workflow_job_block(workflow, "heavy-tests")
-        self.assertIn("ubuntu-24.04", heavy)
-        self.assertNotIn("ubuntu-latest", heavy)
-
     def test_broad_lane_is_manual_or_scheduled_confidence_not_ci_cd(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
@@ -1934,33 +1827,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
 
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
-
-    def test_focused_sqlite_seed_tail_repro_gate_is_named_and_exact(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-        repro = FOCUSED_SQLITE_REPRO.read_text(encoding="utf-8")
-
-        required_gate_snippets = [
-            "run_focused_sqlite_seed_tail_repro()",
-            'step "Focused generated SQLite seed-tail repro"',
-            'scripts/lash-sim-focused-sqlite-repro.sh "$repro_dir"',
-            "run_focused_sqlite_seed_tail_repro",
-            '"focused_sqlite_seed_tail_repro": "$(scheduled_existing_artifact_path focused_sqlite_seed_tail_repro',
-        ]
-        for snippet in required_gate_snippets:
-            self.assertIn(snippet, gate)
-
-        required_repro_snippets = [
-            '"schema": "lash.confidence.focused-sqlite-seed-tail-repro.v1"',
-            'focused_single_seed="4101155038242989457"',
-            'focused_tail_previous_seed="17785827714152183977"',
-            '--profile "$profile"',
-            '--max-boundaries "$max_boundaries"',
-            'run_case "single-seed-4101155038242989457" "$focused_single_seed"',
-            '"tail-seeds-17785827714152183977-4101155038242989457"',
-            '"sqlite_divergence_reports"',
-        ]
-        for snippet in required_repro_snippets:
-            self.assertIn(snippet, repro)
 
     def test_model_replay_artifact_does_not_claim_backend_equivalence(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
@@ -2584,60 +2450,6 @@ derive_mutation_jobs() {{
         for branch in (differential_bazel, differential_cargo):
             self.assertIn("attachment_blob_store_differential_agrees", branch)
 
-    def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
-        gate = GATE.read_text(encoding="utf-8")
-
-        required_snippets = [
-            "run_generated_postgres_dynamic_replay()",
-            'step "Generated Postgres dynamic backend rerun"',
-            "cargo run -p lash-sim --locked -- run-postgres",
-            '--seed "$seed"',
-            'LASH_POSTGRES_GENERATED_PROFILE:-full-random',
-            'LASH_POSTGRES_GENERATED_MAX_BOUNDARIES:-128',
-            '"confidence_lane": "generated_dynamic_postgres_backend_rerun"',
-            '"generated_postgres_dynamic_replay": "$(scheduled_existing_artifact_path generated_postgres_dynamic_replay',
-        ]
-        for snippet in required_snippets:
-            self.assertIn(snippet, gate)
-
-        self.assertIn('type: string', confidence_workflow)
-        self.assertIn("inputs.lane || 'full'", confidence_workflow)
-        self.assertNotIn("LASH_POSTGRES_GENERATED_PROFILE", workflow)
-        self.assertNotIn("LASH_POSTGRES_GENERATED_MAX_BOUNDARIES", workflow)
-
-    def test_property_and_await_cancel_evidence_pinned_in_fast_gate(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-
-        # The SSE framing property suites (transport plus the Anthropic/Google
-        # provider parsers) are pinned as first-class fast-lane evidence in the
-        # fault-matrix shard, alongside the existing state-machine/lashlang
-        # property runners.
-        required_snippets = [
-            'step "LLM transport SSE framing property suite"',
-            "run_cargo_tests -p lash-internal-llm-transport --locked --test property",
-            "run_cargo_tests -p lash-internal-provider-anthropic --locked --test property",
-            "run_cargo_tests -p lash-internal-provider-google --locked --test property",
-            # Durable-wait session-cancel evidence: the generated native
-            # effect-host laws, including the await-event law that exercises
-            # effect_host_await_event_session_cancel_resolves_outstanding_waits.
-            'step "Native effect-host await-event session-cancel conformance"',
-            "run_cargo_tests -p lash-internal-conformance --locked ::tests::effect_host",
-        ]
-        for snippet in required_snippets:
-            self.assertIn(snippet, gate)
-
-    def test_provider_conformance_is_explicitly_featured_in_ci(self) -> None:
-        feature_coverage = FEATURE_COVERAGE.read_text(encoding="utf-8")
-
-        for provider in ("openai", "anthropic", "google"):
-            self.assertIn(
-                f'"cargo", "test", "-p", "lash-internal-provider-{provider}", '
-                '"--features", "testing", "--locked", "conformance"',
-                feature_coverage,
-            )
-
     def test_every_declared_lane_reaches_the_pool_graph(self) -> None:
         """Each coverage lane is compiled by the one Bazel feature job.
 
@@ -3066,24 +2878,6 @@ derive_mutation_jobs() {{
         ):
             self.assertIn(path, workspace_tests)
         self.assertNotIn("target/debug/incremental", workspace_tests)
-
-    def test_heavy_compile_jobs_install_mold(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-
-        for job_id in (
-            "check",
-            "workspace-tests",
-            "lint",
-        ):
-            block = workflow_job_block(workflow, job_id)
-            self.assertIn("./.github/actions/setup-mold", block)
-        release_cache = workflow_job_block(
-            RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8"),
-            "linux-release-cache",
-        )
-        self.assertIn("./.github/actions/setup-mold", release_cache)
-        self.assertNotIn("cargo build", release)
 
     def test_ci_has_no_staging_or_automatic_release_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

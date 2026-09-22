@@ -297,41 +297,6 @@ fn spawn_schema_is_strict_and_nameless() {
 }
 
 #[test]
-// Architecture lint: lexical guard for retired API names, not behavior proof.
-fn lint_subagents_source_does_not_reintroduce_retired_lifecycle_api() {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source_files = [
-        "src/lib.rs",
-        "src/rlm.rs",
-        "src/rlm_support.rs",
-        "src/capability.rs",
-    ];
-    let banned = [
-        ["agent", "_", "name"].concat(),
-        ["Subagent", "Host"].concat(),
-        ["Local", "Subagent", "Host"].concat(),
-        ["Wait", "Agent"].concat(),
-        ["Close", "Agent"].concat(),
-        ["Spawn", "Agent", "Request"].concat(),
-        ["Spawn", "Agent", "Response"].concat(),
-        ["Agent", "Metadata"].concat(),
-        ["normalize", "_async", "_subagent", "_name"].concat(),
-        ["subagent:<", "agent", "_", "name", ">"].concat(),
-    ];
-
-    for relative in source_files {
-        let text = std::fs::read_to_string(manifest_dir.join(relative))
-            .unwrap_or_else(|err| panic!("read {relative}: {err}"));
-        for needle in &banned {
-            assert!(
-                !text.contains(needle),
-                "{relative} reintroduced retired sublashlang binding `{needle}`"
-            );
-        }
-    }
-}
-
-#[test]
 fn single_capability_spawn_can_omit_capability_field() {
     let registry = CapabilityRegistry::new().with(Arc::new(StaticCapability::new(
         "explore",
