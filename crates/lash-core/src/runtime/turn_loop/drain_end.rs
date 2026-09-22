@@ -46,6 +46,7 @@ impl LashRuntime {
             drain_id,
         } = drain_scope
         else {
+            eprintln!("DRAIN_END bail: not a queue-drain scope");
             return;
         };
         let _phase = super::RuntimeNamedPhase::begin(
@@ -61,12 +62,15 @@ impl LashRuntime {
         // promise) is the quiescence read the `WhenQuiescent` retirement gate
         // takes. Either answer withholds the end: the retried drain resumes
         // the same finalizations and asks again.
-        if let Some(closing) = self.host.core.control.effect_host.effect_group_closing() {
+        let closing_seam = self.host.core.control.effect_host.effect_group_closing();
+        eprintln!("DRAIN_END closing seam present: {}", closing_seam.is_some());
+        if let Some(closing) = closing_seam {
             match closing
                 .resume_closing_groups(drain_scope, &crate::GroupOnlyFinalization)
                 .await
             {
                 Ok(reports) => {
+                    eprintln!("DRAIN_END resume reports: {}", reports.len());
                     let pending: usize = reports
                         .iter()
                         .map(|report| match report {
@@ -75,6 +79,7 @@ impl LashRuntime {
                         })
                         .sum();
                     if pending > 0 {
+                        eprintln!("DRAIN_END bail: pending {pending}");
                         tracing::debug!(
                             session_id = %session_id,
                             drain_id = %drain_id,
@@ -85,6 +90,7 @@ impl LashRuntime {
                     }
                 }
                 Err(error) => {
+                    eprintln!("DRAIN_END bail: resume err {error}");
                     // A finalizer that errored leaves `closing` recorded and
                     // discoverable, which is the §7 contract; the drain stays
                     // unended and its retry re-runs the resume.
@@ -100,6 +106,7 @@ impl LashRuntime {
             match closing.scope_is_quiescent(drain_scope).await {
                 Ok(true) => {}
                 Ok(false) => {
+                    eprintln!("DRAIN_END bail: not quiescent");
                     tracing::debug!(
                         session_id = %session_id,
                         drain_id = %drain_id,
@@ -108,6 +115,7 @@ impl LashRuntime {
                     return;
                 }
                 Err(error) => {
+                    eprintln!("DRAIN_END bail: quiescence err {error}");
                     tracing::warn!(
                         session_id = %session_id,
                         drain_id = %drain_id,
@@ -135,9 +143,13 @@ impl LashRuntime {
                 ..Default::default()
             };
             match registry.list_processes(&filter).await {
-                Ok(children) if children.is_empty() => return,
+                Ok(children) if children.is_empty() => {
+                    eprintln!("DRAIN_END bail: empty poll, no children");
+                    return;
+                }
                 Ok(_) => {}
                 Err(error) => {
+                    eprintln!("DRAIN_END bail: list children err {error}");
                     tracing::warn!(
                         session_id = %session_id,
                         drain_id = %drain_id,
@@ -157,7 +169,7 @@ impl LashRuntime {
             crate::ExecutionScope::queue_drain(session_id.clone(), drain_id.clone()),
             "final",
         );
-        let commit = match crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
+        let mut commit = match crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
             &self.state,
             crate::GraphAppend::PreserveHead,
             &[],
@@ -166,6 +178,7 @@ impl LashRuntime {
         ) {
             Ok(commit) => commit,
             Err(error) => {
+                eprintln!("DRAIN_END bail: commit build err {error}");
                 tracing::warn!(
                     session_id = %session_id,
                     drain_id = %drain_id,
@@ -175,6 +188,42 @@ impl LashRuntime {
                 return;
             }
         };
+        // The commit's claimed frame must equal the committed graph's nearest
+        // `FrameOpen` ancestor, and the runtime's live frame and leaf may be
+        // ones it minted itself and never committed — a drain whose run never
+        // opened a frame (an empty retry over a graph with no leaf) would
+        // otherwise claim graph facts the store cannot derive. The head meta
+        // already records the committed leaf and the derived frame, so claim
+        // exactly those.
+        match store.load_session_head_meta().await {
+            Ok(meta) => {
+                // A session whose head carries a minted-but-uncommitted frame
+                // (a bound session that never ran a turn) has no `FrameOpen`
+                // the store can derive — claim a frame only when the
+                // committed leaf exists to derive it from, and claim no leaf
+                // the head does not record.
+                let (frame, leaf) = meta
+                    .map(|meta| {
+                        (
+                            meta.current_frame_node_id
+                                .filter(|_| meta.leaf_node_id.is_some()),
+                            meta.leaf_node_id,
+                        )
+                    })
+                    .unwrap_or_default();
+                commit.current_frame_node_id = frame;
+                commit.graph_base_leaf_node_id = leaf;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    drain_id = %drain_id,
+                    error = %error,
+                    "queue drain end withheld: the session head could not be read",
+                );
+                return;
+            }
+        }
         let borrowed = session_execution_lease.borrowed_authority();
         let head_stale = self.resident_session.graph_head_stale_flag();
         if let Err(error) = crate::runtime::state::commit_in_lane_context(
@@ -189,6 +238,7 @@ impl LashRuntime {
         )
         .await
         {
+            eprintln!("DRAIN_END bail: receipt commit err {error}");
             tracing::warn!(
                 session_id = %session_id,
                 drain_id = %drain_id,
@@ -201,6 +251,7 @@ impl LashRuntime {
         // The ledger row, after the end fact — the cross-store gap a crash
         // here leaves is exactly what the opener parent-end sweep closes.
         let Some(registry) = self.host.process_registry() else {
+            eprintln!("DRAIN_END bail: no registry");
             return;
         };
         let parent = crate::ParentScope::queue_drain(session_id.clone(), drain_id.clone());

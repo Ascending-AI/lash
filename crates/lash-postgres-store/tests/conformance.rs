@@ -2271,6 +2271,8 @@ mod process_retention;
 include!("conformance/append_identity.rs");
 #[path = "conformance/direct_turn_acceptance.rs"]
 mod direct_turn_acceptance;
+#[path = "conformance/drain_end.rs"]
+mod drain_end;
 #[path = "conformance/injectors.rs"]
 mod injectors;
 lash_conformance::session_read_view_tests!({

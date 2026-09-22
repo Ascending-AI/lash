@@ -695,6 +695,8 @@ pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
 pub use runtime::drive_with_event_pump;
+#[cfg(any(test, feature = "testing"))]
+pub use runtime::fail_parent_end_once;
 
 // This block includes the effect / process-control types consumed by external
 // effect hosts (e.g. lash-restate's workflows) and their integration tests —

@@ -45,6 +45,8 @@ mod lifecycle;
 mod local_helpers;
 #[path = "testing/parent_end.rs"]
 mod parent_end;
+#[path = "testing/parent_end_fault.rs"]
+mod parent_end_fault;
 mod raw_state;
 mod registration_refusals;
 mod retention;
@@ -52,6 +54,7 @@ mod support;
 mod types;
 mod worklist;
 use local_helpers::{insert_process, next_change_seq, process_miss};
+pub use parent_end_fault::fail_parent_end_once;
 pub use registration_refusals::{
     REFUSAL_FIXTURE_PROCESS_ID as PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
     accepted_process_registration, refused_process_registrations,
