@@ -174,6 +174,17 @@ impl OracleTheatre {
         );
     }
 
+    /// Waits until the batch's consumer has consumed `count` settlements. The
+    /// `settled:{id}` latch is raised by the presentation step, which a group
+    /// child runs before its final commit takes a rank, so only consumption
+    /// proves where in the commit order a leaf landed.
+    async fn await_consumed(&self, count: usize) {
+        assert!(
+            self.wait(&format!("consumed:{count}")).await,
+            "the consumer never consumed {count} settlement(s)"
+        );
+    }
+
     fn release(&self, id: &str) {
         self.raise(&format!("release:{id}"));
     }
@@ -228,14 +239,15 @@ impl OracleTheatre {
     }
 }
 
-/// The turn's activity sink, used only to count completed tool calls. The
-/// stream is drained after the batch returns, so nothing here can be part of a
-/// rendezvous.
+/// The turn's activity sink: it counts completed tool calls, which the group
+/// consumer emits as it consumes settlements in commit order, and raises
+/// `consumed:{n}` once the n-th settlement has been consumed.
 #[async_trait]
 impl TurnActivitySink for OracleTheatre {
     async fn emit(&self, activity: TurnActivity) {
         if matches!(activity.event, TurnEvent::ToolCallCompleted { .. }) {
-            self.completed_calls.fetch_add(1, Ordering::SeqCst);
+            let consumed = self.completed_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            self.raise(&format!("consumed:{consumed}"));
         }
     }
 }
@@ -824,6 +836,9 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
             .settle_deferred(&driven.core, first, OracleTheatre::rejection(first))
             .await?;
         driven.theatre.await_settled(first).await;
+        // The held leaf cannot commit, so the first consumed settlement is
+        // the parked leaf's: its rank precedes the held leaf's by construction.
+        driven.theatre.await_consumed(1).await;
         driven.theatre.release(second);
         let run = driven.finish().await?;
 
@@ -914,6 +929,9 @@ async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
         tier.name,
         driven.theatre.settled()
     );
+    // Consumed, not merely presented: the later leaf's rank is fixed before
+    // the held leaf can commit.
+    driven.theatre.await_consumed(1).await;
 
     driven.theatre.release("first");
     let run = driven.finish().await?;
@@ -1014,6 +1032,7 @@ async fn a_rejected_aggregate_still_waits_for_every_leaf(tier: &JournaledTier) -
          leaf is still in flight",
         tier.name
     );
+    driven.theatre.await_consumed(1).await;
 
     driven.theatre.release("held");
     let run = driven.finish().await?;
