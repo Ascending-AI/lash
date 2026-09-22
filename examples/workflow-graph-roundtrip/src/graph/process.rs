@@ -1,5 +1,5 @@
 use lash::ProcessId;
-use lashlang::{
+use lash::rlm::lang::{
     ProcessParam, ProcessSignalDecl, WorkflowNode, WorkflowNodeKind, WorkflowNodeNameSource,
     WorkflowProcess, WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
 };
@@ -69,7 +69,9 @@ pub(super) fn seeded_process_body(
             name_source: WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Terminal {
                 terminal: WorkflowTerminalKind::Finish,
-                expression: lashlang::Expr::Return(Box::new(lashlang::Expr::Number(0.0))),
+                expression: lash::rlm::lang::Expr::Return(Box::new(lash::rlm::lang::Expr::Number(
+                    0.0,
+                ))),
             },
             available_variables: params.iter().map(|param| param.name.to_string()).collect(),
             type_facets: None,
@@ -132,7 +134,7 @@ fn editable_signal_name(node_id: &str, value: &str) -> Result<String, RenderErro
                 format!("`data.signals.name` must be a property name: {message}"),
             )
         })?;
-    let lashlang::Expr::Record(entries) = record else {
+    let lash::rlm::lang::Expr::Record(entries) = record else {
         return Err(reject());
     };
     let [(name, _)] = entries.as_slice() else {
@@ -173,14 +175,14 @@ fn editable_process_type(
     process_id: &ProcessId,
     field: &str,
     value: &str,
-) -> Result<lashlang::TypeExpr, RenderErrorResponse> {
+) -> Result<lash::rlm::lang::TypeExpr, RenderErrorResponse> {
     match value.trim() {
-        "any" => Ok(lashlang::TypeExpr::Any),
-        "null" => Ok(lashlang::TypeExpr::Null),
-        "str" | "string" => Ok(lashlang::TypeExpr::Str),
-        "int" => Ok(lashlang::TypeExpr::Int),
-        "float" => Ok(lashlang::TypeExpr::Float),
-        "bool" | "boolean" => Ok(lashlang::TypeExpr::Bool),
+        "any" => Ok(lash::rlm::lang::TypeExpr::Any),
+        "null" => Ok(lash::rlm::lang::TypeExpr::Null),
+        "str" | "string" => Ok(lash::rlm::lang::TypeExpr::Str),
+        "int" => Ok(lash::rlm::lang::TypeExpr::Int),
+        "float" => Ok(lash::rlm::lang::TypeExpr::Float),
+        "bool" | "boolean" => Ok(lash::rlm::lang::TypeExpr::Bool),
         other => Err(RenderErrorResponse::invalid_node_payload(
             process_id,
             format!(

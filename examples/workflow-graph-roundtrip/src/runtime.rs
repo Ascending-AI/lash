@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
-use lashlang::{
+use lash::rlm::lang::{
     AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     LashlangAbilities, LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment,
     LashlangLanguageFeatures, LinkedModule, OperationContract, ResourceOperation,
@@ -32,20 +32,22 @@ impl Default for RunTiming {
 
 pub(crate) struct PreparedRun {
     graph: WorkflowGraph,
-    compiled: lashlang::CompiledProgram,
+    compiled: lash::rlm::lang::CompiledProgram,
     workflow_version: u64,
     run_id: String,
 }
 
 impl PreparedRun {
     pub(crate) fn new(graph: WorkflowGraph, source: &str, workflow_version: u64) -> Result<Self> {
-        let program = lash_typescript::parse(source).context("parse saved workflow")?;
+        let program = lash::typescript::parse(source).context("parse saved workflow")?;
         let linked = LinkedModule::link(program, host_environment()).context("link toy tools")?;
         let process_name = graph
             .declarations
             .iter()
             .find_map(|declaration| match declaration {
-                lashlang::WorkflowDeclaration::Process(process) => Some(process.name.as_str()),
+                lash::rlm::lang::WorkflowDeclaration::Process(process) => {
+                    Some(process.name.as_str())
+                }
                 _ => None,
             })
             .ok_or_else(|| anyhow!("saved workflow has no process to run"))?;
@@ -68,7 +70,8 @@ impl PreparedRun {
             timing,
         );
         let environment = ExecutionEnvironment::new(&host).process();
-        let result = lashlang::execute(&self.compiled, &mut State::new(), &environment).await;
+        let result =
+            lash::rlm::lang::execute(&self.compiled, &mut State::new(), &environment).await;
         if let Err(error) = result {
             host.emit_current_failure(error.to_string());
         }
@@ -176,7 +179,7 @@ impl RunHost {
         }
     }
 
-    fn correlated_node(&self, site: &lashlang::LashlangExecutionSite) -> Option<String> {
+    fn correlated_node(&self, site: &lash::rlm::lang::LashlangExecutionSite) -> Option<String> {
         node_id_for_execution_site(&self.graph, site).map(|id| id.to_string())
     }
 

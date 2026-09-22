@@ -20,13 +20,13 @@ fn workflow_globals() -> std::collections::BTreeSet<String> {
 /// The canonical TypeScript the lens stores for an editable expression: what
 /// the front-end reads back out of `text`, printed by the lens's own printer.
 fn canonical_expression(text: &str) -> String {
-    let expression = lash_typescript::workflow_graph::parse_typescript_expression(
+    let expression = lash::typescript::workflow_graph::parse_typescript_expression(
         text,
         &workflow_globals(),
         &std::collections::BTreeSet::new(),
     )
     .unwrap_or_else(|error| panic!("`{text}` must parse as an editable expression: {error}"));
-    lash_typescript::workflow_graph::typescript_expression_source(&expression)
+    lash::typescript::workflow_graph::typescript_expression_source(&expression)
         .unwrap_or_else(|error| panic!("`{text}` must print back as TypeScript: {error}"))
 }
 
@@ -263,7 +263,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
             .data
             .process_name
             .as_deref()
-            .is_some_and(|name| name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX))
+            .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX))
     );
     assert!(added.data.params.is_empty());
     assert!(added.data.signals.is_empty());
@@ -279,10 +279,11 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
             && node.data.terminal_kind.as_deref() == Some("finish")
             && node.data.expression.as_deref() == Some("0")
     }));
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
-        .expect("added process source reprojects");
+    let graph =
+        lash::typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
+            .expect("added process source reprojects");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_to_source(&graph)
+        lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("added process graph renders"),
         saved.document.source
     );
@@ -328,7 +329,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .process_name
         .clone()
         .expect("projected process name");
-    assert!(derived_name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX));
+    assert!(derived_name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX));
     process.data.process_name = Some("renamed".to_string());
     process.data.params = vec![
         EditableProcessField {
@@ -384,7 +385,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
             .data
             .process_name
             .as_deref()
-            .is_some_and(|name| name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)),
+            .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX)),
         "a lifted process keeps its derived name: {:?}",
         process.data.process_name
     );
@@ -424,10 +425,11 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         }]
     );
     assert_eq!(process.data.available_vars, ["input"]);
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
-        .expect("edited signature source reprojects");
+    let graph =
+        lash::typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
+            .expect("edited signature source reprojects");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_to_source(&graph)
+        lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("edited signature graph renders"),
         saved.document.source
     );
@@ -488,10 +490,11 @@ async fn newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes
                 .get("text")
                 .is_some_and(|value| value == &EditableValue::String("raw".to_string()))
     }));
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
-        .expect("saved catalog-created workflow reprojects");
+    let graph =
+        lash::typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
+            .expect("saved catalog-created workflow reprojects");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_to_source(&graph)
+        lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("reprojected workflow renders"),
         saved.document.source
     );
@@ -540,15 +543,15 @@ async fn source_projection_is_a_stateless_canonical_fixpoint_with_typed_errors()
     let document: WorkflowDocument =
         serde_json::from_value(body["document"].clone()).expect("projected workflow document");
     assert_eq!(document.version, before.version);
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_source(&document.source)
+    let graph = lash::typescript::workflow_graph::workflow_graph_from_source(&document.source)
         .expect("project response source projects");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_to_source(&graph)
+        lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("project response graph renders"),
         document.source
     );
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_from_source(&document.source)
+        lash::typescript::workflow_graph::workflow_graph_from_source(&document.source)
             .expect("project response source reprojects"),
         graph
     );
@@ -628,7 +631,7 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
         serde_json::from_value(body["document"].clone()).expect("scoped document");
     assert_eq!(
         document.facet_schema_version,
-        Some(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     let state = document
         .nodes
@@ -903,7 +906,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
         ));
 
         let projected =
-            lash_typescript::workflow_graph::workflow_graph_from_source(&document.source)
+            lash::typescript::workflow_graph::workflow_graph_from_source(&document.source)
                 .expect("catalog source should project");
         let nodes = projected.nodes().collect::<Vec<_>>();
         assert!(
@@ -947,15 +950,15 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             "exact canonical node slices for catalog workflow `{}`",
             entry.id
         );
-        let rendered = lash_typescript::workflow_graph::workflow_graph_to_source(&projected)
+        let rendered = lash::typescript::workflow_graph::workflow_graph_to_source(&projected)
             .expect("catalog graph should render");
         assert_eq!(rendered, document.source);
         assert_eq!(
-            lash_typescript::parse(&rendered).expect("rendered catalog source"),
-            lash_typescript::parse(&document.source).expect("canonical catalog source")
+            lash::typescript::parse(&rendered).expect("rendered catalog source"),
+            lash::typescript::parse(&document.source).expect("canonical catalog source")
         );
         assert_eq!(
-            lash_typescript::workflow_graph::workflow_graph_from_source(&rendered)
+            lash::typescript::workflow_graph::workflow_graph_from_source(&rendered)
                 .expect("reproject catalog source"),
             projected
         );
@@ -1016,7 +1019,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             assert!(projected.nodes().any(|node| {
                 matches!(
                     &node.kind,
-                    lashlang::WorkflowNodeKind::StateUpdate { target, .. }
+                    lash::rlm::lang::WorkflowNodeKind::StateUpdate { target, .. }
                         if !target.steps.is_empty()
                 )
             }));
@@ -1435,10 +1438,10 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
         node.node_type == "container" && node.data.condition.as_deref() == Some("false")
     }));
     let projected_if =
-        lash_typescript::workflow_graph::workflow_graph_from_source(&saved_if.source)
+        lash::typescript::workflow_graph::workflow_graph_from_source(&saved_if.source)
             .expect("edited branching-approval source should reproject");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_to_source(&projected_if)
+        lash::typescript::workflow_graph::workflow_graph_to_source(&projected_if)
             .expect("edited branching-approval graph should render"),
         saved_if.source
     );
@@ -1503,10 +1506,10 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
         node.node_type == "container" && node.data.iterable.as_deref() == Some("[15]")
     }));
     let projected_for =
-        lash_typescript::workflow_graph::workflow_graph_from_source(&saved_for.source)
+        lash::typescript::workflow_graph::workflow_graph_from_source(&saved_for.source)
             .expect("edited counter-loop source should reproject");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_to_source(&projected_for)
+        lash::typescript::workflow_graph::workflow_graph_to_source(&projected_for)
             .expect("edited counter-loop graph should render"),
         saved_for.source
     );
@@ -1596,10 +1599,10 @@ async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
     assert_eq!(saved.version, 2);
     assert_eq!(saved.nodes.len(), original_node_count - 1);
     assert!(!saved.source.contains("name: \"complete\""));
-    let projected = lash_typescript::workflow_graph::workflow_graph_from_source(&saved.source)
+    let projected = lash::typescript::workflow_graph::workflow_graph_from_source(&saved.source)
         .expect("deleted workflow source should reproject");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_to_source(&projected)
+        lash::typescript::workflow_graph::workflow_graph_to_source(&projected)
             .expect("deleted graph should render"),
         saved.source
     );
@@ -2215,14 +2218,14 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     assert_eq!(body["error"]["code"], "unsupported_schema_version");
     assert_eq!(
         body["error"]["details"]["found"],
-        lashlang::WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+        lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION - 1
     );
     assert_eq!(
         body["error"]["details"]["expected"],
-        lashlang::WORKFLOW_GRAPH_SCHEMA_VERSION
+        lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION
     );
 
-    document.schema_version = lashlang::WORKFLOW_GRAPH_SCHEMA_VERSION;
+    document.schema_version = lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION;
     let while_node = document
         .nodes
         .iter_mut()
@@ -2273,7 +2276,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
         .expect("counter-loop document");
     let invalid_target = "state.count + 1";
     assert!(
-        lash_typescript::workflow_graph::parse_typescript_expression(
+        lash::typescript::workflow_graph::parse_typescript_expression(
             invalid_target,
             &workflow_globals(),
             &std::collections::BTreeSet::new(),

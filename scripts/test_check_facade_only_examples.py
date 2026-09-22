@@ -125,14 +125,23 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
             self.violations(),
         )
 
-    def test_lashlang_specific_target_remains_exempt(self) -> None:
+    def test_workflow_graph_example_has_no_lashlang_exemption(self) -> None:
         self.fixture.package("workflow-graph-roundtrip", 'lashlang = "0.1"\n')
         self.fixture.write(
             "workflow-graph-roundtrip/src/lib.rs",
             "use lashlang::Program;\n",
         )
 
-        self.assertEqual([], self.violations())
+        self.assertEqual(
+            [
+                (
+                    Path("examples/workflow-graph-roundtrip/src/lib.rs"),
+                    1,
+                    "lashlang::",
+                )
+            ],
+            self.violations(),
+        )
 
 
 if __name__ == "__main__":

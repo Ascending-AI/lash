@@ -22,11 +22,11 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash_typescript::workflow_graph::{
+use lash::rlm::lang::WorkflowGraph;
+use lash::typescript::workflow_graph::{
     GraphRenderError, WorkflowGraphBuildError, workflow_graph_from_source,
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
-use lashlang::WorkflowGraph;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
@@ -262,7 +262,7 @@ async fn save_workflow(
     let source = workflow_graph_to_source(&graph).map_err(RenderErrorResponse::from)?;
     let canonical_graph =
         workflow_graph_from_source(&source).map_err(RenderErrorResponse::projection)?;
-    let reconciliation = lashlang::reconcile(&graph, &canonical_graph);
+    let reconciliation = lash::rlm::lang::reconcile(&graph, &canonical_graph);
     if !reconciliation.unmatched.is_empty() || !reconciliation.ambiguous.is_empty() {
         return Err(RenderErrorResponse::document(
             "submitted workflow does not reconcile with its canonical reprojection",

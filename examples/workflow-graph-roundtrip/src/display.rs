@@ -1,4 +1,4 @@
-use lashlang::{ExecutionHostError, Record, Value};
+use lash::rlm::lang::{ExecutionHostError, Record, Value};
 
 use crate::{DisplayDelta, DisplayState};
 

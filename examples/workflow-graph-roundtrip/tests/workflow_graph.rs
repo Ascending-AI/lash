@@ -14,13 +14,13 @@ fn inline_trigger_target_projects_as_a_process_container_and_fixpoints() {
   },
 });
 "#;
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_source(literal_source)
+    let graph = lash::typescript::workflow_graph::workflow_graph_from_source(literal_source)
         .expect("inline target projects");
     let lifted = graph
         .declarations
         .iter()
         .find_map(|declaration| match declaration {
-            lashlang::WorkflowDeclaration::Process(process)
+            lash::rlm::lang::WorkflowDeclaration::Process(process)
                 if process.name.starts_with("__process_") =>
             {
                 Some(process.name.clone())
@@ -29,9 +29,10 @@ fn inline_trigger_target_projects_as_a_process_container_and_fixpoints() {
         })
         .expect("the inline body projects as a process container");
     let rendered =
-        lash_typescript::workflow_graph::workflow_graph_to_source(&graph).expect("renders");
+        lash::typescript::workflow_graph::workflow_graph_to_source(&graph).expect("renders");
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_from_source(&rendered).expect("reprojects"),
+        lash::typescript::workflow_graph::workflow_graph_from_source(&rendered)
+            .expect("reprojects"),
         graph,
         "the inline body's PutGet holds"
     );

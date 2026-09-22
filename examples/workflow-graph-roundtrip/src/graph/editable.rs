@@ -6,13 +6,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_typescript::workflow_graph::{
-    TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
-    typescript_expression_source,
-};
-use lashlang::{
+use lash::rlm::lang::{
     Expr, WorkflowDeclaration, WorkflowEffectKind, WorkflowGraph, WorkflowNode, WorkflowNodeId,
     WorkflowNodeKind, WorkflowTerminalKind, workflow_call_to_ir, workflow_effect_to_ir,
+};
+use lash::typescript::workflow_graph::{
+    TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
+    typescript_expression_source,
 };
 
 use super::{effect_name, required_text};
@@ -118,7 +118,7 @@ pub(super) fn editable_effect_expression(
         )?,
     };
     if let Some(requested_effect) = requested_effect {
-        let current_effect = lashlang::workflow_effect_from_ir(&expression)
+        let current_effect = lash::rlm::lang::workflow_effect_from_ir(&expression)
             .map(|(effect, _, _)| effect)
             .ok_or_else(|| {
                 RenderErrorResponse::invalid_node_payload(
@@ -385,7 +385,7 @@ pub(super) fn parse_assignment_target(
     id: &str,
     source: &str,
     scope: &FragmentScope,
-) -> Result<lashlang::AssignTarget, RenderErrorResponse> {
+) -> Result<lash::rlm::lang::AssignTarget, RenderErrorResponse> {
     parse_assignment_target_fragment(source, scope)
         .map_err(|message| RenderErrorResponse::invalid_assignment_target(id, "target", message))
 }
@@ -393,7 +393,7 @@ pub(super) fn parse_assignment_target(
 pub(super) fn parse_assignment_target_fragment(
     source: &str,
     scope: &FragmentScope,
-) -> Result<lashlang::AssignTarget, String> {
+) -> Result<lash::rlm::lang::AssignTarget, String> {
     parse_typescript_assign_target(source, &scope.globals, &scope.processes)
         .map_err(|error| error.to_string())
 }

@@ -1,14 +1,14 @@
 use lash::ProcessId;
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_typescript::workflow_graph::{
-    typescript_assign_target_source, typescript_expression_source,
-};
-use lashlang::{
+use lash::rlm::lang::{
     Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
     WorkflowEdgeKind, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId,
     WorkflowNodeKind, WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
     workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
+};
+use lash::typescript::workflow_graph::{
+    typescript_assign_target_source, typescript_expression_source,
 };
 use serde_json::json;
 
@@ -311,9 +311,9 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
             id: workflow_node_id(&format!("process-binding:{name}")),
             name: "data".to_string(),
             description: None,
-            name_source: lashlang::WorkflowNodeNameSource::Derived,
+            name_source: lash::rlm::lang::WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Data {
-                binding: Some(lashlang::AssignTarget::variable(name.clone().into())),
+                binding: Some(lash::rlm::lang::AssignTarget::variable(name.clone().into())),
                 expression: Expr::ProcessRef {
                     process: name.into(),
                 },
@@ -331,7 +331,7 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
 /// A lifted process has no module declaration of its own, so nothing about it
 /// is authored under this name.
 pub(super) fn is_lifted_process(name: &str) -> bool {
-    name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
+    name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX)
 }
 
 /// The freshly declared process a body is being rebuilt for.
@@ -1142,7 +1142,7 @@ fn editable_binding(
     node_id: &str,
     source: Option<&String>,
     scope: &FragmentScope,
-) -> Result<Option<lashlang::AssignTarget>, RenderErrorResponse> {
+) -> Result<Option<lash::rlm::lang::AssignTarget>, RenderErrorResponse> {
     source
         .map(|source| parse_assignment_target(node_id, source, scope))
         .transpose()
@@ -1161,14 +1161,14 @@ fn required_text(
     })
 }
 
-fn diagnostic_kind_text(kind: lashlang::WorkflowDiagnosticKind) -> String {
+fn diagnostic_kind_text(kind: lash::rlm::lang::WorkflowDiagnosticKind) -> String {
     serde_json::to_value(kind)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_else(|| "invalid_diagnostic_kind".to_string())
 }
 
-fn diagnostic_class_text(class: lashlang::WorkflowDiagnosticClass) -> String {
+fn diagnostic_class_text(class: lash::rlm::lang::WorkflowDiagnosticClass) -> String {
     serde_json::to_value(class)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
@@ -1234,8 +1234,8 @@ fn node_subkind(node: &WorkflowNode) -> Option<&'static str> {
     }
 }
 
-fn effect_name(effect: &lashlang::WorkflowEffectKind) -> &'static str {
-    use lashlang::WorkflowEffectKind;
+fn effect_name(effect: &lash::rlm::lang::WorkflowEffectKind) -> &'static str {
+    use lash::rlm::lang::WorkflowEffectKind;
     match effect {
         WorkflowEffectKind::AwaitJoin => "await_join",
         WorkflowEffectKind::WaitSignal => "wait_signal",
@@ -1283,9 +1283,9 @@ for (const item of [1, 2]) {
 }
 finish([state, introduced]);
 "#;
-        let graph = lash_typescript::workflow_graph::workflow_graph_from_source(input)
+        let graph = lash::typescript::workflow_graph::workflow_graph_from_source(input)
             .expect("project promoted graph");
-        let source = lash_typescript::workflow_graph::workflow_graph_to_source(&graph)
+        let source = lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("render promoted graph");
         let document = document_from_graph(1, source.clone(), graph.clone());
 
@@ -1324,12 +1324,12 @@ finish([state, introduced]);
 
         let rebuilt = graph_from_document(document, &graph).expect("rebuild promoted graph");
         assert_eq!(
-            lash_typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
+            lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
                 .expect("render rebuilt graph"),
             source
         );
         assert_eq!(
-            lash_typescript::workflow_graph::workflow_graph_from_source(&source)
+            lash::typescript::workflow_graph::workflow_graph_from_source(&source)
                 .expect("reproject rebuilt source"),
             graph
         );
@@ -1347,9 +1347,9 @@ if (true) {
 }
 finish(items);
 "#;
-        let graph = lash_typescript::workflow_graph::workflow_graph_from_source(input)
+        let graph = lash::typescript::workflow_graph::workflow_graph_from_source(input)
             .expect("project container graph");
-        let source = lash_typescript::workflow_graph::workflow_graph_to_source(&graph)
+        let source = lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("render container graph");
         let document = document_from_graph(1, source.clone(), graph.clone());
 
@@ -1383,11 +1383,11 @@ finish(items);
         }));
 
         let rebuilt = graph_from_document(transported, &graph).expect("rebuild transported graph");
-        let rendered = lash_typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
+        let rendered = lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
             .expect("render transported workflow graph");
         assert_eq!(rendered, source);
         assert_eq!(
-            lash_typescript::workflow_graph::workflow_graph_from_source(&rendered)
+            lash::typescript::workflow_graph::workflow_graph_from_source(&rendered)
                 .expect("reproject transported source"),
             graph
         );
@@ -1403,7 +1403,7 @@ finish(items);
     /// clauses and its element subgraph.
     #[test]
     fn api_document_transport_preserves_a_list_comprehension_container() {
-        let graph = lash_typescript::workflow_graph::workflow_graph_from_source(
+        let graph = lash::typescript::workflow_graph::workflow_graph_from_source(
             "const items = [1, 2];\nfinish(items);\n",
         )
         .expect("project comprehension baseline");
@@ -1411,7 +1411,7 @@ finish(items);
             id: workflow_node_id("comprehension:element"),
             name: "data".to_string(),
             description: None,
-            name_source: lashlang::WorkflowNodeNameSource::Derived,
+            name_source: lash::rlm::lang::WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Data {
                 binding: None,
                 expression: Expr::Variable("value".into()),
@@ -1426,9 +1426,9 @@ finish(items);
             id: workflow_node_id("comprehension:container"),
             name: "list comprehension".to_string(),
             description: None,
-            name_source: lashlang::WorkflowNodeNameSource::Derived,
+            name_source: lash::rlm::lang::WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-                binding: Some(lashlang::AssignTarget::variable("doubled".into())),
+                binding: Some(lash::rlm::lang::AssignTarget::variable("doubled".into())),
                 clauses: vec![WorkflowListComprehensionClause::For {
                     binding: "value".to_string(),
                     iterable: Expr::Variable("items".into()),
