@@ -445,10 +445,28 @@ jobs:
       # Slowest commands are listed first so the pool starts them first.
       - name: Install launcher test sandbox
         run: |
-          if ! command -v bwrap >/dev/null 2>&1; then
+          if ! command -v bwrap >/dev/null 2>&1 || ! command -v apparmor_parser >/dev/null 2>&1; then
             sudo apt-get update
-            sudo apt-get install -y bubblewrap
+            sudo apt-get install -y bubblewrap apparmor
           fi
+          # Ubuntu 24.04 restricts capabilities inside unprivileged user
+          # namespaces. Allow this runner's bwrap to configure its private
+          # loopback interface without changing the host-wide restriction.
+          sandbox_bin="$RUNNER_TEMP/lash-launcher-sandbox"
+          mkdir -p "$sandbox_bin"
+          install -m 0755 "$(command -v bwrap)" "$sandbox_bin/bwrap"
+          cat > "$sandbox_bin/apparmor.profile" <<PROFILE
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile lash-launcher-bwrap "$sandbox_bin/bwrap" flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+          sudo apparmor_parser --replace "$sandbox_bin/apparmor.profile"
+          echo "$sandbox_bin" >> "$GITHUB_PATH"
+          "$sandbox_bin/bwrap" --unshare-user --unshare-pid --unshare-net \
+            --unshare-ipc --unshare-uts --die-with-parent \
+            --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp /bin/true
 
       - name: Test repository scripts
         run: |
