@@ -47,7 +47,7 @@ pub(crate) async fn notify_group_settled(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     group_key: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT pg_notify($1, '')")
+    sqlx::query(crate::connection_sql::connection_sql().notify_channel.sql())
         .bind(settlement_channel(group_key))
         .execute(&mut **tx)
         .await?;
