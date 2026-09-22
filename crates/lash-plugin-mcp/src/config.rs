@@ -151,9 +151,10 @@ mod duration_millis_serde {
 /// The fields are typed as `Duration` for Rust integrators. In serialized
 /// MCP server configuration, each value is an integer number of milliseconds,
 /// matching the existing timeout fields. The graceful period applies while a
-/// server can exit normally; the post-kill wait applies only after a stdio
-/// child has been forcefully killed. Both defaults preserve the existing
-/// three-second graceful and one-second post-kill behavior.
+/// server can exit normally; the post-kill wait bounds both the SIGTERM grace
+/// and the post-SIGKILL reap once a stdio child is forcefully terminated.
+/// Both defaults preserve the existing three-second graceful and one-second
+/// per-stage behavior.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpShutdownPolicy {
     /// How long a server gets to exit after graceful transport closure.
@@ -167,9 +168,11 @@ pub struct McpShutdownPolicy {
         skip_serializing_if = "is_default_graceful_period"
     )]
     pub graceful_period: Duration,
-    /// How long to wait for a killed stdio child to be reaped. Default: one
-    /// second. Increase this for hosts under process pressure; decrease it
-    /// when a bounded deployment drain should abandon a child sooner.
+    /// How long each forced-termination stage may take: the wait between
+    /// SIGTERM and SIGKILL to the child's process group, and then the wait to
+    /// reap the child. Default: one second per stage. Increase this for hosts
+    /// under process pressure; decrease it when a bounded deployment drain
+    /// should abandon a child sooner.
     #[serde(
         rename = "post_kill_wait_ms",
         default = "default_post_kill_wait",

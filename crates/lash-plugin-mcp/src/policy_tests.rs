@@ -65,7 +65,11 @@ impl McpEntry {
 }
 
 const MOCK_SERVER: &str = r#"
-import json, os, sys, threading, time
+import json, os, signal, sys, threading, time
+
+# The mock ignores SIGTERM so scripted tests deterministically reach the
+# SIGKILL stage of forced shutdown; graceful stdin-EOF exit is unchanged.
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 lock = threading.Lock()
 behavior = os.environ['BEHAVIOR']
@@ -1116,6 +1120,8 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
     let mut shutdown = Box::pin(pool.shutdown_all());
     assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
     clock.expire(deadline).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
     assert_eq!(
         lifecycle.kill_issued(pid).await,
         Instant::now() + Duration::from_secs(1),
@@ -1125,8 +1131,8 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
     shutdown.await;
     assert_eq!(
         Instant::now(),
-        deadline + scripted::TIMER_TICK,
-        "joining the reaper needs no controlled time past the grace deadline"
+        term + scripted::TIMER_TICK,
+        "joining the reaper needs no controlled time past the terminate deadline"
     );
     assert_eq!(
         process_state(pid),
@@ -1277,6 +1283,13 @@ async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
         "the default three-second grace precedes the kill request"
     );
     clock.expire(grace).await;
+    let term = lifecycle.term_issued(pid).await;
+    assert_eq!(
+        term,
+        Instant::now() + Duration::from_secs(1),
+        "the default one-second terminate deadline follows the grace period"
+    );
+    clock.expire(term).await;
     let cleanup = lifecycle.kill_issued(pid).await;
     assert_eq!(
         cleanup,
@@ -1338,10 +1351,12 @@ async fn shutdown_preempts_in_flight_keepalive_probe_and_reaps_child() {
         "shutdown preempts the unanswered five-second probe and starts the grace period at once"
     );
     clock.expire(deadline).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
     lifecycle.kill_issued(pid).await;
     lifecycle.reaped(pid).await;
     shutdown.await;
-    assert_eq!(Instant::now(), deadline + scripted::TIMER_TICK);
+    assert_eq!(Instant::now(), term + scripted::TIMER_TICK);
     assert_eq!(process_state(pid), None);
 }
 
@@ -1425,20 +1440,20 @@ async fn shutdown_all_bounds_an_actor_that_never_finishes() {
     assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
     assert_eq!(lifecycle.wedged().await, 424_242);
     clock
-        .elapses(shutdown.as_mut(), started, Duration::from_secs(5))
+        .elapses(shutdown.as_mut(), started, Duration::from_secs(6))
         .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
         entry.last_error.read_recover().clone(),
         Some(McpServerFault::Shutdown(
-            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
                 .to_string()
         ))
     );
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     assert!(
         trace.contains(
-            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
         ),
         "captured trace: {trace}"
     );
@@ -1468,7 +1483,7 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
     assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
     assert_eq!(lifecycle.wedged().await, 424_242);
     clock
-        .elapses(shutdown.as_mut(), started, Duration::from_millis(1_100))
+        .elapses(shutdown.as_mut(), started, Duration::from_millis(1_150))
         .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     let fault = entry
@@ -1480,7 +1495,7 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
         panic!("expected a shutdown fault, got {fault:?}");
     };
     assert!(
-        reason.contains("within the 1.1s per-entry total shutdown deadline"),
+        reason.contains("within the 1.15s per-entry total shutdown deadline"),
         "unexpected shortened shutdown reason: {reason}"
     );
 }
@@ -1509,7 +1524,7 @@ async fn abandoned_actor_teardown_releases_normalized_prefix_reservation() {
     assert!(futures_util::poll!(detaching.as_mut()).is_pending());
     assert_eq!(lifecycle.wedged().await, 333_333);
     clock
-        .elapses(detaching.as_mut(), started, Duration::from_secs(5))
+        .elapses(detaching.as_mut(), started, Duration::from_secs(6))
         .await
         .expect("detach entry");
     assert_eq!(pool.entries.read_recover().len(), 0);
@@ -1564,6 +1579,8 @@ async fn eager_attach_cannot_publish_after_shutdown() {
         "attach stays in flight until its actor reports the shutdown"
     );
     clock.expire(deadline).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
     lifecycle.kill_issued(pid).await;
     lifecycle.reaped(pid).await;
     let attach_result = attaching.await.expect("attach task panicked");
@@ -1611,13 +1628,15 @@ async fn aborted_mid_establish_attach_still_allows_bounded_shutdown() {
     assert_eq!(reaping, pid);
     assert_eq!(deadline, started + Duration::from_secs(3));
     clock.expire(deadline).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
     lifecycle.kill_issued(pid).await;
     lifecycle.reaped(pid).await;
     shutdown.await;
     assert_eq!(
         Instant::now(),
-        deadline + scripted::TIMER_TICK,
-        "shutdown after an aborted attach is bounded by the grace period alone"
+        term + scripted::TIMER_TICK,
+        "shutdown after an aborted attach is bounded by grace and terminate alone"
     );
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
@@ -1703,20 +1722,20 @@ async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
     wedged.sort_unstable();
     assert_eq!(wedged, [111_111, 222_222]);
     clock
-        .elapses(shutdown.as_mut(), started, Duration::from_secs(5))
+        .elapses(shutdown.as_mut(), started, Duration::from_secs(6))
         .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
         first.last_error.read_recover().clone(),
         Some(McpServerFault::Shutdown(
-            "MCP stdio child PID 111111 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+            "MCP stdio child PID 111111 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
                 .to_string()
         ))
     );
     assert_eq!(
         second.last_error.read_recover().clone(),
         Some(McpServerFault::Shutdown(
-            "MCP stdio child PID 222222 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+            "MCP stdio child PID 222222 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
                 .to_string()
         ))
     );
@@ -2080,6 +2099,8 @@ async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
     let mut shutdown = Box::pin(pool.shutdown_all());
     assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
     clock.expire(deadline).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
     lifecycle.kill_issued(pid).await;
     lifecycle.reaped(pid).await;
     shutdown.await;
@@ -2153,6 +2174,8 @@ async fn probe_loop_observes_waiting_reason_and_reaps() {
     );
 
     clock.expire(deadline).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
     lifecycle.kill_issued(pid).await;
     lifecycle.reaped(pid).await;
     reconnect_scheduled.notified().await;
@@ -2200,6 +2223,8 @@ async fn probe_loop_observes_healthy_dwell_and_resets_reconnect_backoff() {
     assert!(current_entry.mark_disconnected("prime reconnect backoff".to_string(), 1));
     let (first_pid, first_deadline) = lifecycle.grace_armed().await;
     clock.expire(first_deadline).await;
+    let first_term = lifecycle.term_issued(first_pid).await;
+    clock.expire(first_term).await;
     lifecycle.kill_issued(first_pid).await;
     lifecycle.reaped(first_pid).await;
     reconnect_scheduled.notified().await;
@@ -2250,6 +2275,8 @@ async fn probe_loop_observes_healthy_dwell_and_resets_reconnect_backoff() {
     assert_eq!(stale_result.await.expect("stale timeout reply"), None);
     let (second_pid, second_deadline) = lifecycle.grace_armed().await;
     clock.expire(second_deadline).await;
+    let second_term = lifecycle.term_issued(second_pid).await;
+    clock.expire(second_term).await;
     lifecycle.kill_issued(second_pid).await;
     lifecycle.reaped(second_pid).await;
     reconnect_scheduled.notified().await;
@@ -2339,6 +2366,8 @@ async fn matching_timeout_after_entry_drop_still_cancels_and_reaps_connection() 
     );
 
     clock.expire(deadline).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
     lifecycle.kill_issued(pid).await;
     lifecycle.reaped(pid).await;
     actor

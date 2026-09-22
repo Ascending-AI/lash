@@ -2389,6 +2389,7 @@ dependencies = [
  "lash-internal-lashlang-runtime",
  "lash-internal-sansio",
  "lash-internal-tool-support",
+ "libc",
  "rmcp",
  "serde",
  "serde_json",
