@@ -80,9 +80,9 @@ class DevTestTests(unittest.TestCase):
     def test_worktree_edits_and_shared_manifest_selection(self):
         result = self.invoke("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["command"], ["kiln", "test", "//crates/example:all"])
+        self.assertEqual(json.loads(result.stdout)["command"], ["kiln", "test", "//crates/example:all", "//:schema_checks"])
         (self.source.parents[1] / "Cargo.toml").write_text("[package]\n")
-        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["command"], ["kiln", "test", "//:dev_tests"])
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["command"], ["kiln", "test", "//:dev_tests", "//:schema_checks"])
 
     def test_untracked_content_changes_identity(self):
         untracked = self.root / "crates/example/src/new.rs"
@@ -97,7 +97,7 @@ class DevTestTests(unittest.TestCase):
         query.chmod(0o755)
         result = self.invoke("--dependents", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["command"], ["kiln", "test", "//:dev_tests"])
+        self.assertEqual(json.loads(result.stdout)["command"], ["kiln", "test", "//:dev_tests", "//:schema_checks"])
 
     def test_concurrent_callers_share_failure_but_later_call_retries(self):
         self.env["TEST_EXIT"] = "7"

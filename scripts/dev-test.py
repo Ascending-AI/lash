@@ -115,6 +115,8 @@ def plan(base: str, dependents: bool) -> dict:
             labels = sorted(set(result.stdout.split())) or ["//:dev_tests"]
     if facade:
         labels.append("//crates/lash:ui_fixtures")
+    if labels:
+        labels.append("//:schema_checks")
     result = {
         "base": base,
         "head": git("rev-parse", "HEAD").decode().strip(),
