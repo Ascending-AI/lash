@@ -107,16 +107,6 @@ impl EffectGroupRecordAccessor for EffectGroupRecord {
     }
 }
 
-/// How long a caller parked on rank `n` waits before re-reading the journal.
-///
-/// A settlement written by *another* process reaches this one only by being
-/// read, so the wait is a poll and not purely a notification. The in-process
-/// [`Notify`] shortens it to nothing for the common case where the settling
-/// child is one of this host's own tasks; the interval is what bounds the
-/// cross-process case. It matches [`BUSY_POLL`], the same trade-off the claim
-/// loop already makes for the same reason.
-const SETTLEMENT_POLL: Duration = BUSY_POLL;
-
 /// Every group this driver has open, keyed exactly as ADR 0065 keys them.
 ///
 /// A read-mostly index of per-group states: siblings of *different* groups have
@@ -769,15 +759,26 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         if handle.is_exhausted() {
             return Err(exhausted_group_error(handle));
         }
+        // The store's notifier — shared with every driver over this database —
+        // is what turns a settlement committed by *another* host into a wake
+        // here; `state.settled` still answers for the process-local signals a
+        // commit does not produce (a child task finishing, the group closing).
+        let settlement_notify = self
+            .row_store
+            .settlement_notifier(handle.group_key())
+            .await?;
         loop {
-            let notified = state.settled.notified();
+            let notified = settlement_notify.notified();
             tokio::pin!(notified);
+            let settled = state.settled.notified();
+            tokio::pin!(settled);
             // Enabled *before* the journal read, so a sibling that settles
             // between the read and the park is caught by this future rather
             // than slept through: `Notify::notified()` only starts listening
             // when it is first polled, and `notify_waiters` wakes listeners,
             // not arrivals.
             notified.as_mut().enable();
+            settled.as_mut().enable();
             let closed = state.state.lock_recover().closed;
             if closed {
                 return Err(closed_group_error(handle.group_key()));
@@ -797,7 +798,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     return Err(await_cancelled_error(handle.group_key(), rank));
                 }
                 () = &mut notified => {}
-                () = self.clock.sleep(SETTLEMENT_POLL) => {}
+                () = &mut settled => {}
             }
         }
     }

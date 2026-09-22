@@ -5,6 +5,8 @@
 //! type and the driver/host open paths.
 
 use super::*;
+use std::sync::Arc;
+use tokio::sync::Notify;
 
 mod decode;
 
@@ -21,6 +23,16 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             completion_keys: CompletionKeys::Issued,
             tool_batch_redrive: ToolBatchRedrive::ChildrenFirst,
         }
+    }
+
+    /// The notifier for `group_key`, subscribed on this driver's dedicated
+    /// `LISTEN` connection before the call returns — the ordering the
+    /// caller's enable → read → park sequence needs across processes.
+    async fn settlement_notifier(
+        &self,
+        group_key: &str,
+    ) -> Result<Arc<Notify>, RuntimeEffectControllerError> {
+        self.notify_hub.settlement_notifier(group_key).await
     }
 
     async fn claim(
@@ -169,6 +181,9 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             tx.rollback().await.map_err(effect_store_error)?;
             return Ok(outcome);
         }
+        group_notify::notify_group_settled(&mut tx, &group_key)
+            .await
+            .map_err(effect_store_error)?;
         tx.commit().await.map_err(effect_store_error)?;
         Ok(EffectFinalizeOutcome::Written {
             commit_seq: Some(u64::try_from(commit_seq).map_err(|_| {

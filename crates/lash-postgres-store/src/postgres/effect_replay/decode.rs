@@ -532,16 +532,24 @@ pub(super) async fn read_child_settlement_seq(
 
 /// Allocate the group's next settlement rank, inside a transaction:
 /// `next_seq`, returned.
+///
+/// The `pg_notify` rides the same transaction, so it is delivered exactly
+/// when the rank it announces commits — and not at all when the write rolls
+/// back.
 pub(super) async fn bump_group_rank(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     group_key: &str,
 ) -> Result<i64, RuntimeEffectControllerError> {
-    sqlx::query_scalar(effect_sql().group.bump_next_seq.sql())
+    let settlement_seq = sqlx::query_scalar(effect_sql().group.bump_next_seq.sql())
         .bind(group_key)
         .fetch_optional(&mut **tx)
         .await
         .map_err(effect_store_error)?
-        .ok_or_else(|| missing_group_row(group_key))
+        .ok_or_else(|| missing_group_row(group_key))?;
+    super::super::group_notify::notify_group_settled(tx, group_key)
+        .await
+        .map_err(effect_store_error)?;
+    Ok(settlement_seq)
 }
 
 /// A grouped child whose group row is gone is a corrupt journal, not a silently

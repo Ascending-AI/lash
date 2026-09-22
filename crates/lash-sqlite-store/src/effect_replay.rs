@@ -46,6 +46,7 @@ use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events, wait_sql}
 use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
 
 mod row_store;
+mod settlement_notify;
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
@@ -692,6 +693,7 @@ async fn open_effect_replay_driver(
         signing_secret,
         CompletionKeys::Issued,
         registry,
+        settlement_notify::SettlementNotifierKey::for_file(path),
     )))
 }
 
@@ -722,6 +724,7 @@ async fn open_effect_replay_memory_driver(
         signing_secret,
         CompletionKeys::Unsupported,
         Arc::new(RegistryAttachment::default()),
+        settlement_notify::SettlementNotifierKey::for_memory(),
     )))
 }
 
@@ -732,6 +735,7 @@ fn build_effect_replay_driver(
     signing_secret: Vec<u8>,
     completion_keys: CompletionKeys,
     registry: Arc<RegistryAttachment>,
+    settlement_key: settlement_notify::SettlementNotifierKey,
 ) -> SqliteEffectReplay {
     let await_events = sqlite_await_events(
         conn.clone(),
@@ -745,6 +749,7 @@ fn build_effect_replay_driver(
             conn,
             clock: Arc::clone(&clock),
             registry,
+            settlement_key,
         },
         await_events,
         clock,
@@ -767,6 +772,10 @@ pub struct SqliteEffectReplayRowStore {
     clock: Arc<dyn lash_core::Clock>,
     /// The bound process registry whose file holds process-scope fences.
     registry: Arc<RegistryAttachment>,
+    /// This store's identity in the process-wide settlement-notifier registry:
+    /// the canonical database path for a file journal, so two hosts over one
+    /// file wake each other's parked settlement readers.
+    settlement_key: settlement_notify::SettlementNotifierKey,
 }
 
 impl SqliteEffectReplayRowStore {
@@ -775,6 +784,13 @@ impl SqliteEffectReplayRowStore {
             .ensure_attached(&self.conn)
             .await
             .map_err(effect_sqlite_error)
+    }
+
+    /// Wake every waiter parked on `group_key`'s next settlement — this
+    /// host's own awaiter or another host's over the same file. Called after
+    /// a rank write's commit has landed.
+    fn notify_group_settled(&self, group_key: &str) {
+        settlement_notify::notify_group_settled(&self.settlement_key, group_key);
     }
 }
 

@@ -569,6 +569,7 @@ fn build_effect_replay_driver(
     StoreEffectReplayDriver::new(
         PostgresEffectReplayRowStore {
             pool: storage.pool.clone(),
+            notify_hub: group_notify::GroupNotifyHub::spawn(&storage.pool),
         },
         await_events,
         clock,
@@ -583,6 +584,9 @@ fn build_effect_replay_driver(
 /// module is private, so nothing outside this crate can reach it.
 pub struct PostgresEffectReplayRowStore {
     pool: PgPool,
+    /// The driver's dedicated `LISTEN` connection and the in-process
+    /// notifiers it fans group-settlement `NOTIFY`s into.
+    notify_hub: Arc<group_notify::GroupNotifyHub>,
 }
 
 impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayRowStore {}
@@ -672,6 +676,8 @@ fn effect_store_message(message: String) -> RuntimeEffectControllerError {
 // `src/postgres/tests.rs`. The SQLite sibling needs no attribute because its
 // parent is an ordinary `mod effect_replay;`. `schema_shape.rs` carries the same
 // workaround for the same reason.
+#[path = "effect_replay/group_notify.rs"]
+mod group_notify;
 #[path = "effect_replay/row_store.rs"]
 mod row_store;
 #[path = "effect_replay/tests.rs"]
