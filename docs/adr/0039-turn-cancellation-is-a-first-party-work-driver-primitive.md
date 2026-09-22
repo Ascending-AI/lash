@@ -56,7 +56,7 @@ request gate. A host with a known origin can supply its own vocabulary, such as 
 
 Turn cancellation has three operational layers:
 
-1. `TurnWorkDriver::request_cancel` is the cooperative foreground-turn primitive. Its inline tier
+1. `TurnWorkDriver::request_cancel` is the cooperative foreground-turn primitive. Its native tier
    is process-local; its durable tier survives owner-process loss and replay. It can unwind
    cancellable provider/tool waits, but it cannot guarantee that detached tasks, subprocesses, or
    non-cooperative providers have stopped.
