@@ -328,8 +328,12 @@ IDENTIFIER_RENAME_BASELINES = {
     #     every persisted node body is byte-identical — the serde-shape
     #     regression tests pin that — and SESSION_NODE_BODY_SCHEMA_VERSION
     #     stays 17.
+    #   FIG-3411: `LlmCallId` gained `PartialOrd`/`Ord` derives so
+    #     `UsageDeltaIdentity` can order a BTreeSet. `LlmCallId` serializes
+    #     `#[serde(transparent)]` over `String`, so every emitted byte is
+    #     identical — SESSION_NODE_BODY_SCHEMA_VERSION stays 18.
     'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:fbf343e99da3d0f156255adf90c62cf4e9fc594ed436f40f3ac60796e11ec139',
-    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:e5ae0df442e6b6f88ce65b4c4d744caafa8529c00ebffe42df2dd5d90cdfa140',
+    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:b8e674b0a616e2fc2fce0cd01dc2e488f051a9e047a85d8b9b7f1f90f6a8f2d4',
 
     # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a
     # two-line doc comment and `#[expect(clippy::expect_used, ...)]` under the
