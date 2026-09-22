@@ -180,7 +180,7 @@ lash_store_sql::statements! {
              SET lifecycle = ?2::jsonb
              WHERE group_key = ?1
                AND lifecycle->>'type' = ANY(?3)
-             RETURNING lifecycle";
+             RETURNING group_key, lifecycle";
 
         /// Every `closing` group under scope `?1` — the resumable
         /// finalization set (ADR 0099 §7).

@@ -15,7 +15,8 @@ use lash_core::facade_support::effect_replay_driver::{
     AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectClaimObservation,
     EffectCommitState, EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
     EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupLifecycle,
-    EffectGroupRecord, EffectLeaseFence, EffectTerminal, MintingEffectRef,
+    EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence, EffectTerminal,
+    MintingEffectRef,
 };
 
 #[test]
@@ -671,6 +672,19 @@ async fn retirement_removes_a_group_and_its_children_together() {
         .await
         .expect("finalize the first child");
     discharge(&store, "k1").await;
+
+    // Session retirement refuses while the group is live (ADR 0099 §7);
+    // settle the lifecycle first so the delete is the thing under test.
+    store
+        .transition_group_lifecycle(
+            GROUP,
+            &[EffectGroupLifecyclePhase::Live],
+            &EffectGroupLifecycle::Settled {
+                disposition: lash_core::LoserPolicy::RunToCompletion,
+            },
+        )
+        .await
+        .expect("settle the group lifecycle");
 
     let removed = store
         .retire_journal(&lash_core::EffectJournalRetirement::Session {

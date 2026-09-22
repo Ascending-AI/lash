@@ -257,7 +257,7 @@ UPDATE lash_runtime_effect_group
              SET lifecycle = $2::jsonb
              WHERE group_key = $1
                AND lifecycle->>'type' = ANY($3)
-             RETURNING lifecycle
+             RETURNING group_key, lifecycle
 === postgres::GroupPostgresStatements | effect_group.select_closing_by_scope
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
                     expected_children, lifecycle, created_at_ms

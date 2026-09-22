@@ -38,9 +38,15 @@ const PROCESS_REGISTRY_LIFECYCLE_SOURCE: &str =
 const PROCESS_REGISTRY_LEASES_SOURCE: &str =
     include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
-// The lease atoms live in the `effect_replay/row_store.rs` split; the module
-// root only re-exports them, so the fence reads the file that holds the bodies.
-const EFFECT_REPLAY_SOURCE: &str = include_str!("../src/postgres/effect_replay/row_store.rs");
+// The lease atoms live in the `effect_replay/row_store.rs` split and the
+// write-side helpers it calls live in `effect_replay/decode.rs`; the module
+// root only re-exports them, so the fence reads the files that hold the
+// bodies.
+const EFFECT_REPLAY_SOURCE: &str = concat!(
+    include_str!("../src/postgres/effect_replay/row_store.rs"),
+    "\n",
+    include_str!("../src/postgres/effect_replay/decode.rs"),
+);
 const CONNECTION_SQL_SOURCE: &str = include_str!("../src/postgres/connection_sql.rs");
 
 fn unique_id(prefix: &str) -> String {
