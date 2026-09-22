@@ -256,6 +256,9 @@ pub struct ExpectedArgumentType {
 pub struct TypeDiagnostic {
     pub node_id: String,
     pub kind: String,
+    pub class: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,

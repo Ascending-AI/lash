@@ -55,6 +55,7 @@ pub(super) struct Linker<'module> {
     /// The [`AstPath`] whose facts the workflow projector will read for a
     /// recovered error in the current top-level workflow node.
     pub(super) workflow_diagnostic_owner: RefCell<Option<AstPath>>,
+    pub(super) workflow_error_path: RefCell<Option<AstPath>>,
     /// Process declarations lifted from `Expr::ProcessLiteral` during the
     /// lowering walk, in lift order, with the span to record for each.
     /// While one literal lifts, `collect_signals` is on and every wait site
@@ -92,6 +93,7 @@ impl<'module> Linker<'module> {
             workflow_analysis: None,
             recover_workflow_errors: Cell::new(false),
             workflow_diagnostic_owner: RefCell::new(None),
+            workflow_error_path: RefCell::new(None),
             collect_signals: Cell::new(false),
             inferred_signals: RefCell::new(BTreeMap::new()),
             lifted_declarations: RefCell::new(Vec::new()),
@@ -569,9 +571,6 @@ impl<'module> Linker<'module> {
         };
         let expected = self.resolve_type_aliases(expected);
         match (expr, &expected) {
-            (Expr::LabelAnnotated { expr, .. }, _) => {
-                self.validate_expected_literals(expr, Some(&expected), span)
-            }
             (Expr::String(value), TypeExpr::Enum(members)) if !members.contains(value) => {
                 Err(LinkError::IncompatibleExpectedLiteral {
                     expected: format_type_expr(&expected),
@@ -594,20 +593,6 @@ impl<'module> Linker<'module> {
                         span,
                     })
                 }
-            }
-            (Expr::Record(entries), TypeExpr::Object(fields)) => {
-                for (name, value) in entries {
-                    if let Some(field) = fields.iter().find(|field| field.name == *name) {
-                        self.validate_expected_literals(value, Some(&field.ty), span)?;
-                    }
-                }
-                Ok(())
-            }
-            (Expr::List(items) | Expr::Tuple(items), TypeExpr::List(item)) => {
-                for value in items {
-                    self.validate_expected_literals(value, Some(item), span)?;
-                }
-                Ok(())
             }
             _ => Ok(()),
         }

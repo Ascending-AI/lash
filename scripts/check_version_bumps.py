@@ -897,7 +897,12 @@ def load_config(path: Path) -> tuple[Surface, ...]:
             paths = raw_guard.get("paths")
             symbols = raw_guard.get("symbols", [])
             must_cover = raw_guard.get("must_cover", [])
-            if kind not in {"file", "rust_items", "rust_serde_shapes"}:
+            if kind not in {
+                "file",
+                "rust_items",
+                "rust_impls",
+                "rust_serde_shapes",
+            }:
                 raise CheckError(f"{guard_location} has unsupported kind {kind!r}")
             if not isinstance(paths, list) or not paths or not all(
                 isinstance(value, str) and value for value in paths
@@ -911,10 +916,12 @@ def load_config(path: Path) -> tuple[Surface, ...]:
                 isinstance(value, str) and value for value in must_cover
             ):
                 raise CheckError(f"{guard_location} must_cover must be strings")
-            if kind == "rust_items" and not symbols:
-                raise CheckError(f"{guard_location} rust_items requires symbols")
-            if kind != "rust_items" and symbols:
-                raise CheckError(f"{guard_location} only rust_items accepts symbols")
+            if kind in {"rust_items", "rust_impls"} and not symbols:
+                raise CheckError(f"{guard_location} {kind} requires symbols")
+            if kind not in {"rust_items", "rust_impls"} and symbols:
+                raise CheckError(
+                    f"{guard_location} only rust_items and rust_impls accept symbols"
+                )
             if kind == "rust_serde_shapes" and not must_cover:
                 raise CheckError(
                     f"{guard_location} rust_serde_shapes requires must_cover"
@@ -1356,6 +1363,11 @@ RUST_SERDE_SHAPE = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
     r"(?:struct|enum)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
+RUST_SERDE_IMPL = re.compile(
+    r"(?m)^[ \t]*impl(?:[ \t]*<[^>{}]*>)?[ \t]+"
+    r"((?:serde::)?(?:Serialize|Deserialize)(?:[ \t]*<[^>{}]*>)?)"
+    r"[ \t]+for[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
+)
 RUST_INLINE_MODULE = re.compile(
     r"(?:pub(?:\s*\(\s*(?:crate|self|super|in\s+(?:crate|self|super)"
     r"(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*\))?\s+)?"
@@ -1535,6 +1547,22 @@ def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
     return found
 
 
+def named_rust_serde_impls(text: str, names: Iterable[str]) -> dict[str, str]:
+    wanted = set(names)
+    found: dict[str, str] = {}
+    for match in RUST_SERDE_IMPL.finditer(text):
+        trait = "Deserialize" if "Deserialize" in match.group(1) else "Serialize"
+        name = f"{trait} for {match.group(2)}"
+        if name not in wanted:
+            continue
+        end = rust_item_end(text, match.start())
+        value = strip_rust_trivia(text[match.start() : end])
+        if name in found and found[name] != value:
+            raise CheckError(f"guarded Rust impl {name} is ambiguous in one file")
+        found[name] = value
+    return found
+
+
 def serde_shapes(text: str) -> dict[str, str]:
     found: dict[str, str] = {}
     attribute_ranges = rust_outer_attribute_ranges(text)
@@ -1595,6 +1623,13 @@ def guard_signature(
                 (f"{path}:{name}", apply_elision(f"{path}:{name}", value))
                 for name, value in items.items()
             )
+        elif guard.kind == "rust_impls":
+            items = named_rust_serde_impls(content, guard.symbols)
+            found_symbols.update(items)
+            signature.extend(
+                (f"{path}:{name}", apply_elision(f"{path}:{name}", value))
+                for name, value in items.items()
+            )
         else:
             items = serde_shapes(content)
             covered_shapes.update(name.partition("#")[0] for name in items)
@@ -1603,7 +1638,7 @@ def guard_signature(
                 for name, value in items.items()
             )
 
-    if guard.kind == "rust_items" and enforce_presence:
+    if guard.kind in {"rust_items", "rust_impls"} and enforce_presence:
         missing = sorted(set(guard.symbols) - found_symbols)
         if missing:
             raise CheckError(

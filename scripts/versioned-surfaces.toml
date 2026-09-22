@@ -1290,6 +1290,52 @@ kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/workflow_graph.rs"]
 must_cover = ["WorkflowGraph"]
 
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/ast.rs"]
+symbols = [
+  "Declaration",
+  "TypeDecl",
+  "ProcessDecl",
+  "ProcessParam",
+  "ProcessSignalDecl",
+  "FunctionDecl",
+  "FunctionParam",
+  "LabelMetadata",
+  "AssignTarget",
+  "AssignPathStep",
+  "Expr",
+  "FunctionExpr",
+  "ProcessLiteralExpr",
+  "TryExpr",
+  "CatchClause",
+  "ListComprehensionClause",
+  "TypeExpr",
+  "UnionMembers",
+  "ProcessSignature",
+  "ProcessType",
+  "ProcessTypeKind",
+  "ProcessTypeWire",
+  "ProcessParamWire",
+  "TypeField",
+  "ResourceRefExpr",
+  "UnaryOp",
+  "JavaScriptUnaryOp",
+  "JavaScriptBinaryOp",
+  "JavaScriptLogicalOp",
+  "BinaryOp",
+]
+
+[[surface.guard]]
+kind = "rust_impls"
+paths = ["crates/lashlang/src/ast.rs"]
+symbols = [
+  "Serialize for UnionMembers",
+  "Deserialize for UnionMembers",
+  "Serialize for ProcessType",
+  "Deserialize for ProcessType",
+]
+
 # The document's value types stay in lashlang; the projector that mints its
 # node identity and the printer that produces its text live in lash-typescript,
 # so the guard has to watch both or a projection change ships unversioned.
@@ -1307,6 +1353,31 @@ description = "serialized optional workflow type-facet projection"
 kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/workflow_graph/facets.rs"]
 must_cover = ["WorkflowNodeTypeFacets"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/ast.rs"]
+symbols = [
+  "TypeExpr",
+  "UnionMembers",
+  "ProcessSignature",
+  "ProcessType",
+  "ProcessTypeKind",
+  "ProcessTypeWire",
+  "ProcessParamWire",
+  "ProcessParam",
+  "TypeField",
+]
+
+[[surface.guard]]
+kind = "rust_impls"
+paths = ["crates/lashlang/src/ast.rs"]
+symbols = [
+  "Serialize for UnionMembers",
+  "Deserialize for UnionMembers",
+  "Serialize for ProcessType",
+  "Deserialize for ProcessType",
+]
 
 [[surface]]
 constant = "LASHLANG_SEMANTIC_HASH_VERSION"

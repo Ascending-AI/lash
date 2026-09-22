@@ -3,51 +3,6 @@
 
 use super::*;
 
-pub(crate) fn first_receiver_operation(expression: &Expr) -> Option<&str> {
-    match expression {
-        Expr::ReceiverCall { operation, .. } => lashlang::execution_site_descriptor(expression)
-            .filter(|(kind, _)| *kind == lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND)
-            .map(|_| operation.as_str()),
-        Expr::Await(expr) => match expr.as_ref() {
-            Expr::ReceiverCall { .. } => first_receiver_operation(expr),
-            Expr::ResultUnwrap(inner) => match inner.as_ref() {
-                Expr::ReceiverCall { .. } => first_receiver_operation(inner),
-                _ => None,
-            },
-            _ => None,
-        },
-        Expr::ResultUnwrap(expr) => match expr.as_ref() {
-            Expr::ReceiverCall { .. } => first_receiver_operation(expr),
-            Expr::Await(inner) => match inner.as_ref() {
-                Expr::ReceiverCall { .. } => first_receiver_operation(inner),
-                _ => None,
-            },
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-pub(crate) fn effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
-    if let Expr::ResultUnwrap(expr) = expression {
-        return direct_effect_kind(expr);
-    }
-    direct_effect_kind(expression)
-}
-
-fn direct_effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
-    match expression {
-        Expr::Await(_) => Some(WorkflowEffectKind::AwaitJoin),
-        Expr::WaitSignal { .. } => Some(WorkflowEffectKind::WaitSignal),
-        Expr::SleepFor(_) | Expr::SleepUntil(_) => Some(WorkflowEffectKind::Sleep),
-        Expr::Print(_) => Some(WorkflowEffectKind::Print),
-        Expr::Yield(_) => Some(WorkflowEffectKind::Yield),
-        Expr::Break => Some(WorkflowEffectKind::Break),
-        Expr::Continue => Some(WorkflowEffectKind::Continue),
-        _ => None,
-    }
-}
-
 pub(crate) fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
     let descriptor_expression = match expression {
         Expr::ResultUnwrap(inner) => inner.as_ref(),
@@ -64,13 +19,10 @@ pub(crate) fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> Str
         // The process control effects are tool calls now, and the retired
         // dialect forms no longer reach this projection; the remaining
         // execution-site effects all carry a compiler descriptor.
-        WorkflowEffectKind::Cancel
-        | WorkflowEffectKind::StartProcess
-        | WorkflowEffectKind::SignalRun
-        | WorkflowEffectKind::WaitSignal
-        | WorkflowEffectKind::Sleep
-        | WorkflowEffectKind::Yield
-        | WorkflowEffectKind::Wake => {
+        WorkflowEffectKind::WaitSignal
+        | WorkflowEffectKind::SleepFor
+        | WorkflowEffectKind::SleepUntil
+        | WorkflowEffectKind::Yield => {
             unreachable!("execution-site effects must have a compiler descriptor")
         }
     }

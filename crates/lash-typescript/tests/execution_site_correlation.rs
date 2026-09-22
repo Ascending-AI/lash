@@ -478,7 +478,7 @@ fn execution_site_wrapped_effect_uses_the_compiler_descriptor_for_its_graph_name
     assert!(matches!(
         &node.kind,
         WorkflowNodeKind::Effect {
-            effect: WorkflowEffectKind::Sleep,
+            effect: WorkflowEffectKind::SleepFor,
             ..
         }
     ));

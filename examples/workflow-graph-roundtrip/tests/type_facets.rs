@@ -1,5 +1,30 @@
 use serde_json::Value;
-use workflow_graph_roundtrip::{AppState, EditableValue, SaveWorkflowResponse, WorkflowDocument};
+use workflow_graph_roundtrip::{
+    AppState, EditableValue, SaveWorkflowResponse, TypeDiagnostic, WorkflowDocument,
+};
+
+#[test]
+fn facet_diagnostic_http_json_golden_is_exact() {
+    let diagnostic = TypeDiagnostic {
+        node_id: "node-1".to_string(),
+        kind: "incompatible_expected_literal".to_string(),
+        class: "definite".to_string(),
+        slot: Some("arg[0][\"query\"]".to_string()),
+        message: "expected enum, got incompatible literal \"bad\"".to_string(),
+        span: Some(lashlang::Span { start: 4, end: 9 }),
+    };
+    assert_eq!(
+        serde_json::to_value(diagnostic).expect("diagnostic serializes"),
+        serde_json::json!({
+            "nodeId": "node-1",
+            "kind": "incompatible_expected_literal",
+            "class": "definite",
+            "slot": "arg[0][\"query\"]",
+            "message": "expected enum, got incompatible literal \"bad\"",
+            "span": { "start": 4, "end": 9 }
+        })
+    );
+}
 
 #[tokio::test]
 async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
@@ -43,12 +68,9 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
         .iter()
         .find(|node| node.data.operation.as_deref() == Some("show_message"))
         .expect("typed display call");
-    assert!(
-        call.data
-            .expected_arg_types
-            .iter()
-            .any(|argument| { argument.slot == "arg[0].text" && argument.expected_type == "str" })
-    );
+    assert!(call.data.expected_arg_types.iter().any(|argument| {
+        argument.slot == "arg[0][\"text\"]" && argument.expected_type == "str"
+    }));
     let loop_node = document
         .nodes
         .iter()
@@ -132,13 +154,9 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     let emails = select_workflow(&client, &base, "summarize-emails").await;
     assert_clean_facets(&emails);
     let summarize = call_with_task(&emails, "Summarize this email");
-    assert!(
-        summarize
-            .data
-            .expected_arg_types
-            .iter()
-            .any(|argument| { argument.slot == "arg[0].task" && argument.expected_type == "str" })
-    );
+    assert!(summarize.data.expected_arg_types.iter().any(|argument| {
+        argument.slot == "arg[0][\"task\"]" && argument.expected_type == "str"
+    }));
     // FIG-3033: `for (const email of emails)` lowers through an iterable copy,
     // so the loop binding itself projects as `any`; the mocked element type
     // still reaches the call through the list it iterates.
@@ -168,13 +186,9 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     let nvidia = select_workflow(&client, &base, "research-nvidia-stock").await;
     assert_clean_facets(&nvidia);
     let search = call_with_field(&nvidia, "query");
-    assert!(
-        search
-            .data
-            .expected_arg_types
-            .iter()
-            .any(|argument| { argument.slot == "arg[0].query" && argument.expected_type == "str" })
-    );
+    assert!(search.data.expected_arg_types.iter().any(|argument| {
+        argument.slot == "arg[0][\"query\"]" && argument.expected_type == "str"
+    }));
     let research = call_with_operation(&nvidia, "spawn");
     assert!(research.data.available_vars.iter().any(|variable| {
         variable.name == "search"
@@ -197,7 +211,9 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
             .data
             .expected_arg_types
             .iter()
-            .any(|argument| { argument.slot == "arg[0].text" && argument.expected_type == "str" })
+            .any(|argument| {
+                argument.slot == "arg[0][\"text\"]" && argument.expected_type == "str"
+            })
     );
 
     let response = client
@@ -225,23 +241,17 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     let standup = select_workflow(&client, &base, "team-standup-digest").await;
     assert_clean_facets(&standup);
     let slack = call_with_field(&standup, "channel");
-    assert!(
-        slack.data.expected_arg_types.iter().any(|argument| {
-            argument.slot == "arg[0].channel" && argument.expected_type == "str"
-        })
-    );
+    assert!(slack.data.expected_arg_types.iter().any(|argument| {
+        argument.slot == "arg[0][\"channel\"]" && argument.expected_type == "str"
+    }));
     let github = call_with_field(&standup, "repo");
     assert!(github.data.available_vars.iter().any(|variable| {
         variable.name == "messages"
             && variable.variable_type == "list[{ text: str, ts: str, user: str }]"
     }));
-    assert!(
-        github
-            .data
-            .expected_arg_types
-            .iter()
-            .any(|argument| { argument.slot == "arg[0].repo" && argument.expected_type == "str" })
-    );
+    assert!(github.data.expected_arg_types.iter().any(|argument| {
+        argument.slot == "arg[0][\"repo\"]" && argument.expected_type == "str"
+    }));
     let digest = call_with_operation(&standup, "spawn");
     assert!(digest.data.available_vars.iter().any(|variable| {
         variable.name == "activity"

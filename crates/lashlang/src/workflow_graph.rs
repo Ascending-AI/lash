@@ -13,7 +13,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::LashlangExecutionSite;
-use crate::ast::{FunctionDecl, ProcessParam, ProcessSignalDecl, TypeDecl, TypeExpr};
+use crate::ast::{
+    AssignTarget, AstString, Expr, FunctionDecl, ProcessParam, ProcessSignalDecl, TypeDecl,
+    TypeExpr,
+};
 use crate::span::Span;
 use crate::tracking::WorkflowExecutionSite;
 
@@ -24,7 +27,7 @@ pub use execution_sites::{execution_sites, runtime_execution_site_for_workflow_s
 pub use facets::*;
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 11;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 12;
 
 /// A deterministic node identifier minted from canonical source and AST position.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -154,33 +157,40 @@ pub struct WorkflowNode {
 pub enum WorkflowNodeKind {
     Data {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        expression: String,
+        binding: Option<AssignTarget>,
+        expression: Expr,
     },
     Call {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
+        binding: Option<AssignTarget>,
+        receiver: Expr,
         operation: String,
-        expression: String,
+        #[serde(default)]
+        arguments: Vec<WorkflowArgument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        result_steps: Vec<WorkflowResultStep>,
     },
     Effect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
+        binding: Option<AssignTarget>,
         effect: WorkflowEffectKind,
-        expression: String,
+        #[serde(default)]
+        arguments: Vec<WorkflowArgument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        result_steps: Vec<WorkflowResultStep>,
     },
     Computation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        expression: String,
+        binding: Option<AssignTarget>,
+        expression: Expr,
     },
     StateUpdate {
-        target: String,
-        expression: String,
+        target: AssignTarget,
+        expression: Expr,
     },
     Terminal {
         terminal: WorkflowTerminalKind,
-        expression: String,
+        expression: Expr,
     },
     Container(WorkflowContainer),
     Opaque {
@@ -188,18 +198,196 @@ pub enum WorkflowNodeKind {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One call or effect argument in graph order.
+///
+/// Type facets address these values with a serialized [`WorkflowSlotPath`].
+/// Its typed call, argument, field, and index segments cannot collide when a
+/// field contains punctuation. Nodes with several nested receiver calls add a
+/// call segment in depth-first IR walk order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkflowArgument {
+    Positional { value: Expr },
+    Named { fields: Vec<(AstString, Expr)> },
+}
+
+/// Ordered wrappers around a call or effect, from the operation outwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowResultStep {
+    Await,
+    UnwrapResult,
+}
+
+/// Decomposes one receiver call into the graph's structural IR fields.
+pub fn workflow_call_from_ir(
+    expression: &Expr,
+) -> Option<(Expr, String, Vec<WorkflowArgument>, Vec<WorkflowResultStep>)> {
+    let (call, result_steps) = peel_call_result_steps(expression);
+    let Expr::ReceiverCall {
+        receiver,
+        operation,
+        args,
+    } = call
+    else {
+        return None;
+    };
+    Some((
+        receiver.as_ref().clone(),
+        operation.to_string(),
+        args.iter().map(workflow_argument_from_ir).collect(),
+        result_steps,
+    ))
+}
+
+/// Reconstructs the authoritative IR represented by a call node.
+pub fn workflow_call_to_ir(
+    receiver: &Expr,
+    operation: &str,
+    arguments: &[WorkflowArgument],
+    result_steps: &[WorkflowResultStep],
+) -> Expr {
+    apply_result_steps(
+        Expr::ReceiverCall {
+            receiver: Box::new(receiver.clone()),
+            operation: operation.into(),
+            args: arguments.iter().map(workflow_argument_to_ir).collect(),
+        },
+        result_steps,
+    )
+}
+
+/// Decomposes one effect into its exact kind, arguments, and outer result steps.
+pub fn workflow_effect_from_ir(
+    expression: &Expr,
+) -> Option<(
+    WorkflowEffectKind,
+    Vec<WorkflowArgument>,
+    Vec<WorkflowResultStep>,
+)> {
+    let (effect, result_steps) = peel_result_steps(expression);
+    let (kind, args) = match effect {
+        Expr::Await(value) => (WorkflowEffectKind::AwaitJoin, vec![value.as_ref().clone()]),
+        Expr::WaitSignal { name } => (
+            WorkflowEffectKind::WaitSignal,
+            vec![Expr::String(name.clone())],
+        ),
+        Expr::SleepFor(value) => (WorkflowEffectKind::SleepFor, vec![value.as_ref().clone()]),
+        Expr::SleepUntil(value) => (WorkflowEffectKind::SleepUntil, vec![value.as_ref().clone()]),
+        Expr::Print(value) => (WorkflowEffectKind::Print, vec![value.as_ref().clone()]),
+        Expr::Yield(value) => (WorkflowEffectKind::Yield, vec![value.as_ref().clone()]),
+        Expr::Break => (WorkflowEffectKind::Break, Vec::new()),
+        Expr::Continue => (WorkflowEffectKind::Continue, Vec::new()),
+        _ => return None,
+    };
+    Some((
+        kind,
+        args.iter().map(workflow_argument_from_ir).collect(),
+        result_steps,
+    ))
+}
+
+/// Reconstructs the authoritative IR represented by an effect node.
+pub fn workflow_effect_to_ir(
+    effect: WorkflowEffectKind,
+    arguments: &[WorkflowArgument],
+    result_steps: &[WorkflowResultStep],
+) -> Option<Expr> {
+    let values = arguments
+        .iter()
+        .map(workflow_argument_to_ir)
+        .collect::<Vec<_>>();
+    let expression = match (effect, values.as_slice()) {
+        (WorkflowEffectKind::AwaitJoin, [value]) => Expr::Await(Box::new(value.clone())),
+        (WorkflowEffectKind::WaitSignal, [Expr::String(name)]) => {
+            Expr::WaitSignal { name: name.clone() }
+        }
+        (WorkflowEffectKind::SleepFor, [value]) => Expr::SleepFor(Box::new(value.clone())),
+        (WorkflowEffectKind::SleepUntil, [value]) => Expr::SleepUntil(Box::new(value.clone())),
+        (WorkflowEffectKind::Print, [value]) => Expr::Print(Box::new(value.clone())),
+        (WorkflowEffectKind::Yield, [value]) => Expr::Yield(Box::new(value.clone())),
+        (WorkflowEffectKind::Break, []) => Expr::Break,
+        (WorkflowEffectKind::Continue, []) => Expr::Continue,
+        _ => return None,
+    };
+    Some(apply_result_steps(expression, result_steps))
+}
+
+fn workflow_argument_from_ir(value: &Expr) -> WorkflowArgument {
+    match value {
+        Expr::Record(fields) => WorkflowArgument::Named {
+            fields: fields.clone(),
+        },
+        value => WorkflowArgument::Positional {
+            value: value.clone(),
+        },
+    }
+}
+
+fn workflow_argument_to_ir(argument: &WorkflowArgument) -> Expr {
+    match argument {
+        WorkflowArgument::Positional { value } => value.clone(),
+        WorkflowArgument::Named { fields } => Expr::Record(fields.clone()),
+    }
+}
+
+fn peel_result_steps(expression: &Expr) -> (&Expr, Vec<WorkflowResultStep>) {
+    let mut expression = expression;
+    let mut outer_steps = Vec::new();
+    loop {
+        match expression {
+            Expr::ResultUnwrap(inner) => {
+                outer_steps.push(WorkflowResultStep::UnwrapResult);
+                expression = inner;
+            }
+            _ => {
+                outer_steps.reverse();
+                return (expression, outer_steps);
+            }
+        }
+    }
+}
+
+fn peel_call_result_steps(expression: &Expr) -> (&Expr, Vec<WorkflowResultStep>) {
+    let mut expression = expression;
+    let mut outer_steps = Vec::new();
+    loop {
+        match expression {
+            Expr::Await(inner) => {
+                outer_steps.push(WorkflowResultStep::Await);
+                expression = inner;
+            }
+            Expr::ResultUnwrap(inner) => {
+                outer_steps.push(WorkflowResultStep::UnwrapResult);
+                expression = inner;
+            }
+            _ => {
+                outer_steps.reverse();
+                return (expression, outer_steps);
+            }
+        }
+    }
+}
+
+fn apply_result_steps(mut expression: Expr, result_steps: &[WorkflowResultStep]) -> Expr {
+    for step in result_steps {
+        expression = match step {
+            WorkflowResultStep::Await => Expr::Await(Box::new(expression)),
+            WorkflowResultStep::UnwrapResult => Expr::ResultUnwrap(Box::new(expression)),
+        };
+    }
+    expression
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowEffectKind {
-    StartProcess,
     AwaitJoin,
-    SignalRun,
     WaitSignal,
-    Sleep,
-    Cancel,
+    SleepFor,
+    SleepUntil,
     Print,
     Yield,
-    Wake,
     Break,
     Continue,
 }
@@ -216,8 +404,8 @@ pub enum WorkflowTerminalKind {
 pub enum WorkflowContainer {
     If {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        condition: String,
+        binding: Option<AssignTarget>,
+        condition: Expr,
         /// Whether the source's then branch is a statement block rather than a value expression.
         then_is_block: bool,
         /// Whether the source's else branch is a block rather than a direct value or `else if`.
@@ -227,16 +415,16 @@ pub enum WorkflowContainer {
     },
     For {
         binding: String,
-        iterable: String,
+        iterable: Expr,
         body: Box<WorkflowSubgraph>,
     },
     While {
-        condition: String,
+        condition: Expr,
         body: Box<WorkflowSubgraph>,
     },
     ListComprehension {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
+        binding: Option<AssignTarget>,
         clauses: Vec<WorkflowListComprehensionClause>,
         element: Box<WorkflowSubgraph>,
     },
@@ -286,8 +474,8 @@ impl WorkflowContainer {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkflowListComprehensionClause {
-    For { binding: String, iterable: String },
-    If { condition: String },
+    For { binding: String, iterable: Expr },
+    If { condition: Expr },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

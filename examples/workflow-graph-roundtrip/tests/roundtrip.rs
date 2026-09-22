@@ -1017,7 +1017,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
                 matches!(
                     &node.kind,
                     lashlang::WorkflowNodeKind::StateUpdate { target, .. }
-                        if target.contains('.')
+                        if !target.steps.is_empty()
                 )
             }));
         }

@@ -69,7 +69,7 @@ pub(super) fn seeded_process_body(
             name_source: WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Terminal {
                 terminal: WorkflowTerminalKind::Finish,
-                expression: "return 0;".to_string(),
+                expression: lashlang::Expr::Return(Box::new(lashlang::Expr::Number(0.0))),
             },
             available_variables: params.iter().map(|param| param.name.to_string()).collect(),
             type_facets: None,
