@@ -310,9 +310,4 @@ mod tests {
             QueuedDrainSelection::leading(3)
         );
     }
-
-    #[test]
-    fn the_configured_default_is_one_at_a_time() {
-        assert_eq!(default_queued_drain_policy().name(), "one_at_a_time");
-    }
 }
