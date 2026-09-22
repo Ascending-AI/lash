@@ -735,7 +735,11 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// the whole four-column claim identity (FIG-3262): a claim id/token pair
 /// with no owner was representable. A pre-70 database is rejected at open and
 /// recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 70;
+/// Version 71 removes the redundant payload-family kind from stored blob
+/// envelopes (FIG-1949 layer 2). The durable-core version guards these bytes
+/// as well as the DDL. Pre-71 catalogs are rejected at open and recreated;
+/// there is no envelope migration or legacy decode path.
+pub(crate) const SCHEMA_VERSION: i32 = 71;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

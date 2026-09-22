@@ -110,7 +110,7 @@ must_cover = [
 [[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-description = "SQLite session-store tables, columns, constraints, and unique indexes"
+description = "SQLite session-store DDL and stored blob envelopes"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -120,6 +120,11 @@ paths = [
 ]
 symbols = ["SCHEMA", "AWAIT_EVENT_TABLES"]
 elide = "sql_idempotent_index"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sqlite-store/src/lib.rs"]
+symbols = ["StoredBlobEnvelope", "BlobArtifactDescriptor", "BlobStorageHint", "BlobCompression"]
 
 [[surface]]
 constant = "PROCESS_SCHEMA_VERSION"

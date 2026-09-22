@@ -1,6 +1,7 @@
-use lash_sqlite_store::{SESSION_SCHEMA_VERSION, Store};
+use lash_core::{StorePreflight, StoreSchemaVerdict};
+use lash_sqlite_store::{SESSION_SCHEMA_VERSION, SqliteStorePreflight, Store};
 
-const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 69;
+const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 70;
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
@@ -17,11 +18,44 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
     );
 
     let connection = rusqlite::Connection::open(&path).expect("open SQLite predecessor fixture");
+    #[derive(serde::Serialize)]
+    struct PriorEnvelope<'a> {
+        descriptor: serde_json::Value,
+        compression: &'a str,
+        #[serde(with = "serde_bytes")]
+        content: &'a [u8],
+    }
+    let prior_envelope = rmp_serde::to_vec_named(&PriorEnvelope {
+        descriptor: serde_json::json!({
+            "kind": "CheckpointComponent",
+            "hints": ["Compressible", "LargePayload"],
+        }),
+        compression: "None",
+        content: b"pre-cutover payload",
+    })
+    .expect("encode the pre-cutover envelope shape");
+    let blob_ref = lash_core::BlobRef::for_content(b"pre-cutover payload");
+    connection
+        .execute(
+            "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",
+            rusqlite::params![blob_ref.as_str(), prior_envelope],
+        )
+        .expect("retain an envelope with the deleted kind field");
     connection
         .pragma_update(None, "user_version", RETAINED_PRIOR_DURABLE_CORE_GENERATION)
         .expect("stamp retained SQLite durable-core predecessor");
     drop(connection);
 
+    let status = SqliteStorePreflight::for_durable_core(&path)
+        .schema_status()
+        .await
+        .expect("inspect old catalog without decoding blobs");
+    assert_eq!(
+        status.databases[0].verdict,
+        StoreSchemaVerdict::Mismatch {
+            found: i64::from(RETAINED_PRIOR_DURABLE_CORE_GENERATION),
+        }
+    );
     let error = Store::open(&path)
         .await
         .err()
@@ -34,6 +68,19 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
             )),
         "the predecessor refusal must identify expected and found versions: {error}"
     );
+    let connection = rusqlite::Connection::open(&path).expect("inspect refused catalog");
+    let stored: Vec<u8> = connection
+        .query_row(
+            "SELECT content FROM blobs WHERE hash = ?1",
+            [blob_ref.as_str()],
+            |row| row.get(0),
+        )
+        .expect("old envelope remains untouched");
+    assert_eq!(stored, prior_envelope);
+    let version: i32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read refused version");
+    assert_eq!(version, RETAINED_PRIOR_DURABLE_CORE_GENERATION);
 }
 
 #[tokio::test]
@@ -72,7 +119,7 @@ async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
     assert_eq!(
         error,
         format!(
-            "Error(\"Unsupported lash durable core schema: this binary supports schema version 70, but the database reports version 41. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md. This store was last written by lash release {}.\")",
+            "Error(\"Unsupported lash durable core schema: this binary supports schema version 71, but the database reports version 41. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md. This store was last written by lash release {}.\")",
             env!("CARGO_PKG_VERSION")
         )
     );
