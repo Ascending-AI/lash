@@ -782,20 +782,15 @@ and shared `runtime_support` helpers. The turns suite also owns its two
 other tests that scan its source at runtime, but does not recompile unrelated
 suite binaries.
 
-### Linux Swift toolchain discovery
+### No Swift toolchain registration
 
-Bazel 9.1 brings `rules_swift` 3.1.2 as a built-in dependency and registers its
-local toolchains. On Linux hosts with `swiftc` installed, that registration
-compiles a Swift feature probe even for Rust-only analysis. Fresh CI lint and
-tail jobs spent 27s and 55s on that probe.
+Lash has no Swift source or Swift targets. Bazel 9.1 still brings `rules_swift`
+3.1.2 through its built-in `bazel_tools` module. Lash's root module patches out
+that dependency's automatic `register_toolchains` call, so Rust analysis no
+longer discovers or probes a host Swift compiler on any platform.
 
-Lash has no Swift targets. Its Linux Bazel configuration sets
-`--repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1`, using the opt-in patch shipped
-by [hermetic-llvm 0.8.18](https://github.com/hermeticbuild/hermetic-llvm/blob/v0.8.18/3rd_party/rules_swift/0001-allow-disabling-autoconfiguration.patch).
-The patch is retained byte-for-byte at
-`tools/bazel/patches/rules-swift-opt-in-autoconfiguration.patch`. LLVM's own
-module override is a development dependency and does not propagate to Lash.
-Darwin receives no disable flag, preserving upstream Xcode and Swift discovery.
-An explicit `--repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=0` restores upstream
-discovery when diagnosing Swift consumers. Rust, C/C++, and bindgen toolchain
-registrations are unchanged.
+The dependency itself remains because Bazel requires it. The patch changes only
+registration in `rules_swift`'s `MODULE.bazel`; it does not replace the module,
+change the Bazel installation, or alter Rust, C/C++, or bindgen registrations.
+Fresh Linux CI previously spent 27s and 55s compiling a Swift feature probe in
+its lint and tail jobs. There is no Swift opt-out flag or fallback in Lash.

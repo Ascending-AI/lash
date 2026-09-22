@@ -19,9 +19,6 @@ startup --host_jvm_args=-Xmx4g
 # a restart after eviction costs seconds, so half an hour is plenty.
 startup --max_idle_secs=1800
 common --enable_platform_specific_config
-# Lash has no Linux Swift targets; avoid compiling a Swift feature probe while
-# resolving Rust toolchains. Darwin keeps upstream Xcode/Swift discovery.
-common:linux --repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1
 common --lockfile_mode=error
 
 # Every pre-analysis fetch of a module archive or a release asset is a serial

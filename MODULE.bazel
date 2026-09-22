@@ -87,10 +87,10 @@ single_version_override(
     patch_strip = 1,
 )
 
-# Carry hermetic-llvm 0.8.18's opt-in switch for Bazel's built-in Swift dependency.
+# Bazel brings rules_swift, but Lash has no Swift targets or host toolchains.
 single_version_override(
     module_name = "rules_swift",
     version = "3.1.2",
-    patches = ["//tools/bazel:patches/rules-swift-opt-in-autoconfiguration.patch"],
+    patches = ["//tools/bazel:patches/rules-swift-no-toolchain-registration.patch"],
     patch_strip = 1,
 )

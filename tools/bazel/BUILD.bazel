@@ -20,4 +20,4 @@ filegroup(
 
 exports_files(["patches/rules-rs-reachable-features.patch"])
 
-exports_files(["patches/rules-swift-opt-in-autoconfiguration.patch"])
+exports_files(["patches/rules-swift-no-toolchain-registration.patch"])
