@@ -12,11 +12,11 @@
 
 #![allow(dead_code)]
 
-use compact_str::CompactString as AstString;
 use lashlang::{
-    AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, FunctionDecl,
-    FunctionExpr, FunctionParam, LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam,
-    ProcessSignalDecl, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
+    AssignPathStep, AssignTarget, AstString, BinaryOp, CatchClause, Declaration, Expr,
+    FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata, ListComprehensionClause, ProcessDecl,
+    ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr,
+    TypeField, UnaryOp,
 };
 
 // ---------------------------------------------------------------------------

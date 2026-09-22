@@ -12,6 +12,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -33,7 +34,9 @@ pub use facets::*;
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 13;
 
 /// A deterministic node identifier minted from canonical source and AST position.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(transparent)]
 pub struct WorkflowNodeId(String);
 
@@ -50,7 +53,7 @@ impl std::fmt::Display for WorkflowNodeId {
 }
 
 /// The single serializable graph document used for editing and run overlays.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct WorkflowGraph {
     pub schema_version: u32,
     /// Content identity of the projected definition.
@@ -85,7 +88,9 @@ impl WorkflowGraph {
 
     /// Decodes an already-parsed JSON graph with the same version-first fence
     /// as [`Self::decode_json`].
-    pub fn decode_json_value(value: serde_json::Value) -> Result<Self, WorkflowGraphDecodeError> {
+    pub fn decode_json_value(
+        mut value: serde_json::Value,
+    ) -> Result<Self, WorkflowGraphDecodeError> {
         let found = value
             .get("schema_version")
             .ok_or(WorkflowGraphDecodeError::MissingSchemaVersion)?
@@ -97,6 +102,16 @@ impl WorkflowGraph {
                 found,
                 expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
             });
+        }
+        let facets_are_current = value
+            .get("facet_schema_version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(u64::from(WORKFLOW_TYPE_FACET_SCHEMA_VERSION));
+        if !facets_are_current {
+            strip_type_facets(&mut value);
+            if let Some(document) = value.as_object_mut() {
+                document.remove("facet_schema_version");
+            }
         }
         let encoded = serde_json::to_string(&value).map_err(WorkflowGraphDecodeError::Document)?;
         let mut deserializer = serde_json::Deserializer::from_str(&encoded);
@@ -142,6 +157,36 @@ impl WorkflowGraph {
             }
         }
         nodes.into_iter()
+    }
+}
+
+fn strip_type_facets(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                strip_type_facets(value);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            if object.contains_key("nodes") && object.contains_key("edges") {
+                if let Some(nodes) = object
+                    .get_mut("nodes")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    for node in nodes {
+                        if let Some(node) = node.as_object_mut() {
+                            node.remove("type_facets");
+                        }
+                        strip_type_facets(node);
+                    }
+                }
+            } else {
+                for value in object.values_mut() {
+                    strip_type_facets(value);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -447,7 +492,7 @@ struct WorkflowGraphWire {
     main: WorkflowSubgraph,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowDeclaration {
     Type(#[serde(deserialize_with = "deserialize_strict")] TypeDecl),
@@ -464,7 +509,7 @@ pub enum WorkflowDeclaration {
 }
 
 /// A named process is a container with its own child subgraph.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowProcess {
     pub id: WorkflowNodeId,
@@ -485,14 +530,14 @@ pub struct WorkflowProcess {
     pub body: WorkflowSubgraph,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowNodeNameSource {
     Label,
     Derived,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowSubgraph {
     #[serde(default)]
@@ -501,7 +546,7 @@ pub struct WorkflowSubgraph {
     pub edges: Vec<WorkflowEdge>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowNode {
     pub id: WorkflowNodeId,
@@ -527,7 +572,7 @@ pub struct WorkflowNode {
     pub source_span: Option<Span>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowNodeKind {
     Data {
@@ -589,7 +634,7 @@ pub enum WorkflowNodeKind {
 /// Its typed call, argument, field, and index segments cannot collide when a
 /// field contains punctuation. Nodes with several nested receiver calls add a
 /// call segment in depth-first IR walk order.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowArgument {
     Positional {
@@ -603,7 +648,7 @@ pub enum WorkflowArgument {
 }
 
 /// Ordered wrappers around a call or effect, from the operation outwards.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowResultStep {
     Await,
@@ -770,7 +815,7 @@ fn apply_result_steps(mut expression: Expr, result_steps: &[WorkflowResultStep])
     expression
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowEffectKind {
     AwaitJoin,
@@ -783,14 +828,14 @@ pub enum WorkflowEffectKind {
     Continue,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowTerminalKind {
     Finish,
     Fail,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "container_kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowContainer {
     If {
@@ -868,7 +913,7 @@ impl WorkflowContainer {
 }
 
 /// One editable list-comprehension clause.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowListComprehensionClause {
     For {
@@ -882,14 +927,14 @@ pub enum WorkflowListComprehensionClause {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VariableVersion {
     pub variable: String,
     pub version: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowEdge {
     pub id: String,
@@ -898,7 +943,7 @@ pub struct WorkflowEdge {
     pub kind: WorkflowEdgeKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowEdgeKind {
     DataDependency { variable: String, version: u32 },

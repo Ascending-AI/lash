@@ -2309,6 +2309,7 @@ dependencies = [
  "rmp-serde",
  "rustc-hash 2.1.3",
  "ryu-js",
+ "schemars 0.8.22",
  "serde",
  "serde_ignored",
  "serde_json",

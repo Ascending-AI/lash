@@ -557,6 +557,95 @@ class VersionBumpFixtureTest(unittest.TestCase):
         self.assertEqual(result.failures[0].base_version, 1)
         self.assertEqual(result.failures[0].head_version, 1)
 
+    def test_adding_json_schema_to_guarded_derive_lists_needs_no_bump(self) -> None:
+        cases = (
+            (
+                "direct enum derive",
+                WIRE_BASE,
+                WIRE_BASE.replace(
+                    "Serialize, Deserialize", "Serialize, Deserialize, schemars::JsonSchema"
+                ),
+            ),
+            (
+                "cfg_attr struct derive",
+                """
+                #[derive(Serialize, Deserialize)]
+                #[cfg_attr(feature = "schema", derive(Clone))]
+                pub struct WireMessage { value: String }
+                """,
+                """
+                #[derive(Serialize, Deserialize)]
+                #[cfg_attr(feature = "schema", derive(Clone, schemars::JsonSchema))]
+                pub struct WireMessage { value: String }
+                """,
+            ),
+        )
+        for name, base_wire, head_wire in cases:
+            with self.subTest(name=name):
+                fixture = self.fixture()
+                fixture.write(LIB_V1, base_wire)
+                base = fixture.commit("base")
+                fixture.write(LIB_V1, head_wire)
+                head = fixture.commit("add schema derive without bump")
+
+                self.assertEqual(
+                    self.check(fixture, base, head), MODULE.CheckResult((), ())
+                )
+
+    def test_derive_spelling_inside_attribute_string_is_not_exempt(self) -> None:
+        fixture = self.fixture()
+        base_wire = '#[doc = "derive(Clone)"]\n' + WIRE_BASE
+        head_wire = '#[doc = "derive(Clone, JsonSchema)"]\n' + WIRE_BASE
+        fixture.write(LIB_V1, base_wire)
+        base = fixture.commit("base")
+        fixture.write(LIB_V1, head_wire)
+        head = fixture.commit("change attribute string without bump")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+
+    def test_serde_attribute_changes_still_require_a_bump(self) -> None:
+        cases = (
+            (
+                "rename",
+                '#[serde(rename = "old")]\n',
+                '#[serde(rename = "new")]\n',
+            ),
+            ("tag", '#[serde(tag = "type")]\n', '#[serde(tag = "kind")]\n'),
+            ("deny_unknown_fields", "", "#[serde(deny_unknown_fields)]\n"),
+            (
+                "skip_serializing_if",
+                '#[serde(skip_serializing_if = "Option::is_none")]\n',
+                '#[serde(skip_serializing_if = "Vec::is_empty")]\n',
+            ),
+            ("default", "#[serde(default)]\n", '#[serde(default = "default_value")]\n'),
+        )
+        for name, base_attribute, head_attribute in cases:
+            with self.subTest(name=name):
+                fixture = self.fixture()
+                base_wire = (
+                    "#[derive(Serialize, Deserialize)]\n"
+                    + base_attribute
+                    + "pub struct WireMessage { value: Option<String> }\n"
+                )
+                head_wire = (
+                    "#[derive(Serialize, Deserialize)]\n"
+                    + head_attribute
+                    + "pub struct WireMessage { value: Option<String> }\n"
+                )
+                fixture.write(LIB_V1, base_wire)
+                base = fixture.commit("base")
+                fixture.write(LIB_V1, head_wire)
+                head = fixture.commit("change serde attribute without bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(result.failures[0].surface.constant, "WIRE_VERSION")
+
     def test_continuation_registry_guards_all_tool_failure_leaves(self) -> None:
         continuation = next(
             surface

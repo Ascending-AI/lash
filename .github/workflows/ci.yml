@@ -457,6 +457,7 @@ jobs:
           python3 scripts/test_bazel_test_contract.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/test_check_version_bumps.py
+          python3 scripts/test_generate_workflow_schemas.py
           python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_check_facade_only_examples.py
@@ -1420,6 +1421,9 @@ jobs:
         run: |
           python3 scripts/check-postgres-json-carrier-coverage.py
           python3 scripts/check-postgres-payload-shape-version.py
+
+      - name: Check host contract schema drift
+        run: python3 scripts/generate-workflow-schemas.py --check
 
       # One owner per table across both SQL stores (FIG-3380): no stray
       # statement, no duplicate, no shadowed shared statement, and every

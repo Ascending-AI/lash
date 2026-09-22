@@ -796,7 +796,7 @@ impl Compiler {
                 let required: Vec<Value> = fields
                     .iter()
                     .filter(|f| !f.optional)
-                    .map(|f| Value::String(f.name.clone()))
+                    .map(|f| Value::String(f.name.clone().into()))
                     .collect();
                 let mut rec = record_with_capacity(4);
                 rec.insert(

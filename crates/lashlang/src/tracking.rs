@@ -167,7 +167,19 @@ impl LashlangExecutionSiteBuilder<'_> {
 }
 
 /// Stable source-level location carried by runtime sites for workflow-graph joins.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 pub struct WorkflowExecutionSite {
     pub owner: String,
     #[serde(default)]

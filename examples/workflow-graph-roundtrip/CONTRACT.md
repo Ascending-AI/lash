@@ -86,86 +86,28 @@ An unknown ID returns HTTP `404`:
 
 ## WorkflowDocument
 
-`GET /workflow`, a successful `POST /workflow`, and a successful
-`POST /workflow/select` return this exact shape:
+The hand-maintained copy of the core graph model has been removed. The current
+machine-readable contracts are:
 
-```json
-{
-  "schemaVersion": 8,
-  "version": 1,
-  "source": "canonical Lashlang source",
-  "nodes": [
-    {
-      "id": "call:stable-id",
-      "type": "call",
-      "parentId": "process:stable-id",
-      "data": {
-        "kind": "call",
-        "title": "show_message",
-        "description": "optional @label description",
-        "nameSource": "label",
-        "operation": "show_message",
-        "effect": "sleep",
-        "fields": { "text": "Welcome", "pct": 35 },
-        "binding": "optional assignment binding",
-        "target": "state.count",
-        "expression": "state.count + 1",
-        "condition": "state.count < 3",
-        "iterable": "[70, 85, 100]",
-        "clauses": [
-          { "kind": "for", "binding": "item", "iterable": "items" },
-          { "kind": "if", "condition": "item.enabled" }
-        ],
-        "source": "one canonical opaque statement, when fallback is required",
-        "children": [
-          {
-            "slot": "then",
-            "scope": "container:stable-id:then",
-            "nodeIds": ["call:child-id"]
-          }
-        ]
-      }
-    }
-  ],
-  "edges": [
-    {
-      "id": "sequence:stable-id",
-      "source": "call:source-id",
-      "target": "effect:target-id",
-      "data": {
-        "kind": "sequence",
-        "scope": "process:stable-id",
-        "variable": "optional data-edge variable",
-        "version": 1
-      }
-    }
-  ],
-  "roots": {
-    "main": [],
-    "processes": ["process:stable-id"]
-  }
-}
-```
+- [`WorkflowGraph` JSON Schema](../../schemas/host/workflow-graph/v13.schema.json)
+- [workflow type-facet JSON Schema](../../schemas/host/workflow-type-facets/v3.schema.json)
+- [generated graph declarations](frontend/src/generated/workflow-graph.d.ts)
+- [generated facet declarations](frontend/src/generated/workflow-type-facets.d.ts)
 
-Optional properties are omitted, so a real call node has `operation` but no
-`effect`, expression slot, `source`, or `children`. The combined example above
-shows every possible property in one place.
+`npm run generate:types` regenerates the declarations from those schemas.
+`npm run check:types` fails when they drift.
 
-`schemaVersion: 8` is the current clean-cutover contract. Container nodes use a
-distinct container-kind discriminator in the core graph JSON, so serialized
-graphs roundtrip without colliding with the node-kind discriminator. Older
-schema versions are not accepted by the renderer.
+The HTTP example exposes its own camel-case `WorkflowDocument` adapter, defined
+in [`src/contract.rs`](src/contract.rs). It adds the optimistic `version` and
+canonical `source`, flattens nested core subgraphs into `nodes`, `edges`, and
+`roots`, and formats type facets for display. `schemaVersion` copies the core
+graph version. `facetSchemaVersion` is present only when the backend projected
+facets. These adapter fields are not a second definition of the core contract.
 
-Node `type` and `data.kind` use `process`, `data`, `call`, `effect`,
-`computation`, `state_update`, `terminal`, `container`, or `opaque`.
-`data.effect` uses `start_process`,
-`await_join`, `signal_run`, `wait_signal`, `sleep`, `cancel`, `print`, `yield`,
-`wake`, `break`, or `continue`. `data.nameSource` is `label` for an authored
-`@label` and `derived` for an automatic name. It is required on every node and
-tags the name: a `label` name carries `data.title` and an optional
-`data.description`, a `derived` name carries only the recomputed `data.title`.
-A missing or unrecognized `nameSource` is a decode error, never a `derived`
-name — a title sent without its tag would otherwise be dropped on save.
+Optional adapter properties are omitted. `data.nameSource` is `label` for an
+authored `@label` and `derived` for an automatic name. A labeled node carries
+`data.title` and may carry `data.description`; a derived node carries only its
+recomputed title. The backend refuses a missing or unknown `nameSource`.
 
 An authored name is written back into the canonical source as a one-line JSDoc
 comment on the statement it names, `/** @label Title — Description */`, with an
@@ -180,7 +122,7 @@ that includes strings such as `text`, `key`, `value`, `name`, `state`, `list`,
 Values may be null, booleans, numbers, strings, lists, or objects. An opaque
 node is edited through `data.source` as one complete Lashlang statement.
 
-Structured expression slots are canonical Lashlang text rather than AST JSON:
+The adapter renders structured expression slots as canonical TypeScript text:
 
 - `data.condition` is present on `if` and `while` containers.
 - `data.iterable` is present on `for` containers.
@@ -190,10 +132,9 @@ Structured expression slots are canonical Lashlang text rather than AST JSON:
 - `data.binding` and `data.expression` are present on `computation` nodes.
 
 Bindings are also returned on other assignment-producing structured nodes.
-On save, these strings replace the graph payload. Lashlang parses each string
-back into its typed AST field, validates that it matches the owning node kind,
-and only then runs the canonical printer. No original AST expression is used
-as a fallback.
+On save, these strings replace the graph payload. The TypeScript fragment
+parser converts each string to the owning typed IR field before the canonical
+printer runs. The backend does not fall back to the original expression.
 
 Containers carry ordered child groups in `data.children`. `roots.processes`
 lists the top-level process containers. A process container uses slot `body`;

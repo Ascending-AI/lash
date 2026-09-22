@@ -1,0 +1,450 @@
+{
+  "$id": "https://lash.dev/schemas/workflow-type-facets/v3",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ProcessParam": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "ProcessType": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "known"
+              ],
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/definitions/TypeExpr"
+            },
+            "params": {
+              "items": {
+                "$ref": "#/definitions/ProcessParam"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "output",
+            "params"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Span": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "TypeExpr": {
+      "description": "A serialized value-type expression.\n\nHost decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.",
+      "oneOf": [
+        {
+          "enum": [
+            "Any",
+            "Str",
+            "Int",
+            "Float",
+            "Bool",
+            "Dict"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The literal `null` type; usually only useful as part of a `Union` (e.g. `str | null` for a nullable field).",
+          "enum": [
+            "Null"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Enum": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "Enum"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "List": {
+              "$ref": "#/definitions/TypeExpr"
+            }
+          },
+          "required": [
+            "List"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Object": {
+              "items": {
+                "$ref": "#/definitions/TypeField"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "Object"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Ref"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Process": {
+              "$ref": "#/definitions/ProcessType"
+            }
+          },
+          "required": [
+            "Process"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "TriggerHandle": {
+              "$ref": "#/definitions/TypeExpr"
+            }
+          },
+          "required": [
+            "TriggerHandle"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Union of alternative type shapes, e.g. `str | int | null`.",
+          "properties": {
+            "Union": {
+              "$ref": "#/definitions/UnionMembers"
+            }
+          },
+          "required": [
+            "Union"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TypeField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "optional",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "UnionMembers": {
+      "items": {
+        "$ref": "#/definitions/TypeExpr"
+      },
+      "type": "array"
+    },
+    "WorkflowDiagnosticClass": {
+      "description": "Whether a diagnostic blocks save under ADR 0073's gradual typing rule.",
+      "enum": [
+        "definite",
+        "advisory"
+      ],
+      "type": "string"
+    },
+    "WorkflowDiagnosticKind": {
+      "description": "Closed host-facing vocabulary for linker diagnostics.",
+      "enum": [
+        "duplicate_declaration",
+        "duplicate_process_param",
+        "duplicate_process_signal",
+        "unknown_process",
+        "unknown_name",
+        "unknown_builtin",
+        "unknown_resource",
+        "unknown_type",
+        "incompatible_constructor_input",
+        "incompatible_operation_input",
+        "awaited_settled_expression",
+        "incompatible_expected_literal",
+        "incompatible_process_return",
+        "incompatible_function_return",
+        "duplicate_function_param",
+        "function_argument_count",
+        "incompatible_function_argument",
+        "forbidden_in_function",
+        "function_name_is_not_a_value",
+        "function_shadows_builtin",
+        "invalid_trigger_registration",
+        "invalid_trigger_subscription_key",
+        "process_literal_outside_process_slot",
+        "conflicting_signal_payload",
+        "invalid_trigger_inputs",
+        "duplicate_trigger_input",
+        "missing_trigger_input",
+        "unknown_trigger_input",
+        "missing_trigger_event_input",
+        "trigger_target_takes_no_event",
+        "ambiguous_omitted_trigger_inputs",
+        "trigger_event_outside_inputs",
+        "trigger_event_projection",
+        "invalid_trigger_list",
+        "unknown_trigger_event_type",
+        "invalid_trigger_target",
+        "trigger_event_mismatch",
+        "unresolved_receiver",
+        "unknown_resource_operation",
+        "ambiguous_module_operation",
+        "bare_tool_call",
+        "incompatible_process_argument",
+        "feature_disabled",
+        "process_lifecycle_outside_process",
+        "opaque_host_descriptor_access",
+        "unknown_object_field",
+        "incompatible_binary_operands",
+        "incompatible_builtin_operands",
+        "incompatible_iteration_target",
+        "module_hash",
+        "invalid_ast"
+      ],
+      "type": "string"
+    },
+    "WorkflowExpectedArgument": {
+      "properties": {
+        "slot": {
+          "items": {
+            "$ref": "#/definitions/WorkflowSlotPathSegment"
+          },
+          "type": "array"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "slot",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "WorkflowSlotPathSegment": {
+      "description": "One structural step in a [`WorkflowSlotPath`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "call"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arg": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowTypeDiagnostic": {
+      "properties": {
+        "class": {
+          "$ref": "#/definitions/WorkflowDiagnosticClass"
+        },
+        "kind": {
+          "$ref": "#/definitions/WorkflowDiagnosticKind"
+        },
+        "message": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "slot": {
+          "items": {
+            "$ref": "#/definitions/WorkflowSlotPathSegment"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "span": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Span"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "class",
+        "kind",
+        "message",
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "WorkflowTypedVariable": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/definitions/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "available_variables": {
+      "items": {
+        "$ref": "#/definitions/WorkflowTypedVariable"
+      },
+      "type": "array"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/WorkflowTypeDiagnostic"
+      },
+      "type": "array"
+    },
+    "expected_arguments": {
+      "items": {
+        "$ref": "#/definitions/WorkflowExpectedArgument"
+      },
+      "type": "array"
+    }
+  },
+  "title": "WorkflowNodeTypeFacets",
+  "type": "object",
+  "x-lash-schema-version": 3,
+  "x-lash-version-constant": "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
+}

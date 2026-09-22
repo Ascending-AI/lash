@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 145,
+  "cargo_target_count": 146,
   "feature_lane_units": [
     {
       "features": [],
@@ -17368,7 +17368,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 199,
+  "generated_label_count": 201,
   "packages": [
     {
       "declared_features": [
@@ -19755,6 +19755,7 @@
         "rmp-serde",
         "rustc-hash",
         "ryu-js",
+        "schemars",
         "serde",
         "serde_ignored",
         "serde_json",
@@ -19780,6 +19781,18 @@
           "cargo": "lashlang",
           "kind": "unit-test",
           "label": "//crates/lashlang:lashlang__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "workflow_schema_generator",
+          "kind": "bin",
+          "label": "//crates/lashlang:workflow_schema_generator__bin",
+          "tags": []
+        },
+        {
+          "cargo": "workflow_schema_generator",
+          "kind": "bin-unit-test",
+          "label": "//crates/lashlang:workflow_schema_generator__bin__unit_test",
           "tags": []
         },
         {
@@ -19859,7 +19872,8 @@
           "//crates/lashlang:integration__test",
           "//crates/lashlang:lashlang__unit_test",
           "//crates/lashlang:property__test",
-          "//crates/lashlang:stack_budget__test"
+          "//crates/lashlang:stack_budget__test",
+          "//crates/lashlang:workflow_schema_generator__bin__unit_test"
         ]
       }
     },

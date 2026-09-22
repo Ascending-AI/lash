@@ -215,7 +215,7 @@ fn workflow_graph_decode_checks_version_before_shape() {
 }
 
 #[test]
-fn workflow_graph_decode_refuses_unknown_fields_and_variants() {
+fn workflow_graph_refuses_unknown_field() {
     let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
     let mut unknown_field = serde_json::to_value(&graph).expect("graph serializes");
     unknown_field["future"] = serde_json::json!(true);
@@ -224,7 +224,11 @@ fn workflow_graph_decode_refuses_unknown_fields_and_variants() {
     )
     .expect_err("same-version unknown fields are refused");
     assert!(error.to_string().contains("unknown field `future`"));
+}
 
+#[test]
+fn workflow_graph_refuses_unknown_variant() {
+    let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
     let mut unknown_variant = serde_json::to_value(graph).expect("graph serializes");
     unknown_variant["main"]["nodes"][0]["kind"] = serde_json::json!({ "kind": "future_node" });
     let error = WorkflowGraph::decode_json(
@@ -232,6 +236,55 @@ fn workflow_graph_decode_refuses_unknown_fields_and_variants() {
     )
     .expect_err("same-version unknown variants are refused");
     assert!(error.to_string().contains("unknown variant `future_node`"));
+}
+
+#[test]
+fn facet_reader_requires_exact_version() {
+    let graph = workflow_graph_from_source_with_facets("finish(1);\n", Some(&facet_environment()))
+        .expect("fixture projects with facets");
+    let mut value = serde_json::to_value(graph).expect("graph serializes");
+    value["facet_schema_version"] = serde_json::json!(WORKFLOW_TYPE_FACET_SCHEMA_VERSION - 1);
+    value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
+        "kind": "future_diagnostic"
+    }]);
+
+    let decoded = WorkflowGraph::decode_json_value(value)
+        .expect("stale optional facets are discarded before their shape is decoded");
+    assert!(decoded.nodes().all(|node| node.type_facets.is_none()));
+}
+
+#[test]
+fn facet_reader_tolerates_unknown_field() {
+    let graph = workflow_graph_from_source_with_facets("finish(1);\n", Some(&facet_environment()))
+        .expect("fixture projects with facets");
+    let mut value = serde_json::to_value(graph).expect("graph serializes");
+    value["main"]["nodes"][0]["type_facets"]["future"] = serde_json::json!(true);
+
+    WorkflowGraph::decode_json_value(value)
+        .expect("known facet objects tolerate additive unknown fields");
+}
+
+#[test]
+fn facet_reader_refuses_unknown_variant() {
+    let graph = workflow_graph_from_source_with_facets("finish(1);\n", Some(&facet_environment()))
+        .expect("fixture projects with facets");
+    let mut value = serde_json::to_value(graph).expect("graph serializes");
+    value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
+        "node_id": value["main"]["nodes"][0]["id"].clone(),
+        "kind": "future_diagnostic",
+        "class": "definite",
+        "slot": null,
+        "message": "fixture",
+        "span": null
+    }]);
+
+    let error = WorkflowGraph::decode_json_value(value)
+        .expect_err("unknown facet enum variants must be refused at the current version");
+    assert!(
+        error
+            .to_string()
+            .contains("unknown variant `future_diagnostic`")
+    );
 }
 
 #[test]

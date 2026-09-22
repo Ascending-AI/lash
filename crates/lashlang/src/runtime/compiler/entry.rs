@@ -753,7 +753,7 @@ impl Compiler {
                 target: left_target,
                 index: left_index,
             } = left.as_ref()
-            && matches!(left_target.as_ref(), Expr::Variable(name) if name == target.root)
+            && matches!(left_target.as_ref(), Expr::Variable(name) if name == &target.root)
             && left_index.as_ref() == index
             && let Some(Value::Number(right)) = self.fold_compile_time_expr(right)
         {
@@ -1031,7 +1031,7 @@ impl Compiler {
             Expr::Undefined => Some(Value::Undefined),
             Expr::Bool(value) => Some(Value::Bool(*value)),
             Expr::Number(value) => Some(Value::Number(*value)),
-            Expr::String(value) => Some(Value::String(value.clone())),
+            Expr::String(value) => Some(Value::String(value.clone().into())),
             Expr::ResourceRef(resource) => {
                 Some(Value::Resource(crate::runtime::ResourceHandle::new(
                     resource.resource_type.to_string(),

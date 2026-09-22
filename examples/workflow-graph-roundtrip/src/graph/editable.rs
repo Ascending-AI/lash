@@ -7,8 +7,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash::rlm::lang::{
-    Expr, WorkflowDeclaration, WorkflowEffectKind, WorkflowGraph, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowTerminalKind, workflow_call_to_ir, workflow_effect_to_ir,
+    AstString, Expr, WorkflowDeclaration, WorkflowEffectKind, WorkflowGraph, WorkflowNode,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowTerminalKind, workflow_call_to_ir,
+    workflow_effect_to_ir,
 };
 use lash::typescript::workflow_graph::{
     TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
@@ -251,7 +252,7 @@ pub(super) fn apply_fields(
     Ok(())
 }
 
-fn receiver_fields(expression: &Expr) -> Option<&Vec<(compact_str::CompactString, Expr)>> {
+fn receiver_fields(expression: &Expr) -> Option<&Vec<(AstString, Expr)>> {
     match expression {
         Expr::ReceiverCall { args, .. } => args.first().and_then(|arg| match arg {
             Expr::Record(fields) => Some(fields),
@@ -262,9 +263,7 @@ fn receiver_fields(expression: &Expr) -> Option<&Vec<(compact_str::CompactString
     }
 }
 
-fn receiver_fields_mut(
-    expression: &mut Expr,
-) -> Option<&mut Vec<(compact_str::CompactString, Expr)>> {
+fn receiver_fields_mut(expression: &mut Expr) -> Option<&mut Vec<(AstString, Expr)>> {
     match expression {
         Expr::ReceiverCall { args, .. } => args.first_mut().and_then(|arg| match arg {
             Expr::Record(fields) => Some(fields),
@@ -573,9 +572,7 @@ pub(super) fn first_receiver_operation(expression: &Expr) -> Option<&str> {
     }
 }
 
-pub(super) fn receiver_operation_mut(
-    expression: &mut Expr,
-) -> Option<&mut compact_str::CompactString> {
+pub(super) fn receiver_operation_mut(expression: &mut Expr) -> Option<&mut AstString> {
     match expression {
         Expr::ReceiverCall { operation, .. } => Some(operation),
         Expr::Await(inner) | Expr::ResultUnwrap(inner) => receiver_operation_mut(inner),

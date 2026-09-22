@@ -24,6 +24,12 @@ pinned the same way: the guards project guarded text, so a retyped variant reads
 as a shape change even when the serialized bytes are identical, and only a
 reviewer can say which it was.
 
+Derived trait lists do not affect serialized bytes. Guarded Rust item hashing
+therefore erases only the contents of ``derive(...)`` calls, including those
+inside ``cfg_attr``. The attribute shell and every other attribute remain in the
+preimage; in particular, all ``serde`` attributes still require the owning
+version to advance when they change.
+
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.  Pull-request CI passes the PR merge-base explicitly.
 """
@@ -1355,6 +1361,92 @@ def rust_item_start_with_attributes(
     return cursor
 
 
+def normalize_rust_derive_lists(text: str) -> str:
+    """Erase derive-list contents without changing any other attribute token."""
+    output: list[str] = []
+    cursor = 0
+    for attribute_start, attribute_end in rust_outer_attribute_ranges(text):
+        output.append(text[cursor:attribute_start])
+        attribute = text[attribute_start:attribute_end]
+        normalized: list[str] = []
+        attribute_cursor = 0
+        index = 0
+        while index < len(attribute):
+            following = attribute[index + 1] if index + 1 < len(attribute) else ""
+            if attribute[index] == "/" and following == "/":
+                newline = attribute.find("\n", index + 2)
+                index = len(attribute) if newline < 0 else newline + 1
+            elif attribute[index] == "/" and following == "*":
+                index += 2
+                depth = 1
+                while index < len(attribute) and depth:
+                    if attribute.startswith("/*", index):
+                        depth += 1
+                        index += 2
+                    elif attribute.startswith("*/", index):
+                        depth -= 1
+                        index += 2
+                    else:
+                        index += 1
+            elif raw := _raw_string_start(attribute, index):
+                content_start, closer = raw
+                closing = attribute.find(closer, content_start)
+                if closing < 0:
+                    break
+                index = closing + len(closer)
+            elif attribute[index] == '"' or (
+                attribute[index] == "b" and following == '"'
+            ):
+                index += 2 if attribute[index] == "b" else 1
+                while index < len(attribute):
+                    if attribute[index] == "\\":
+                        index += 2
+                    else:
+                        closing = attribute[index] == '"'
+                        index += 1
+                        if closing:
+                            break
+            elif char_end := _char_literal_end(attribute, index):
+                index = char_end
+            elif attribute.startswith("derive", index) and (
+                index == 0 or not (attribute[index - 1].isalnum() or attribute[index - 1] == "_")
+            ):
+                name_end = index + len("derive")
+                if name_end < len(attribute) and (
+                    attribute[name_end].isalnum() or attribute[name_end] == "_"
+                ):
+                    index = name_end
+                    continue
+                open_paren = name_end
+                while open_paren < len(attribute) and attribute[open_paren].isspace():
+                    open_paren += 1
+                if open_paren >= len(attribute) or attribute[open_paren] != "(":
+                    index = name_end
+                    continue
+                depth = 1
+                end = open_paren + 1
+                while end < len(attribute) and depth:
+                    if attribute[end] == "(":
+                        depth += 1
+                    elif attribute[end] == ")":
+                        depth -= 1
+                    end += 1
+                if depth:
+                    index = name_end
+                    continue
+                normalized.append(attribute[attribute_cursor : open_paren + 1])
+                normalized.append(")")
+                attribute_cursor = end
+                index = end
+            else:
+                index += 1
+        normalized.append(attribute[attribute_cursor:])
+        output.append("".join(normalized))
+        cursor = attribute_end
+    output.append(text[cursor:])
+    return "".join(output)
+
+
 RUST_DECLARATION = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
     r"(?:const|static|fn|struct|enum|type)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
@@ -1540,7 +1632,7 @@ def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
             continue
         start = rust_item_start_with_attributes(text, match.start(), attribute_ranges)
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(text[start:end])
+        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
         if name in found and found[name] != value:
             raise CheckError(f"guarded Rust symbol {name} is ambiguous in one file")
         found[name] = value
@@ -1576,7 +1668,7 @@ def serde_shapes(text: str) -> dict[str, str]:
         if "Serialize" not in attributes and "Deserialize" not in attributes:
             continue
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(text[start:end])
+        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
         key = name
         ordinal = 2
         while key in found:

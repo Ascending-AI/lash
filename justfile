@@ -95,6 +95,14 @@ workflow-graph-integration-verify:
   cargo test -p workflow-graph-roundtrip --all-targets --locked
   bash "{{repo}}/scripts/check-workflow-graph-model.sh"
 
+# Generate the checked-in host contract schemas.
+workflow-schema-generate:
+  python3 scripts/generate-workflow-schemas.py
+
+# Fail when checked-in host contract schemas differ from Rust types.
+workflow-schema-check:
+  python3 scripts/generate-workflow-schemas.py --check
+
 agent-service-restate-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -363,6 +371,7 @@ floor:
     'kiln fmt -- --check' \
     'git diff --check' \
     'scripts/ci/repository-gates.sh' \
+    'python3 scripts/generate-workflow-schemas.py --check' \
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
     | scripts/gate-table.sh
