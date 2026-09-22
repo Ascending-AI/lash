@@ -1180,7 +1180,6 @@ macro_rules! impl_restate_controller_context {
                         Ok(revoked)
                     })
                 }
-
                 fn scope_effect_begin<'run>(
                     &'run self,
                     index_key: String,
@@ -1191,14 +1190,16 @@ macro_rules! impl_restate_controller_context {
                 {
                     let call = self
                         .object_client::<LashDurableWaitIndexClient>(index_key)
-                        .begin_effect(Json(RestateDurableWaitEffectRequest { replay_key }))
+                        .begin_effect(Json(RestateDurableWaitEffectRequest {
+                            replay_key: replay_key.clone(),
+                        }))
+                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                         .call();
                     Box::pin(async move {
                         let Json(admitted) = call.await?;
                         Ok(admitted)
                     })
                 }
-
                 fn scope_effect_end<'run>(
                     &'run self,
                     index_key: String,
@@ -1209,14 +1210,16 @@ macro_rules! impl_restate_controller_context {
                 {
                     let call = self
                         .object_client::<LashDurableWaitIndexClient>(index_key)
-                        .end_effect(Json(RestateDurableWaitEffectRequest { replay_key }))
+                        .end_effect(Json(RestateDurableWaitEffectRequest {
+                            replay_key: replay_key.clone(),
+                        }))
+                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                         .call();
                     Box::pin(async move {
                         let Json(()) = call.await?;
                         Ok(())
                     })
                 }
-
                 fn scope_group_record<'run>(
                     &'run self,
                     index_key: String,
@@ -1357,7 +1360,6 @@ macro_rules! impl_restate_controller_context {
                         Ok(response)
                     })
                 }
-
                 fn scope_group_child_membership<'run>(
                     &'run self,
                     index_key: String,
@@ -1369,8 +1371,11 @@ macro_rules! impl_restate_controller_context {
                     let call = self
                         .object_client::<LashDurableWaitIndexClient>(index_key)
                         .group_child_membership(Json(
-                            RestateDurableWaitGroupChildMembershipRequest { replay_key },
+                            RestateDurableWaitGroupChildMembershipRequest {
+                                replay_key: replay_key.clone(),
+                            },
                         ))
+                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                         .call();
                     Box::pin(async move { call.await.map(|Json(group_key)| group_key) })
                 }

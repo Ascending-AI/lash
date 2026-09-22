@@ -1440,6 +1440,7 @@ impl TraceRuntimeSubject {
 pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
+    pub source_identity: String,
     pub module_ref: String,
     pub entry_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

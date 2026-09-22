@@ -395,6 +395,7 @@ pub async fn run_lashlang_process(
         LashlangProcessTraceIdentity {
             session_id,
             process_id: process_id.clone(),
+            source_identity: trace_lashlang_source_identity(&artifact),
             module_ref: artifact.module_ref.clone(),
             process_ref: input.process_ref.clone(),
             process_name: input.process_name.clone(),
@@ -1222,6 +1223,7 @@ struct LashlangProcessExecutionTrace {
     base_context: TraceContext,
     session_id: Option<SessionId>,
     process_id: ProcessId,
+    source_identity: String,
     module_ref: lashlang::ModuleRef,
     process_ref: lashlang::ProcessRef,
     process_name: String,
@@ -1234,6 +1236,7 @@ struct LashlangProcessExecutionTrace {
 struct LashlangProcessTraceIdentity {
     session_id: Option<SessionId>,
     process_id: ProcessId,
+    source_identity: String,
     module_ref: lashlang::ModuleRef,
     process_ref: lashlang::ProcessRef,
     process_name: String,
@@ -1251,6 +1254,7 @@ impl LashlangProcessExecutionTrace {
             base_context,
             session_id: identity.session_id,
             process_id: identity.process_id,
+            source_identity: identity.source_identity,
             module_ref: identity.module_ref,
             process_ref: identity.process_ref,
             process_name: identity.process_name,
@@ -1275,6 +1279,7 @@ impl LashlangProcessExecutionTrace {
             subject: TraceRuntimeSubject::Process {
                 process_id: self.process_id.clone(),
             },
+            source_identity: self.source_identity.clone(),
             module_ref: self.module_ref.to_string(),
             entry_kind: "process".to_string(),
             entry_ref: Some(lashlang::process_ref_key(&self.process_ref)),
@@ -1658,8 +1663,8 @@ pub use schema::lashlang_type_expr_schema;
 
 #[path = "process/trace_map.rs"]
 mod trace_map;
-pub use trace_map::trace_lashlang_main_map;
 use trace_map::{language_event_node_id, trace_lashlang_process_map};
+pub use trace_map::{trace_lashlang_main_map, trace_lashlang_source_identity};
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]

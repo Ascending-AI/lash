@@ -28,6 +28,7 @@ fn process_trace_session_attribution_comes_only_from_a_session_originator() {
             LashlangProcessTraceIdentity {
                 session_id: process_trace_session_id(&originator),
                 process_id: lash_core::ProcessId::from("process"),
+                source_identity: "source-identity".to_string(),
                 module_ref: lashlang::ModuleRef::new(&hash),
                 process_ref: lashlang::ProcessRef::new(hash, 0),
                 process_name: "main".to_string(),

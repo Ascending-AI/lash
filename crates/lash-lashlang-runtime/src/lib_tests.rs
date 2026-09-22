@@ -354,7 +354,14 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     // program projection is language-agnostic and does not round-trip through
     // canonical TypeScript.
     let graph = lash_typescript::workflow_graph::workflow_graph_from_program(&program);
+    let trace_graph =
+        lash_typescript::workflow_graph::workflow_graph_from_program(&output.artifact.canonical_ir);
     let trace_map = trace_lashlang_main_map(&output.artifact);
+    assert_eq!(
+        trace_lashlang_source_identity(&output.artifact),
+        trace_graph.source_identity,
+        "the trace integration must retain the projector's source identity"
+    );
 
     let container_kinds = graph
         .nodes()

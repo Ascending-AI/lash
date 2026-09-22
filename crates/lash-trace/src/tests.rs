@@ -122,6 +122,7 @@ fn language_execution_records_are_jsonl_shaped() {
         subject: TraceRuntimeSubject::Process {
             process_id: ProcessId::from("p1".to_string()),
         },
+        source_identity: "source".to_string(),
         module_ref: "module".to_string(),
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
@@ -152,6 +153,7 @@ fn language_execution_records_are_jsonl_shaped() {
     assert_eq!(json["language"], "lashlang");
     assert_eq!(json["event"]["kind"], "node_started");
     assert_eq!(json["event"]["event_key"], "process:p1:node:n1:1:started");
+    assert_eq!(json["event"]["identity"]["source_identity"], "source");
 
     let round_trip =
         serde_json::from_value::<TraceRecord>(json).expect("deserialize language execution");
@@ -256,6 +258,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                     subject: TraceRuntimeSubject::Process {
                         process_id: ProcessId::from("p1".to_string()),
                     },
+                    source_identity: "source".to_string(),
                     module_ref: "m".to_string(),
                     entry_kind: "p".to_string(),
                     entry_ref: None,

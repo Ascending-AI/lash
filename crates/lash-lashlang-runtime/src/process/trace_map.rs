@@ -3,6 +3,11 @@ use lash_trace::{
     TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
 };
 
+pub fn trace_lashlang_source_identity(artifact: &lashlang::ModuleArtifact) -> String {
+    lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir)
+        .source_identity
+}
+
 pub(super) fn trace_lashlang_process_map(
     artifact: &lashlang::ModuleArtifact,
     process_name: &str,

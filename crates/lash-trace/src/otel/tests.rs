@@ -24,6 +24,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
         subject: crate::TraceRuntimeSubject::Process {
             process_id: ProcessId::from("process-1"),
         },
+        source_identity: "source-1".to_string(),
         module_ref: "module-1".to_string(),
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
@@ -48,6 +49,10 @@ fn correlation_fields_are_exported_as_otel_attributes() {
         },
     );
     let language_attrs = event_attributes(&language_record, &OtelTraceOptions::default());
+    assert_eq!(
+        attribute_value(&language_attrs, "lash.language_execution.source_identity"),
+        &OtelValue::String("source-1".into())
+    );
     assert_eq!(
         attribute_value(
             &language_attrs,
@@ -421,6 +426,7 @@ fn failed_language_execution_yields_error_span() {
         subject: TraceRuntimeSubject::Process {
             process_id: ProcessId::from("p1".to_string()),
         },
+        source_identity: "source".to_string(),
         module_ref: "module".to_string(),
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),

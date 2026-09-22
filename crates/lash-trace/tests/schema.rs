@@ -222,6 +222,7 @@ fn lashlang_identity() -> TraceLanguageExecutionIdentity {
         subject: TraceRuntimeSubject::Process {
             process_id: ProcessId::from("p1"),
         },
+        source_identity: "source".to_string(),
         module_ref: "module".to_string(),
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
@@ -804,6 +805,7 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
                     subject: TraceRuntimeSubject::Process {
                         process_id: ProcessId::from("p1"),
                     },
+                    source_identity: "source:v1".to_string(),
                     module_ref: "module:v1".to_string(),
                     entry_kind: "program".to_string(),
                     entry_ref: None,
@@ -1239,6 +1241,7 @@ fn execution_started_map_carries_no_identity_copy() {
                 "identity": {
                     "scope": { "session_id": "s1" },
                     "subject": { "type": "process", "process_id": "p1" },
+                    "source_identity": "source",
                     "module_ref": "module",
                     "entry_kind": "process",
                     "entry_ref": "component:0",
@@ -1263,7 +1266,13 @@ fn execution_started_map_carries_no_identity_copy() {
     );
 
     let map = &wire["event"]["execution_map"];
-    for field in ["module_ref", "entry_kind", "entry_ref", "entry_name"] {
+    for field in [
+        "source_identity",
+        "module_ref",
+        "entry_kind",
+        "entry_ref",
+        "entry_name",
+    ] {
         assert!(
             map.get(field).is_none(),
             "the execution map must not restate `{field}`; identity owns it"
@@ -1636,6 +1645,7 @@ fn language_execution_full_shape() {
                 "identity": {
                     "scope": { "session_id": "s1" },
                     "subject": { "type": "process", "process_id": "p1" },
+                    "source_identity": "source",
                     "module_ref": "module",
                     "entry_kind": "process",
                     "entry_ref": "component:0",

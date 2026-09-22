@@ -81,6 +81,8 @@ pub(super) const LASH_LANGUAGE_EXECUTION_PROCESS_ID: &str = "lash.language_execu
 pub(super) const LASH_LANGUAGE_EXECUTION_RESTATE_INVOCATION_ID: &str =
     "lash.language_execution.restate_invocation_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_SESSION_ID: &str = "lash.language_execution.session_id";
+pub(super) const LASH_LANGUAGE_EXECUTION_SOURCE_IDENTITY: &str =
+    "lash.language_execution.source_identity";
 pub(super) const LASH_LANGUAGE_EXECUTION_STATUS: &str = "lash.language_execution.status";
 pub(super) const LASH_LANGUAGE_EXECUTION_SUBJECT_TYPE: &str =
     "lash.language_execution.subject_type";

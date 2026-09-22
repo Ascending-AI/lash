@@ -1020,6 +1020,12 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
         trace.identity().restate_invocation_id.as_deref(),
         Some("invocation-rlm-cell")
     );
+    assert_eq!(
+        trace.identity().source_identity,
+        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir)
+            .source_identity,
+        "the RLM trace identity must carry the projector's source identity"
+    );
 }
 
 pub(super) async fn execute_continue_as_with_trace_sink(

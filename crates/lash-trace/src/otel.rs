@@ -1150,6 +1150,10 @@ fn language_execution_attributes(
         ));
     }
     attrs.push(KeyValue::new(
+        attr::LASH_LANGUAGE_EXECUTION_SOURCE_IDENTITY,
+        event.identity.source_identity.clone(),
+    ));
+    attrs.push(KeyValue::new(
         attr::LASH_LANGUAGE_EXECUTION_MODULE_REF,
         event.identity.module_ref.clone(),
     ));
