@@ -436,6 +436,21 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
             .close_effect_group(handle, disposition)
             .await
     }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner
+            .controller()
+            .read_group_settlement(group_key, rank)
+            .await
+    }
+
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
@@ -482,20 +497,6 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
         if index == 3 {
             operations.push(SurfaceOperation::RuntimeOperationRecord { key: 0 });
             operations.push(SurfaceOperation::RuntimeOperationRecord { key: 1 });
-        }
-
-        async fn read_group_settlement(
-            &self,
-            group_key: &str,
-            rank: u64,
-        ) -> Result<
-            Option<lash_core::runtime::effect::RankedGroupSettlement>,
-            lash_core::RuntimeEffectControllerError,
-        > {
-            self.inner
-                .controller()
-                .read_group_settlement(group_key, rank)
-                .await
         }
 
         if index == 5 {

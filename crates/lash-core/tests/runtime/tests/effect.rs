@@ -617,6 +617,17 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
         self.native.close_effect_group(handle, disposition).await
     }
 
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
+    }
+
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
@@ -1041,17 +1052,6 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
     impl lash_core::ToolProvider for RetryOnceTool {
         fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
             vec![retry_once_tool_definition().manifest()]
-        }
-
-        async fn read_group_settlement(
-            &self,
-            group_key: &str,
-            rank: u64,
-        ) -> Result<
-            Option<lash_core::runtime::effect::RankedGroupSettlement>,
-            lash_core::RuntimeEffectControllerError,
-        > {
-            self.native.read_group_settlement(group_key, rank).await
         }
 
         fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
