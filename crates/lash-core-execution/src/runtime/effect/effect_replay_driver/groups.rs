@@ -124,7 +124,10 @@ const SETTLEMENT_POLL: Duration = BUSY_POLL;
 /// # Retention, and the one entry that outlives its group
 ///
 /// An entry is removed when the group is closed *and* complete (see
-/// `reap_if_complete`). A group whose caller never closes — a frame that
+/// `reap_if_complete`). A reopen is a new caller interest: it clears the
+/// entry's `closed` flag (the narrowed disposition stays cumulative), and the
+/// entry is reaped only after the caller's *next* close once children
+/// complete. A group whose caller never closes — a frame that
 /// panicked between open and close, or a host that drops the session — keeps
 /// its entry for the life of the process: a `Vec<String>` of replay keys, a
 /// token, and a counter, per such group. This is a bounded-per-group leak and
@@ -251,10 +254,15 @@ impl DurableEffectGroups {
 
     fn reap(&self, group_key: &str, state: &Arc<OpenGroup>) {
         let mut open = self.open.write_recover();
-        if open
-            .get(group_key)
-            .is_some_and(|current| Arc::ptr_eq(current, state))
-        {
+        if open.get(group_key).is_some_and(|current| {
+            // Re-judge the retirement under the write lock: the caller's
+            // checks ran before a read of the journal, and a reopen that
+            // cleared `closed` in between — or a child task that was still
+            // finishing — must not be retired out from under it.
+            Arc::ptr_eq(current, state)
+                && current.state.lock_recover().closed
+                && current.outstanding.load(Ordering::Acquire) == 0
+        }) {
             open.remove(group_key);
         }
     }
@@ -282,7 +290,9 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     /// lease or no row at all is executed. A reopen *inside this process* skips
     /// the dispatch entirely, because those children are still running on this
     /// host's tasks and re-running them would double the side effects the first
-    /// dispatch is still producing.
+    /// dispatch is still producing — and it clears the entry's `closed` flag,
+    /// because a reopen is a new caller interest entitled to read the ranks a
+    /// closed-but-unreaped group kept recording.
     ///
     /// A host with no registered [`GroupExecutors`] resolver refuses here —
     /// as its two sibling methods do, with
@@ -362,13 +372,45 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         let offered = accepted_membership(&group, self.clock.timestamp_ms())?;
         let persisted = self.row_store.open_group(&record, &offered).await?;
         fence_reopen(&record, &persisted)?;
-        let Some((offered_children, offered_executors)) = prepared else {
-            // Already running here. The durable fence above has judged the
-            // shape, so there is nothing left to check and nothing to dispatch.
-            return Ok(handle);
+        let (offered_children, offered_executors) = match prepared {
+            Some(prepared) => prepared,
+            None => {
+                // Already running here. The durable fence above has judged the
+                // shape, so there is nothing left to check and nothing to
+                // dispatch. The reopen is a new caller interest: an entry
+                // closed by an earlier caller but not yet reaped opens again —
+                // a closed group's settlements keep landing under host
+                // ownership precisely so a caller may read them. Only `closed`
+                // clears; the narrowed disposition stays cumulative. The clear
+                // runs under the map's write lock so a `reap` re-judging the
+                // entry under the same lock cannot retire it out from under
+                // the new handle.
+                let still_open = {
+                    let open = self.groups.open.write_recover();
+                    if let Some(existing) = open.get(group.group_key()) {
+                        existing.state.lock_recover().closed = false;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if still_open {
+                    return Ok(handle);
+                }
+                // The entry raced a reap and lost: it existed at the earlier
+                // check and is gone now. The reopen is still a new caller
+                // interest — resolve the children this run skipped and open
+                // the group fresh.
+                let children = child_identities_of(&group)?;
+                (children, self.resolve_group_children(&group).await?)
+            }
         };
-        if self.groups.get(group.group_key()).is_some() {
-            return Ok(handle);
+        {
+            let open = self.groups.open.write_recover();
+            if let Some(existing) = open.get(group.group_key()) {
+                existing.state.lock_recover().closed = false;
+                return Ok(handle);
+            }
         }
 
         // Dispatch from the *journal's* membership, never from `group`.
@@ -428,7 +470,8 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             .count();
         let state = {
             let mut open = self.groups.open.write_recover();
-            if open.contains_key(group.group_key()) {
+            if let Some(existing) = open.get(group.group_key()) {
+                existing.state.lock_recover().closed = false;
                 return Ok(handle);
             }
             let state = Arc::new(OpenGroup {
