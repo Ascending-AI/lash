@@ -292,19 +292,10 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
     return env, deps
 
 
-# The agent-workbench cases that shell out to `node --test` to drive
-# `examples/agent-workbench/tests/browser_projection.mjs`. The Bazel action has
-# no Node.js toolchain and no Cargo-relative asset tree, so the partition label
-# skips them by name (`args`, below) and the `Test Cargo workspace partition`
-# job selects exactly them out of the same binary
-# (`tools/bazel/workbench_nextest_filter.txt`). Every other workbench case is
-# partition-owned and runs on the pool. Keep the two derived from this one list
-# so a new Node-gated case can never be skipped by Bazel without also being
-# picked up by Cargo, or the reverse.
-NODE_GATED_WORKBENCH_TESTS = (
-    "tests::recoverable_chat_tests::"
-    "workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
-)
+# The workbench unit test shells out to Node for its browser-projection case.
+# Its interpreter is a pinned Bazel input, including on feature-lane variants.
+WORKBENCH_NODE = "@workbench_node_linux_x64//:bin/node"
+WORKBENCH_NODE_ENV = {"LASH_WORKBENCH_TEST_NODE": f"$(rootpath {WORKBENCH_NODE})"}
 
 
 def cargo_test_policy(
@@ -930,21 +921,11 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             bin_unit_tags, bin_unit_cargo_reason = cargo_test_policy(
                 package["name"], "bin-unit-test", target["name"]
             )
-            bin_unit_skips = (
-                list(NODE_GATED_WORKBENCH_TESTS)
-                if package["name"] == "agent-workbench"
-                else []
-            )
+            workbench_node = package["name"] == "agent-workbench"
             unit_args = [
                 "lash_rust_unit_test(\n",
                 f"    name = {quote(name + '__unit_test')},\n",
             ]
-            if bin_unit_skips:
-                unit_args.append(
-                    "    args = "
-                    + string_list([f"--skip={test}" for test in bin_unit_skips])
-                    + ",\n"
-                )
             unit_args += [
                 f"    crate_features = {string_list(target_features)},\n",
                 f"    crate_name = {quote(crate_name)},\n",
@@ -958,6 +939,9 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 unit_args.append(
                     f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
                 )
+            if workbench_node:
+                unit_args.append(f"    extra_data = {string_list([WORKBENCH_NODE])},\n")
+                unit_args.append(f"    test_env = {json.dumps(WORKBENCH_NODE_ENV, sort_keys=True)},\n")
             unit_args.extend([
                 f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
@@ -974,12 +958,10 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 "label": f"//{package_dir}:{name}__unit_test",
                 "tags": bin_unit_tags,
             }
-            if bin_unit_skips:
-                bin_unit_inventory["bazel_skipped"] = sorted(bin_unit_skips)
             if bin_unit_cargo_reason:
                 bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
             inventory_targets.append(bin_unit_inventory)
-            if not bin_unit_skips and not bin_unit_tags:
+            if not workbench_node and not bin_unit_tags:
                 batch_members.append(f":{name}__unit_test")
 
     if package["name"] == "lash-internal-core":
@@ -1255,22 +1237,6 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     # nextest syntax error at the call site rather than an empty selection.
     outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
         " + ".join(cargo_nextest_terms) + "\n" if cargo_nextest_terms else "none()\n"
-    )
-    # The workbench partition is now exactly the Node-gated cases the Bazel
-    # label skipped, selected by name out of the same binary. Derived from the
-    # same `bazel_skipped` records the label's `--skip` args come from, so the
-    # two halves of the split cannot drift into a gap or an overlap.
-    workbench_terms = sorted(
-        f"({nextest_filter_term(package['package'], target)} & test(={test}))"
-        for package in inventory
-        if package["package"] == "agent-workbench"
-        for target in package["targets"]
-        if target.get("label") is not None
-        and target["kind"] in ("bin-unit-test", "test", "unit-test")
-        for test in target.get("bazel_skipped", ())
-    )
-    outputs[ROOT / "tools/bazel/workbench_nextest_filter.txt"] = (
-        " + ".join(workbench_terms) + "\n" if workbench_terms else "none()\n"
     )
     # The service jobs build these labels from the shared cache and execute
     # them uncached against the service they stand up. Generated, so a new
@@ -1917,28 +1883,21 @@ class FeatureLaneGraph:
         if kind == "bin-unit-test":
             base = label_name(target, library is None and len(binaries) == 1)
             name = f"{base}__unit_test__fv_{suffix}"
-            skips = (
-                [f"--skip={case}" for case in NODE_GATED_WORKBENCH_TESTS]
-                if package_name == "agent-workbench"
-                else []
-            )
+            workbench_node = package_name == "agent-workbench"
             self.add_chunk(
                 package_name,
                 name,
                 "lash_rust_feature_test(\n"
                 f"    name = {quote(name)},\n"
-                + (
-                    f"    args = {string_list(sorted(set(skips + args)))},\n"
-                    if skips or args
-                    else ""
-                )
+                + (f"    args = {string_list(sorted(set(args)))},\n" if args else "")
                 + f"    crate_features = {string_list(target_features)},\n"
                 f"    crate_name = {quote(crate_name)},\n"
                 f"    crate_root = {quote(crate_root)},\n"
                 f"    declared_features = {string_list(sorted(package['features']))},\n"
                 + exec_properties_argument(crate_name, "test")
                 + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
-                f"    library = {quote(library_label) if library_label else 'None'},\n"
+                + (f"    extra_data = {string_list([WORKBENCH_NODE])},\n" if workbench_node else "")
+                + f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
                 f"    manifest_dir = {quote(directory)},\n"
                 f"    package_name = {quote(package_name)},\n"
@@ -1948,8 +1907,8 @@ class FeatureLaneGraph:
                     else ""
                 )
                 + (
-                    f"    test_env = {json.dumps(rustc_env, sort_keys=True)},\n"
-                    if rustc_env
+                    f"    test_env = {json.dumps(rustc_env | (WORKBENCH_NODE_ENV if workbench_node else {}), sort_keys=True)},\n"
+                    if rustc_env or workbench_node
                     else ""
                 )
                 + f"    tags = {string_list(tags)},\n"

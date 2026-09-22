@@ -719,8 +719,7 @@ class BazelTestContractTests(unittest.TestCase):
         """The Bazel partition owns every deterministic Rust binary.
 
         `tools/bazel/cargo_owned_nextest_filter.txt` is therefore `none()`, and
-        a trusted event with no workbench diff must refuse to run rather than
-        launder an empty selection into a green Cargo job.
+        a trusted event must refuse the Cargo job, including on workbench diffs.
         """
         self.assertEqual(
             "none()",
@@ -728,59 +727,17 @@ class BazelTestContractTests(unittest.TestCase):
             .read_text(encoding="utf-8")
             .strip(),
         )
-        completed, invocations, _ = self.run_workspace_test_step(
-            trusted=True, workbench=False
-        )
-        self.assertEqual(1, completed.returncode)
-        self.assertIn("without workbench", completed.stderr)
-        self.assertEqual([], invocations)
+        for workbench in (False, True):
+            with self.subTest(workbench=workbench):
+                completed, invocations, _ = self.run_workspace_test_step(
+                    trusted=True, workbench=workbench
+                )
+                self.assertEqual(1, completed.returncode)
+                self.assertIn("must use the Bazel partition", completed.stderr)
+                self.assertEqual([], invocations)
 
-    def test_a_trusted_event_runs_exactly_the_workbench_partition(self) -> None:
-        expected_filter = (
-            ROOT / "tools/bazel/workbench_nextest_filter.txt"
-        ).read_text(encoding="utf-8").strip()
-        completed, invocations, _ = self.run_workspace_test_step(
-            trusted=True, workbench=True
-        )
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertEqual(2, len(invocations))
-        nextest = invocations[1]
-        self.assertEqual(["nextest", "run"], nextest[:2])
-        self.assertEqual(expected_filter, nextest[nextest.index("-E") + 1])
-
-    def test_a_trusted_event_builds_only_the_workbench_package(self) -> None:
-        """The selection is one binary, so the build must be one package.
-
-        A `cargo build --workspace` here compiled and linked every workspace
-        crate on a 2-core runner before running a single Node-gated test, which
-        made this job the CI tail (836 s against the Bazel partition's 145 s).
-        The trusted path builds `agent-workbench`'s test targets and nothing
-        else; the store conformance helper example belongs to the untrusted
-        full-workspace path, which still spawns it.
-        """
-        _, invocations, _ = self.run_workspace_test_step(trusted=True, workbench=True)
-        build, nextest = invocations
-        self.assertEqual("build", build[0])
-        self.assertNotIn("--workspace", build)
-        self.assertNotIn("--example", build)
-        self.assertEqual(["--package", "agent-workbench"], build[-3:-1])
-        self.assertIn("--tests", build)
-        self.assertNotIn("--workspace", nextest)
-        self.assertIn("--package", nextest)
-        self.assertEqual(
-            "agent-workbench", nextest[nextest.index("--package") + 1]
-        )
-
-    def test_the_workbench_split_covers_every_workbench_case_exactly_once(
-        self,
-    ) -> None:
-        """Bazel skips by name exactly what the Cargo filter selects by name.
-
-        The workbench unit binary is partition-owned apart from the cases that
-        shell out to `node --test`. Those two halves are generated from one
-        `bazel_skipped` record; this refuses a hand edit that skips a case in
-        Bazel without selecting it in Cargo, or selects one Cargo never runs.
-        """
+    def test_workbench_browser_projection_has_a_pinned_bazel_node_input(self) -> None:
+        """The full workbench unit binary executes under Bazel with Node in runfiles."""
         workbench = next(
             target
             for target in inventory_targets()
@@ -789,31 +746,17 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertEqual([], workbench["tags"])
         self.assertNotIn("cargo_only", workbench)
-        skipped = workbench["bazel_skipped"]
-        self.assertEqual(sorted(skipped), skipped)
-        self.assertTrue(skipped)
+        self.assertNotIn("bazel_skipped", workbench)
         build_file = (
             ROOT / "examples/agent-workbench/BUILD.bazel"
         ).read_text(encoding="utf-8")
-        for test in skipped:
-            self.assertIn(f'"--skip={test}"', build_file)
-        expected_filter = " + ".join(
-            sorted(
-                "((package(agent-workbench) & kind(bin) &"
-                f" binary(agent-workbench)) & test(={test}))"
-                for test in skipped
-            )
-        )
-        self.assertEqual(
-            expected_filter,
-            (ROOT / "tools/bazel/workbench_nextest_filter.txt")
-            .read_text(encoding="utf-8")
-            .strip(),
-        )
+        self.assertIn('"@workbench_node_linux_x64//:bin/node"', build_file)
+        self.assertIn('"LASH_WORKBENCH_TEST_NODE"', build_file)
+        self.assertNotIn("--skip=tests::recoverable_chat_tests::workbench_browser", build_file)
         source = (
             ROOT / "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
         ).read_text(encoding="utf-8")
-        self.assertIn('Command::new("node")', source)
+        self.assertIn('var_os("LASH_WORKBENCH_TEST_NODE")', source)
 
     def test_an_untrusted_event_keeps_the_full_cargo_workspace_run(self) -> None:
         completed, invocations, python_invocations = self.run_workspace_test_step(

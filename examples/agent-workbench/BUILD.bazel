@@ -37,9 +37,6 @@ lash_rust_binary(
 
 lash_rust_unit_test(
     name = "agent-workbench__unit_test",
-    args = [
-        "--skip=tests::recoverable_chat_tests::workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
-    ],
     crate_features = [
         "default",
     ],
@@ -53,6 +50,10 @@ lash_rust_unit_test(
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+    ],
+    test_env = {"LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
@@ -141,9 +142,6 @@ lash_rust_feature_binary(
 
 lash_rust_feature_test(
     name = "agent-workbench__unit_test__fv_39c07113",
-    args = [
-        "--skip=tests::recoverable_chat_tests::workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
-    ],
     crate_features = [
         "provider-wire-fixtures",
     ],
@@ -158,10 +156,14 @@ lash_rust_feature_test(
         "//examples:shared_rust_sources",
         "//crates/lash-sim:package_files",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+    ],
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
     package_name = "agent-workbench",
+    test_env = {"LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [
         "feature-lane",
         "manual",
@@ -172,9 +174,6 @@ lash_rust_feature_test(
 
 lash_rust_feature_test(
     name = "agent-workbench__unit_test__fv_d90f54df",
-    args = [
-        "--skip=tests::recoverable_chat_tests::workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
-    ],
     crate_features = [],
     crate_name = "agent_workbench",
     crate_root = "src/main.rs",
@@ -186,10 +185,14 @@ lash_rust_feature_test(
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+    ],
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
     package_name = "agent-workbench",
+    test_env = {"LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [
         "feature-lane",
         "manual",
