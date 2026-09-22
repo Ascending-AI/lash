@@ -846,6 +846,17 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     let drain_id = format!("{prefix}-l7-drain");
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "a drain gated on a closing group").await;
+    // The drain owns a child, so the retry that ends it is a resumed drain,
+    // not a fresh empty poll: the epilogue distinguishes the two by the
+    // registry, and an `Abandon` child is exactly the child a drain can own
+    // while a closing group withholds its end.
+    register_drain_child(
+        &world.registry,
+        &drain_id,
+        &format!("{prefix}-l7-abandon-child"),
+        OnParentEnd::Abandon,
+    )
+    .await;
 
     // Open and close a group under the drain's scope on the group host: one
     // child settles, the loser holds a release gate, so `closing` reports an

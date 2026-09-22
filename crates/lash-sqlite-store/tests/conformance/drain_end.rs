@@ -11,17 +11,19 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use lash_conformance::{
-    DrainEndWorld, DrainEndWorldFactory, EffectHost, ProcessRegistry, SessionStoreFactory,
-};
-use lash_core::RuntimeEffectEnvelope;
+use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
 use lash_core::store::RuntimePersistence;
+use lash_core::{EffectHost, ProcessRegistry, SessionStoreFactory};
 use lash_sansio::SessionId;
 use lash_sqlite_store::{SqliteEffectHost, SqliteProcessRegistry, SqliteSessionStoreFactory};
-fn sqlite_drain_end_host(effects_db: &std::path::Path) -> Arc<dyn EffectHost> {
-    let host = SqliteEffectHost::open(effects_db.to_path_buf()).expect("open the effect host");
-    host.register_group_executors(Arc::new(SettlingExecutors))
-        .expect("a fresh host has no resolver yet");
+async fn sqlite_drain_end_host(effects_db: &std::path::Path) -> Arc<dyn EffectHost> {
+    let host = SqliteEffectHost::open(effects_db)
+        .await
+        .expect("open the effect host");
+    host.register_group_executors(
+        lash_conformance::RecordingExecutors::settling() as Arc<dyn lash_core::GroupExecutors>
+    )
+    .expect("a fresh host has no resolver yet");
     Arc::new(host)
 }
 
@@ -41,34 +43,14 @@ async fn sqlite_drain_end_world(dir: &std::path::Path) -> DrainEndWorld {
         .expect("create the drain-end session store");
     DrainEndWorld {
         store: store as Arc<dyn RuntimePersistence>,
-        registry: SqliteProcessRegistry::open(dir.join("processes.db"), dir.join("sessions"))
-            .expect("open the drain-end process registry")
-            as Arc<dyn ProcessRegistry>,
+        registry: Arc::new(
+            SqliteProcessRegistry::open(&dir.join("processes.db"), dir.join("sessions"))
+                .await
+                .expect("open the drain-end process registry"),
+        ) as Arc<dyn ProcessRegistry>,
         session_factory: Arc::new(store_factory) as Arc<dyn SessionStoreFactory>,
-        effect_host: sqlite_drain_end_host(&dir.join("effects.db")),
-        group_host: Some(sqlite_drain_end_host(&dir.join("effects.db"))),
-    }
-}
-
-/// The drain-end laws never drive grouped children through a drain; the
-/// resolver exists only so the hosts support groups at all, and every child a
-/// law opens is served from the suite's staged-executor table first.
-struct SettlingExecutors;
-
-impl lash_conformance::GroupExecutors for SettlingExecutors {
-    fn executor_for(
-        &self,
-        _envelope: &RuntimeEffectEnvelope,
-    ) -> Option<lash_conformance::RuntimeEffectLocalExecutor<'static>> {
-        Some(lash_conformance::RuntimeEffectLocalExecutor::testing(
-            |_| async move {
-                Ok(
-                    lash_conformance::RuntimeEffectOutcome::LanguageRuntimeValue {
-                        value: serde_json::json!({"settled": true}),
-                    },
-                )
-            },
-        ))
+        effect_host: sqlite_drain_end_host(&dir.join("effects.db")).await,
+        group_host: Some(sqlite_drain_end_host(&dir.join("effects.db")).await),
     }
 }
 

@@ -11,37 +11,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_conformance::{
-    DrainEndWorld, DrainEndWorldFactory, EffectHost, ProcessRegistry, SessionStoreFactory,
-};
-use lash_core::RuntimeEffectEnvelope;
+use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
 use lash_core::store::RuntimePersistence;
+use lash_core::{EffectHost, ProcessRegistry, SessionStoreFactory};
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 use lash_sansio::SessionId;
 
 use super::{SharedDatabaseLock, database_url, reset};
-
-/// The drain-end laws never drive grouped children through a drain; the
-/// resolver exists only so the hosts support groups at all, and every child a
-/// law opens is served from the suite's staged-executor table first.
-struct SettlingExecutors;
-
-impl lash_conformance::GroupExecutors for SettlingExecutors {
-    fn executor_for(
-        &self,
-        _envelope: &RuntimeEffectEnvelope,
-    ) -> Option<lash_conformance::RuntimeEffectLocalExecutor<'static>> {
-        Some(lash_conformance::RuntimeEffectLocalExecutor::testing(
-            |_| async move {
-                Ok(
-                    lash_conformance::RuntimeEffectOutcome::LanguageRuntimeValue {
-                        value: serde_json::json!({"settled": true}),
-                    },
-                )
-            },
-        ))
-    }
-}
 
 fn postgres_drain_end_host(storage: &PostgresStorage) -> Arc<dyn EffectHost> {
     let ttl = Duration::from_secs(30);
@@ -53,8 +29,10 @@ fn postgres_drain_end_host(storage: &PostgresStorage) -> Arc<dyn EffectHost> {
             drain_budget: Default::default(),
         },
     );
-    host.register_group_executors(Arc::new(SettlingExecutors))
-        .expect("a freshly connected host has no resolver yet");
+    host.register_group_executors(
+        lash_conformance::RecordingExecutors::settling() as Arc<dyn lash_core::GroupExecutors>
+    )
+    .expect("a freshly connected host has no resolver yet");
     Arc::new(host)
 }
 
