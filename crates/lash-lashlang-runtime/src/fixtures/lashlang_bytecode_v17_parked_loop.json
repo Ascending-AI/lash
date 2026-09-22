@@ -18,7 +18,7 @@
     "signal_wait_ordinals": {},
     "sleep_sequence": 0,
     "started_process_ids": [],
-    "version": 12,
+    "version": 13,
     "vm": {
       "active_execution_elapsed": {
         "nanos": 0,
@@ -94,6 +94,10 @@
           }
         }
       ]
+    },
+    "incorporation_ledger": {
+      "incorporated": [],
+      "usage_charged": []
     }
   },
   "source_commit": "4f96c76629575e46b8d7f29526bb0cab7c16625b"
