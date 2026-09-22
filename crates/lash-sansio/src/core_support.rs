@@ -401,6 +401,10 @@ mod blake3_domain_tests {
         "lash-runtime-usage-payload/v3",
         "lash-tool-intent-payload/v2",
         "lash-lashlang-execution-site/v2",
+        // FIG-3420: the filesystem spill path is deleted; retained output is a
+        // journaled session attachment, so the spill domain is permanently
+        // retired rather than reused.
+        "lash-tool-output-spill/v2",
         "lash-workflow-node/v2",
         "lashlang-process-start/v2",
     ];

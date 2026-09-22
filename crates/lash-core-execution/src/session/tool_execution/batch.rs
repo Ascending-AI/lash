@@ -1025,9 +1025,22 @@ mod tests {
         async fn execute_effect(
             &self,
             envelope: crate::RuntimeEffectEnvelope,
-            _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+            local_executor: crate::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            // Each settled call also journals its presentation boundary
+            // (FIG-3420) through this controller; run its executor rather
+            // than synthesizing a presentation here.
+            if let command @ crate::RuntimeEffectCommand::PresentToolResult { .. } =
+                envelope.command
+            {
+                return local_executor
+                    .execute(crate::RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        command,
+                    ))
+                    .await;
+            }
             assert!(matches!(
                 envelope.command,
                 crate::RuntimeEffectCommand::ToolBatch { .. }
