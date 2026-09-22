@@ -141,6 +141,7 @@ pub enum RuntimeErrorCode {
     EffectJournalRetirementUnsupported,
     EffectScopeRetired,
     EffectScopeNotQuiescent,
+    EffectGroupLifecyclePinned,
     AwaitEventScopeNotRetirable,
     InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
@@ -479,6 +480,7 @@ impl RuntimeErrorCode {
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
             Self::EffectScopeRetired => "effect_scope_retired",
             Self::EffectScopeNotQuiescent => "effect_scope_not_quiescent",
+            Self::EffectGroupLifecyclePinned => "effect_group_lifecycle_pinned",
             Self::AwaitEventScopeNotRetirable => "await_event_scope_not_retirable",
             Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
@@ -743,6 +745,7 @@ impl RuntimeErrorCode {
             | Self::EffectJournalRetirementUnsupported
             | Self::EffectScopeRetired
             | Self::EffectScopeNotQuiescent
+            | Self::EffectGroupLifecyclePinned
             | Self::AwaitEventScopeNotRetirable
             | Self::InvalidAwaitEventSessionId
             | Self::InvalidAwaitEventWaitIdentity
@@ -943,6 +946,7 @@ impl RuntimeErrorCode {
         Self::EffectJournalRetirementUnsupported,
         Self::EffectScopeRetired,
         Self::EffectScopeNotQuiescent,
+        Self::EffectGroupLifecyclePinned,
         Self::AwaitEventScopeNotRetirable,
         Self::InvalidAwaitEventSessionId,
         Self::InvalidAwaitEventWaitIdentity,
@@ -1145,6 +1149,7 @@ impl RuntimeErrorCode {
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
             "effect_scope_retired" => Self::EffectScopeRetired,
             "effect_scope_not_quiescent" => Self::EffectScopeNotQuiescent,
+            "effect_group_lifecycle_pinned" => Self::EffectGroupLifecyclePinned,
             "await_event_scope_not_retirable" => Self::AwaitEventScopeNotRetirable,
             "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,

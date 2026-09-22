@@ -14,8 +14,8 @@ use lash_core::{
 use lash_core::facade_support::effect_replay_driver::{
     AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectClaimObservation,
     EffectCommitState, EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
-    EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupRecord,
-    EffectLeaseFence, EffectTerminal, MintingEffectRef,
+    EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupLifecycle,
+    EffectGroupRecord, EffectLeaseFence, EffectTerminal, MintingEffectRef,
 };
 
 #[test]
@@ -145,6 +145,7 @@ fn group_record() -> EffectGroupRecord {
         wake: lash_core::GroupWakePolicy::All,
         loser_disposition: lash_core::LoserPolicy::RunToCompletion,
         expected_children: 2,
+        lifecycle: EffectGroupLifecycle::Live,
         created_at_ms: 1_000,
     }
 }

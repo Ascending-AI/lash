@@ -2,8 +2,7 @@
 //! counters its children allocate from — `next_seq` for settlement rank at
 //! discharge, `next_commit_seq` for final-commit order at the §4 point — the
 //! write-time `expected_children`, and a `lifecycle` enum-per-phase column
-//! (`live` today; `closing`/`settled` are FIG-3410's writes on this column,
-//! not new columns).
+//! (`live`/`closing`/`settled`, ADR 0099 §7, FIG-3410).
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "runtime_effect_group";
@@ -11,27 +10,27 @@ pub const TABLE: &str = "runtime_effect_group";
 /// Every column, in insert order.
 ///
 /// `lifecycle` is deliberately absent: the DDL default writes
-/// `{"type":"live"}` at open, and no code path reads or writes it before
-/// FIG-3410 — the column is the reservation, declared now so the closing and
-/// settled phases are new values, not a migration.
+/// `{"type":"live"}` at open, and the only writer afterward is the guarded
+/// single-row CAS, which sets the column explicitly — an INSERT that named it
+/// would only be able to repeat the default.
 pub const INSERT_COLUMNS: &str = "group_key, scope_id, session_id, wake, loser_disposition,
                 expected_children, next_seq, next_commit_seq, created_at_ms";
 
 /// The group as a caller reads it back.
 ///
-/// The one projection over this table, and the full row minus both counters
-/// and the lifecycle: each counter is never read, only bumped and returned by
-/// its bump, and the lifecycle has no consumer until FIG-3410 — a reader that
-/// carried either would be reporting a fact it must not act on.
+/// The one projection over this table: the full row minus both counters (each
+/// is never read, only bumped and returned by its bump) — but *with* the
+/// lifecycle, which is the durable closing fact §7's finalization and the
+/// session-deletion pin read act on.
 pub const RECORD_COLUMNS: &str = "group_key, scope_id, session_id, wake, loser_disposition,
-                    expected_children, created_at_ms";
+                    expected_children, lifecycle, created_at_ms";
 
 crate::statements! {
     /// `runtime_effect_group` statements both backends issue verbatim.
     pub struct GroupStatements @ "effect_group" {
         /// The durably recorded group row for `?1`.
         select_by_key = "SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    expected_children, created_at_ms
+                    expected_children, lifecycle, created_at_ms
              FROM runtime_effect_group
              WHERE group_key = ?1";
 

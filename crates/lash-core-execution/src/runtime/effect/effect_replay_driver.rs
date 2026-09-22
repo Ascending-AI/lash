@@ -112,8 +112,8 @@ pub use super::group_journal::{
     AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectCommitState,
     EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
     EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupColumn,
-    EffectGroupRecord, GroupChildFinalCommit, StoredChildArbitration, StoredGroupSettlement,
-    UnsettledGroupChild,
+    EffectGroupLifecycle, EffectGroupLifecyclePhase, EffectGroupRecord, FinalizationStep,
+    GroupChildFinalCommit, StoredChildArbitration, StoredGroupSettlement, UnsettledGroupChild,
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
@@ -1167,6 +1167,39 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         &self,
         group_key: &str,
     ) -> Result<Vec<UnsettledGroupChild>, RuntimeEffectControllerError>;
+
+    /// Advance the group's durable lifecycle if it currently holds one of
+    /// `from` phases, in a single guarded write (ADR 0099 §7).
+    ///
+    /// This is the close/finalization CAS: close writes `Closing` before any
+    /// `decide_cancel`, each finalization step advances the recorded cursor,
+    /// and step 4 turns `closing` into `settled`. Returns the lifecycle now
+    /// durable on the row — `to` on a hit, the existing value on a guard miss —
+    /// so a caller distinguishes "I wrote this" from "someone else moved it"
+    /// without a second round-trip. An unknown `group_key` is an error: the
+    /// group row must exist.
+    async fn transition_group_lifecycle(
+        &self,
+        group_key: &str,
+        from: &[EffectGroupLifecyclePhase],
+        to: &EffectGroupLifecycle,
+    ) -> Result<EffectGroupLifecycle, RuntimeEffectControllerError>;
+
+    /// Every group recorded under `scope_id` whose lifecycle is `closing` —
+    /// the resumable finalization set a redriven opener drains
+    /// (ADR 0099 §7, `resume_closing_groups`).
+    async fn read_closing_groups(
+        &self,
+        scope_id: &str,
+    ) -> Result<Vec<EffectGroupRecord>, RuntimeEffectControllerError>;
+
+    /// `(group_key, lifecycle)` for every group owned by `session_id` whose
+    /// lifecycle is not `settled` — the pins a session deletion must refuse
+    /// before it deletes anything (ADR 0099 §7).
+    async fn read_session_group_lifecycle_pins(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, EffectGroupLifecycle)>, RuntimeEffectControllerError>;
 
     /// Extend the lease by `lease_ttl_ms`, guarded by `fence`.
     ///
