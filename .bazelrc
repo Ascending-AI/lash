@@ -121,6 +121,10 @@ build --@rules_rust//rust/settings:pipelined_compilation=True
 # with no remote cache ignores it.
 build --remote_cache_compression
 
+# Only the explicit fast feature-lane check enables binary/test metadata
+# actions. Enabling this for ordinary builds changes rust_test action keys.
+build:feature-fast-check --@rules_rust//rust/settings:always_enable_metadata_output_groups=true
+
 build --incompatible_strict_action_env
 # Measured 2026-09-22 on `just floor` after a one-line test edit: at 8 the
 # floor's 74 test actions ran eight at a time while the pool's slots sat

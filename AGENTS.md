@@ -18,8 +18,12 @@ flags; `--test_arg=<name>` filters test cases. `clippy` defaults to
 `//:workspace_clippy`; `doc` renders `//:workspace_docs` into bazel-bin; `run`
 compiles on the pool and starts the program locally.
 
-Feature coverage: `kiln build //:feature_lanes`, `kiln test
-//:feature_lane_tests`, `kiln clippy //:feature_lane_clippy`.`kiln fmt [-- --check]` is local `cargo fmt`;
+Feature edits can use `kiln build //:feature_lane_fast_checks
+--config=feature-fast-check` for Cargo-check-style metadata feedback on the
+feature-lane `cargo check` commands. `kiln build //:feature_lanes` remains the full
+compile/link checkpoint; `kiln test //:feature_lane_tests` and `kiln clippy
+//:feature_lane_clippy` retain their existing coverage. `kiln fmt [-- --check]`
+is local `cargo fmt`;
 `kiln sync` regenerates the graph and lockfile; `kiln clean` expunges only
 this workspace's output base. `kiln gate lash <name> -- <cmd>` runs the
 integration gates, names and ports from `KILN_GATE_ID`.

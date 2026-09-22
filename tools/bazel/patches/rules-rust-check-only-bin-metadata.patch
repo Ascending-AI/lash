@@ -1,0 +1,68 @@
+diff --git a/rust/private/rust.bzl b/rust/private/rust.bzl
+--- a/rust/private/rust.bzl
++++ b/rust/private/rust.bzl
+@@ -312,7 +312,7 @@
+     rustc_rmeta_output = None
+     if can_build_metadata(toolchain, ctx, ctx.attr.crate_type):
+         rust_metadata = ctx.actions.declare_file(
+-            metadata_output_path(toolchain, "lib" + crate_name),
++            "_meta/{}.rmeta".format(output.basename) if ctx.attr.crate_type == "bin" else metadata_output_path(toolchain, "lib" + crate_name),
+             sibling = output,
+         )
+         rustc_rmeta_output = generate_output_diagnostics(ctx, toolchain, rust_metadata)
+@@ -418,7 +418,7 @@
+         rustc_rmeta_output = None
+         if can_build_metadata(toolchain, ctx, crate_type):
+             rust_metadata = ctx.actions.declare_file(
+-                metadata_output_path(toolchain, "lib" + crate_name),
++                "_meta/{}.rmeta".format(output.basename) if crate_type == "bin" else metadata_output_path(toolchain, "lib" + crate_name),
+                 sibling = output,
+             )
+             rustc_rmeta_output = generate_output_diagnostics(ctx, toolchain, rust_metadata)
+@@ -489,7 +489,7 @@
+         rustc_rmeta_output = None
+         if can_build_metadata(toolchain, ctx, crate_type):
+             rust_metadata = ctx.actions.declare_file(
+-                metadata_output_path(toolchain, "lib" + crate_name),
++                "_meta/{}.rmeta".format(output.basename) if crate_type == "bin" else metadata_output_path(toolchain, "lib" + crate_name),
+                 sibling = output,
+             )
+             rustc_rmeta_output = generate_output_diagnostics(ctx, toolchain, rust_metadata)
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -2185,7 +2185,11 @@
+ 
+     args_metadata = None
+     if build_metadata:
+-        metadata_emit = ["link"]
++        # A binary, including --test, cannot produce the hollow rlib written
++        # by -Zno-codegen --emit=link. Its check-only action emits an .rmeta
++        # sentinel, which is never a crate dependency. Libraries still emit
++        # hollow rlibs for downstream pipelined compilation.
++        metadata_emit = [("metadata", build_metadata)] if crate_info.type == "bin" else ["link"]
+         args_metadata, _ = construct_arguments(
+             ctx = ctx,
+             attr = attr,
+diff --git a/rust/private/utils.bzl b/rust/private/utils.bzl
+--- a/rust/private/utils.bzl
++++ b/rust/private/utils.bzl
+@@ -788,8 +788,16 @@
+     # 2) either:
+-    #   * always_enable_metadata_output_groups is set
++    #   * the opt-in setting selects a feature-lane binary or test root
+     #   * this target can use metadata for pipelined compilation
++    # Lash's opt-in fast check only needs metadata for feature-lane binary
++    # roots. Applying the upstream global setting to every binary and proc
++    # macro would rekey ordinary tests and host build tools unnecessarily.
++    feature_root_metadata = (
++        crate_type == "bin" and
++        "feature-lane" in getattr(ctx.attr, "tags", []) and
++        ctx.attr._always_enable_metadata_output_groups[AlwaysEnableMetadataOutputGroupsInfo].always_enable_metadata_output_groups
++    )
+     return not toolchain._bootstrapping and (
+-        ctx.attr._always_enable_metadata_output_groups[AlwaysEnableMetadataOutputGroupsInfo].always_enable_metadata_output_groups or
++        feature_root_metadata or
+         (not disable_pipelining and
+          can_use_metadata_for_pipelining(toolchain, crate_type))
+     )

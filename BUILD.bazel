@@ -1,9 +1,12 @@
 load("//tools/bazel:schema_checks.bzl", "schema_check", "schema_documents")
 load("//tools/bazel:clippy.bzl", "lash_rust_clippy")
+load("//tools/bazel:check_roots.bzl", "check_only_roots")
 load(
     "//tools/bazel:feature_lanes.bzl",
     "FEATURE_LANE_CLIPPY_TARGETS",
     "FEATURE_LANE_COMPILE_TARGETS",
+    "FEATURE_LANE_CHECK_ROOTS",
+    "FEATURE_LANE_CHECK_LIBRARIES",
     "FEATURE_LANE_TEST_TARGETS",
 )
 load(
@@ -71,6 +74,21 @@ test_suite(
 filegroup(
     name = "feature_lanes",
     srcs = FEATURE_LANE_COMPILE_TARGETS,
+    testonly = True,
+)
+
+# Optional fast feedback for feature edits. The full `feature_lanes` target
+# above remains the compile/link checkpoint and the CI contract.
+
+check_only_roots(
+    name = "feature_lane_check_metadata",
+    roots = FEATURE_LANE_CHECK_ROOTS,
+    testonly = True,
+)
+
+filegroup(
+    name = "feature_lane_fast_checks",
+    srcs = FEATURE_LANE_CHECK_LIBRARIES + [":feature_lane_check_metadata"],
     testonly = True,
 )
 

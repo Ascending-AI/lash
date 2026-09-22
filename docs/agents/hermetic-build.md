@@ -78,6 +78,16 @@ labels or lint aggregates and defaults to `//:workspace_clippy`,
 `doc` renders the `rust_doc` targets into bazel-bin, `run` compiles a binary on
 the pool and starts it locally, and `fmt` is a local `cargo fmt`.
 
+For feature edits, `kiln build //:feature_lane_fast_checks
+--config=feature-fast-check` covers the feature-lane `cargo check` commands at
+their resolved feature graphs: libraries keep full outputs and binary/test
+roots use rustc metadata output. It does not run the lane's `cargo test`
+commands. The target fails analysis without the opt-in config or if any root
+lacks its check output. A successful check catches type errors inside test code, but does not
+prove code generation or linking. Run `kiln build //:feature_lanes` for that
+full checkpoint; ordinary `kiln build`, `kiln check`, and `kiln test` retain
+their existing action keys and outputs.
+
 ```sh
 # Analyze the generated graph and reject metadata or module-lock drift.
 scripts/hermetic-build.sh analyze

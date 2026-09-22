@@ -1476,6 +1476,8 @@ class FeatureLaneGraph:
         self.lanes: dict[str, dict[str, list[str]]] = {}
         self.units: list[dict] = []
         self.clippy: set[str] = set()
+        self.check_roots: set[str] = set()
+        self.check_compile_labels: set[str] = set()
         self.activations: dict[tuple[str, tuple[str, ...]], set[str]] = {}
         self._workspace_edges: dict[str, set[str]] = {}
         self._closures: dict[str, set[str]] = {}
@@ -2011,6 +2013,7 @@ class FeatureLaneGraph:
             test_labels: list[str] = []
             lane_name = lane["name"]
             for argv in lane["commands"]:
+                command_start = len(compile_labels)
                 command = feature_variants.parse_command(list(argv))
                 resolved = feature_variants.resolve_request(
                     self.workspace,
@@ -2039,6 +2042,9 @@ class FeatureLaneGraph:
                     )
                 roots = self.emit_root_targets(command, resolution, test_labels)
                 compile_labels.extend(roots)
+                if command.subcommand == "check":
+                    self.check_roots.update(roots)
+                    self.check_compile_labels.update(compile_labels[command_start:])
                 scope = (
                     command.package,
                     tuple(sorted(set(",".join(command.features).split(",")) - {""})),
@@ -2167,6 +2173,13 @@ def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict
     compile_targets = sorted({
         label for lane in graph.lanes.values() for label in lane["compile"]
     })
+    # The fast aggregate covers only Cargo-check commands. Their library
+    # closures remain full outputs; their binary/test roots use metadata.
+    check_roots = sorted(graph.check_roots)
+    check_compile_targets = set(graph.check_compile_labels)
+    if not set(check_roots) <= check_compile_targets:
+        raise SystemExit("feature-lane check root missing from compile inventory")
+    check_libraries = sorted(check_compile_targets - set(check_roots))
     test_targets = sorted({
         label for lane in graph.lanes.values() for label in lane["test"]
     })
@@ -2187,6 +2200,8 @@ def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict
     bzl = [
         GENERATED_HEADER,
         "FEATURE_LANE_COMPILE_TARGETS = " + string_list(compile_targets, indent=4) + "\n\n",
+        "FEATURE_LANE_CHECK_ROOTS = " + string_list(check_roots, indent=4) + "\n\n",
+        "FEATURE_LANE_CHECK_LIBRARIES = " + string_list(check_libraries, indent=4) + "\n\n",
         "FEATURE_LANE_TEST_TARGETS = " + string_list(test_targets, indent=4) + "\n\n",
         "FEATURE_LANE_CLIPPY_TARGETS = " + string_list(clippy_targets, indent=4) + "\n\n",
         "FEATURE_LANE_TEST_FLOORS = "
