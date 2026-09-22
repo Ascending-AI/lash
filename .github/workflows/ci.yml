@@ -1901,8 +1901,9 @@ jobs:
   fuzz-smoke:
     name: Fuzz smoke
     runs-on: ubuntu-24.04
-    # Explicit budget: four bounded libFuzzer runs over the committed seed
-    # corpus plus one nightly build must never grow past this.
+    # Explicit budget: one bounded libFuzzer run per [[bin]] target in
+    # fuzz/Cargo.toml over the committed seed corpus, plus the nightly
+    # toolchain build, must never grow past this.
     timeout-minutes: 45
     needs: plan
     # Off the pull-request critical path by design (FIG-878): the smoke run
@@ -1957,10 +1958,25 @@ jobs:
         working-directory: fuzz
         run: |
           set -euo pipefail
-          for target in remote_wire_dto plugin_payload attachment_metadata; do
+          # Target list comes from the same manifest the corpus check
+          # audits: a new [[bin]] in fuzz/Cargo.toml is smoked without a
+          # workflow edit.
+          mapfile -t targets < <(python3 ../scripts/check_fuzz_corpus.py --list-targets)
+          mkdir -p artifacts
+          for target in "${targets[@]}"; do
             cargo +nightly fuzz run "$target" "corpus/$target" -- \
-              -max_total_time=60 -timeout=10 -rss_limit_mb=4096
+              -max_total_time=60 -timeout=10 -rss_limit_mb=4096 \
+              "-artifact_prefix=${PWD}/artifacts/"
           done
+
+      - name: Upload fuzz crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-smoke-artifacts-${{ github.run_attempt }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
 
   stack-budget:
     name: Stack budget

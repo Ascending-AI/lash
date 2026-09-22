@@ -719,6 +719,35 @@ class FuzzSmokeTests(unittest.TestCase):
             needs["fuzz-smoke"]["result"] = "skipped"
             self.assertEqual([], ci_plan.evaluate_conclusion(needs, event_name=event))
 
+    def test_fuzz_smoke_targets_match_manifest(self) -> None:
+        import check_fuzz_corpus
+
+        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["fuzz-smoke"]
+        run_scripts = "\n".join(
+            step["run"] for step in job["steps"] if "run" in step
+        )
+        targets = check_fuzz_corpus.fuzz_targets(
+            check_fuzz_corpus.FUZZ_MANIFEST.read_text(encoding="utf-8")
+        )
+        # The loop must source its targets from the manifest, not a literal
+        # list: no declared target name may appear in any run step.
+        self.assertIn("check_fuzz_corpus.py --list-targets", run_scripts)
+        for target in targets:
+            self.assertNotIn(target, run_scripts)
+        uploads = [
+            step
+            for step in job["steps"]
+            if "upload-artifact" in str(step.get("uses", ""))
+        ]
+        self.assertTrue(
+            any(
+                step.get("if") == "failure()"
+                and "fuzz/artifacts" in step["with"]["path"]
+                for step in uploads
+            ),
+            "fuzz-smoke must upload fuzz/artifacts/ when a target crashes",
+        )
+
     def test_fuzz_paths_are_known_to_the_classifier(self) -> None:
         plan = ci_plan.classify(
             [
