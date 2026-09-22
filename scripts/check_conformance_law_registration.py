@@ -42,6 +42,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = "crates/lash-conformance/src/macros.rs"
+# Catalogue files split from macros.rs to stay inside the line budget.
+MACRO_MODULES = "crates/lash-conformance/src/macros"
 SUPPORT_INDEX = (
     "crates/lash-conformance/src/conformance/runtime_persistence/mod.rs"
 )
@@ -138,7 +140,10 @@ def referenced_elsewhere(name: str, defining_file: str, files: dict[str, str]) -
 
 
 def check(root: Path) -> list[str]:
-    macros = (root / MACROS).read_text(encoding="utf-8")
+    macros = "\n".join(
+        source.read_text(encoding="utf-8")
+        for source in [root / MACROS, *sorted((root / MACRO_MODULES).glob("*.rs"))]
+    )
     support_index = (root / SUPPORT_INDEX).read_text(encoding="utf-8")
     sweep = swept_files(root, support_index)
     candidates = collect_candidates(root, sweep)

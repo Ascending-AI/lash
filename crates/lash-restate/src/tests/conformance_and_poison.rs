@@ -245,7 +245,7 @@ lash_conformance::durable_queued_drain_wait_resolver_tests!({
 // The turn runs inside a live handler: its tool call opens a real Restate
 // effect group whose child runs in the endpoint's dispatch invocation, which
 // the recording contexts cannot serve (FIG-3397).
-lash_conformance::signal_intent_tests!(
+lash_conformance::turn_runner_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
         let harness =
@@ -274,8 +274,12 @@ lash_conformance::signal_intent_tests!(
             registry,
             process_work,
             turn_runner,
-            move || async move {
-                verify_transport.assert_reattached_to(&target);
+            // Only the signal law waits on a process terminal through the
+            // attach transport; the turn-cancel laws never touch it.
+            move |law: &'static str| async move {
+                if law == "public_signal_intent_wakes_parked_process" {
+                    verify_transport.assert_reattached_to(&target);
+                }
             },
         )
     }
