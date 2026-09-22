@@ -456,25 +456,28 @@ mod tests {
         AfterDurableRecord,
     }
 
+    #[derive(Clone)]
     struct FaultJournalController {
         fault: JournalFault,
-        faults_remaining: AtomicUsize,
-        outcomes: Mutex<BTreeMap<String, lash_core::RuntimeEffectOutcome>>,
+        faults_remaining: std::sync::Arc<AtomicUsize>,
+        outcomes: std::sync::Arc<Mutex<BTreeMap<String, lash_core::RuntimeEffectOutcome>>>,
         inner: std::sync::Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+        host: std::sync::Arc<std::sync::OnceLock<std::sync::Arc<dyn lash_core::EffectHost>>>,
     }
 
     impl FaultJournalController {
         fn new(fault: JournalFault) -> Self {
             Self {
                 fault,
-                faults_remaining: AtomicUsize::new(usize::from(!matches!(
+                faults_remaining: std::sync::Arc::new(AtomicUsize::new(usize::from(!matches!(
                     fault,
                     JournalFault::None
-                ))),
-                outcomes: Mutex::new(BTreeMap::new()),
+                )))),
+                outcomes: std::sync::Arc::new(Mutex::new(BTreeMap::new())),
                 inner: std::sync::Arc::new(
                     lash_core::facade_support::NativeRuntimeEffectController::default(),
                 ),
+                host: std::sync::Arc::new(std::sync::OnceLock::new()),
             }
         }
     }
@@ -483,11 +486,15 @@ mod tests {
 
     #[async_trait]
     impl lash_core::RuntimeEffectController for FaultJournalController {
-        fn shared_native_group_substrate(
-            &self,
-        ) -> Option<std::sync::Arc<lash_core::facade_support::NativeRuntimeEffectController>>
-        {
-            Some(std::sync::Arc::clone(&self.inner))
+        fn shared_effect_host(&self) -> Option<std::sync::Arc<dyn lash_core::EffectHost>> {
+            Some(std::sync::Arc::clone(self.host.get_or_init(|| {
+                std::sync::Arc::new(
+                    lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
+                        std::sync::Arc::new(self.clone()),
+                        &self.inner,
+                    ),
+                ) as std::sync::Arc<dyn lash_core::EffectHost>
+            })))
         }
 
         async fn execute_effect(

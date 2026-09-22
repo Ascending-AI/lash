@@ -389,6 +389,7 @@ pub(super) fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
 pub(super) struct CapturingTriggerEffectController {
     envelopes: Arc<std::sync::Mutex<Vec<lash_core::RuntimeEffectEnvelope>>>,
     inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+    host: Arc<std::sync::OnceLock<Arc<dyn lash_core::EffectHost>>>,
 }
 
 impl Default for CapturingTriggerEffectController {
@@ -396,6 +397,7 @@ impl Default for CapturingTriggerEffectController {
         Self {
             envelopes: Arc::default(),
             inner: Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+            host: Arc::new(std::sync::OnceLock::new()),
         }
     }
 }
@@ -404,10 +406,19 @@ impl lash_core::AwaitEventResolver for CapturingTriggerEffectController {}
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for CapturingTriggerEffectController {
-    fn shared_native_group_substrate(
-        &self,
-    ) -> Option<Arc<lash_core::facade_support::NativeRuntimeEffectController>> {
-        Some(Arc::clone(&self.inner))
+    fn shared_effect_host(&self) -> Option<Arc<dyn lash_core::EffectHost>> {
+        Some(Arc::clone(self.host.get_or_init(|| {
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
+                    Arc::new(Self {
+                        envelopes: Arc::clone(&self.envelopes),
+                        inner: Arc::clone(&self.inner),
+                        host: Arc::new(std::sync::OnceLock::new()),
+                    }),
+                    &self.inner,
+                ),
+            ) as Arc<dyn lash_core::EffectHost>
+        })))
     }
 
     async fn execute_effect(
