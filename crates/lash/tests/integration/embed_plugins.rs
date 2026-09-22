@@ -278,3 +278,9 @@ async fn sessions_without_typed_plugin_install_do_not_get_inactive_fallback_tool
             .all(|definition| definition.name != "typed_probe")
     );
 }
+
+// FIG-2107-TEST-WITNESS-0001: lash_core::facade_support::visible_response_text_from_parts [function]
+#[test]
+fn plugins_area_test_support_witness() {
+    let _ = lash_core::facade_support::visible_response_text_from_parts;
+}

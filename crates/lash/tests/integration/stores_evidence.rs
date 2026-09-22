@@ -381,4 +381,28 @@ pub(crate) fn store_area_test_support_witnesses() {
     fn method_witness_0074<T: lash_conformance::LineageConformanceInjector>(value: &T) {
         std::mem::drop(lash_conformance::LineageConformanceInjector::tombstone_node(value, "node"));
     }
+    // FIG-2107-TEST-WITNESS-0001: lash::persistence::AppendRequestIdentity::Append [variant]
+    variant_witness(|value: &lash::persistence::AppendRequestIdentity| {
+        matches!(
+            value,
+            lash::persistence::AppendRequestIdentity::Append { .. }
+        )
+    });
+    // FIG-2107-TEST-WITNESS-0002: lash::persistence::AppendRequestIdentity::PlainCommit [variant]
+    variant_witness(|value: &lash::persistence::AppendRequestIdentity| {
+        matches!(value, lash::persistence::AppendRequestIdentity::PlainCommit)
+    });
+    // FIG-2107-TEST-WITNESS-0003: lash::persistence::StoreSchemaVerdict::Migratable [variant]
+    variant_witness(|value: &lash::persistence::StoreSchemaVerdict| {
+        matches!(
+            value,
+            lash::persistence::StoreSchemaVerdict::Migratable { .. }
+        )
+    });
+    // FIG-2107-TEST-WITNESS-0004: lash::persistence::StoreSchemaVerdict::Migratable::found [field]
+    field_witness(|value: &lash::persistence::StoreSchemaVerdict| {
+        if let lash::persistence::StoreSchemaVerdict::Migratable { found, .. } = value {
+            let _ = found;
+        }
+    });
 }
