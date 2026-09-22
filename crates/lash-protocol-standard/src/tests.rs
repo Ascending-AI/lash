@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::{
-    AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, RuntimeEffectController,
-    ToolCallOutput, ToolValue, facade_support::AttachmentRef, facade_support::ModelToolReturn,
+    AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCallOutput, ToolValue,
+    facade_support::AttachmentRef, facade_support::ModelToolReturn,
 };
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -348,8 +348,8 @@ type RecordedEffectFrame = (lash_core::RuntimeEffectKind, Option<String>);
 
 #[derive(Clone, Default)]
 pub(super) struct CountingEffectController {
-    frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
-    group_opens: Arc<AtomicUsize>,
+    pub(super) frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
+    pub(super) group_opens: Arc<AtomicUsize>,
     /// The native controller group operations forward to: a tool batch is
     /// a durable effect group now, so a test double that refuses groups
     /// leaves every batch unrouted. Shared with the runtime's effect host
