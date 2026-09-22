@@ -1,0 +1,165 @@
+diff --git a/rs/private/cargo_workspace_graph.bzl b/rs/private/cargo_workspace_graph.bzl
+--- a/rs/private/cargo_workspace_graph.bzl
++++ b/rs/private/cargo_workspace_graph.bzl
+@@ -64,6 +64,7 @@
+ 
+ def new_feature_resolutions(package_index, possible_deps, possible_features, platform_triples):
+     return struct(
++        active_triples = set(),
+         features_enabled = {triple: set() for triple in platform_triples},
+         build_deps = {triple: set() for triple in platform_triples},
+         deps = {triple: set() for triple in platform_triples},
+@@ -488,6 +489,7 @@
+         dep_label_prefix = "//:",
+         skip_internal_rustc_placeholder_crates = True,
+         watch_manifests = False,
++        prune_unreachable = False,
+         use_legacy_rules_rust_platforms = False):
+     platform_cfg_attrs = [triple_to_cfg_attrs(triple) for triple in platform_triples]
+     platform_cfg_attrs_by_triple = {}
+@@ -534,6 +536,10 @@
+         feature_resolutions_by_fq_crate[fq_crate(name, version)] = feature_resolutions
+ 
+         resolver_packages.append(resolver_package)
++
++    if not prune_unreachable:
++        for package in resolver_packages:
++            package["feature_resolutions"].active_triples.update(platform_triples)
+ 
+     _resolve_possible_deps(
+         resolver_packages,
+@@ -554,6 +560,7 @@
+             ctx.watch(package["manifest_path"])
+ 
+         package_feature_resolutions = feature_resolutions_by_fq_crate[fq_crate(package["name"], package["version"])]
++        package_feature_resolutions.active_triples.update(platform_triples)
+         if "default" in package.get("features", {}):
+             for triple in platform_triples:
+                 package_feature_resolutions.features_enabled[triple].add("default")
+diff --git a/rs/private/resolver.bzl b/rs/private/resolver.bzl
+--- a/rs/private/resolver.bzl
++++ b/rs/private/resolver.bzl
+@@ -75,10 +75,12 @@
+                     if _dep_target_matches_triple(dep, triple, features_enabled[triple], cfg_attrs_by_triple)
+                 ])
+             else:
+-                match = dep["target"]
++                match = set(dep["target"])
+ 
+             to_remove = None
+             for triple in match:
++                if triple not in feature_resolutions.active_triples:
++                    continue
+                 if optional:
+                     features_for_triple = features_enabled[triple]
+                     if dep_name not in features_for_triple and prefixed_dep_alias not in features_for_triple:
+@@ -92,6 +94,9 @@
+                 if has_alias:
+                     feature_resolutions.aliases[bazel_target] = dep_name.replace("-", "_")
+ 
++                if triple not in dep_feature_resolutions.active_triples:
++                    dep_feature_resolutions.active_triples.add(triple)
++                    new_dirty_package_indices.add(dep_feature_resolutions.package_index)
+                 triple_features = dep_feature_resolutions.features_enabled[triple]
+ 
+                 dep_features = dep.get("features")
+@@ -126,7 +131,7 @@
+     possible_features = feature_resolutions.possible_features
+ 
+     for triple, feature_set in features_enabled.items():
+-        if not feature_set:
++        if triple not in feature_resolutions.active_triples or not feature_set:
+             continue
+ 
+         # Enable any features that are implied by previously-enabled features.
+@@ -161,6 +166,9 @@
+                         dep_optional = dep.get("optional", False)
+                         if not optional_marker or not dep_optional or dep_name in feature_set or ("dep:" + dep_name) in feature_set:
+                             dep_feature_resolutions = dep["feature_resolutions"]
++                            if triple not in dep_feature_resolutions.active_triples:
++                                dep_feature_resolutions.active_triples.add(triple)
++                                dirty_package_indices.add(dep_feature_resolutions.package_index)
+                             triple_features = dep_feature_resolutions.features_enabled[triple]
+                             if dep_feature not in triple_features:
+                                 triple_features.add(dep_feature)
+@@ -181,7 +189,11 @@
+ 
+ def resolve(mctx, packages, feature_resolutions_by_fq_crate, cfg_attrs_by_triple, debug):
+     # Do some rounds of mutual resolution; bail when no more changes
+-    dirty_package_indices = range(len(packages))
++    dirty_package_indices = [
++        index
++        for index in range(len(packages))
++        if packages[index]["feature_resolutions"].active_triples
++    ]
+ 
+     for i in range(_MAX_ROUNDS):
+         if mctx:
+diff --git a/rs/extensions.bzl b/rs/extensions.bzl
+--- a/rs/extensions.bzl
++++ b/rs/extensions.bzl
+@@ -121,7 +121,8 @@
+         debug,
+         generate_lint_config,
+         use_legacy_rules_rust_platforms,
+-        dry_run = False):
++        dry_run = False,
++        prune_unreachable = False):
+     """Generates repositories for the transitive closure of the Cargo workspace.
+ 
+     Args:
+@@ -291,6 +292,7 @@
+         debug = debug,
+         dep_label_prefix = "@%s//:" % hub_name,
+         watch_manifests = watch_manifests,
++        prune_unreachable = prune_unreachable,
+         use_legacy_rules_rust_platforms = use_legacy_rules_rust_platforms,
+     )
+     cfg_match_cache = workspace_resolution.cfg_match_cache
+@@ -363,7 +365,10 @@
+             link_deps = annotation.link_deps,
+             aliases = feature_resolutions.aliases,
+             crate_features = annotation.crate_features,
+-            crate_features_select = _select(feature_resolutions.features_enabled),
++            crate_features_select = _select({
++                triple: set([feature for feature in features if feature != "default" or feature in feature_resolutions.possible_features])
++                for triple, features in feature_resolutions.features_enabled.items()
++            }) if prune_unreachable else _select(feature_resolutions.features_enabled),
+             use_legacy_rules_rust_platforms = use_legacy_rules_rust_platforms,
+         )
+ 
+@@ -826,9 +831,9 @@
+ 
+             if cfg.debug:
+                 for _ in range(25):
+-                    _generate_hub_and_spokes(mctx, cfg.name, annotations, suggested_annotation_snippet_paths, cargo_path, cfg.cargo_lock, cargo_toml_by_hub_name[cfg.name], hub_packages, cfg.platform_triples, cargo_credentials, effective_cargo_config, cfg.validate_lockfile, cfg.debug, cfg.generate_lint_config, cfg.use_legacy_rules_rust_platforms, dry_run = True)
+-
+-            facts |= _generate_hub_and_spokes(mctx, cfg.name, annotations, suggested_annotation_snippet_paths, cargo_path, cfg.cargo_lock, cargo_toml_by_hub_name[cfg.name], hub_packages, cfg.platform_triples, cargo_credentials, effective_cargo_config, cfg.validate_lockfile, cfg.debug, cfg.generate_lint_config, cfg.use_legacy_rules_rust_platforms)
++                    _generate_hub_and_spokes(mctx, cfg.name, annotations, suggested_annotation_snippet_paths, cargo_path, cfg.cargo_lock, cargo_toml_by_hub_name[cfg.name], hub_packages, cfg.platform_triples, cargo_credentials, effective_cargo_config, cfg.validate_lockfile, cfg.debug, cfg.generate_lint_config, cfg.use_legacy_rules_rust_platforms, dry_run = True, prune_unreachable = cfg.prune_unreachable)
++
++            facts |= _generate_hub_and_spokes(mctx, cfg.name, annotations, suggested_annotation_snippet_paths, cargo_path, cfg.cargo_lock, cargo_toml_by_hub_name[cfg.name], hub_packages, cfg.platform_triples, cargo_credentials, effective_cargo_config, cfg.validate_lockfile, cfg.debug, cfg.generate_lint_config, cfg.use_legacy_rules_rust_platforms, prune_unreachable = cfg.prune_unreachable)
+ 
+     # Lay down the git repos with generated per-crate BUILD overlays.
+     git_repos = {}
+@@ -942,6 +947,10 @@
+         ),
+         "cargo_lock": attr.label(),
+         "cargo_config": attr.label(),
++        "prune_unreachable": attr.bool(
++            doc = "Resolve only packages reachable from workspace roots; disables dormant crates exported for feature variants.",
++            default = False,
++        ),
+         "generate_lint_config": attr.bool(
+             doc = "If true, generate per-package Cargo lint configuration by reading workspace member manifests.",
+             default = False,
+diff --git a/rs/private/cargo_workspace_graph_test.bzl b/rs/private/cargo_workspace_graph_test.bzl
+--- a/rs/private/cargo_workspace_graph_test.bzl
++++ b/rs/private/cargo_workspace_graph_test.bzl
+@@ -298,6 +298,7 @@
+             "version": "1.0.0",
+         })
+ 
++    resolutions[-1].active_triples.add(triple)
+     resolutions[-1].features_enabled[triple].add("forward")
+     resolve(None, packages, resolutions_by_crate, {}, False)
+ 

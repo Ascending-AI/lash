@@ -14,7 +14,9 @@ repos:
   - repo: builtin
     hooks:
       - id: trailing-whitespace
+        exclude: '^tools/bazel/patches/.*\.patch$'
       - id: end-of-file-fixer
+        exclude: '^tools/bazel/patches/.*\.patch$'
       - id: check-yaml
       - id: check-json
 

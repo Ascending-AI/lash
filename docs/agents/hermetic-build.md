@@ -317,7 +317,7 @@ recipes for these correctness contracts:
   additionally refuses a lane with no Bazel target, so the coverage plan and
   the lane graph cannot drift apart.
 
-  The limitation that survives is third-party: `crate.from_cargo` in
+  The general feature-lane limitation is third-party: `crate.from_cargo` in
   `MODULE.bazel` pins `@crates` from one `//:Cargo.toml` + `//:Cargo.lock`
   resolution, so a variant sets `crate_features` on first-party targets but
   links third-party crates at the workspace feature union. The union is a
@@ -329,6 +329,23 @@ recipes for these correctness contracts:
   `all_crate_deps()` reports only the workspace resolution. Untrusted pull
   requests keep the Cargo matrix exactly as it was, which is where a real
   third-party feature divergence would still surface.
+
+  The unconditional runtime OFF witness uses a separate `//:runtime_off`
+  graph. `runtime_off_workspace.py` flattens Cargo workspace inheritance into
+  generated manifests and links their source directories to the checkout.
+  Its single root depends on `lash-runtime` with default features disabled.
+  `runtime-off.Cargo.lock` records this resolution; `kiln sync` regenerates it
+  from the current workspace lock. The `runtime_off_crates` hub selects
+  `prune_unreachable` in the local rules_rs patch, so platform-inactive lock
+  packages cannot enable features on reachable dependencies. The ordinary
+  hub retains dormant dependencies needed by the feature-lane variants.
+
+  Trusted lint CI builds this target alongside Clippy and schemas, then
+  `check_runtime_off_graph.py` compares its actual Rust compiler features
+  and dependency edges with the package-only Cargo tree. The existing native
+  AWS-LC annotation replaces only `aws-lc-sys`'s Cargo build-script dependency
+  subtree. All remaining Rust units and edges must match. Untrusted CI keeps
+  `cargo check -p lash-runtime --lib --no-default-features --locked`.
 
   Cargo-required targets omitted from the resolved default graph are still
   recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`.

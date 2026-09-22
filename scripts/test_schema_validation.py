@@ -78,6 +78,46 @@ class SchemaValidationTests(unittest.TestCase):
             log = root / "commands"
             scripts = root / "scripts/ci"
             scripts.mkdir(parents=True)
+            for name in (
+                "lint-contracts.sh",
+                "run-gate-commands.sh",
+                "check-schema-contracts.sh",
+            ):
+                shutil.copy2(ROOT / "scripts/ci" / name, scripts / name)
+            for name, code in (("cargo", 7), ("npm", 0)):
+                tool = root / name
+                tool.write_text(
+                    f'#!/bin/sh\nprintf "%s\\n" "{name} $*" >> "$COMMAND_LOG"\nexit {code}\n'
+                )
+                tool.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(scripts / "lint-contracts.sh")],
+                env={
+                    **os.environ,
+                    "PATH": f"{root}:{os.environ['PATH']}",
+                    "BAZEL_TRUSTED": "false",
+                    "COMMAND_LOG": str(log),
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "cargo check -p lash-runtime --lib --no-default-features --locked",
+                log.read_text(),
+            )
+            self.assertIn(
+                "npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types",
+                log.read_text(),
+            )
+            self.assertIn("exit 7", result.stdout)
+
+    def test_trusted_lint_uses_completed_bazel_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log = root / "commands"
+            scripts = root / "scripts/ci"
+            scripts.mkdir(parents=True)
             for name in ("lint-contracts.sh", "run-gate-commands.sh"):
                 shutil.copy2(ROOT / "scripts/ci" / name, scripts / name)
             for name, code in (("cargo", 7), ("npm", 0)):
@@ -97,16 +137,11 @@ class SchemaValidationTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn(
-                "cargo check -p lash-runtime --lib --no-default-features --locked",
-                log.read_text(),
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                log.read_text().splitlines(),
+                ["npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types"],
             )
-            self.assertIn(
-                "npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types",
-                log.read_text(),
-            )
-            self.assertIn("exit 7", result.stdout)
 
     def test_functional_e2e_checks_schemas_without_kiln_and_keeps_frontend_gates(
         self,
