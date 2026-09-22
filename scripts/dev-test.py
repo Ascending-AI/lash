@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import sys
 import time
@@ -69,14 +71,64 @@ def input_id(base: str) -> str:
     return digest.hexdigest()
 
 
-def select(paths: list[str]) -> tuple[list[str], bool, bool]:
+def script_gates() -> dict[str, list[list[str]]]:
+    """Read the executable script inventory shared by CI and repository-gates."""
+    commands: dict[str, list[list[str]]] = {}
+    capture = False
+    for line in (ROOT / ".github/workflows/ci.yml").read_text().splitlines():
+        if "run-gate-commands.sh " in line and "<<'GATES'" in line:
+            capture = True
+        elif capture and line.strip() == "GATES":
+            capture = False
+        elif capture and line.strip():
+            command = shlex.split(line.strip())
+            if len(command) >= 2 and command[0] == "python3":
+                commands.setdefault(command[1], []).append(command)
+    if not commands:
+        raise RuntimeError("CI repository gate inventory is empty")
+    return commands
+
+
+def dev_inventory() -> tuple[set[str], dict[str, list[str]]]:
+    wanted = {"WORKSPACE_DEV_TEST_TARGETS", "WORKSPACE_TEST_BATCHES"}
+    values = {}
+    tree = ast.parse((ROOT / "tools/bazel/workspace_targets.bzl").read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if name in wanted:
+                values[name] = ast.literal_eval(node.value)
+    return set(values["WORKSPACE_DEV_TEST_TARGETS"]), values["WORKSPACE_TEST_BATCHES"]
+
+
+def batch_labels(members: set[str], batches: dict[str, list[str]]) -> list[str]:
+    labels = set(members)
+    for batch, children in batches.items():
+        # Partial reverse-dependency selections must not widen to other members.
+        if set(children) <= members:
+            labels.difference_update(children)
+            labels.add(batch)
+    return sorted(labels)
+
+
+def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[str], bool, bool, list[list[str]]]:
     packages: set[str] = set()
-    broad = facade = False
+    scripts: set[str] = set()
+    broad = facade = repository = False
+    # These implementations affect validation policy, not Rust compilation.
+    families = {
+        "scripts/dev-test.py": "scripts/test_dev_test.py",
+        "scripts/gate_scope.py": "scripts/test_gate_scope.py",
+        "tools/bazel/test_batch_runner.sh": "scripts/test_test_batch_runner.py",
+    }
     for name in paths:
         path = Path(name)
         if path.suffix == ".md" or name.startswith(("docs/", "LICENSE")) or name == ".gitignore":
             continue
-        if name in ("Cargo.toml", "Cargo.lock"):
+        proof = families.get(name, name)
+        if proof in gates and Path(proof).name.startswith("test_"):
+            scripts.add(proof)
+        elif name in ("Cargo.toml", "Cargo.lock"):
             broad = facade = True
         elif len(path.parts) >= 3 and path.parts[0] in ("crates", "examples", "runbooks"):
             package = "/".join(path.parts[:2])
@@ -88,35 +140,37 @@ def select(paths: list[str]) -> tuple[list[str], bool, bool]:
             if path.name in ("Cargo.toml", "BUILD.bazel"):
                 broad = True
         else:
-            broad = True
-    return sorted(packages), broad, facade
+            broad = repository = True
+    commands = ([["bash", "scripts/ci/repository-gates.sh"]] if repository else
+                [command for name in sorted(scripts) for command in gates[name]])
+    return sorted(packages), broad, facade, commands
 
 
 def plan(base: str, dependents: bool) -> dict:
     identity = input_id(base)
     paths = changed_files(base)
-    packages, broad, facade = select(paths)
-    labels = ["//:dev_tests"] if broad else [p + ":all" for p in packages]
+    packages, broad, facade, commands = select(paths, script_gates())
+    allowed, batches = dev_inventory()
+    members = {label for label in allowed if label.split(":")[0] in packages}
     if dependents and packages and not broad:
-        expression = (
-            'kind("test", rdeps(//..., set('
-            + " ".join(p + ":all" for p in packages)
-            + '))) - attr(tags, "manual", //...)'
-        )
+        expression = 'kind("test", rdeps(//..., set(' + " ".join(p + ":all" for p in packages) + ')))'
         result = subprocess.run(
             ["bazel", "query", expression], cwd=ROOT, capture_output=True, text=True
         )
         if result.returncode:
-            # An incomplete query is never a narrowed validation result.
             print(result.stderr, file=sys.stderr)
-            labels = ["//:dev_tests"]
             broad = True
         else:
-            labels = sorted(set(result.stdout.split())) or ["//:dev_tests"]
+            members = set(result.stdout.split()) & allowed
+    labels = ["//:dev_tests"] if broad else batch_labels(members, batches)
     if facade:
         labels.append("//crates/lash:ui_fixtures")
+    if packages and not broad and not members:
+        # Service-only and compile-only packages still need compilation proof.
+        commands.append(["kiln", "build", *(p + ":all" for p in packages), "//:schema_checks"])
     if labels:
         labels.append("//:schema_checks")
+        commands.append(["kiln", "test", *labels])
     result = {
         "base": base,
         "head": git("rev-parse", "HEAD").decode().strip(),
@@ -124,7 +178,7 @@ def plan(base: str, dependents: bool) -> dict:
         "identity_scope": "checkout/config snapshot; Bazel validates full action inputs",
         "changed_files": paths,
         "selection": "suite" if broad else "dependents" if dependents else "packages",
-        "command": ["kiln", "test", *labels] if labels else [],
+        "commands": commands,
         "remaining": ["Required CI gates; this is focused local validation, not full CI"],
     }
     result["id"] = hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest()
@@ -158,14 +212,15 @@ def run(planned: dict) -> int:
         started = time.time_ns()
         save(directory / "plan.json", planned)
         print(f"dev-test: checkout/config snapshot {planned['inputs'][:12]}, {planned['selection']}", flush=True)
-        print("+ " + " ".join(planned["command"]), flush=True)
         process = None
         try:
-            if planned["command"]:
-                process = subprocess.Popen(planned["command"], cwd=ROOT, start_new_session=True)
+            code = 0
+            for command in planned["commands"]:
+                print("+ " + shlex.join(command), flush=True)
+                process = subprocess.Popen(command, cwd=ROOT, start_new_session=True)
                 code = process.wait()
-            else:
-                code = 0
+                if code:
+                    break
         except KeyboardInterrupt:
             if process is not None and process.poll() is None:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -212,7 +267,7 @@ def main() -> int:
         base = git("merge-base", "HEAD", "origin/main").decode().strip()
     try:
         planned = plan(base, args.dependents)
-    except RuntimeError as error:
+    except (RuntimeError, KeyError, ValueError, OSError) as error:
         parser.error(str(error))
     if args.dry_run:
         print(json.dumps(planned, indent=2))

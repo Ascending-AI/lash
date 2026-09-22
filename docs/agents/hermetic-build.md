@@ -31,10 +31,14 @@ python3 scripts/dev-test.py
 ```
 
 `python3 scripts/dev-test.py --dry-run` prints the changed paths, exact labels,
-base/head revisions and a checkout/config snapshot digest. `--dependents` selects reverse dependencies;
+base/head revisions, ordered commands and a checkout/config snapshot digest. `--dependents` selects reverse dependencies within the canonical developer partition;
 `just test-changed` uses this same planner. Live store environments are refused.
+Package selection substitutes complete batches once and excludes deferred/manual tests.
+Known Python test edits run their exact command from the CI repository-gate inventory;
+known validation-script families run their mapped test. Shared or unknown tooling
+runs repository gates and the Rust developer suite.
 The runner writes its plan and final receipt under Git's `lash-validation/`
-directory and serializes concurrent requests in one fork. Every request calls
+directory and serializes concurrent requests in one fork. Every request that selects Rust calls
 Bazel, including a request that waited for another run: only Bazel can validate
 ignored package data and external toolchain inputs before reusing cached actions.
 The snapshot covers Git-visible content, relevant environment variables, env.sh
@@ -55,6 +59,10 @@ tests cannot address host PIDs, the host network or the `/run` Docker socket.
 Inherited Docker host/context overrides are removed; test commands still use
 fixtures and mock Docker. This is not containment for arbitrary hostile code.
 Install the `bubblewrap` package on a new host.
+
+Batch labels forward libtest arguments to every member. Explicit arguments print
+member output, including `--list`; a filter matching no tests across the batch
+fails explicitly. Use a direct member label to avoid starting unrelated binaries.
 
 The lower-level entry script remains available for graph analysis, sync, local
 executor reproduction, and focused Bazel labels.
@@ -80,7 +88,7 @@ kiln build
 # binaries); `kiln test //:workspace_tests` runs the full PR partition.
 kiln test
 
-# Narrow //:dev_tests to the changed package directories. A shared input
+# Select each changed package from the canonical developer partition. A shared input
 # (manifest, lockfile, toolchain, tools/, scripts/) runs the whole suite.
 # Never starts Postgres, S3, or E2E.
 python3 scripts/dev-test.py
@@ -101,8 +109,8 @@ kiln test \
   //crates/lash-sqlite-store:integration__test
 ```
 
-Three `just` recipes compose those commands into the routine gates. `just
-floor` is the pre-push floor: the dev and feature-lane test and clippy
+Three `just` recipes compose explicit validation checkpoints. `just
+floor` is an opt-in broad tooling checkpoint: the dev and feature-lane test and clippy
 partitions, `kiln fmt -- --check`, `git diff --check`, the repository-script
 gates CI runs as `Test repository scripts`
 (`scripts/ci/repository-gates.sh` extracts the command list from
@@ -117,10 +125,9 @@ version-bump checks, `scripts/check-store-sql-ownership.py`, the lash-sim
 `schema_congruence__test` target, and the lash-core-store unit target that
 holds the runtime-error classification exhaustiveness test. `just
 test-changed [base]` diffs against `<base>` (default `origin/main`), maps the
-changed files to their Bazel packages, queries the test targets in the
-reverse dependencies of those packages within `//...`, and runs them
-through `kiln test`, falling back to `//:dev_tests` when the query selects
-nothing.
+changed files to their Bazel packages, queries reverse dependencies within `//...`, intersects them with the canonical
+developer test inventory, and batches complete member sets once. Query failures
+fall back to `//:dev_tests`; a valid empty selection does not widen the scope.
 
 These build and test commands select the shared Kiln execution pool by default.
 `scripts/hermetic-build.sh --shared build` makes that choice explicit. It uses

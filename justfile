@@ -353,7 +353,7 @@ battery-fast:
 seal:
   cargo test --workspace --locked --test ui
 
-# The pre-push floor over the Kiln fork: the dev and feature-lane test and
+# An opt-in broad tooling checkpoint over the Kiln fork: the dev and feature-lane test and
 # clippy partitions on the shared pool plus the quick script gates. Frontend
 # dependencies are installed first so npm does not replace node_modules while
 # Bazel scans the example package; the remaining gates run concurrently and

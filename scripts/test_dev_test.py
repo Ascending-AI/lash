@@ -33,6 +33,17 @@ class DevTestTests(unittest.TestCase):
         self.source.parent.mkdir(parents=True)
         self.source.write_text("pub fn example() {}\n")
         (self.source.parents[1] / "BUILD.bazel").write_text("# fixture\n")
+        inventory = self.root / "tools/bazel/workspace_targets.bzl"
+        inventory.parent.mkdir(parents=True)
+        inventory.write_text(
+            'WORKSPACE_DEV_TEST_TARGETS = ["//crates/example:first", "//crates/example:second"]\n'
+            'WORKSPACE_TEST_BATCHES = {"//crates/example:test_batch": ["//crates/example:first", "//crates/example:second"]}\n'
+        )
+        workflow = self.root / ".github/workflows/ci.yml"
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text("bash scripts/ci/run-gate-commands.sh --jobs 4 <<'GATES'\n"
+                            "python3 scripts/test_dev_test.py\nGATES\n")
+        (self.root / "scripts/test_dev_test.py").write_text("raise SystemExit(0)\n")
         (self.root / ".gitignore").write_text(".kiln.bazelrc\n")
         (self.root / ".kiln.bazelrc").touch()
         self.git("init", "-q")
@@ -81,9 +92,56 @@ class DevTestTests(unittest.TestCase):
     def test_worktree_edits_and_shared_manifest_selection(self):
         result = self.invoke("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["command"], ["kiln", "test", "//crates/example:all", "//:schema_checks"])
+        self.assertEqual(json.loads(result.stdout)["commands"], [["kiln", "test", "//crates/example:test_batch", "//:schema_checks"]])
         (self.source.parents[1] / "Cargo.toml").write_text("[package]\n")
-        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["command"], ["kiln", "test", "//:dev_tests", "//:schema_checks"])
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [["kiln", "test", "//:dev_tests", "//:schema_checks"]])
+
+    def test_query_cannot_select_deferred_manual_or_duplicate_batch_members(self):
+        query = self.bin / "bazel"
+        query.write_text("#!/bin/sh\nprintf '%s\\n' //crates/example:first //crates/example:second "
+                         "//crates/example:test_batch //crates/example:deferred //crates/example:manual\n")
+        query.chmod(0o755)
+        commands = json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"]
+        self.assertEqual(commands, [["kiln", "test", "//crates/example:test_batch", "//:schema_checks"]])
+        query.write_text("#!/bin/sh\necho //crates/example:first\n")
+        self.assertEqual(json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"],
+                         [["kiln", "test", "//crates/example:first", "//:schema_checks"]])
+
+    def test_known_script_edit_runs_its_ci_proof_and_propagates_failure(self):
+        self.git("checkout", "--", "crates/example/src/lib.rs")
+        (self.root / "scripts/test_dev_test.py").write_text("raise SystemExit(7)\n")
+        planned = json.loads(self.invoke("--dry-run").stdout)
+        self.assertEqual(planned["commands"], [["python3", "scripts/test_dev_test.py"]])
+        self.assertEqual(self.invoke().returncode, 7)
+        self.assertFalse((self.root / ".git/calls").exists())
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertEqual(receipt["exit_code"], 7)
+
+    def test_shared_tooling_runs_repository_proof_and_rust_suite(self):
+        (self.root / "scripts/unknown.py").write_text("# new tooling\n")
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
+            ["bash", "scripts/ci/repository-gates.sh"],
+            ["kiln", "test", "//:dev_tests", "//:schema_checks"],
+        ])
+
+    def test_service_only_package_builds_without_running_manual_tests(self):
+        self.git("checkout", "--", "crates/example/src/lib.rs")
+        package = self.root / "crates/service"
+        package.mkdir()
+        (package / "BUILD.bazel").write_text("# fixture\n")
+        self.git("add", "crates/service/BUILD.bazel")
+        self.git("commit", "-qm", "service fixture")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        (package / "service.rs").write_text("// service change\n")
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
+            ["kiln", "build", "//crates/service:all", "//:schema_checks"],
+        ])
+
+    def test_facade_keeps_explicit_manual_seal(self):
+        (self.root / "Cargo.toml").write_text("[workspace]\n")
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
+            ["kiln", "test", "//:dev_tests", "//crates/lash:ui_fixtures", "//:schema_checks"],
+        ])
 
     def test_untracked_content_changes_identity(self):
         untracked = self.root / "crates/example/src/new.rs"
@@ -98,7 +156,7 @@ class DevTestTests(unittest.TestCase):
         query.chmod(0o755)
         result = self.invoke("--dependents", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["command"], ["kiln", "test", "//:dev_tests", "//:schema_checks"])
+        self.assertEqual(json.loads(result.stdout)["commands"], [["kiln", "test", "//:dev_tests", "//:schema_checks"]])
 
     def test_waiting_callers_recheck_bazel_inputs_instead_of_reusing_receipts(self):
         self.env["TEST_EXIT"] = "7"

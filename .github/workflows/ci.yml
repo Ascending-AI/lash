@@ -487,6 +487,7 @@ jobs:
           python3 scripts/test_generate_workflow_schemas.py
           python3 scripts/test_schema_validation.py
           python3 scripts/test_dev_test.py
+          python3 scripts/test_test_batch_runner.py
           python3 scripts/test_launcher_test_sandbox.py
           python3 scripts/test_check_checkpoint_component_flatten.py
           python3 scripts/test_action_sizes_from_log.py
