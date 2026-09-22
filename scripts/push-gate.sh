@@ -203,7 +203,7 @@ run_rust_source_guards() {
   python3 scripts/check_judged_build_geometry.py
 
   step "Production file-size budget guard"
-  bash scripts/check-production-file-size.sh
+  python3 scripts/check-production-file-size.py
 }
 
 run_workflow_gates() {
