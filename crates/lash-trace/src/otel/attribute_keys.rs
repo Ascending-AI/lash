@@ -75,6 +75,8 @@ pub(super) const LASH_LANGUAGE_EXECUTION_NODE_COUNT: &str = "lash.language_execu
 pub(super) const LASH_LANGUAGE_EXECUTION_NODE_ID: &str = "lash.language_execution.node_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_NODE_KIND: &str = "lash.language_execution.node_kind";
 pub(super) const LASH_LANGUAGE_EXECUTION_OCCURRENCE: &str = "lash.language_execution.occurrence";
+pub(super) const LASH_LANGUAGE_EXECUTION_ATTEMPT: &str = "lash.language_execution.attempt";
+pub(super) const LASH_LANGUAGE_EXECUTION_INCARNATION: &str = "lash.language_execution.incarnation";
 pub(super) const LASH_LANGUAGE_EXECUTION_PARENT_NODE_ID: &str =
     "lash.language_execution.parent_node_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_PROCESS_ID: &str = "lash.language_execution.process_id";

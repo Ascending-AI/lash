@@ -178,6 +178,7 @@ fn test_graph(
     children: Vec<TraceLashlangGraphChildLink>,
 ) -> TraceLashlangGraph {
     TraceLashlangGraph {
+        schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
         graph_key: graph_key.to_string(),
         scope: TraceRuntimeScope::new(session_id),
         subject,
@@ -187,9 +188,15 @@ fn test_graph(
         entry_ref: None,
         entry_name: "main".to_string(),
         status: TraceLanguageExecutionStatus::Running,
+        completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
         nodes: Vec::new(),
         edges: Vec::new(),
         children,
+        history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+        truncation_watermark: None,
+        conflicts: Vec::new(),
+        history: Vec::new(),
+        execution_map: None,
     }
 }
 
@@ -203,6 +210,7 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         entry_ref: graph.entry_ref.clone(),
         entry_name: graph.entry_name.clone(),
         restate_invocation_id: None,
+        generation: None,
     };
     let context = TraceContext {
         session_id: graph.scope.session_id.clone(),
@@ -316,6 +324,7 @@ fn lashlang_graph_store_builds_graph_state() {
         entry_ref: Some("r1:0".to_string()),
         entry_name: "main".to_string(),
         restate_invocation_id: None,
+        generation: None,
     };
     let append = |event: TraceLanguageExecution| {
         store

@@ -228,7 +228,39 @@ fn lashlang_identity() -> TraceLanguageExecutionIdentity {
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
         restate_invocation_id: None,
+        generation: None,
     }
+}
+
+#[test]
+fn language_execution_identity_refuses_half_present_generation() {
+    let mut value = serde_json::to_value(lashlang_identity()).expect("encode identity");
+    value["attempt"] = json!(2);
+    let error = serde_json::from_value::<TraceLanguageExecutionIdentity>(value)
+        .expect_err("attempt without incarnation must be refused");
+    assert!(error.to_string().contains("present together"));
+
+    let mut value = serde_json::to_value(lashlang_identity()).expect("encode identity");
+    value["incarnation"] = json!(3);
+    let error = serde_json::from_value::<TraceLanguageExecutionIdentity>(value)
+        .expect_err("incarnation without attempt must be refused");
+    assert!(error.to_string().contains("present together"));
+}
+
+#[test]
+fn known_trace_event_tolerates_unknown_field() {
+    let record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::TurnStarted {
+            metadata: Default::default(),
+        },
+    );
+    let mut value = serde_json::to_value(&record).expect("encode record");
+    value["future_field"] = json!(true);
+    assert_eq!(
+        serde_json::from_value::<TraceRecord>(value).expect("additive record field"),
+        record
+    );
 }
 
 /// One representative of every [`TraceEvent`] variant. Paired with
@@ -811,6 +843,7 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
                     entry_ref: None,
                     entry_name: "main".to_string(),
                     restate_invocation_id: None,
+                    generation: None,
                 },
                 payload: TraceLanguageExecutionPayload::ExecutionFinished {
                     status: TraceLanguageExecutionStatus::Completed,

@@ -98,12 +98,18 @@ must_cover = [
   "TraceDurableWaitResolution",
   "TraceDurableTimerStatus",
   "TraceAttemptUsageDisposition",
+  "TraceLashlangGraph",
 ]
 
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-sansio/src/workflow.rs"]
 symbols = ["WorkflowExecutionSite"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-trace/src/lashlang_graph.rs"]
+symbols = ["fold_lashlang_graph"]
 
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility

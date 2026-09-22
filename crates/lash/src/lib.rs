@@ -796,8 +796,9 @@ pub mod process {
     pub use lash_core_worker::ProcessExecutionConcurrencyError;
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
-        LASHLANG_ENGINE_KIND, LashlangProcessInput, lashlang_process_event_types,
-        lashlang_process_signal_event_types,
+        LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageExecutionMapError,
+        lashlang_process_event_types, lashlang_process_signal_event_types,
+        trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
     };
 }
 
@@ -917,17 +918,21 @@ pub mod tracing {
     /// variant exists in every build, so its payload types are unconditional
     /// `lash-trace` re-exports rather than `rlm`-gated.
     pub use lash_trace::{
-        ExecCodeFailureReason, TextProjectionMetadata, TraceAgentFrameSwitch,
-        TraceAttemptUsageDisposition, TraceDurableTimerStatus, TraceDurableWaitResolution,
-        TraceExecToolCall, TraceExecutionEvidence, TraceJournaledEffectStatus,
-        TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
+        DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
+        TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageDisposition,
+        TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
+        TraceExecutionEvidence, TraceJournaledEffectStatus, TraceLanguageChildExecution,
+        TraceLanguageExecution, TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
         TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
         TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
-        TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
-        TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
+        TraceLashlangEventIdentity, TraceLashlangEventTransition, TraceLashlangGraph,
+        TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
+        TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
+        TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
+        TraceLashlangNodeObservation, TraceLashlangNodeSummary, TraceLashlangNodeTerminalSummary,
         TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome, TraceToolCallStatus,
         TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
-        TraceTurnOutcome,
+        TraceTurnOutcome, fold_lashlang_graph,
     };
     pub use lash_trace::{
         StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,

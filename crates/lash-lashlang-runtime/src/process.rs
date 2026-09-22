@@ -391,6 +391,12 @@ pub async fn run_lashlang_process(
         .as_ref()
         .and_then(|authority| authority.restate_invocation_id(&process_id))
         .map(str::to_string);
+    let attempt = context
+        .execution_context()
+        .execution_write_authority
+        .as_ref()
+        .and_then(lash_core::ProcessExecutionWriteAuthority::attempt)
+        .expect("process engine runs with attempt-bound write authority");
     let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
         engine.execution_sink.clone(),
         engine.trace_context.clone(),
@@ -401,6 +407,8 @@ pub async fn run_lashlang_process(
             module_ref: artifact.module_ref.clone(),
             process_ref: input.process_ref.clone(),
             process_name: input.process_name.clone(),
+            attempt,
+            incarnation: context.incarnation(),
             restate_invocation_id,
         },
     );
@@ -1229,6 +1237,8 @@ struct LashlangProcessExecutionTrace {
     module_ref: lashlang::ModuleRef,
     process_ref: lashlang::ProcessRef,
     process_name: String,
+    attempt: u32,
+    incarnation: lash_core::ProcessIncarnation,
     restate_invocation_id: Option<String>,
     resource_call_ids: Arc<std::sync::Mutex<BTreeMap<(String, u64), String>>>,
     pending_resource_starts:
@@ -1242,6 +1252,8 @@ struct LashlangProcessTraceIdentity {
     module_ref: lashlang::ModuleRef,
     process_ref: lashlang::ProcessRef,
     process_name: String,
+    attempt: u32,
+    incarnation: lash_core::ProcessIncarnation,
     restate_invocation_id: Option<String>,
 }
 
@@ -1260,6 +1272,8 @@ impl LashlangProcessExecutionTrace {
             module_ref: identity.module_ref,
             process_ref: identity.process_ref,
             process_name: identity.process_name,
+            attempt: identity.attempt,
+            incarnation: identity.incarnation,
             restate_invocation_id: identity.restate_invocation_id,
             resource_call_ids: Arc::default(),
             pending_resource_starts: Arc::default(),
@@ -1287,19 +1301,31 @@ impl LashlangProcessExecutionTrace {
             entry_ref: Some(lashlang::process_ref_key(&self.process_ref)),
             entry_name: self.process_name.clone(),
             restate_invocation_id: self.restate_invocation_id.clone(),
+            generation: Some(lash_trace::TraceLanguageExecutionGeneration::new(
+                self.attempt,
+                self.incarnation.registration_sequence(),
+            )),
         }
     }
 
     fn event_key(&self, suffix: impl std::fmt::Display) -> String {
-        format!("lashlang_execution:{}:{suffix}", self.process_id)
+        format!(
+            "lashlang_execution:{}:{suffix}",
+            self.identity().graph_key()
+        )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "process admission verified the named process exists in this artifact"
+    )]
     fn emit_started(&self, artifact: &lashlang::ModuleArtifact) {
         self.emit(TraceLanguageExecution {
             event_key: self.event_key("started"),
             identity: self.identity(),
             payload: TraceLanguageExecutionPayload::ExecutionStarted {
-                execution_map: trace_lashlang_process_map(artifact, &self.process_name),
+                execution_map: trace_lashlang_process_map(artifact, &self.process_name)
+                    .expect("admission verified the process exists in the artifact"),
             },
         });
     }
@@ -1609,58 +1635,9 @@ fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessA
     ))
 }
 
-pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {
-    vec![
-        // `process.yield` is the one progress emission a running process can
-        // make: the guest `yield` form and the shipped `processes.emit` leaf
-        // tool both append under it (ADR 0095 deleted the `wake` special form
-        // that used to carry the wake). A progress emission is therefore what
-        // reaches the declaring session, so the wake is declared here — the
-        // event type is the only place a wake can be materialized from an
-        // append, and both producers go through it.
-        lash_core::ProcessEventType {
-            name: "process.yield".to_string(),
-            payload_schema: lash_core::LashSchema::any(),
-            semantics: lash_core::ProcessEventSemanticsSpec {
-                wake: Some(lash_core::ProcessWakeSpec {
-                    when: None,
-                    input: lash_core::ProcessValueSelector::Payload,
-                }),
-                ..lash_core::ProcessEventSemanticsSpec::default()
-            },
-        },
-        lash_core::ProcessEventType {
-            name: "process.wake".to_string(),
-            payload_schema: lash_core::LashSchema::any(),
-            semantics: lash_core::ProcessEventSemanticsSpec {
-                wake: Some(lash_core::ProcessWakeSpec {
-                    when: None,
-                    input: lash_core::ProcessValueSelector::Pointer("/text".to_string()),
-                }),
-                ..lash_core::ProcessEventSemanticsSpec::default()
-            },
-        },
-    ]
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "lashlang process signal names are parser-validated before reaching this registration, which the message states"
-)]
-pub fn lashlang_process_signal_event_types(
-    process: &lashlang::ProcessDecl,
-) -> Vec<lash_core::ProcessEventType> {
-    process
-        .signals
-        .iter()
-        .map(|signal| lash_core::ProcessEventType {
-            name: lash_core::facade_support::process_signal_event_type(signal.name.as_str())
-                .expect("lashlang process signal declarations use parser-validated names"),
-            payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema(&signal.ty)),
-            semantics: lash_core::ProcessEventSemanticsSpec::default(),
-        })
-        .collect()
-}
+#[path = "process/event_types.rs"]
+mod event_types;
+pub use event_types::{lashlang_process_event_types, lashlang_process_signal_event_types};
 
 #[path = "process/schema.rs"]
 mod schema;
@@ -1668,8 +1645,11 @@ pub use schema::lashlang_type_expr_schema;
 
 #[path = "process/trace_map.rs"]
 mod trace_map;
-use trace_map::{language_event_node_id, trace_lashlang_process_map};
-pub use trace_map::{trace_lashlang_main_map, trace_lashlang_source_identity};
+use trace_map::language_event_node_id;
+pub use trace_map::{
+    TraceLanguageExecutionMapError, trace_lashlang_main_map, trace_lashlang_process_map,
+    trace_lashlang_process_map_snapshot, trace_lashlang_source_identity,
+};
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]

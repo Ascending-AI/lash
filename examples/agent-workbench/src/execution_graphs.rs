@@ -532,6 +532,7 @@ mod tests {
         children: Vec<TraceLashlangGraphChildLink>,
     ) -> TraceLashlangGraph {
         TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
             graph_key: graph_key.to_string(),
             scope: TraceRuntimeScope::new(session_id),
             subject,
@@ -541,9 +542,15 @@ mod tests {
             entry_ref: None,
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
             nodes: Vec::new(),
             edges: Vec::new(),
             children,
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            truncation_watermark: None,
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
         }
     }
 
@@ -598,6 +605,7 @@ mod tests {
             .expect("register subagent process");
 
         let parent_graph = TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
             graph_key: "effect:root:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: Some(SessionId::from("root")),
@@ -619,6 +627,7 @@ mod tests {
             entry_ref: None,
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
             nodes: Vec::new(),
             edges: Vec::new(),
             children: vec![TraceLashlangGraphChildLink {
@@ -629,8 +638,14 @@ mod tests {
                 child_entry_ref: None,
                 child_entry_name: Some("subagent".to_string()),
             }],
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            truncation_watermark: None,
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
         };
         let child_graph = TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
             graph_key: "effect:child-session:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: Some(SessionId::from(child_session_id.to_string())),
@@ -652,9 +667,15 @@ mod tests {
             entry_ref: None,
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Completed,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
             nodes: Vec::new(),
             edges: Vec::new(),
             children: Vec::new(),
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            truncation_watermark: None,
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
         };
         let mut projection = GraphProjection::new(
             &observer,

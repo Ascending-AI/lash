@@ -993,14 +993,30 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
         "invocation-rlm-cell",
     )
     .bind_attempt(2);
-    let mut input = lash_core::TurnInput::text("run the RLM cell");
-    lash_core::core_internal::attach_process_invocation_correlation(
-        &mut input.turn_context,
+    let controller = lash_core::facade_support::NativeRuntimeEffectController::default();
+    let admitted_process = lash_core::ProcessRef::new(
+        process_id.clone(),
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    );
+    let process_controller = || {
+        lash_core::ScopedEffectController::borrowed(
+            &controller,
+            lash_core::AdmittedScope::process(admitted_process.clone()),
+        )
+        .expect("process scope")
+    };
+    let request = lash_core::facade_support::SessionTurnRequest::new_process_backed(
+        "rlm-session",
+        process_id.as_str(),
+        lash_core::TurnInput::text("run the RLM cell"),
         &process_id,
         &authority,
-    );
+        process_controller(),
+    )
+    .expect("process-backed session turn");
     let context = lash_core::testing::TestExecutionContextBuilder::new()
-        .turn_context(input.turn_context)
+        .turn_context(request.input().turn_context.clone())
+        .borrowed_effect_controller(process_controller())
         .build()
         .into_runtime();
     let program = lash_typescript::parse("finish(1);").expect("valid fixture source");
@@ -1026,6 +1042,31 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
             .source_identity,
         "the RLM trace identity must carry the projector's source identity"
     );
+    assert_eq!(trace.identity().attempt(), Some(2));
+    assert_eq!(trace.identity().incarnation(), Some(1));
+
+    let non_process_context = lash_core::testing::code_execution_context_with_invocation(
+        lash_core::testing::exec_code_invocation(
+            "rlm-session",
+            "turn-1",
+            0,
+            0,
+            "exec-code",
+            "exec-code:foreground",
+        ),
+    );
+    let non_process_trace = foreground_lashlang_execution_trace(
+        &non_process_context,
+        &artifact,
+        &RlmLashlangExecutionTraceConfig {
+            sink: Some(Arc::new(NoopTraceSink)),
+            trace_context: TraceContext::default(),
+        },
+        "typescript",
+    )
+    .expect("non-process foreground trace");
+    assert_eq!(non_process_trace.identity().attempt(), None);
+    assert_eq!(non_process_trace.identity().incarnation(), None);
 }
 
 pub(super) async fn execute_continue_as_with_trace_sink(

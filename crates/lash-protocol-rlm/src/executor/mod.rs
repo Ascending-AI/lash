@@ -20,8 +20,9 @@ use lash_core::{
 #[cfg(feature = "testing")]
 use lash_core::SessionError;
 use lash_lashlang_runtime::{
-    LashlangSurface, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionMap, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+    LashlangSurface, TraceLanguageExecution, TraceLanguageExecutionGeneration,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionPayload,
+    TraceLanguageExecutionStatus,
 };
 use lashlang::{ExecutionOutcome, State as FlowState};
 
@@ -897,6 +898,13 @@ fn foreground_lashlang_execution_trace(
     let invocation = ctx.parent_invocation()?;
     let effect_id = invocation.effect_id()?;
     let address = invocation.effect_address()?.clone();
+    let generation = match ctx.admitted_process() {
+        Some(process) => Some(TraceLanguageExecutionGeneration::new(
+            ctx.admitted_process_attempt()?,
+            process.incarnation.registration_sequence(),
+        )),
+        None => None,
+    };
     Some(LashlangExecutionTrace::new(
         sink,
         language,
@@ -918,6 +926,7 @@ fn foreground_lashlang_execution_trace(
             entry_ref: None,
             entry_name: "main".to_string(),
             restate_invocation_id: ctx.restate_invocation_id().map(str::to_string),
+            generation,
         },
     ))
 }

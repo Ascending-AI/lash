@@ -1137,6 +1137,18 @@ fn language_execution_attributes(
         attr::LASH_LANGUAGE_EXECUTION_GRAPH_KEY,
         event.identity.graph_key(),
     ));
+    if let Some(attempt) = event.identity.attempt() {
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_ATTEMPT,
+            i64::from(attempt),
+        ));
+    }
+    if let Some(incarnation) = event.identity.incarnation() {
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_INCARNATION,
+            incarnation as i64,
+        ));
+    }
     if let Some(session_id) = &event.identity.scope.session_id {
         attrs.push(KeyValue::new(
             attr::LASH_LANGUAGE_EXECUTION_SESSION_ID,
@@ -1430,9 +1442,7 @@ fn typed_diagnostic_protocol_payload(event: &TraceEvent) -> Value {
 }
 
 fn record_time(record: &TraceRecord) -> SystemTime {
-    DateTime::parse_from_rfc3339(&record.timestamp)
-        .map(|time| time.with_timezone(&Utc).into())
-        .unwrap_or_else(|_| SystemTime::now())
+    record.timestamp.into()
 }
 
 fn event_type(event: &TraceEvent) -> &'static str {
