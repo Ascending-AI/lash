@@ -541,6 +541,35 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
+    /// The native group table this controller's group operations land on,
+    /// when it is — or delegates every group operation to — a native
+    /// controller. Erased as `Any` because the table is crate-internal: a host
+    /// uses it to arbitrate bound-child admission against the same state the
+    /// group wrote, and a foreign controller — or a double that answers groups
+    /// itself — honestly answers `None`.
+    #[doc(hidden)]
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        None
+    }
+
+    /// The bound group-child controller for hosts that are thin projections
+    /// over this controller and own no scope-minting surface of their own:
+    /// the substrate answers with the same controller
+    /// [`EffectHost::scoped_for_group_child`] would lend — every admission it
+    /// serves minted under `binding` (FIG-3470). Defaults to the unsupported
+    /// refusal: a controller without substrate-owned admission has no bound
+    /// controller to lend.
+    fn group_child_scoped_controller(
+        &self,
+        _admitted: AdmittedScope,
+        _binding: crate::GroupChildBinding,
+    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
+        Err(
+            super::effect_groups_unsupported("durable group-child admission binding")
+                .into_runtime_error(),
+        )
+    }
+
     /// Await the next settlement in the group's durable settlement order.
     ///
     /// The obligation, stated engine-portably: **settlement `n` of a group is a

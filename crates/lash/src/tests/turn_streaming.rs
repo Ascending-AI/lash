@@ -465,6 +465,10 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
         self.native.register_group_executors(executors)
     }
 
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.native.native_effect_groups_substrate()
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
@@ -622,6 +626,10 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         executors: Arc<dyn lash_core::GroupExecutors>,
     ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
         self.native.register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.native.native_effect_groups_substrate()
     }
 
     async fn await_next_settlement(

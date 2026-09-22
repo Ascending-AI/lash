@@ -135,6 +135,17 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         self.delegate.open_effect_group(group).await
     }
 
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.delegate.register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.delegate.native_effect_groups_substrate()
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,

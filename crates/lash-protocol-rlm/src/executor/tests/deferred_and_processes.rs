@@ -140,6 +140,14 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
         self.inner.register_group_executors(executors)
     }
 
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.group_child_scoped_controller(admitted, binding)
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,

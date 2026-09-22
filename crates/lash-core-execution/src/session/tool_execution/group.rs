@@ -11,11 +11,12 @@
 //! source-first leaf no longer blocks a later sibling's terminal.
 //!
 //! What does *not* live here yet: opener-side lifecycle closing at turn
-//! end/cancel (FIG-3410, ADR 0099 §7), drain-end handling (FIG-3419), and
-//! settlement-fact incorporation into the durable journal (FIG-3411). The
-//! seam below applies the recorded facts to the opener's live state exactly
-//! as the batch path did, but reads the model return the child projected and
-//! recorded rather than re-projecting it (ADR 0099 §6).
+//! end/cancel (FIG-3410, ADR 0099 §7) and drain-end handling (FIG-3419).
+//! Settlement-fact incorporation is FIG-3411's `incorporate_group_prefix`:
+//! the consumer journals the consumed prefix as an `IncorporateGroupSettlements`
+//! record and applies each rank's recorded facts once, while the seam below
+//! reads the model return the child projected and recorded rather than
+//! re-projecting it (ADR 0099 §6).
 
 use super::*;
 
@@ -374,6 +375,18 @@ impl RuntimeExecutionContext<'_> {
                             settlement_positions.push(position);
                         }
                     }
+                    // Incorporate the consumed prefix before abandoning the
+                    // await: settled ranks are durable facts and the journaled
+                    // `IncorporateGroupSettlements` record names them so a
+                    // replay applies the same prefix (FIG-3411 part 2).
+                    self.incorporate_group_prefix(&handle).await?;
+                    // Abandoned children stay live under host ownership, but a
+                    // child that parked this run's execution slot
+                    // (`release_process_execution_permit_while`) is no longer
+                    // awaited: the run continues, so it re-takes its slot here
+                    // exactly as the batch-effect path does after a cancel
+                    // grace drops a child future mid-wait.
+                    crate::runtime::ensure_process_execution_permit().await;
                     return Ok(ToolChildGroupSettled {
                         settled,
                         settlement_positions,
@@ -388,13 +401,7 @@ impl RuntimeExecutionContext<'_> {
                     settlement,
                 }) => {
                     let completed = self
-                        .apply_tool_child_settlement(
-                            handle.group_key(),
-                            position,
-                            &leaves[position],
-                            *outcome,
-                            *settlement,
-                        )
+                        .apply_tool_child_settlement(&leaves[position], *outcome, *settlement)
                         .await?;
                     settled[position] = Some(completed);
                 }
@@ -413,6 +420,10 @@ impl RuntimeExecutionContext<'_> {
             }
             settlement_positions.push(position);
         }
+        // Journal and apply the consumed prefix: every settled rank's facts
+        // land once under its recorded `child_replay_key`, and a replay
+        // re-incorporates exactly this prefix (FIG-3411 part 2).
+        self.incorporate_group_prefix(&handle).await?;
         if let Err(error) = controller
             .close_effect_group(handle, LoserPolicy::RunToCompletion)
             .await
@@ -428,42 +439,38 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
-    /// FIG-3411 seam: applies one settled child's recorded facts to the
-    /// opener's live state and returns the completed call.
+    /// FIG-3411 seam: returns one settled child's completed call and emits its
+    /// activity events.
     ///
     /// The once-only channels — possession, committed checkpoint messages,
     /// trigger receipts, and usage deltas charged once per
-    /// `UsageDeltaIdentity` (ADR 0099 §6/§13) — go through
-    /// `incorporate_tool_settlement` under the child's
-    /// `SettlementSource::GroupRank` identity rather than being re-applied
-    /// here. Presentation is taken verbatim from `settlement.model_return` —
-    /// the child's own recorded projection, run once inside the child — rather
-    /// than re-running the projector. Realized intent outcomes and their
-    /// activity events ride the carried `ToolDispatchOutcome`.
+    /// `UsageDeltaIdentity` (ADR 0099 §6/§13) — are incorporated by the
+    /// consumer through `incorporate_group_prefix`, which journals the
+    /// `IncorporateGroupSettlements` record covering the consumed prefix
+    /// (FIG-3411 part 2). Presentation is taken verbatim from
+    /// `settlement.model_return` — the child's own recorded projection, run
+    /// once inside the child — rather than re-running the projector. Realized
+    /// intent outcomes and their activity events ride the carried
+    /// `ToolDispatchOutcome`.
     ///
-    /// Deliberately absent here, and owned by FIG-3411 part 2: the recorded
-    /// observation prefix (ADR 0099 §6) and cross-invocation carriage of the
-    /// settlement facts themselves (§8). An incorporation refusal is an
-    /// infrastructure failure: the consumer turns it into the batch-level
-    /// failure, never a per-leaf tool rejection (§10 L3).
+    /// Deliberately absent here, and owned by FIG-3411's remaining steps:
+    /// cross-invocation carriage of the settlement facts (ADR 0099 §8).
     pub(crate) async fn apply_tool_child_settlement(
         &self,
-        group_key: &str,
-        position: usize,
         leaf: &PreparedToolChildLeaf,
         outcome: ToolDispatchOutcome,
         settlement: crate::runtime::ToolSettlement,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
         let call_id = leaf.call.call.call_id.clone();
         let correlation_id = tool_activity_id(&call_id);
-        self.incorporate_tool_settlement(
-            crate::session::SettlementSource::GroupRank {
-                group_key: group_key.to_string(),
-                rank: position as u64,
-                child_replay_key: format!("{group_key}:child:{position}"),
-            },
-            &settlement,
-        )?;
+        // Settlement *facts* (possession, messages, triggers, usage) are not
+        // applied here: `consume_all_tool_child_settlements` incorporates the
+        // consumed prefix through `incorporate_group_prefix` (FIG-3411 part
+        // 2), which journals the `IncorporateGroupSettlements` record and
+        // names each rank's real `child_replay_key` — a replay re-incorporates
+        // exactly the recorded prefix, never a rank that settled after the
+        // record was cut. This seam keeps presentation (the recorded
+        // `settlement.model_return`) and the activity events.
         for intent_outcome in &outcome.intent_outcomes {
             self.emit_turn_activity(
                 correlation_id.clone(),
