@@ -575,6 +575,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
 async fn failed_final_child_commit_cancellation_stays_recoverable() {
     let fixture = Box::pin(parked_session_turn("commit-failure")).await;
     let ParkedSessionTurn {
+        _runtime: runtime,
         services,
         factory,
         process_id,
@@ -671,6 +672,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
 async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     let fixture = Box::pin(parked_session_turn("crash-redelivery")).await;
     let ParkedSessionTurn {
+        _runtime: runtime,
         services,
         factory,
         process_id,
