@@ -105,63 +105,18 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
     queued_work_driver: Option<Arc<dyn lash::runtime::QueuedWorkSubstrate>>,
     context_window_tokens: usize,
 ) -> AppState {
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let model = with_workbench_model_capability(
-        lash::ModelSpec::builder("test-model")
-            .context_window_tokens(context_window_tokens)
-            .build()
-            .expect("model spec"),
-    );
-    let mut core_builder = explicit_durable_test_facets(data_dir)
-        .provider(provider)
-        .model(model)
-        .store_factory(Arc::clone(&store_factory))
-        .process_registry(Arc::clone(&process_registry))
-        .trigger_store(Arc::clone(&trigger_store));
-    if let Some(queued_work_driver) = queued_work_driver {
-        core_builder = core_builder.with_queued_work(queued_work_driver);
-    }
-    let core = core_builder
-        .build(crate::test_core_owner())
-        .expect("build test core");
-    let process_observer = core
-        .processes()
-        .observer()
-        .expect("process observer configured");
-    AppState {
-        core,
-        attachment_store: test_attachment_store(),
-        session_store_factory: Arc::clone(&store_factory),
+    recoverable_chat_test_state_with_replay_store(
+        data_dir,
+        channel_capacity,
+        provider,
         trigger_store,
-        process_observer,
-        // Process work is resolved through the core.
-        sessions: WorkbenchSessions::fresh(),
-        messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
-            model: "test-model".to_string(),
-            model_variant: Default::default(),
-        })),
-        trace_sink: None,
-        lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
-        event_tx: SessionEventRegistry::new(channel_capacity),
-        queued_work_driver: inert_queued_work(),
-        restate_ingress_url: "http://127.0.0.1:8080".to_string(),
-        restate_admin_url: "http://127.0.0.1:9070".to_string(),
-        restate_http: reqwest::Client::new(),
-        restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
-        mail_world: mail::MailWorld::new(),
-        active_turns: ActiveTurns::default(),
-        unknown_turn_terminals: UnknownTurnTerminals::default(),
-        authorization: WorkbenchAuthorization::allow_all(),
-        approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
-    }
+        store_factory,
+        queued_work_driver,
+        context_window_tokens,
+        None,
+        None,
+    )
+    .await
 }
 
 struct RetiringSubscriptionListTriggerStore {

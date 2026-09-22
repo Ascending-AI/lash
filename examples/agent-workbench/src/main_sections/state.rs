@@ -673,7 +673,7 @@ pub(crate) enum ProductStreamItem {
     Resync { snapshot: ProductEventSnapshot },
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ObservationStreamItem {
     Cursor {
