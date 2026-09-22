@@ -875,6 +875,28 @@ async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
     )
     .await?;
 
+    // A batch whose group never dispatched fails the turn instead of parking
+    // on a leaf; report that outcome rather than timing out on the rendezvous.
+    let mut probe = tokio::time::interval(std::time::Duration::from_millis(50));
+    let deadline = tokio::time::Instant::now() + RENDEZVOUS_BUDGET;
+    while tokio::time::Instant::now() < deadline {
+        probe.tick().await;
+        if driven.theatre.started().len() == 2 {
+            break;
+        }
+        if driven.turn.is_finished() {
+            let run = driven.finish().await?;
+            panic!(
+                "{}: the turn finished with no leaf ever started; started: {:?}, \
+                 final value: {:?}, provider requests: {:?}",
+                tier.name,
+                run.theatre.started(),
+                run.final_value(),
+                run.requests
+            );
+        }
+    }
+
     // Both leaves' attempts have run; the held source-first leaf no longer
     // blocks the later terminal leaf's settlement.
     driven.theatre.await_started("second").await;
