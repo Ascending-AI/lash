@@ -29,7 +29,8 @@ failed validation. A second fork with the same frontend dependency state
 completed in 3.662 seconds with zero remote executions, two remote cache hits
 for the example generator library/binary and a disk hit for schema generation.
 An earlier mismatched fork recompiled: ignored frontend files had changed the
-broad package inputs. Python bytecode caches are now excluded from those globs.
+broad package inputs. Python bytecode caches and frontend `node_modules` are
+now excluded from those globs.
 This is cache-reuse evidence, not a controlled end-to-end CI speedup.
 
 For a real inherited genrule, changing only CPU/memory defaults changed its
@@ -43,6 +44,23 @@ inside Bubblewrap. Separate probes verified private locks, hidden host `/tmp`
 sentinels and an inaccessible host Docker socket. These are isolated shell
 fixtures; they do not run against live services.
 
+## Bounded test split
+
+Fifteen lease serialization tests move into a separate integration crate using
+existing public types. Their assertions, helpers and fully qualified names are
+preserved. The before/after multiset contains the same 861 tests, now divided
+between 846 unit tests and 15 integration tests. Model-filter tests stay in the
+unit crate because moving them would require an extra testing feature.
+
+A matched lease-test comment edit took 84.9 seconds before and 13.3 seconds
+after. Compiler worker execution for the changed test fell from 76.0 seconds
+to 0.8 seconds. A production comment edit took 78.3 seconds before and 89.1
+seconds after. Aggregate compiler worker execution fell from 122.5 to 104.4
+seconds; the new integration compile added 2.4 seconds. These are single
+shared-pool samples. They establish a cheaper edit boundary for this test group,
+but do not establish improved production-edit latency or eliminate the large
+unit frontend. Keep the existing test batching and resource policy.
+
 ## Diagnostics and placement
 
 The opt-in `scripts/bazel-diagnose.py` captures profiles, compact execution logs
@@ -54,7 +72,7 @@ timestamps are reported as clock skew. Failed and interrupted captures retain
 the invocation exit status.
 
 A 1,059-action cached log decoded successfully. Three tiny paired probes showed
-about 1.5 seconds median total capture overhead, with substantial noise. Capture
+about 1.7 seconds median paired capture overhead, with substantial noise. Capture
 therefore remains opt-in. Keep raw bundles private and outside the checkout.
 
 Dedicated-worker placement remains unchanged and unbenchmarked. The current
