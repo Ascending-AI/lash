@@ -227,6 +227,23 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         self.owner.scoped_for_group_child(admitted, binding)
     }
 
+    // The group lifecycle seams are the owner's, untouched by the turn-control
+    // delegation: without these forwards the wrapper would silently answer the
+    // defaults — no closing seam, and a dropped tool-child install that leaves
+    // the owner's controller with no registered group executors.
+    fn effect_group_closing(
+        &self,
+    ) -> Option<Arc<dyn crate::runtime::effect::StoreEffectGroupClosing>> {
+        self.owner.effect_group_closing()
+    }
+
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<crate::runtime::effect::ToolChildHost>,
+    ) -> Option<Arc<crate::runtime::effect::ToolChildHost>> {
+        self.owner.install_tool_child_host(candidate)
+    }
+
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
         self
     }
