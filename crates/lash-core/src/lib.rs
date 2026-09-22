@@ -641,7 +641,9 @@ pub use lash_core_execution::{
     ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,
     TurnMachine, TurnMachineConfig,
 };
-pub use lash_sansio::{FailureCode, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind};
+pub use lash_sansio::{
+    FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
+};
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{

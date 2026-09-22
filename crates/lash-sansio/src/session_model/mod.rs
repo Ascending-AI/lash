@@ -2,7 +2,9 @@ pub mod failure;
 pub mod message;
 pub mod prompt;
 
-pub use failure::{FailureCode, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind};
+pub use failure::{
+    FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
+};
 pub use message::{
     BaseRenderCache, InvalidPartCombination, Message, MessageRole, MessageSequence, Part,
     PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
