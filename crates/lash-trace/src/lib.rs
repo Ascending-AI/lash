@@ -134,7 +134,8 @@ pub use lashlang_graph::{
 /// Version 29 (FIG-1961) renames the compaction decision fields from
 /// `context_budget_tokens` to `used_tokens`: the value is now the checked
 /// provider-reported usage, not a derived budget snapshot.
-pub const TRACE_SCHEMA_VERSION: u32 = 29;
+/// Version 30 (FIG-3463) adds typed failure provenance to language observations.
+pub const TRACE_SCHEMA_VERSION: u32 = 30;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
