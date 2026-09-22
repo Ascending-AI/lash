@@ -173,6 +173,7 @@ impl RuntimeTurnDriver<'_> {
                             .await?;
                         let dispatch_outcome = prepare_context
                             .pending_completion_dispatch_outcome(
+                                &call_id,
                                 prepared.tool_name.clone(),
                                 prepared.args.clone(),
                                 resolution,

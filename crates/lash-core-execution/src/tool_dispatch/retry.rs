@@ -266,8 +266,14 @@ pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOu
 /// handler boundary. Every input this body ever used came from the dispatch
 /// context, so the two callers share one settlement rather than each spelling
 /// the projection, the after-tool hook and the trailing trace attempt.
+///
+/// `call_id` is the parked call's durable identity, re-derived by the caller
+/// from the journaled park rather than read out of it — the pending row does
+/// not carry it — so the after-tool observation still names the call it
+/// settles.
 pub(crate) async fn settle_completed_pending_tool_call(
     context: &ToolDispatchContext<'_>,
+    call_id: &str,
     tool_name: String,
     args: serde_json::Value,
     resolution: crate::Resolution,
@@ -278,6 +284,7 @@ pub(crate) async fn settle_completed_pending_tool_call(
     let output = crate::tool_result::tool_output_from_completion_resolution(resolution, resolver);
     let result = super::finalize_tool_result_with_execution_context(
         context,
+        call_id,
         &tool_name,
         &args,
         ToolOutcome::from_output(output),

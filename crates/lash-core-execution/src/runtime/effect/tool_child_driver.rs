@@ -967,6 +967,7 @@ pub(crate) async fn await_journaled_tool_completion(
     };
     let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
         dispatch,
+        call_id,
         pending.tool_name,
         pending.args,
         resolution,

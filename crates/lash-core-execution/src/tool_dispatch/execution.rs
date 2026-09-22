@@ -170,6 +170,7 @@ pub async fn execute_orchestrating_tool<'run>(
     let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
     let result = finalize_tool_result_with_execution_context(
         context,
+        &prepared.call_id,
         &tool_name,
         &args,
         result,
@@ -234,6 +235,7 @@ pub async fn execute_internal_process_tool<'run>(
     let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
     let result = finalize_tool_result_with_execution_context(
         context,
+        &prepared.call_id,
         &tool_name,
         &args,
         result,
@@ -431,6 +433,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
 
     let result = finalize_tool_result_with_execution_context(
         context,
+        &prepared.call_id,
         &tool_name,
         &args,
         result,
@@ -506,6 +509,7 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
 
 pub async fn finalize_tool_result_with_execution_context(
     context: &ToolDispatchContext<'_>,
+    call_id: &str,
     tool_name: &str,
     args: &serde_json::Value,
     result: ToolOutcome,
@@ -515,6 +519,7 @@ pub async fn finalize_tool_result_with_execution_context(
         .plugins
         .after_tool_call(ToolResultHookContext::new(
             context.session_id.clone(),
+            call_id.to_string(),
             tool_name.to_string(),
             args.clone(),
             result.clone(),
