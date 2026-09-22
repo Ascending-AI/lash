@@ -194,6 +194,14 @@ class FakeDocker:
             encoding="utf-8",
         )
         script.chmod(0o755)
+        if not ready:
+            sleep = directory / "sleep"
+            sleep.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf 'sleep %s\\n' \"$*\" >>'{self.calls}'\n",
+                encoding="utf-8",
+            )
+            sleep.chmod(0o755)
 
     def logged(self) -> list[str]:
         if not self.calls.exists():
@@ -271,13 +279,14 @@ class WithServiceBehaviour(unittest.TestCase):
                 directory,
                 ["pg16", "--", "bash", "-c", f"touch '{marker}'"],
                 ready=False,
-                # 30 probes two seconds apart, the CI health-check budget.
-                timeout=240,
             )
             self.assertEqual(1, result.returncode)
             # The command must never run against a service that never came up.
             self.assertFalse(marker.exists())
             self.assertIn("never became ready", result.stderr)
+            probes = [call for call in docker.logged() if call.startswith("exec ")]
+            self.assertEqual(30, len(probes))
+            self.assertEqual(30, docker.logged().count("sleep 2"))
             self.assertTrue(
                 any(call.startswith("rm --force") for call in docker.logged()),
                 docker.logged(),
