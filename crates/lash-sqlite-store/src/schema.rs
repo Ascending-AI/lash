@@ -1349,7 +1349,14 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// `runtime_effect_group`, the group arity column is renamed
 /// `expected_children`, and the membership's `request_version` becomes
 /// `command_version`. A pre-30 journal is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 30;
+/// Version 31 (FIG-3411) is a journaled-encoding cutover with no relational
+/// change: the `ToolAttempt` outcome's `ToolAttemptCapture` usage deltas carry
+/// the `(source, model)` labels the incorporation charge needs, and the
+/// journaled `ToolInvocation` outcome's `ToolDispatchOutcome` carries the
+/// aggregated captures and trigger receipts to the settlement boundary. A
+/// pre-31 journal is rejected at open and recreated rather than replayed
+/// under the old carrier shape.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 31;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
