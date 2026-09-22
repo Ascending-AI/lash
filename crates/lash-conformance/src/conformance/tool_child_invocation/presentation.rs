@@ -430,10 +430,9 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             .expect("the group closes");
         drop(guard);
 
-        // This tier keeps no journal, so a re-registered opener is a new
-        // incarnation — not a replay: the group re-executes, the changed chain
-        // runs, and the law observes `[a][b2]`, which is exactly the bypass a
-        // durable replay must never serve.
+        // A re-registered opener is a new incarnation; what it observes depends
+        // on whether the tier keeps the journal the `PresentToolResult` record
+        // lives in.
         let (changed_factories, a2_runs, b2_runs) = ab2_steps();
         let _guard = register_opener_with_extras(
             &host,
@@ -449,16 +448,40 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             },
         );
         let (scoped, handle, replayed) = settle_rank_zero(&host, &scope, group).await;
-        assert!(
-            presented_text(invocation_settlement(&replayed)).ends_with("[a][b2]"),
-            "a new opener incarnation re-runs rather than replaying: the fresh \
-             chain stamps [b2] — the answer a journaled replay must never give"
-        );
-        assert_eq!(
-            a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
-            2,
-            "the changed environment's steps ran under the new incarnation"
-        );
+        match fixture.deferrable_routing {
+            ToolChildDeferrableRouting::ProcessLifetime => {
+                // The in-memory tier keeps no journal, so the reopened group
+                // re-executes and the changed chain runs: the law observes
+                // `[a][b2]` — exactly the bypass a journaled replay must never
+                // serve.
+                assert!(
+                    presented_text(invocation_settlement(&replayed)).ends_with("[a][b2]"),
+                    "a new opener incarnation re-runs rather than replaying: the fresh \
+                     chain stamps [b2] — the answer a journaled replay must never give"
+                );
+                assert_eq!(
+                    a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
+                    2,
+                    "the changed environment's steps ran under the new incarnation"
+                );
+            }
+            ToolChildDeferrableRouting::Durable => {
+                // Restate keeps the journal host-side — a durable routing —
+                // even though Lash walks no drain of its own, so the reopened
+                // group serves the recorded presentation and the changed
+                // chain's steps never run.
+                let presented = presented_text(invocation_settlement(&replayed));
+                assert!(
+                    presented.ends_with("[a][b]"),
+                    "the journaled presentation survives the opener registration: {presented:?}"
+                );
+                assert_eq!(
+                    a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
+                    0,
+                    "the changed environment's steps never ran"
+                );
+            }
+        }
         scoped
             .controller()
             .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
