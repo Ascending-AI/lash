@@ -1104,13 +1104,11 @@ mod append_request_identity_tests {
                 .expect("encode current request")),
             ),
         ];
-        let rendered = rows
-            .iter()
+        rows.iter()
             .map(|(name, value)| format!("{name}={value}"))
             .collect::<Vec<_>>()
             .join("\n")
-            + "\n";
-        rendered
+            + "\n"
     }
 
     #[test]

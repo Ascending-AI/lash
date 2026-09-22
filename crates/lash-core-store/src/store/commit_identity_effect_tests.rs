@@ -67,7 +67,7 @@ pub(super) fn effect_identity_rows() -> String {
         "different admitted scopes must not share append identity"
     );
 
-    let rendered = [
+    [
         (
             "turn_effect_node",
             hex(&append_node_identity_bytes(&turn_node).expect("encode current turn-scoped node")),
@@ -79,6 +79,5 @@ pub(super) fn effect_identity_rows() -> String {
     .map(|(name, value)| format!("{name}={value}"))
     .collect::<Vec<_>>()
     .join("\n")
-        + "\n";
-    rendered
+        + "\n"
 }
