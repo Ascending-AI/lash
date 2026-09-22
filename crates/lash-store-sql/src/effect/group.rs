@@ -25,6 +25,13 @@ pub const INSERT_COLUMNS: &str = "group_key, scope_id, session_id, wake, loser_d
 pub const RECORD_COLUMNS: &str = "group_key, scope_id, session_id, wake, loser_disposition,
                     expected_children, lifecycle, created_at_ms";
 
+/// The pin a session retirement checks: key and lifecycle alone.
+///
+/// Session deletion refuses while any of the session's groups is accepted or
+/// closing, and the refusal message names the offending group — the full row
+/// would decode columns the check never reads.
+pub const SESSION_PIN_COLUMNS: &str = "group_key, lifecycle";
+
 crate::statements! {
     /// `runtime_effect_group` statements both backends issue verbatim.
     pub struct GroupStatements @ "effect_group" {
