@@ -856,6 +856,43 @@ kind = "rust_items"
 paths = ["crates/lash-sansio/src/llm/capability.rs"]
 symbols = ["ModelCapability", "InstructionRole"]
 
+# Restricted resident-tool authority serializes `Vec<ToolDefinition>` through
+# `SessionToolAccessWire` inside the head's config column. The wire carrier and
+# the definition's whole serialized closure are named here because the closure
+# lives in tool_contract.rs/schema_contract.rs, which this surface's other
+# guards do not sweep. `rust_items` projects attributes too, so a
+# `serde(flatten)` reintroduction on any of them trips this surface.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/session_identity.rs"]
+symbols = [
+  "SessionToolAccess",
+  "SessionResidentToolAccess",
+  "SessionToolAccessWire",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lash-sansio/src/tool_contract.rs",
+  "crates/lash-sansio/src/schema_contract.rs",
+]
+symbols = [
+  "ToolDefinition",
+  "ToolManifest",
+  "ToolContract",
+  "ToolId",
+  "CompactToolContract",
+  "ToolActivation",
+  "ToolRetryPolicy",
+  "ToolOutputContract",
+  "ToolArgumentProjectionPolicy",
+  "SchemaContract",
+  "SchemaProjectionPolicy",
+  "SchemaProjectionOverride",
+  "ProjectionMode",
+]
+
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/session_graph.rs"
@@ -1048,6 +1085,39 @@ must_cover = ["RlmSnapshotRoot", "RlmDriverState", "DeferredTriggerResolutionRec
 kind = "rust_items"
 paths = ["crates/lash-rlm-types/src/lib.rs"]
 symbols = ["ProjectionRef"]
+
+# `DeferredResolutionRecord.resolutions` carries `Resolution::Resolved` ->
+# `ToolGrant.definition` into the snapshot, and `link_key` carries
+# `EffectAddress`; both declarations live outside the serde-shape sweep above.
+# The definition and the link key's serialized closures are named here so a
+# declaration edit demands the bump. `rust_items` projects attributes too, so
+# a `serde(flatten)` reintroduction on any of them trips this surface.
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lash-sansio/src/tool_contract.rs",
+  "crates/lash-sansio/src/schema_contract.rs",
+  "crates/lash-sansio/src/effect_identity.rs",
+  "crates/lash-sansio/src/causal.rs",
+]
+symbols = [
+  "ToolDefinition",
+  "ToolManifest",
+  "ToolContract",
+  "ToolId",
+  "CompactToolContract",
+  "ToolActivation",
+  "ToolRetryPolicy",
+  "ToolOutputContract",
+  "ToolArgumentProjectionPolicy",
+  "SchemaContract",
+  "SchemaProjectionPolicy",
+  "SchemaProjectionOverride",
+  "ProjectionMode",
+  "EffectAddress",
+  "ExecutionScope",
+  "CausalRef",
+]
 
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"

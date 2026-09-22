@@ -490,7 +490,7 @@ mod tests {
             else {
                 return local_executor.execute(envelope).await;
             };
-            if !operation.starts_with("deferred_tool_resolution:v1:") {
+            if !operation.starts_with("deferred_tool_resolution:v2:") {
                 return local_executor.execute(envelope).await;
             }
             let key = envelope.invocation.replay_key().to_string();

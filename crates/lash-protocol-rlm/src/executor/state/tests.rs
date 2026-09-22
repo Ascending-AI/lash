@@ -61,6 +61,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         json!({"type": "object"}),
         json!({"type": "object"}),
     );
+    definition.manifest.inline = false;
     definition.manifest.compact_contract = Some(std::sync::Arc::new(compact_contract.clone()));
     definition.manifest.activation = ToolActivation::Internal;
     definition
@@ -196,7 +197,13 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     );
     assert_field_schema(
         TOOL_DEFINITION_FIELDS,
+        &["manifest", "contract"],
+        &[serialized_fields(&definition)],
+    );
+    assert_field_schema(
+        TOOL_MANIFEST_FIELDS,
         &[
+            "inline",
             "id",
             "name",
             "description",
@@ -205,12 +212,18 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             "bindings",
             "argument_projection",
             "retry_policy",
+        ],
+        &[serialized_fields(&definition.manifest)],
+    );
+    assert_field_schema(
+        TOOL_CONTRACT_FIELDS,
+        &[
             "input_schema",
             "output_schema",
             "output_contract",
             "examples",
         ],
-        &[serialized_fields(&definition)],
+        &[serialized_fields(&definition.contract)],
     );
     assert_field_schema(
         SCHEMA_CONTRACT_FIELDS,
@@ -570,7 +583,7 @@ fn canonical_resolution_field_order_is_independent_of_key_shape() {
             let result = validate_canonical_root(&bytes);
             if reversed {
                 assert!(
-                    matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { reason, .. }) if reason.contains("canonical declaration order")),
+                    matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("canonical declaration order")),
                     "key {key}"
                 );
             } else {
@@ -578,6 +591,73 @@ fn canonical_resolution_field_order_is_independent_of_key_shape() {
             }
         }
     }
+}
+
+#[test]
+fn reordered_tool_definition_subtree_is_rejected_not_renormalized() {
+    // Hand-written MessagePack pins ordering independently of serde's encoder.
+    fn string(value: &str) -> Vec<u8> {
+        assert!(value.len() < 32);
+        let mut bytes = vec![0xa0 | u8::try_from(value.len()).expect("fixstr length")];
+        bytes.extend_from_slice(value.as_bytes());
+        bytes
+    }
+    fn map(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
+        assert!(entries.len() < 16);
+        let mut bytes = vec![0x80 | u8::try_from(entries.len()).expect("fixmap length")];
+        for (key, value) in entries {
+            bytes.extend_from_slice(&string(key));
+            bytes.extend_from_slice(&value);
+        }
+        bytes
+    }
+    fn envelope(definition: Vec<u8>) -> Vec<u8> {
+        let resolution = map(vec![
+            ("kind", string("resolved")),
+            ("definition", definition),
+        ]);
+        let resolutions = map(vec![("tool", resolution)]);
+        let deferred = map(vec![("resolutions", resolutions)]);
+        map(vec![("deferred_resolutions", deferred)])
+    }
+
+    let manifest = map(vec![("id", string("tool.t")), ("name", string("t"))]);
+    let schema = map(vec![("canonical", string("schema"))]);
+    let contract = map(vec![("input_schema", schema)]);
+    let definition = map(vec![
+        ("manifest", manifest.clone()),
+        ("contract", contract.clone()),
+    ]);
+    validate_canonical_root(&envelope(definition))
+        .expect("declared definition order must be accepted");
+
+    // Reordering the definition's own fields is a declaration-order violation.
+    let swapped = map(vec![("contract", contract.clone()), ("manifest", manifest)]);
+    let result = validate_canonical_root(&envelope(swapped));
+    assert!(
+        matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("canonical declaration order")),
+        "reordered definition: {result:?}"
+    );
+
+    // Reordering inside the formerly flattened manifest is rejected the same
+    // way; the pre-pass can now declare the order it could not express under
+    // `serde(flatten)`.
+    let manifest_swapped = map(vec![("name", string("t")), ("id", string("tool.t"))]);
+    let definition = map(vec![("manifest", manifest_swapped), ("contract", contract)]);
+    let result = validate_canonical_root(&envelope(definition));
+    assert!(
+        matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("canonical declaration order")),
+        "reordered manifest: {result:?}"
+    );
+
+    // A pre-cutover flat definition body is foreign wire data, not a legacy
+    // shape to normalize: its fields are unknown at the definition map.
+    let flat = map(vec![("id", string("tool.t")), ("name", string("t"))]);
+    let result = validate_canonical_root(&envelope(flat));
+    assert!(
+        matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("unknown field")),
+        "flat definition: {result:?}"
+    );
 }
 
 #[test]
@@ -647,15 +727,17 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 #[test]
 fn previous_snapshot_version_is_typed_rejection_for_missing_child_attempt_bound() {
     // v19 is the last envelope written without the child attempt bound; v20
-    // added it. v21 is the single-language cutover (ADR 0096), which sits on
-    // top without touching this envelope's shape, so the gap to the reader is
-    // two rather than one. The rejection asserted below is unchanged.
+    // added it. v21 is the single-language cutover (ADR 0096) and v22 the
+    // nested-tool-definition cutover (FIG-1210), which sit on top without
+    // touching this envelope's other fields, so the gap to the reader is
+    // three rather than one. The rejection asserted below is unchanged.
     const PREVIOUS_SNAPSHOT_VERSION: u32 = 19;
     assert_eq!(
         RLM_SNAPSHOT_VERSION,
-        PREVIOUS_SNAPSHOT_VERSION + 2,
-        "the child attempt-bound snapshot bump and the single-language cutover \
-         are the only versions between this envelope and the current reader"
+        PREVIOUS_SNAPSHOT_VERSION + 3,
+        "the child attempt-bound snapshot bump, the single-language cutover \
+         and the tool-definition nesting are the only versions between this \
+         envelope and the current reader"
     );
 
     #[derive(Serialize)]
@@ -822,7 +904,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-21 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-22 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -833,23 +915,24 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_21_root_encodes_to_golden_bytes() {
+fn version_22_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "86a776657273696f6e15a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6",
-        "696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565a576616c756582a46b696e64",
-        "a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a46b696e64a46c656166a9636f6d706f6e656e",
-        "74d957657865637574696f6e5f73746174652f626c616b65332f653233376136623237663766343935393661656234313936323836346165",
-        "63633034366334666266623236643364393162393331613134303262636665363937b464656665727265645f7265736f6c7574696f6e7382",
-        "a86c696e6b5f6b657981a76164647265737382af657865637574696f6e5f73636f706583a474797065a47475726eaa73657373696f6e5f69",
-        "64ae73657373696f6e2d676f6c64656ea77475726e5f6964a67475726e2d37aa7265706c61795f6b6579a87265706c61792d31ab7265736f",
-        "6c7574696f6e7382a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f6e85a26964aa746f6f6c3a6665",
-        "746368a46e616d65a56665746368ab6465736372697074696f6eae4665746368206f6e652055524c2eac696e7075745f736368656d6181a9",
-        "63616e6f6e6963616c82aa70726f7065727469657381a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f757470",
-        "75745f736368656d6181a963616e6f6e6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562",
-        "b1657865637574696f6e5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f6176",
-        "61696c61626c65",
-        "bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380",
-        "b26368696c645f6d61785f617474656d70747305",
+        "86a776657273696f6e16a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282",
+        "a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565",
+        "a576616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a4",
+        "6b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f653233376136",
+        "6232376637663439353936616562343139363238363461656363303436633466626662323664336439316239333161313430",
+        "3262636665363937b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657981a76164647265737382af",
+        "657865637574696f6e5f73636f706583a474797065a47475726eaa73657373696f6e5f6964ae73657373696f6e2d676f6c64",
+        "656ea77475726e5f6964a67475726e2d37aa7265706c61795f6b6579a87265706c61792d31ab7265736f6c7574696f6e7382",
+        "a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f6e82a86d616e696665737483a26964",
+        "aa746f6f6c3a6665746368a46e616d65a56665746368ab6465736372697074696f6eae4665746368206f6e652055524c2ea8",
+        "636f6e747261637482ac696e7075745f736368656d6181a963616e6f6e6963616c82aa70726f7065727469657381a375726c",
+        "81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e6963616c",
+        "81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e5f62696e",
+        "64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61626c65bc",
+        "64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380b26368696c645f6d",
+        "61785f617474656d70747305",
     );
 
     let mut resolutions = BTreeMap::new();
@@ -918,7 +1001,7 @@ fn version_21_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-21 root encoding changed; decide on a version bump before updating the golden"
+        "the version-22 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =

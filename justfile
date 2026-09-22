@@ -377,6 +377,7 @@ floor:
     'npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types' \
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
+    'python3 scripts/check_checkpoint_component_flatten.py' \
     | scripts/gate-table.sh
 
 # The store-bump gates only: both version-bump checks, the store SQL ownership

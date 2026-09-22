@@ -15,7 +15,7 @@ impl lash_core::RuntimeEffectController for FailingDeferredJournalController {
         if matches!(
             &envelope.command,
             lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
-                if operation.starts_with("deferred_tool_resolution:v1:")
+                if operation.starts_with("deferred_tool_resolution:v2:")
         ) {
             local_executor.execute(envelope).await?;
             Err(lash_core::RuntimeEffectControllerError::new(
@@ -80,7 +80,7 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
         let is_deferred = matches!(
             &envelope.command,
             lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
-                if operation.starts_with("deferred_tool_resolution:v1:")
+                if operation.starts_with("deferred_tool_resolution:v2:")
         );
         if !is_deferred {
             return self.inner.execute_effect(envelope, local_executor).await;

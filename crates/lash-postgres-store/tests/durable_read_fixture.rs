@@ -96,6 +96,9 @@ const ABATING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const FLEETING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-100-failure-code-predecessor/postgres-expected.json",
 ];
+const EXPIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-101-f2a4770bd/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
