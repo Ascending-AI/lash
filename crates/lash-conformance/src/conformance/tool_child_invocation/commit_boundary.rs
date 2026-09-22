@@ -18,6 +18,10 @@ use super::*;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the group's fields are the law's parameters; a struct would only rename the list"
+)]
 fn commit_group(
     scope: &crate::ExecutionScope,
     session_id: &crate::SessionId,

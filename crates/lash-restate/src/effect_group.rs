@@ -1050,7 +1050,7 @@ impl EffectGroupIndex {
         Json(request): Json<EffectGroupDrainBlockedRequest>,
     ) -> HandlerResult<Json<bool>> {
         let blocked = match load_index_shared(&ctx).await? {
-            Some(record) => record.live().map_or(false, |live| {
+            Some(record) => record.live().is_ok_and(|live| {
                 live.commit_states.iter().any(|(position, state)| {
                     matches!(state, EffectGroupChildCommitState::Committed { commit_seq }
                         if *commit_seq < request.commit_seq)

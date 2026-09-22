@@ -601,7 +601,7 @@ async fn record_child_settlement(
                 ),
             );
             return Err(TerminalError::new(
-                serde_json::to_string(&refusal).unwrap_or_else(|_| refusal.message),
+                serde_json::to_string(&refusal).unwrap_or(refusal.message),
             )
             .into());
         }
