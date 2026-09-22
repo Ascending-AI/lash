@@ -1475,6 +1475,12 @@ impl RuntimeEffectOutcome {
     }
 }
 
+impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
+    fn from(invocation: RuntimeEffectInvocation) -> Self {
+        invocation.into_runtime_invocation()
+    }
+}
+
 #[cfg(test)]
 mod rejection_tests {
     use super::*;
@@ -1686,11 +1692,5 @@ mod rejection_tests {
             RuntimeEffectCommand::ToolBatch { batch: value },
             "runtime_effect_tool_batch_call_replay",
         );
-    }
-}
-
-impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
-    fn from(invocation: RuntimeEffectInvocation) -> Self {
-        invocation.into_runtime_invocation()
     }
 }
