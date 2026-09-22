@@ -124,8 +124,15 @@ impl RuntimeTurnDriver<'_> {
             // child driver, so no `ToolCallLaunch::Pending` reaches here.
             let group_invocation =
                 self.turn_effect_invocation(machine, id, RuntimeEffectKind::ToolBatch)?;
+            // The group's identity is the invocation it replaces, not the
+            // sansio effect id alone: effect ids restart in every agent frame,
+            // while the admitted scope stays the root turn's, so a follow-on
+            // frame's first tool call would otherwise name the root frame's
+            // group and reopen its settlements. The invocation's replay key
+            // carries the physical turn and protocol iteration.
+            let batch_id = group_invocation.replay_key().to_string();
             let completions = prepare_context
-                .execute_prepared_tool_group(&id.0.to_string(), group_invocation, prepared_entries)
+                .execute_prepared_tool_group(&batch_id, group_invocation, prepared_entries)
                 .await?;
             for (source_index, completed) in completions {
                 results[source_index] = Some(completed.completed);
