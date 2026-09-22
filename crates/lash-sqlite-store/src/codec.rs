@@ -171,19 +171,26 @@ mod tests {
             (BuiltinBlobProfile::Balanced, BlobCompression::Zlib),
             (BuiltinBlobProfile::Compact, BlobCompression::Zlib),
         ] {
-            let descriptor = BlobArtifactDescriptor::checkpoint_component();
-            let encoded =
-                encode_artifact_blob(&descriptor, profile, &content).expect("encode artifact blob");
-            let wire: WireEnvelope =
-                rmp_serde::from_slice(&encoded).expect("inspect named MessagePack envelope");
-            assert_eq!(
-                wire.descriptor,
-                serde_json::json!({
-                    "hints": ["Compressible", "LargePayload"]
-                })
-            );
-            assert_eq!(wire.compression, compression);
-            assert_eq!(decode_artifact_blob(&encoded).unwrap(), content);
+            for (descriptor, expected_descriptor, expected_compression) in [
+                (
+                    BlobArtifactDescriptor::checkpoint_component(),
+                    serde_json::json!({"hints": ["Compressible", "LargePayload"]}),
+                    compression,
+                ),
+                (
+                    BlobArtifactDescriptor::new(Vec::new()),
+                    serde_json::json!({}),
+                    BlobCompression::None,
+                ),
+            ] {
+                let encoded = encode_artifact_blob(&descriptor, profile, &content)
+                    .expect("encode artifact blob");
+                let wire: WireEnvelope =
+                    rmp_serde::from_slice(&encoded).expect("inspect named MessagePack envelope");
+                assert_eq!(wire.descriptor, expected_descriptor);
+                assert_eq!(wire.compression, expected_compression);
+                assert_eq!(decode_artifact_blob(&encoded).unwrap(), content);
+            }
         }
     }
 
