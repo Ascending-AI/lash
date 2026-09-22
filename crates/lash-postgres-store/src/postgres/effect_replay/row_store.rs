@@ -436,6 +436,14 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 .rows_affected(),
         };
         if stamped == 0 {
+            // A terminal-less discharge missing the settle guard means the row
+            // is still mid-drain (`status = 'in_progress'`): the drain is
+            // still owed, and the rank bump above must roll back with the
+            // rest of the transaction.
+            if request.terminal.is_none() {
+                tx.rollback().await.map_err(effect_store_error)?;
+                return Ok(EffectDischargeOutcome::Blocked);
+            }
             return Err(replay_corrupt(format!(
                 "discharge write for child `{}` of group {} missed a row read \
                  committed in the same transaction",
@@ -491,10 +499,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         .await
         .map_err(effect_store_error)?;
         let Some(row) = row else {
-            // No durable row means no durable membership: the caller is not a
-            // journaled group child, so there is nothing to arbitrate.
-            tx.commit().await.map_err(effect_store_error)?;
-            return Ok(EffectGroupChildCommitOutcome::Ungrouped);
+            return Err(replay_corrupt(format!(
+                "a §4 commit for replay key `{}` under scope `{}` names a replay row \
+                 that does not exist; a claimed child's row cannot be missing",
+                request.replay_key, request.scope_id
+            )));
         };
         let Some(group_key): Option<String> = row.get("group_key") else {
             tx.commit().await.map_err(effect_store_error)?;

@@ -762,10 +762,25 @@ impl NativeEffectGroups {
             let task_owner = Arc::clone(&state);
             let child_task = tracing::Instrument::instrument(
                 async move {
+                    let execution = executor.execute(child);
+                    tokio::pin!(execution);
                     let outcome = tokio::select! {
                         biased;
-                        () = cancel.cancelled() => Err(child_cancelled_error(&group_key, position)),
-                        outcome = executor.execute(child) => outcome,
+                        () = cancel.cancelled() => {
+                            // A committed child retains authority to finish its
+                            // drain (§4); the close decides only undecided
+                            // children, so the token is not authorization here.
+                            let committed = matches!(
+                                state.state.lock_recover().decisions.get(&position),
+                                Some(NativeChildDecision::Committed)
+                            );
+                            if committed {
+                                execution.await
+                            } else {
+                                Err(child_cancelled_error(&group_key, position))
+                            }
+                        }
+                        outcome = &mut execution => outcome,
                     };
                     Self::record(&groups, &group_key, &state, position, outcome);
                 },

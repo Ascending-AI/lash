@@ -241,11 +241,13 @@ crate::statements! {
         /// port's `AlreadyDischarged` arm a read of durable fact instead of a
         /// guess — and so rank and drain state land atomically: a recovered
         /// reader never sees a rankable child that is not drained nor a
-        /// drained child without a rank.
+        /// drained child without a rank. `status <> 'in_progress'` is the
+        /// second half of that guard: a committed row still mid-drain owes a
+        /// terminal, and a rank must not seat ahead of it.
         settle_drained = "UPDATE runtime_effect_replay
              SET commit_state = 'drained', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
-               AND commit_state = 'committed'";
+               AND commit_state = 'committed' AND status <> 'in_progress'";
 
         /// [`settle_drained`](Self::settle_drained) plus the drained terminal:
         /// `?1` scope, `?2` replay key, `?3` the group the row belongs to,

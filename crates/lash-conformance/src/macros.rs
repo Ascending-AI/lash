@@ -2093,6 +2093,14 @@ macro_rules! tool_child_invocation_tests {
                 every_billed_provider_attempt_is_conserved_once_on_its_opener,
                 "tool-child-usage-conservation"
             ),
+            (
+                a_committed_childs_final_is_protected_and_its_drain_is_finished,
+                "tool-child-commit-boundary-crash"
+            ),
+            (
+                drains_are_admitted_in_recorded_commit_order,
+                "tool-child-commit-order"
+            ),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

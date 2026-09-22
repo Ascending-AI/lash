@@ -1785,16 +1785,42 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                             tokio::pin!(execution);
                             tokio::select! {
                                 biased;
-                                () = cancel.cancelled() => Err(child_cancelled_error(
-                                    cancel_membership
-                                        .as_deref()
-                                        .map_or("<ungrouped>", |membership| {
-                                            membership.group_key.as_str()
-                                        }),
-                                    cancel_membership
-                                        .as_deref()
-                                        .map_or(0, |membership| membership.position),
-                                )),
+                                () = cancel.cancelled() => {
+                                    // Cancellation tokens are physical-stop
+                                    // signals for uncommitted children; a
+                                    // committed final retains authority to
+                                    // finish its drain (§4), so the token is
+                                    // not authorization once the boundary ran.
+                                    match self
+                                        .row_store
+                                        .read_group_child_arbitration(
+                                            &claim.fence.scope_id,
+                                            &claim.fence.replay_key,
+                                        )
+                                        .await
+                                    {
+                                        Err(err) => Err(err),
+                                        Ok(Some(arbitration))
+                                            if matches!(
+                                                arbitration.commit_state,
+                                                EffectCommitState::Committed
+                                                    | EffectCommitState::Drained
+                                            ) =>
+                                        {
+                                            execution.await
+                                        }
+                                        _ => Err(child_cancelled_error(
+                                            cancel_membership
+                                                .as_deref()
+                                                .map_or("<ungrouped>", |membership| {
+                                                    membership.group_key.as_str()
+                                                }),
+                                            cancel_membership
+                                                .as_deref()
+                                                .map_or(0, |membership| membership.position),
+                                        )),
+                                    }
+                                }
                                 result = &mut execution => result,
                             }
                         }
@@ -1975,6 +2001,13 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         {
             match arbitration.commit_state {
                 EffectCommitState::Committed | EffectCommitState::Drained => {
+                    // A failed execution of a committed child seats nothing:
+                    // the row stays `committed`+`in_progress` so the recovery
+                    // drain re-executes it, rather than discharging a
+                    // terminal the protected final never produced (§4, §14).
+                    if outcome.is_err() {
+                        return Ok(());
+                    }
                     return self
                         .discharge_committed_claim(
                             &fence.scope_id,
@@ -1992,15 +2025,15 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
         match self.row_store.finalize(fence, &terminal).await? {
             EffectFinalizeOutcome::Written { commit_seq: _ } => {
-                // A grouped child that won the §4 point owes its §5 discharge
-                // before its rank becomes visible. Its declared intents are
-                // already durable — they journal inside the attempt that
-                // produced this outcome — so the discharge here is the barrier
-                // wait and the rank write, not a re-execution. The barrier
-                // holds this child behind lower-commit siblings still
-                // draining; a sibling whose host died mid-drain is finished by
-                // the next drain pass, which this poll is the fallback for,
-                // not the driver of.
+                // A `pending` grouped row reaching finalize never ran the
+                // attempt boundary — a non-tool child, or a tool child that
+                // failed before its terminal attempt — so it has no drain to
+                // owe: finalize is its §4 point and its discharge is
+                // immediate (§5: a child with no remaining intent admission
+                // is admitted and discharged at once). The barrier still
+                // holds it behind lower-commit siblings; a sibling whose
+                // host died mid-drain is finished by the next drain pass,
+                // which this poll is the fallback for, not the driver of.
                 let Some(group_key) = &claim.group_key else {
                     return Ok(());
                 };

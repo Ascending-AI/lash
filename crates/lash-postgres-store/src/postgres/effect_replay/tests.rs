@@ -12,7 +12,8 @@ use crate::postgres_test_support;
 
 use lash_core::ChildDrainOutcome;
 use lash_core::facade_support::effect_replay_driver::{
-    EffectClaimObservation, EffectCommitState, MintingEffectRef,
+    EffectClaimObservation, EffectCommitState, EffectGroupChildCommitOutcome,
+    EffectGroupChildCommitRequest, MintingEffectRef,
 };
 
 #[test]
@@ -298,6 +299,93 @@ async fn concurrent_finalize_allocates_distinct_commit_positions() {
         fixture.next_seq().await,
         2,
         "the counter counts settlements"
+    );
+}
+
+/// A boundary-committed row is `committed` but still `in_progress`: its drain
+/// is owed. A terminal-less discharge against it must report `Blocked` and
+/// roll its rank bump back — never seat a rank on a child whose projected
+/// terminal does not exist yet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_committed_child_still_draining_cannot_take_a_rank_without_its_terminal() {
+    let Some(fixture) = GroupFixture::open("mid-drain").await else {
+        eprintln!("skipping mid-drain discharge anchor: database URL is not set");
+        return;
+    };
+    fixture.claim("k1", "owner-a").await;
+
+    let outcome = fixture
+        .store
+        .commit_group_child(&EffectGroupChildCommitRequest {
+            group_key: Some(fixture.group_key.clone()),
+            scope_id: fixture.scope_id.clone(),
+            replay_key: "k1".to_string(),
+            drain_input: "{}".to_string(),
+            owner_id: "owner-a".to_string(),
+        })
+        .await
+        .expect("commit the child's final at the boundary");
+    assert!(
+        matches!(
+            outcome,
+            EffectGroupChildCommitOutcome::Committed { commit_seq: 1, .. }
+        ),
+        "the boundary commit allocates the first commit position: {outcome:?}"
+    );
+
+    let outcome = fixture
+        .store
+        .discharge_child(&EffectDischargeRequest {
+            group_key: fixture.group_key.clone(),
+            scope_id: fixture.scope_id.clone(),
+            replay_key: "k1".to_string(),
+            terminal: None,
+        })
+        .await
+        .expect("probe the mid-drain discharge");
+    assert_eq!(
+        outcome,
+        EffectDischargeOutcome::Blocked,
+        "a committed row still in_progress owes its drain; no rank seats"
+    );
+
+    let (commit_state, settlement_seq): (String, Option<i64>) = sqlx::query_as(
+        "SELECT commit_state, settlement_seq FROM lash_runtime_effect_replay
+         WHERE scope_id = $1 AND replay_key = 'k1'",
+    )
+    .bind(&fixture.scope_id)
+    .fetch_one(&fixture.store.pool)
+    .await
+    .expect("read the child back");
+    assert_eq!(
+        commit_state, "committed",
+        "the blocked discharge seats nothing"
+    );
+    assert_eq!(
+        settlement_seq, None,
+        "a blocked discharge allocates no rank"
+    );
+    assert_eq!(
+        fixture.next_seq().await,
+        0,
+        "the rank bump rolled back with the blocked discharge"
+    );
+
+    // The finishing write carries the projected terminal and discharges.
+    let outcome = fixture
+        .store
+        .discharge_child(&EffectDischargeRequest {
+            group_key: fixture.group_key.clone(),
+            scope_id: fixture.scope_id.clone(),
+            replay_key: "k1".to_string(),
+            terminal: Some(GroupFixture::terminal("k1")),
+        })
+        .await
+        .expect("discharge with the drained terminal");
+    assert_eq!(
+        outcome,
+        EffectDischargeOutcome::Discharged { settlement_seq: 1 },
+        "the terminal seats the drain and the rank together"
     );
 }
 

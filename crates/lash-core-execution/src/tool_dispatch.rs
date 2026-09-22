@@ -17,7 +17,8 @@ pub use context::{
 pub use pending_resolver::arm_pending_resolver;
 
 pub use attempt_coordinator::{
-    BatchIntentDrainGate, IntentDrainGuard, ToolAttemptEffectIdentity, coordinate_tool_invocation,
+    BatchIntentDrainGate, GroupChildCoordination, IntentDrainGuard, ToolAttemptEffectIdentity,
+    coordinate_tool_invocation,
 };
 pub use context::OrchestratingStartsBuffer;
 #[cfg(feature = "testing")]

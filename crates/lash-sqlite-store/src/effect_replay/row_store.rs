@@ -498,6 +498,13 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     )?,
                 };
                 if stamped == 0 {
+                    // A terminal-less discharge missing the settle guard means
+                    // the row is still mid-drain (`status = 'in_progress'`):
+                    // the drain is still owed, and the rank bump above must
+                    // roll back with the rest of the transaction.
+                    if request.terminal.is_none() {
+                        return Ok(TxOutcome::Rollback(EffectDischargeOutcome::Blocked));
+                    }
                     return Err(sqlite_conversion_error(stored_data_corrupt(
                         "RuntimeEffectReplay",
                         format!(
@@ -570,14 +577,17 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         )
                         .optional()?
                     else {
-                        // No durable row means no durable membership: the caller is
-                        // not a journaled group child, so there is nothing to
-                        // arbitrate. A claimed child's row cannot be missing — its
-                        // claim is what wrote it — so this arm answers callers
-                        // asking about rows that never existed rather than
-                        // reporting corruption.
-                        return Ok(TxOutcome::Commit(Ok(
-                            EffectGroupChildCommitOutcome::Ungrouped,
+                        // A claimed child's row cannot be missing — its claim is
+                        // what wrote it — so a §4 commit naming no row is
+                        // corruption, not an ungrouped caller.
+                        return Err(sqlite_conversion_error(stored_data_corrupt(
+                            "RuntimeEffectReplay",
+                            format!(
+                                "a §4 commit for replay key `{}` under scope `{}` names \
+                                 a replay row that does not exist; a claimed child's row \
+                                 cannot be missing",
+                                request.replay_key, request.scope_id
+                            ),
                         )));
                     };
                     let Some(group_key) = row_group_key else {
