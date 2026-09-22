@@ -2054,24 +2054,40 @@ macro_rules! store_effect_group_closing_tests {
     };
 }
 
+/// Register the public signal-intent law.
+///
+/// The fixture hands back a guard, a session prefix, the tier's effect host, a
+/// process registry, the process-work substrate, the tier's
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) and a post-wake
+/// verification. Restate runs the turn inside a live handler (`#[ignore]`d,
+/// deferred to `effect-group-conformance-e2e`).
 #[macro_export]
 macro_rules! signal_intent_tests {
     ($fixture:block) => {
-        $crate::signal_intent_tests!(@catalogue $fixture; [
-            (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"),
-        ]);
+        $crate::signal_intent_tests!(@catalogue [] $fixture);
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, prefix, host, registry, work, verify) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(prefix, host, registry, work).await;
-                verify().await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
+    ($(#[$attr:meta])+ $fixture:block) => {
+        $crate::signal_intent_tests!(@catalogue [$(#[$attr])*] $fixture);
+    };
+    (@catalogue $attrs:tt $fixture:block) => {
+        $crate::__signal_intent_register!($attrs $fixture;
+            (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"));
+    };
+}
+
+/// Register one public signal-intent law.
+#[macro_export]
+macro_rules! __signal_intent_register {
+    ([$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, registry, work, runner, verify) = $fixture;
+            let _ = $label;
+            $crate::registration_macro_support::$law(prefix, host, registry, work, runner).await;
+            verify().await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
     };
 }
 

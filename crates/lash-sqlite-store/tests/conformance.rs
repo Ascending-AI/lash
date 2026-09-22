@@ -1794,12 +1794,14 @@ lash_conformance::signal_intent_tests!({
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
         &registry,
     )));
+    let turn_runner = lash_conformance::HostTurnRunner::new(Arc::clone(&effect_host));
     (
         dir,
         "sqlite-public-signal-intent",
         effect_host,
         registry,
         process_work,
+        turn_runner,
         // The SQLite host owns no post-wake journal assertion beyond the shared check.
         || async {},
     )

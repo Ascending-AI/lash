@@ -86,6 +86,7 @@ mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod effect_group_shape;
 mod endpoint_protocol;
+mod live_turn_probe;
 mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;

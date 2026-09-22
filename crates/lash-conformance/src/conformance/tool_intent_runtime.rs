@@ -52,6 +52,8 @@ impl crate::ToolProvider for SignalIntentProvider {
 
 /// Runs a literal parked-signal law through a real provider, coordinator, and
 /// runtime turn over the supplied durable effect host and process registry.
+/// The turn runs where the tier runs turns (`turn_runner`): scoped on the host
+/// in process, inside a handler on Restate.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -61,6 +63,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     effect_host: Arc<dyn crate::EffectHost>,
     registry: Arc<dyn crate::ProcessRegistry>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
+    turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let session_id = SessionId::from(format!("{prefix}-session"));
     let turn_id = TurnId::from(format!("{prefix}-turn"));
@@ -215,17 +218,32 @@ pub async fn public_signal_intent_wakes_parked_process(
     )
     .await
     .expect("build public signal-intent conformance runtime");
-    let turn_scope = effect_host
-        .scoped(admit(crate::ExecutionScope::turn(&session_id, &turn_id)))
-        .expect("scope public signal-intent turn");
+    let admitted = admit(crate::ExecutionScope::turn(&session_id, &turn_id));
     let mut input = crate::TurnInput::text("signal the parked process");
     input.trace_turn_id = Some(turn_id);
-    let turn = runtime
-        .stream_turn(
-            input,
-            crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
+    let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+    turn_runner
+        .run_turn(
+            admitted,
+            Box::new(move |turn_scope| {
+                Box::pin(async move {
+                    let turn = runtime
+                        .stream_turn(
+                            input,
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                turn_scope,
+                            ),
+                        )
+                        .await;
+                    let _ = turn_tx.send(turn);
+                })
+            }),
         )
+        .await;
+    let turn = turn_rx
         .await
+        .expect("the tier's turn runner ran the public signal-intent turn")
         .expect("run public signal-intent conformance turn");
     assert!(matches!(turn.outcome, crate::TurnOutcome::Finished(_)));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
