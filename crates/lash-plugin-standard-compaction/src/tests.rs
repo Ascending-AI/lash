@@ -533,6 +533,121 @@ async fn standard_compaction_turn_transform_records_needed_when_no_cut_point_exi
 }
 
 #[tokio::test]
+async fn standard_compaction_turn_transform_traces_attachment_pruning_without_compaction() {
+    // 130_000 / 200_000 trips the 0.6 pruning threshold but stays under the
+    // compaction watermark: a prune-only turn still reports the prompt-view
+    // change so hosts can observe why old attachments became placeholders.
+    let manager = Arc::new(mock_manager());
+    let trace = Arc::new(RecordingSessionGraph::default());
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
+    let state = SessionSnapshot {
+        session_id: SessionId::from("root"),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+    };
+    let ctx = build_turn_ctx_with_graph(
+        &SessionId::from("root"),
+        state,
+        Some(prompt_usage(130_000)),
+        Some(200_000),
+        manager,
+        trace.clone(),
+    );
+    let prepared = PreparedContext {
+        // The tail since the second-most-recent user turn (a2, u3) keeps its
+        // attachments; u2 and everything older is replaced by placeholders.
+        messages: vec![
+            image_message("u1", MessageRole::User, b"oldest screenshot"),
+            image_message("u2", MessageRole::User, b"second screenshot"),
+            text_message("a2", MessageRole::Assistant, "recent answer"),
+            text_message("u3", MessageRole::User, "latest request"),
+        ]
+        .into(),
+        ..Default::default()
+    };
+
+    transform
+        .transform(&ctx, prepared)
+        .await
+        .expect("transform should trace the attachment prune");
+
+    let events = trace.events();
+    let attachment_events: Vec<_> = events
+        .iter()
+        .filter(|(_, event)| {
+            matches!(
+                event,
+                lash_core::TraceEvent::PromptViewAttachmentsPruned { .. }
+            )
+        })
+        .collect();
+    assert_eq!(attachment_events.len(), 1, "{events:?}");
+    assert_eq!(
+        attachment_events[0].1,
+        lash_core::TraceEvent::PromptViewAttachmentsPruned {
+            used_tokens: 130_000,
+            max_context_tokens: 200_000,
+            pruned_attachments: 2,
+        }
+    );
+    assert_eq!(attachment_events[0].0.session_id.as_deref(), Some("root"));
+    assert_eq!(
+        attachment_events[0].0.turn_id.as_deref(),
+        Some("standard-compaction-test-turn")
+    );
+    assert!(
+        !events.iter().any(|(_, event)| matches!(
+            event,
+            lash_core::TraceEvent::CompactionNeeded { .. }
+                | lash_core::TraceEvent::PromptViewPruned { .. }
+        )),
+        "no compaction decision runs on a prune-only turn: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn standard_compaction_turn_transform_traces_nothing_when_no_attachments_pruned() {
+    // Same prune-only pressure, but text-only messages: pruning finds nothing
+    // to replace and must emit no event.
+    let manager = Arc::new(mock_manager());
+    let trace = Arc::new(RecordingSessionGraph::default());
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
+    let state = SessionSnapshot {
+        session_id: SessionId::from("root"),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+    };
+    let ctx = build_turn_ctx_with_graph(
+        &SessionId::from("root"),
+        state,
+        Some(prompt_usage(130_000)),
+        Some(200_000),
+        manager,
+        trace.clone(),
+    );
+    let prepared = PreparedContext {
+        messages: vec![
+            text_message("u1", MessageRole::User, "old work"),
+            text_message("a1", MessageRole::Assistant, "assistant old"),
+            text_message("u2", MessageRole::User, "latest request"),
+        ]
+        .into(),
+        ..Default::default()
+    };
+
+    transform
+        .transform(&ctx, prepared)
+        .await
+        .expect("transform");
+
+    assert!(
+        trace.events().is_empty(),
+        "nothing was pruned and no compaction ran: {:?}",
+        trace.events()
+    );
+}
+
+#[tokio::test]
 async fn standard_compactor_returns_summary_seed_for_new_frame() {
     let manager = Arc::new(mock_manager());
     let trace = Arc::new(RecordingSessionGraph::default());

@@ -141,7 +141,9 @@ pub use lashlang_graph::{
 /// Version 30 (FIG-3463) adds typed failure provenance to language observations.
 /// Version 31 (FIG-3474) adds occurrence-level wait/resume/cancel facts, derives branch
 /// skips from selection and map membership, and closes workflow site kinds.
-pub const TRACE_SCHEMA_VERSION: u32 = 31;
+/// Version 32 (FIG-3535) adds `PromptViewAttachmentsPruned`, emitted when
+/// old-attachment pruning changes the prompt view without a tail-window cut.
+pub const TRACE_SCHEMA_VERSION: u32 = 32;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -484,6 +486,11 @@ pub enum TraceEvent {
         max_context_tokens: usize,
         dropped_prefix_messages: usize,
         retained_messages: usize,
+    },
+    PromptViewAttachmentsPruned {
+        used_tokens: usize,
+        max_context_tokens: usize,
+        pruned_attachments: usize,
     },
     LlmCallStarted {
         request: TraceLlmRequest,
@@ -841,6 +848,7 @@ impl TraceEvent {
             | Self::CompactionStarted { .. }
             | Self::CompactionCompleted { .. }
             | Self::PromptViewPruned { .. }
+            | Self::PromptViewAttachmentsPruned { .. }
             | Self::LlmCallStarted { .. }
             | Self::LlmCallCompleted { .. }
             | Self::ProviderRequest { .. }
@@ -876,6 +884,7 @@ impl TraceEvent {
             Self::CompactionStarted { .. } => "compaction_started",
             Self::CompactionCompleted { .. } => "compaction_completed",
             Self::PromptViewPruned { .. } => "prompt_view_pruned",
+            Self::PromptViewAttachmentsPruned { .. } => "prompt_view_attachments_pruned",
             Self::LlmCallStarted { .. } => "llm_call_started",
             Self::LlmCallCompleted { .. } => "llm_call_completed",
             Self::LlmCallFailed { .. } => "llm_call_failed",

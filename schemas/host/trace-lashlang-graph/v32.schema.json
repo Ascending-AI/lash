@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/trace-lashlang-graph/v31",
+  "$id": "https://lash.dev/schemas/trace-lashlang-graph/v32",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "EffectAddress": {
@@ -1838,7 +1838,7 @@
     },
     "schema_version": {
       "enum": [
-        31
+        32
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -1878,6 +1878,6 @@
   ],
   "title": "TraceLashlangGraph",
   "type": "object",
-  "x-lash-schema-version": 31,
+  "x-lash-schema-version": 32,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }

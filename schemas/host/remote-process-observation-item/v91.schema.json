@@ -2151,7 +2151,7 @@
         },
         "schema_version": {
           "enum": [
-            31
+            32
           ],
           "format": "uint32",
           "minimum": 0.0,
@@ -3376,6 +3376,38 @@
         },
         {
           "properties": {
+            "max_context_tokens": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "pruned_attachments": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "prompt_view_attachments_pruned"
+              ],
+              "type": "string"
+            },
+            "used_tokens": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "max_context_tokens",
+            "pruned_attachments",
+            "type",
+            "used_tokens"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "request": {
               "$ref": "#/definitions/TraceLlmRequest"
             },
@@ -4113,7 +4145,7 @@
         },
         "schema_version": {
           "enum": [
-            31
+            32
           ],
           "format": "uint32",
           "minimum": 0.0,

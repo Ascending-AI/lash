@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/trace-record/v31",
+  "$id": "https://lash.dev/schemas/trace-record/v32",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "AttachmentMaterializationReason": {
@@ -3141,6 +3141,38 @@
     },
     {
       "properties": {
+        "max_context_tokens": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "pruned_attachments": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "prompt_view_attachments_pruned"
+          ],
+          "type": "string"
+        },
+        "used_tokens": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_context_tokens",
+        "pruned_attachments",
+        "type",
+        "used_tokens"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
         "request": {
           "$ref": "#/definitions/TraceLlmRequest"
         },
@@ -3878,7 +3910,7 @@
     },
     "schema_version": {
       "enum": [
-        31
+        32
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -3897,6 +3929,6 @@
   ],
   "title": "TraceRecord",
   "type": "object",
-  "x-lash-schema-version": 31,
+  "x-lash-schema-version": 32,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }
