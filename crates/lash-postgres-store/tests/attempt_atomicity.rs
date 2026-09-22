@@ -722,13 +722,21 @@ fn public_runtime_input() -> lash_core::TurnInput {
     input
 }
 
+/// The public turn's scope, admitted on the host the runtime runs on: the
+/// turn's tool calls open effect groups, and a group's children route through
+/// the executors that host registered, so a controller minted on a separate
+/// driver would refuse the open (`EffectGroupUnsupported`, ADR 0099 §3).
 fn postgres_public_turn_scope(
-    storage: &PostgresStorage,
+    effect_host: &dyn EffectHost,
     signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
 ) -> lash_core::ScopedEffectController<'static> {
     let scope = lash_core::AdmittedScope::turn(SESSION, TURN);
-    let inner: Arc<dyn lash_core::RuntimeEffectController> =
-        Arc::new(storage.runtime_effect_controller(scope.scope().clone()));
+    let inner: Arc<dyn lash_core::RuntimeEffectController> = effect_host
+        .scoped_static(scope.clone())
+        .expect("scope PostgreSQL public turn on its host")
+        .expect("the PostgreSQL host lends a 'static controller")
+        .owned_controller()
+        .expect("the PostgreSQL host's scoped controller is shared");
     lash_core::ScopedEffectController::shared(
         Arc::new(CrossingController {
             inner,
@@ -919,6 +927,13 @@ fn projected_output(outcome: &RuntimeEffectOutcome) -> String {
 async fn reset(storage: &PostgresStorage) {
     for statement in [
         "DELETE FROM lash_runtime_effect_replay WHERE scope_id LIKE '%pg-attempt-atomicity%'",
+        // Every public turn opens its tool calls as an effect group keyed by
+        // the same SESSION/TURN scope and call id, so a sibling's retained
+        // group would otherwise be reopened by the next test's turn.
+        "DELETE FROM lash_runtime_effect_group_child WHERE group_key IN (
+             SELECT group_key FROM lash_runtime_effect_group
+             WHERE scope_id LIKE '%pg-attempt-atomicity%')",
+        "DELETE FROM lash_runtime_effect_group WHERE scope_id LIKE '%pg-attempt-atomicity%'",
         "DELETE FROM lash_processes WHERE process_id = 'pg-public-intent-target' OR record_json LIKE '%pg-public-caller%'",
         // Every public turn in this binary ends the same SESSION/TURN scope, so
         // a sibling's turn-exit ledger row would otherwise be waiting for the
@@ -1250,7 +1265,8 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         PublicIntentKind::Signal,
     )
     .await;
-    let first_scope = postgres_public_turn_scope(&storage, Arc::clone(&signal_crossing_frames));
+    let first_scope =
+        postgres_public_turn_scope(first_host.as_ref(), Arc::clone(&signal_crossing_frames));
     let first_turn = first
         .stream_turn(
             public_runtime_input(),
@@ -1318,7 +1334,8 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         PublicIntentKind::Signal,
     )
     .await;
-    let replay_scope = postgres_public_turn_scope(&storage, Arc::clone(&signal_crossing_frames));
+    let replay_scope =
+        postgres_public_turn_scope(replay_host.as_ref(), Arc::clone(&signal_crossing_frames));
     let replay_turn = replay
         .stream_turn(
             public_runtime_input(),
@@ -1416,7 +1433,8 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     )
     .await;
     first.set_turn_phase_probe(Arc::new(PanicAtParentEnd));
-    let first_scope = postgres_public_turn_scope(&storage, Arc::new(Mutex::new(Vec::new())));
+    let first_scope =
+        postgres_public_turn_scope(effect_host.as_ref(), Arc::new(Mutex::new(Vec::new())));
     let crashed = tokio::spawn(async move {
         first
             .stream_turn(
