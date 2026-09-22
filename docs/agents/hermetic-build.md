@@ -150,14 +150,13 @@ The shared caches live where `.kiln.bazelrc` points them; Bazel action keys use
 declared repository-relative source, patch, data, runfiles, build environment,
 and rule inputs, so two Kiln forks can reuse the same results. Successful test
 results are cacheable (`--cache_test_results=yes`) and an input change produces
-a different test action key. Failed tests are never reused as successes. The
-executor tracks up to eight actions. Each action declares four CPUs and 4 GiB by
-default; its 16-CPU scheduling capacity admits up to four such actions at once.
-Bazel queues at most eight jobs, repository loading uses four threads,
-and each checkout's Bazel server has a 4 GiB heap ceiling. The Bazel server
-remains in the caller's cgroup; remote compilation runs inside the executor's
-`kiln-heavy.slice` budget. Keeping a Bazel server alive preserves its analysis
-cache.
+a different test action key. Failed tests are never reused as successes. Inherited actions request one CPU and 2 GiB in both local and CI builds.
+Generated targets retain the measured resource requests in
+`tools/bazel/action-sizes.json`, including the four-CPU test floor. Local
+clients submit at most 16 jobs; CI submits 32. These are in-flight action
+limits, not compiler thread counts. The scheduler admits work against each
+worker's advertised capacity. Keep a fork's Bazel server alive to preserve
+its analysis cache.
 
 The Kiln golden is maintained outside agent forks. Its refresh prewarms the
 shared action cache with the equivalent of:
