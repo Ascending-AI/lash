@@ -18,7 +18,7 @@ remove a fork with `rm -rf`. After its change merges, remove it with `kiln rm
 lash <name>`.
 
 The implementer loop is `kiln test <label> --test_arg=<name>` while editing
-and `scripts/dev-test.sh` before calling a change done. Bare `kiln test` runs
+and `python3 scripts/dev-test.py` before calling a change done. Bare `kiln test` runs
 `//:dev_tests`, the developer suite; `kiln test //:workspace_tests` runs the
 PR partition CI runs. Implementer loops do not run Postgres,
 S3, or E2E (`scripts/ci/with-service.sh`, store recipes, Restate workers): CI
@@ -27,8 +27,27 @@ single-box database.
 
 ```sh
 . ./env.sh
-scripts/dev-test.sh
+python3 scripts/dev-test.py
 ```
+
+`python3 scripts/dev-test.py --dry-run` prints the changed paths, exact labels,
+base/head revisions and an input digest. `--dependents` selects reverse dependencies;
+`just test-changed` uses this same planner. Live store environments are refused.
+The runner writes its plan and final receipt under Git's `lash-validation/`
+directory, coalesces concurrent identical requests in one fork, and rejects a
+result if inputs change during execution. A later explicit run executes again;
+these receipts do not replace Bazel's cache or CI's required gates.
+
+`just floor` is an explicit broad tooling checkpoint, not the default per-edit
+command. It runs the dev/feature/clippy and schema checks together. `just bump-check`
+combines both Rust targets in one Bazel invocation while its script checks run
+beside it. A fork should have only one build request in flight; reuse its result
+or wait before starting another service command.
+
+Launcher shell self-tests require Bubblewrap. Each invocation mounts a private
+`/tmp` and `/run`, uses separate PID/network namespaces, and sees the checkout
+read-only. Production launchers retain their real global ownership locks;
+tests cannot reach a live stack. Install the `bubblewrap` package on a new host.
 
 The lower-level entry script remains available for graph analysis, sync, local
 executor reproduction, and focused Bazel labels.
@@ -57,7 +76,7 @@ kiln test
 # Narrow //:dev_tests to the changed package directories. A shared input
 # (manifest, lockfile, toolchain, tools/, scripts/) runs the whole suite.
 # Never starts Postgres, S3, or E2E.
-scripts/dev-test.sh
+python3 scripts/dev-test.py
 
 # Lint the `--workspace --all-targets` shape (one clippy action per target).
 kiln clippy
@@ -92,7 +111,7 @@ version-bump checks, `scripts/check-store-sql-ownership.py`, the lash-sim
 holds the runtime-error classification exhaustiveness test. `just
 test-changed [base]` diffs against `<base>` (default `origin/main`), maps the
 changed files to their Bazel packages, queries the test targets in the
-reverse dependencies of those packages within `//crates/...`, and runs them
+reverse dependencies of those packages within `//...`, and runs them
 through `kiln test`, falling back to `//:dev_tests` when the query selects
 nothing.
 

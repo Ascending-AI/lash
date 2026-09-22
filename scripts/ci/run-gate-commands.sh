@@ -1,44 +1,20 @@
 #!/usr/bin/env bash
 # Run one gate command per line of stdin, concurrently, and report each one's
 # wall time.
-#
-# `Test repository scripts` ran its self-tests as a serial list of shell lines,
-# which cost 269 s of the 306 s `Repository gates` job while three of the
-# runner's four cores sat idle: the commands are independent processes over a
-# read-only checkout, and two of them (the launcher self-tests) account for
-# nearly half the total on their own.
-#
-# Two rules make the concurrency sound:
-#
-#   * `--serial` names the commands that may not run beside each other. The
-#     agent-workbench and slack-clone launcher self-tests drive
-#     `scripts/agent-workbench-dev.sh`, which takes a box-wide `flock -n` on
-#     `/tmp/lash-agent-workbench-$UID/data-ownership.lock` and *refuses* rather
-#     than waits when it is held, so two of them at once would fail on
-#     contention instead of on a defect. They run as one serial stream beside
-#     the pool.
-#   * Every command runs to completion even after one fails, and each one's
-#     output is held and printed whole under its own heading. Interleaved
-#     output from concurrent gates is unreadable, and a first failure that
-#     cancels the rest turns one red gate into several rounds.
-#
-# Usage: run-gate-commands.sh [--jobs N] [--serial REGEX] < commands
+# Launcher self-tests own isolated namespaces. Every command runs to completion,
+# even after another fails, and its output is printed as one block.
+# Usage: run-gate-commands.sh [--jobs N] < commands
 set -uo pipefail
 
 jobs_limit=""
-serial_pattern=""
 while (($#)); do
   case "$1" in
     --jobs)
       jobs_limit="${2:-}"
       shift 2
       ;;
-    --serial)
-      serial_pattern="${2:-}"
-      shift 2
-      ;;
     *)
-      printf 'usage: %s [--jobs N] [--serial REGEX] < commands\n' "$0" >&2
+      printf 'usage: %s [--jobs N] < commands\n' "$0" >&2
       exit 2
       ;;
   esac
@@ -57,18 +33,11 @@ work_dir="$(mktemp -d)"
 trap 'rm -rf -- "$work_dir"' EXIT
 
 commands=()
-serial_indexes=()
-parallel_indexes=()
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -n "${line//[[:space:]]/}" ]] || continue
   [[ "${line#"${line%%[![:space:]]*}"}" != '#'* ]] || continue
   commands+=("$line")
-  index=$((${#commands[@]} - 1))
-  if [[ -n "$serial_pattern" && "$line" =~ $serial_pattern ]]; then
-    serial_indexes+=("$index")
-  else
-    parallel_indexes+=("$index")
-  fi
+
 done
 
 if ((${#commands[@]} == 0)); then
@@ -88,24 +57,9 @@ run_one() {
     > "$work_dir/$index.seconds"
 }
 
-run_serial_stream() {
-  local index
-  for index in "$@"; do
-    run_one "$index"
-  done
-}
-
-pool_limit="$jobs_limit"
-if ((${#serial_indexes[@]} > 0)); then
-  run_serial_stream "${serial_indexes[@]}" &
-  if ((pool_limit > 1)); then
-    pool_limit=$((pool_limit - 1))
-  fi
-fi
-
 running=0
-for index in "${parallel_indexes[@]}"; do
-  if ((running >= pool_limit)); then
+for index in "${!commands[@]}"; do
+  if ((running >= jobs_limit)); then
     wait -n
     running=$((running - 1))
   fi

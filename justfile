@@ -395,49 +395,12 @@ bump-check:
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
     'python3 scripts/check-store-sql-ownership.py' \
-    'kiln test //crates/lash-sim:schema_congruence__test' \
-    'kiln test //crates/lash-core-store:lash-core-store__unit_test' \
+    'kiln test //crates/lash-sim:schema_congruence__test //crates/lash-core-store:lash-core-store__unit_test' \
     | scripts/gate-table.sh
 
-# Change-scoped Bazel tests: map the files changed since <base> onto their
-# Bazel packages, query for test targets in the reverse dependencies of those
-# packages within //crates/..., and run them through the shared pool. Prints
-# the label list it ran; falls back to //:dev_tests when the query selects
-# nothing.
+# Reverse-dependency selection uses the same input-identified plan as dev-test.
 test-changed base='origin/main':
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd "{{repo}}"
-  python3 tools/bazel/generate_build_files.py --check
-  declare -A packages=()
-  while IFS= read -r path; do
-    [[ -n "$path" ]] || continue
-    dir="$(dirname "$path")"
-    while [[ "$dir" != "." && ! -f "$dir/BUILD.bazel" ]]; do
-      dir="$(dirname "$dir")"
-    done
-    [[ "$dir" != "." ]] || continue
-    packages["//$dir"]=1
-  done < <(git diff --name-only "{{base}}"...HEAD)
-  if ((${#packages[@]} == 0)); then
-    echo "test-changed: no changed file maps to a Bazel package; falling back to //:dev_tests"
-    exec kiln test //:dev_tests
-  fi
-  set_expr="$(printf '%s:all ' "${!packages[@]}")"
-  # `manual`-tagged targets are opt-in gates (live Postgres, trybuild, …) that
-  # no wildcard partition runs; the rdeps set excludes them the same way
-  # `:all` expansion does.
-  mapfile -t labels < <(bazel query \
-    "kind(\"test\", rdeps(//crates/..., set(${set_expr% }))) \
-       - attr(tags, \"manual\", //crates/...)")
-  if ((${#labels[@]} == 0)); then
-    echo "test-changed: the rdeps query selected no test targets; falling back to //:dev_tests"
-    exec kiln test //:dev_tests
-  fi
-  printf 'test-changed: %s test label(s) from rdeps of %s package(s):\n' \
-    "${#labels[@]}" "${#packages[@]}"
-  printf '  %s\n' "${labels[@]}"
-  exec kiln test "${labels[@]}"
+  python3 scripts/dev-test.py --base {{base}} --dependents
 
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.

@@ -41,13 +41,11 @@ if ((run_all == 0)); then
   commands="$(printf '%s\n' "$commands" | grep -Fxv -- "$local_skip" || true)"
 fi
 
-# --jobs 4 mirrors the CI runner's four-core pool: a bare `nproc` fan-out on
-# the shared dev box lets the 43 gates starve each other's spawned process
-# trees, and time-sensitive self-tests (e.g. test_with_service.py's interrupt
-# window) race their own deadlines instead of measuring the product.
+# Keep process-heavy self-tests within a four-command budget on the shared
+# host. Launcher tests isolate their own global state and can run together.
 status=0
 printf '%s\n' "$commands" \
-  | bash "$repo/scripts/ci/run-gate-commands.sh" --jobs 4 --serial '^bash ' \
+  | bash "$repo/scripts/ci/run-gate-commands.sh" --jobs 4 \
   || status=$?
 
 # The last line is what scripts/gate-table.sh shows as this leg's evidence, so
