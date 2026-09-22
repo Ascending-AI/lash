@@ -496,6 +496,17 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
         self.native.commit_group_child_final(commit).await
     }
 
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> std::result::Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
+    }
+
     async fn group_child_drain_blocked(
         &self,
         group_key: &str,
@@ -657,6 +668,17 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         lash_core::RuntimeEffectControllerError,
     > {
         self.native.commit_group_child_final(commit).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> std::result::Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
     }
 
     async fn group_child_drain_blocked(

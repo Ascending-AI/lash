@@ -171,6 +171,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                 )
             })?,
             event_tx,
+            turn_activity_tx: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(

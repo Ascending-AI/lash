@@ -109,6 +109,11 @@ pub struct ToolDispatchContext<'run> {
     pub session_id: SessionId,
     pub agent_frame_id: crate::FrameNodeId,
     pub event_tx: mpsc::Sender<SessionStreamEvent>,
+    /// The turn's `TurnActivity` channel, lent to a group child so its nested
+    /// calls surface the same `ToolCallStarted`/`ToolCallCompleted` activities
+    /// a turn-dispatched call emits (ADR 0099 §3's live-channel side of the
+    /// split). `None` where the dispatch serves no turn stream.
+    pub turn_activity_tx: Option<mpsc::Sender<crate::TurnActivity>>,
     pub checkpoint_messages: CheckpointMessageBuffer,
     pub trigger_outcomes: ToolTriggerOutcomeBuffer,
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
@@ -161,7 +166,7 @@ impl ToolDispatchContext<'_> {
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 1;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 2;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).
@@ -209,6 +214,7 @@ pub enum RebindField {
     SessionId,
     AgentFrameId,
     EventTx,
+    TurnActivityTx,
     CheckpointMessages,
     TriggerOutcomes,
     AttachmentStore,
@@ -240,6 +246,7 @@ impl RebindField {
             Self::SessionId => "session_id",
             Self::AgentFrameId => "agent_frame_id",
             Self::EventTx => "event_tx",
+            Self::TurnActivityTx => "turn_activity_tx",
             Self::CheckpointMessages => "checkpoint_messages",
             Self::TriggerOutcomes => "trigger_outcomes",
             Self::AttachmentStore => "attachment_store",
@@ -283,6 +290,7 @@ impl RebindField {
             | Self::ProcessDefinitions
             | Self::ProcessEngines
             | Self::EventTx
+            | Self::TurnActivityTx
             | Self::AttachmentStore
             | Self::AttachmentSourcePolicy
             | Self::TurnContext
@@ -316,6 +324,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::SessionId,
     RebindField::AgentFrameId,
     RebindField::EventTx,
+    RebindField::TurnActivityTx,
     RebindField::CheckpointMessages,
     RebindField::TriggerOutcomes,
     RebindField::AttachmentStore,
@@ -351,6 +360,7 @@ impl<'run> ToolDispatchContext<'run> {
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
             event_tx: self.event_tx.clone(),
+            turn_activity_tx: self.turn_activity_tx.clone(),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
@@ -402,6 +412,7 @@ impl<'run> ToolDispatchContext<'run> {
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
             event_tx: self.event_tx.clone(),
+            turn_activity_tx: self.turn_activity_tx.clone(),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),

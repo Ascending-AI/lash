@@ -229,6 +229,10 @@ async fn coordinate_nested_tool_batch<'run>(
         .enclosing_process()
         .map(|process_id| ProcessId::from(process_id.to_string()));
     let parent_invocation = dispatch.parent_invocation.clone();
+    // The body call these calls nest under — the parent link their
+    // `ToolCallStarted`/`ToolCallCompleted` activities carry, the same
+    // `batch_parent_call_id` a turn-dispatched batch stamps.
+    let parent_call_id = body_context.tool_call_id.clone();
 
     let run_call = {
         let dispatch = Arc::clone(dispatch);
@@ -238,160 +242,231 @@ async fn coordinate_nested_tool_batch<'run>(
             let cancellation_token = cancellation_token.clone();
             let enclosing_process = enclosing_process.clone();
             let parent_invocation = parent_invocation.clone();
+            let parent_call_id = parent_call_id.clone();
             async move {
                 let call_id = call.id.clone();
-                let grant = call.execution_grant.take();
-                let tool_name = match &grant {
-                    Some(grant) => grant.manifest().name.clone(),
-                    None => match crate::tool_dispatch::resolve_callable_manifest_by_id(
-                        dispatch.as_ref(),
-                        &call.tool_id,
-                    ) {
-                        Some(manifest) => manifest.name,
-                        None => {
-                            return crate::ToolInvocationReply::from_output(
-                                crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                                    crate::ToolFailureClass::Unavailable,
-                                    "tool_unavailable",
-                                    format!(
-                                        "Tool id `{}` is unavailable in this session",
-                                        call.tool_id
+                let call_args = call.args.clone();
+                let call_tool_id = call.tool_id.to_string();
+                let activity_id = crate::session::tool_execution::tool_activity_id(&call_id);
+                let (reply, tool_name) = 'reply: {
+                    let grant = call.execution_grant.take();
+                    let tool_name = match &grant {
+                        Some(grant) => grant.manifest().name.clone(),
+                        None => match crate::tool_dispatch::resolve_callable_manifest_by_id(
+                            dispatch.as_ref(),
+                            &call.tool_id,
+                        ) {
+                            Some(manifest) => manifest.name,
+                            None => {
+                                break 'reply (
+                                    crate::ToolInvocationReply::from_output(
+                                        crate::ToolCallOutput::failure(
+                                            crate::ToolFailure::runtime(
+                                                crate::ToolFailureClass::Unavailable,
+                                                "tool_unavailable",
+                                                format!(
+                                                    "Tool id `{}` is unavailable in this session",
+                                                    call.tool_id
+                                                ),
+                                            ),
+                                        ),
                                     ),
-                                )),
-                            );
+                                    None,
+                                );
+                            }
+                        },
+                    };
+                    // A body-driven call is invisible to the turn stream only
+                    // when the child's dispatch lent no activity channel: emit
+                    // the same stream-start and activity pair a turn-dispatched
+                    // call emits, parented to the body that named it.
+                    let _ = dispatch
+                        .event_tx
+                        .send(crate::SessionStreamEvent::ToolCallStart {
+                            call_id: Some(call_id.clone()),
+                            name: tool_name.clone(),
+                            args: call_args.clone(),
+                        })
+                        .await;
+                    if let Some(turn_tx) = &dispatch.turn_activity_tx {
+                        let _ = turn_tx
+                            .send(crate::TurnActivity::new(
+                                activity_id.clone(),
+                                crate::TurnEvent::ToolCallStarted {
+                                    call_id: Some(call_id.clone()),
+                                    name: tool_name.clone(),
+                                    args: call_args.clone(),
+                                    graph_key: None,
+                                    parent_call_id: parent_call_id.clone(),
+                                },
+                            ))
+                            .await;
+                    }
+                    let pending = crate::sansio::PendingToolCall {
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.clone(),
+                        args: call.args,
+                        replay: None,
+                    };
+                    let preparation = match &grant {
+                        Some(grant) => {
+                            crate::tool_dispatch::prepare_granted_tool_call_with_context(
+                                dispatch.as_ref(),
+                                grant,
+                                pending,
+                                Some(call_id.clone()),
+                            )
+                            .await
                         }
-                    },
-                };
-                let pending = crate::sansio::PendingToolCall {
-                    call_id: call_id.clone(),
-                    tool_name,
-                    args: call.args,
-                    replay: None,
-                };
-                let preparation = match &grant {
-                    Some(grant) => {
-                        crate::tool_dispatch::prepare_granted_tool_call_with_context(
-                            dispatch.as_ref(),
-                            grant,
-                            pending,
-                            Some(call_id.clone()),
-                        )
-                        .await
-                    }
-                    None => {
-                        crate::tool_dispatch::prepare_tool_call_with_context(
-                            dispatch.as_ref(),
-                            pending,
-                            Some(call_id.clone()),
-                        )
-                        .await
-                    }
-                };
-                let prepared = match preparation {
-                    crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => *prepared,
-                    crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
-                        return dispatch_outcome_reply(*outcome);
-                    }
-                };
-
-                let tool_context = ToolContext::from_dispatch(Arc::clone(&dispatch))
-                    .prepared_call(&prepared)
-                    .cancellation_token(cancellation_token)
-                    .turn_cancel_wait(turn_cancel_wait.clone())
-                    .enclosing_process(enclosing_process)
-                    .parent_invocation(parent_invocation.clone())
-                    .child_execution_trace_hook(call.child_execution_trace_hook.clone())
-                    .build();
-
-                // An orchestrating registration runs its body inline — it
-                // declares no attempt frame (`execute_prepared_tool_batch_child`
-                // routes it the same way), so a journaled attempt for it would
-                // park on a completion nobody resolves. A granted call names
-                // leaf authority by construction and cannot be orchestrating.
-                if grant.is_none() && dispatch.is_orchestrating_tool(&prepared.tool_id) {
-                    let mut outcome = crate::tool_dispatch::execute_orchestrating_tool(
-                        dispatch.as_ref(),
-                        prepared,
-                        tool_context,
-                    )
-                    .await;
-                    for trigger in std::mem::take(&mut outcome.triggers) {
-                        dispatch.trigger_outcomes.enqueue(trigger);
-                    }
-                    return dispatch_outcome_reply(outcome);
-                }
-
-                let retry_policy = crate::tool_dispatch::resolve_retry_policy(
-                    dispatch.as_ref(),
-                    &prepared.tool_id,
-                    grant.as_deref(),
-                );
-                let executor_dispatch = Arc::clone(&dispatch);
-                let executor_context = tool_context.clone();
-                let coordinated = crate::tool_dispatch::coordinate_tool_invocation(
-                    dispatch.as_ref(),
-                    prepared,
-                    grant,
-                    retry_policy,
-                    // A nested call is a live admission, not a retained fact:
-                    // whether it may defer is read from the live registry,
-                    // exactly as any live caller's would be.
-                    None,
-                    crate::tool_dispatch::ToolAttemptEffectIdentity::Scalar {
-                        parent: parent_invocation,
-                    },
-                    &turn_cancel_wait,
-                    // §5's drain gate is a batch aggregate's; a body-driven
-                    // batch has no aggregate frame, so each call drains its
-                    // own intents.
-                    None,
-                    call.child_execution_trace_hook.clone(),
-                    move |completion_key| {
-                        crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
-                            Arc::clone(&executor_dispatch),
-                            executor_context.clone(),
-                            completion_key,
-                        )
-                    },
-                )
-                .await;
-                // The journaled attempts' triggers ride the outcome; they
-                // belong to the body's own buffer, which its settlement
-                // carries.
-                match coordinated.launch {
-                    crate::tool_dispatch::ToolCallLaunch::Done(mut outcome) => {
-                        for trigger in std::mem::take(&mut outcome.triggers) {
-                            dispatch.trigger_outcomes.enqueue(trigger);
+                        None => {
+                            crate::tool_dispatch::prepare_tool_call_with_context(
+                                dispatch.as_ref(),
+                                pending,
+                                Some(call_id.clone()),
+                            )
+                            .await
                         }
-                        dispatch_outcome_reply(*outcome)
-                    }
-                    crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {
-                        let mut outcome = crate::runtime::effect::await_journaled_tool_completion(
+                    };
+                    let prepared = match preparation {
+                        crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => {
+                            *prepared
+                        }
+                        crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
+                            break 'reply (dispatch_outcome_reply(*outcome), Some(tool_name));
+                        }
+                    };
+
+                    let tool_context = ToolContext::from_dispatch(Arc::clone(&dispatch))
+                        .prepared_call(&prepared)
+                        .cancellation_token(cancellation_token)
+                        .turn_cancel_wait(turn_cancel_wait.clone())
+                        .enclosing_process(enclosing_process)
+                        .parent_invocation(parent_invocation.clone())
+                        .child_execution_trace_hook(call.child_execution_trace_hook.clone())
+                        .build();
+
+                    // An orchestrating registration runs its body inline — it
+                    // declares no attempt frame (`execute_prepared_tool_batch_child`
+                    // routes it the same way), so a journaled attempt for it would
+                    // park on a completion nobody resolves. A granted call names
+                    // leaf authority by construction and cannot be orchestrating.
+                    if grant.is_none() && dispatch.is_orchestrating_tool(&prepared.tool_id) {
+                        let mut outcome = crate::tool_dispatch::execute_orchestrating_tool(
                             dispatch.as_ref(),
-                            dispatch.parent_invocation.as_ref(),
-                            &call_id,
-                            *pending,
-                            &turn_cancel_wait,
+                            prepared,
+                            tool_context,
                         )
                         .await;
                         for trigger in std::mem::take(&mut outcome.triggers) {
                             dispatch.trigger_outcomes.enqueue(trigger);
                         }
-                        dispatch_outcome_reply(outcome)
+                        break 'reply (dispatch_outcome_reply(outcome), Some(tool_name));
                     }
-                    crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {
-                        // The calls are already in flight together, so the
-                        // refusal reaches only the call it aborted — the same
-                        // answer the group path gives a refused child.
-                        crate::ToolInvocationReply::from_output(crate::ToolCallOutput::failure(
-                            crate::ToolFailure::runtime(
-                                crate::ToolFailureClass::Internal,
-                                "tool_call_controller_aborted",
-                                error.to_string(),
-                            ),
-                        ))
-                    }
+
+                    let retry_policy = crate::tool_dispatch::resolve_retry_policy(
+                        dispatch.as_ref(),
+                        &prepared.tool_id,
+                        grant.as_deref(),
+                    );
+                    let executor_dispatch = Arc::clone(&dispatch);
+                    let executor_context = tool_context.clone();
+                    let coordinated = crate::tool_dispatch::coordinate_tool_invocation(
+                        dispatch.as_ref(),
+                        prepared,
+                        grant,
+                        retry_policy,
+                        // A nested call is a live admission, not a retained fact:
+                        // whether it may defer is read from the live registry,
+                        // exactly as any live caller's would be.
+                        None,
+                        crate::tool_dispatch::ToolAttemptEffectIdentity::Scalar {
+                            parent: parent_invocation,
+                        },
+                        &turn_cancel_wait,
+                        // §5's drain gate is a batch aggregate's; a body-driven
+                        // batch has no aggregate frame, so each call drains its
+                        // own intents.
+                        None,
+                        call.child_execution_trace_hook.clone(),
+                        move |completion_key| {
+                            crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
+                                Arc::clone(&executor_dispatch),
+                                executor_context.clone(),
+                                completion_key,
+                            )
+                        },
+                    )
+                    .await;
+                    // The journaled attempts' triggers ride the outcome; they
+                    // belong to the body's own buffer, which its settlement
+                    // carries.
+                    (
+                        match coordinated.launch {
+                            crate::tool_dispatch::ToolCallLaunch::Done(mut outcome) => {
+                                for trigger in std::mem::take(&mut outcome.triggers) {
+                                    dispatch.trigger_outcomes.enqueue(trigger);
+                                }
+                                dispatch_outcome_reply(*outcome)
+                            }
+                            crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {
+                                let mut outcome =
+                                    crate::runtime::effect::await_journaled_tool_completion(
+                                        dispatch.as_ref(),
+                                        dispatch.parent_invocation.as_ref(),
+                                        &call_id,
+                                        *pending,
+                                        &turn_cancel_wait,
+                                    )
+                                    .await;
+                                for trigger in std::mem::take(&mut outcome.triggers) {
+                                    dispatch.trigger_outcomes.enqueue(trigger);
+                                }
+                                dispatch_outcome_reply(outcome)
+                            }
+                            crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {
+                                // The calls are already in flight together, so the
+                                // refusal reaches only the call it aborted — the same
+                                // answer the group path gives a refused child.
+                                crate::ToolInvocationReply::from_output(
+                                    crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                                        crate::ToolFailureClass::Internal,
+                                        "tool_call_controller_aborted",
+                                        error.to_string(),
+                                    )),
+                                )
+                            }
+                        },
+                        Some(tool_name),
+                    )
+                };
+                // The completion pair to the start emitted above: the record
+                // when the call produced one, the reply's output otherwise.
+                if let Some(turn_tx) = &dispatch.turn_activity_tx {
+                    let completed = match reply.record.as_ref() {
+                        Some(record) => crate::TurnEvent::ToolCallCompleted {
+                            call_id: record.call_id.clone().or_else(|| Some(call_id.clone())),
+                            name: record.tool.clone(),
+                            args: record.args.clone(),
+                            output: record.output.clone(),
+                            duration_ms: record.duration_ms,
+                            graph_key: None,
+                            parent_call_id: parent_call_id.clone(),
+                        },
+                        None => crate::TurnEvent::ToolCallCompleted {
+                            call_id: Some(call_id),
+                            name: tool_name.unwrap_or(call_tool_id),
+                            args: call_args,
+                            output: reply.output.clone(),
+                            duration_ms: 0,
+                            graph_key: None,
+                            parent_call_id,
+                        },
+                    };
+                    let _ = turn_tx
+                        .send(crate::TurnActivity::new(activity_id, completed))
+                        .await;
                 }
+                reply
             }
         }
     };

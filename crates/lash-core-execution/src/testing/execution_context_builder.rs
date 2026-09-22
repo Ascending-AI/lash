@@ -451,6 +451,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             agent_frame_id: crate::FrameNodeId::new("test-frame")
                 .expect("test frame identity is non-empty"),
             event_tx,
+            turn_activity_tx: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),

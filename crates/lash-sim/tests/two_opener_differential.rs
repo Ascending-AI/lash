@@ -290,6 +290,7 @@ impl OpenerDeployment {
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
             event_tx,
+            turn_activity_tx: None,
             checkpoint_messages: CheckpointMessageBuffer::default(),
             trigger_outcomes: ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),
@@ -382,6 +383,7 @@ fn axis_value(
         }
         RebindField::ProcessEngines => format!("engines:{}", deployment.tag),
         RebindField::EventTx => format!("event-tx:{}", deployment.tag),
+        RebindField::TurnActivityTx => format!("turn-activity-tx:{}", deployment.tag),
         RebindField::AttachmentStore => {
             format!("{:p}", Arc::as_ptr(&deployment.attachment_store))
         }
