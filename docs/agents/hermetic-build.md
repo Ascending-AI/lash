@@ -755,6 +755,8 @@ fixtures no longer invalidate these production library actions. Cross-package
 `extra_compile_data` remains additive. Unlisted libraries retain the conservative
 glob, and tests retain their compile fixtures and runtime package files. Add new
 embedded assets to the owning library's declaration in the same change.
+The SQLite and PostgreSQL durable-read tests explicitly declare core's
+predecessor-fixture filegroup as runtime data, including their feature variants.
 
 All five relocated core runtime suites now declare their own Rust module trees
 and shared `runtime_support` helpers. The turns suite also owns its two

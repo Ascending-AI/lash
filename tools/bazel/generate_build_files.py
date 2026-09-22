@@ -525,6 +525,7 @@ def target_support(
             ])
         if target["name"] == "durable_read_fixture":
             extra_compile_data.append("//crates/lash-core:durable_read_fixture_source")
+            extra_data.append("//crates/lash-core:durable_read_predecessor_fixtures")
     if (
         package["name"] == "lash-internal-postgres-store"
         and target["name"] == "preflight_durable_walk"
@@ -984,6 +985,10 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "filegroup(\n"
             "    name = \"durable_read_fixture_source\",\n"
             "    srcs = [\"tests/support/durable_read_fixture.rs\"],\n"
+            ")\n\n"
+            "filegroup(\n"
+            "    name = \"durable_read_predecessor_fixtures\",\n"
+            "    srcs = glob([\"tests/fixtures/durable-read-predecessors/**\"]),\n"
             ")\n\n"
             "filegroup(\n"
             "    name = \"queued_claim_atomicity\",\n"

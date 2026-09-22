@@ -380,6 +380,11 @@ filegroup(
 )
 
 filegroup(
+    name = "durable_read_predecessor_fixtures",
+    srcs = glob(["tests/fixtures/durable-read-predecessors/**"]),
+)
+
+filegroup(
     name = "queued_claim_atomicity",
     srcs = ["tests/support/queued_claim_atomicity.rs"],
 )

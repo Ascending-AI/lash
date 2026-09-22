@@ -38,7 +38,7 @@ class SourceOwnershipTests(unittest.TestCase):
             "runtime_lifecycle": "tests/runtime/tests/plugin_lifecycle.rs",
         }
         counts = {name: 0 for name in own}
-        for args in declarations(directory, {"lash_rust_test", "lash_rust_feature_test"}):
+        for args in declarations(directory, {"lash_rust_integration_test", "lash_rust_feature_test"}):
             name = ast.literal_eval(args["crate_name"])
             if name not in own:
                 continue
