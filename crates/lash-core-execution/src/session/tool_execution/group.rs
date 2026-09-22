@@ -150,12 +150,9 @@ impl RuntimeExecutionContext<'_> {
             )
         })?;
 
-        let participation = controller
-            .turn_control_participation()
-            .await
-            .map_err(crate::RuntimeEffectControllerError::from)?;
+        let participation = controller.effect_journaling();
         let cancellation_authority = match participation {
-            crate::TurnControlParticipation::DurableJournaled => {
+            crate::EffectJournaling::Journaled => {
                 let authority = controller
                     .await_event_authority_binding_id()
                     .ok_or_else(|| {
@@ -178,7 +175,7 @@ impl RuntimeExecutionContext<'_> {
                     })?,
                 )
             }
-            crate::TurnControlParticipation::Local => None,
+            crate::EffectJournaling::Local => None,
         };
 
         // The environment reference is a durable-owner publish retained inside
@@ -275,7 +272,7 @@ impl RuntimeExecutionContext<'_> {
         &self,
         controller: &dyn crate::RuntimeEffectController,
         scope: &crate::ExecutionScope,
-        participation: crate::TurnControlParticipation,
+        participation: crate::EffectJournaling,
         tool_id: &crate::ToolId,
         grant: Option<&crate::ToolExecutionGrant>,
         call_id: &str,
@@ -303,10 +300,8 @@ impl RuntimeExecutionContext<'_> {
                 Ok(ToolChildCompletionRouting::Inline)
             }
             crate::CompletionKeyPreparation::Issued(_) => match participation {
-                crate::TurnControlParticipation::DurableJournaled => {
-                    Ok(ToolChildCompletionRouting::Durable)
-                }
-                crate::TurnControlParticipation::Local => {
+                crate::EffectJournaling::Journaled => Ok(ToolChildCompletionRouting::Durable),
+                crate::EffectJournaling::Local => {
                     let issuer = self.tool_child_completion_issuer.clone().ok_or_else(|| {
                         crate::RuntimeEffectControllerError::new(
                             crate::RuntimeErrorCode::RuntimeEffectGroupShape,
