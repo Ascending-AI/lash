@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan and run one change-scoped Kiln validation for an exact input state."""
+"""Plan and serialize change-scoped validation for a checkout/config snapshot."""
 
 from __future__ import annotations
 
@@ -121,6 +121,7 @@ def plan(base: str, dependents: bool) -> dict:
         "base": base,
         "head": git("rev-parse", "HEAD").decode().strip(),
         "inputs": identity,
+        "identity_scope": "checkout/config snapshot; Bazel validates full action inputs",
         "changed_files": paths,
         "selection": "suite" if broad else "dependents" if dependents else "packages",
         "command": ["kiln", "test", *labels] if labels else [],
@@ -128,7 +129,7 @@ def plan(base: str, dependents: bool) -> dict:
     }
     result["id"] = hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest()
     if input_id(base) != identity:
-        raise RuntimeError("inputs changed while selecting tests; rerun")
+        raise RuntimeError("checkout/config snapshot changed while selecting tests; rerun")
     return result
 
 
@@ -138,28 +139,25 @@ def save(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-def run(planned: dict, requested: int) -> int:
+def run(planned: dict) -> int:
     directory = Path(git("rev-parse", "--path-format=absolute", "--git-path", "lash-validation").decode().strip())
     directory.mkdir(mode=0o700, exist_ok=True)
     with (directory / "lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print("dev-test: joining the running validation or waiting for this fork", flush=True)
+            print("dev-test: waiting for this fork's running validation", flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
         if input_id(planned["base"]) != planned["inputs"]:
-            print("dev-test: inputs changed while planning/waiting; rerun", file=sys.stderr)
+            print("dev-test: checkout/config snapshot changed while planning/waiting; rerun", file=sys.stderr)
             return 2
         receipt_path = directory / "latest.json"
-        if receipt_path.exists():
-            receipt = json.loads(receipt_path.read_text())
-            if (receipt["plan"]["id"] == planned["id"]
-                    and receipt["finished_ns"] >= requested):
-                print(f"dev-test: joined exit {receipt['exit_code']}; receipt {receipt_path}")
-                return receipt["exit_code"]
+        # Only Bazel knows the full declared action inputs, including ignored
+        # package data and external toolchains. A prior receipt cannot replace
+        # its cache validation, even for an overlapping identical request.
         started = time.time_ns()
         save(directory / "plan.json", planned)
-        print(f"dev-test: input {planned['inputs'][:12]}, {planned['selection']}", flush=True)
+        print(f"dev-test: checkout/config snapshot {planned['inputs'][:12]}, {planned['selection']}", flush=True)
         print("+ " + " ".join(planned["command"]), flush=True)
         process = None
         try:
@@ -182,7 +180,7 @@ def run(planned: dict, requested: int) -> int:
             code = 2
         unchanged = input_id(planned["base"]) == planned["inputs"]
         if not unchanged:
-            print("dev-test: inputs changed during validation; result is stale", file=sys.stderr)
+            print("dev-test: checkout/config snapshot changed during validation; result is stale", file=sys.stderr)
             code = 2
         receipt = {
             "plan": planned, "started_ns": started, "finished_ns": time.time_ns(),
@@ -195,7 +193,6 @@ def run(planned: dict, requested: int) -> int:
 
 
 def main() -> int:
-    requested = time.time_ns()
     def interrupt(_signal, _frame):
         raise KeyboardInterrupt
 
@@ -220,7 +217,7 @@ def main() -> int:
     if args.dry_run:
         print(json.dumps(planned, indent=2))
         return 0
-    return run(planned, requested)
+    return run(planned)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise selection, concurrent joins and stale-input refusal with a fake executor."""
+"""Exercise selection, concurrent serialization and stale-snapshot refusal with a fake executor."""
 
 import json
 import os
@@ -47,6 +47,7 @@ class DevTestTests(unittest.TestCase):
             '#!/usr/bin/env python3\nimport os,time\nfrom pathlib import Path\n'
             'root=Path.cwd()/".git"\n'
             'with (root/"calls").open("a") as f: f.write("run\\n")\n'
+            '(root/"pid").write_text(str(os.getpid()))\n'
             '(root/"started").touch()\n'
             'while (root/"hold").exists(): time.sleep(0.01)\n'
             'raise SystemExit(int(os.environ.get("TEST_EXIT", "0")))\n'
@@ -99,21 +100,21 @@ class DevTestTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["command"], ["kiln", "test", "//:dev_tests", "//:schema_checks"])
 
-    def test_concurrent_callers_share_failure_but_later_call_retries(self):
+    def test_waiting_callers_recheck_bazel_inputs_instead_of_reusing_receipts(self):
         self.env["TEST_EXIT"] = "7"
         hold = self.root / ".git/hold"
         hold.touch()
         first = self.start()
         self.wait_started()
         second = self.start()
-        self.assertIn("joining", second.stdout.readline())
+        self.assertIn("waiting", second.stdout.readline())
         hold.unlink()
         first.communicate(timeout=10)
         second.communicate(timeout=10)
         self.assertEqual((first.returncode, second.returncode), (7, 7))
-        self.assertEqual((self.root / ".git/calls").read_text().splitlines(), ["run"])
+        self.assertEqual((self.root / ".git/calls").read_text().splitlines(), ["run", "run"])
         self.assertEqual(self.invoke().returncode, 7)
-        self.assertEqual(len((self.root / ".git/calls").read_text().splitlines()), 2)
+        self.assertEqual(len((self.root / ".git/calls").read_text().splitlines()), 3)
 
     def test_edit_during_validation_cannot_produce_green_receipt(self):
         hold = self.root / ".git/hold"
@@ -126,6 +127,42 @@ class DevTestTests(unittest.TestCase):
         self.assertEqual(process.returncode, 2)
         receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
         self.assertFalse(receipt["inputs_unchanged"])
+
+
+    def test_ignored_input_change_still_requires_each_waiter_to_invoke_bazel(self):
+        ignore = self.root / ".gitignore"
+        ignore.write_text(ignore.read_text() + "generated-input\n")
+        ignored = self.root / "generated-input"
+        ignored.write_text("first\n")
+        hold = self.root / ".git/hold"
+        hold.touch()
+        first = self.start()
+        self.wait_started()
+        second = self.start()
+        self.assertIn("waiting", second.stdout.readline())
+        ignored.write_text("second\n")
+        hold.unlink()
+        first.communicate(timeout=10)
+        second.communicate(timeout=10)
+        self.assertEqual((first.returncode, second.returncode), (0, 0))
+        self.assertEqual((self.root / ".git/calls").read_text().splitlines(), ["run", "run"])
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertIn("checkout/config snapshot", receipt["plan"]["identity_scope"])
+
+
+    def test_interrupt_stops_the_owned_executor_and_writes_failure(self):
+        hold = self.root / ".git/hold"
+        hold.touch()
+        process = self.start()
+        self.wait_started()
+        child_pid = int((self.root / ".git/pid").read_text())
+        process.terminate()
+        process.communicate(timeout=15)
+        self.assertEqual(process.returncode, 130)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child_pid, 0)
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertEqual(receipt["exit_code"], 130)
 
     def test_live_store_environment_is_refused(self):
         self.env["LASH_POSTGRES_DATABASE_URL"] = "postgres://fixture"

@@ -31,12 +31,16 @@ python3 scripts/dev-test.py
 ```
 
 `python3 scripts/dev-test.py --dry-run` prints the changed paths, exact labels,
-base/head revisions and an input digest. `--dependents` selects reverse dependencies;
+base/head revisions and a checkout/config snapshot digest. `--dependents` selects reverse dependencies;
 `just test-changed` uses this same planner. Live store environments are refused.
 The runner writes its plan and final receipt under Git's `lash-validation/`
-directory, coalesces concurrent identical requests in one fork, and rejects a
-result if inputs change during execution. A later explicit run executes again;
-these receipts do not replace Bazel's cache or CI's required gates.
+directory and serializes concurrent requests in one fork. Every request calls
+Bazel, including a request that waited for another run: only Bazel can validate
+ignored package data and external toolchain inputs before reusing cached actions.
+The snapshot covers Git-visible content, relevant environment variables, env.sh
+and .kiln.bazelrc; it is not the complete action-input digest. A changed snapshot
+at the end of execution makes the receipt stale. These receipts do not replace
+Bazel's cache or CI's required gates.
 
 `just floor` is an explicit broad tooling checkpoint, not the default per-edit
 command. It runs the dev/feature/clippy and schema checks together. `just bump-check`
@@ -47,7 +51,10 @@ or wait before starting another service command.
 Launcher shell self-tests require Bubblewrap. Each invocation mounts a private
 `/tmp` and `/run`, uses separate PID/network namespaces, and sees the checkout
 read-only. Production launchers retain their real global ownership locks;
-tests cannot reach a live stack. Install the `bubblewrap` package on a new host.
+tests cannot address host PIDs, the host network or the `/run` Docker socket.
+Inherited Docker host/context overrides are removed; test commands still use
+fixtures and mock Docker. This is not containment for arbitrary hostile code.
+Install the `bubblewrap` package on a new host.
 
 The lower-level entry script remains available for graph analysis, sync, local
 executor reproduction, and focused Bazel labels.

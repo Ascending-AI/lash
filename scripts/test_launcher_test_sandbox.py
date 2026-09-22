@@ -2,6 +2,7 @@
 """Launcher tests must never share the host's ownership or process namespace."""
 
 import concurrent.futures
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -50,6 +51,32 @@ class LauncherSandboxTests(unittest.TestCase):
                     ["readlink", "/proc/self/ns/mnt"], text=True
                 ).strip(),
             )
+
+
+    def test_inherited_namespace_hint_does_not_skip_isolation(self):
+        git_dir = subprocess.check_output(
+            ["git", "rev-parse", "--absolute-git-dir"], cwd=ROOT, text=True
+        ).strip()
+        host_namespace = subprocess.check_output(
+            ["readlink", "/proc/self/ns/mnt"], text=True
+        ).strip()
+        with tempfile.TemporaryDirectory(dir=git_dir) as fixture:
+            probe = Path(fixture) / "probe.sh"
+            probe.write_text(
+                '#!/usr/bin/env bash\nset -euo pipefail\n'
+                f'source "{ROOT}/scripts/ci/launcher-test-sandbox.sh"\n'
+                'launcher_test_sandbox "$@"\n'
+                'test -z "${DOCKER_HOST+x}"\n'
+                'test -z "${DOCKER_CONTEXT+x}"\n'
+                'readlink /proc/self/ns/mnt\n'
+            )
+            result = subprocess.run(
+                ["bash", str(probe)], capture_output=True, text=True, timeout=20,
+                env={**os.environ, "LASH_LAUNCHER_TEST_NAMESPACE": host_namespace,
+                     "DOCKER_HOST": "unix:///home/unused.sock", "DOCKER_CONTEXT": "host"},
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(result.stdout.strip(), host_namespace)
 
 
 if __name__ == "__main__":
