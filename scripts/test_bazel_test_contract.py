@@ -1208,7 +1208,9 @@ class CargoResolutionTests(unittest.TestCase):
                     patch.object(generator.feature_variants.Workspace, "from_metadata", return_value=SimpleNamespace(packages={"example": None})), \
                     patch.object(generator, "feature_coverage_plan", return_value=plan), \
                     patch.object(generator.feature_variants, "resolve_request", return_value=SimpleNamespace(sorted_features=lambda: {"example": features})), \
-                    patch.object(generator.subprocess, "run", return_value=SimpleNamespace(stdout=output)), \
+                    patch.object(generator.subprocess, "run", side_effect=lambda argv, **kwargs: SimpleNamespace(
+                        stdout=output if "--color=never" in argv else output.replace("(*)", "\x1b[33m\x1b[2m(*)\x1b[39m\x1b[22m")
+                    )), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(generator.verify_resolution({}), expected)
 

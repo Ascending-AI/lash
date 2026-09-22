@@ -2224,6 +2224,7 @@ def verify_resolution(metadata: dict) -> int:
             tree = [
                 os.environ.get("KILN_REAL_CARGO", "cargo"),
                 "tree",
+                "--color=never",
                 "-p",
                 command.package,
                 "-e",
