@@ -47,7 +47,8 @@ pub use lashlang_graph::{
     TraceLashlangGraphCompleteness, TraceLashlangGraphConflict, TraceLashlangGraphConflictKind,
     TraceLashlangGraphEdge, TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent,
     TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
-    TraceLashlangNodeSummary, TraceLashlangNodeTerminalSummary, fold_lashlang_graph,
+    TraceLashlangNodeRetention, TraceLashlangNodeSummary, TraceLashlangNodeTerminalSummary,
+    fold_lashlang_graph,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -1637,7 +1638,10 @@ pub enum TraceLanguageExecutionPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
-    pub subject: TraceRuntimeSubject,
+    pub process_id: lash_sansio::ProcessId,
+    pub incarnation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1647,8 +1651,13 @@ pub struct TraceLanguageChildExecution {
 }
 
 impl TraceLanguageChildExecution {
-    pub fn graph_key(&self) -> String {
-        self.subject.graph_key()
+    pub fn graph_key(&self) -> Option<String> {
+        self.attempt.map(|attempt| {
+            format!(
+                "process:{}:incarnation:{}:attempt:{attempt}",
+                self.process_id, self.incarnation,
+            )
+        })
     }
 }
 

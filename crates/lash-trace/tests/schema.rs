@@ -1752,9 +1752,9 @@ fn language_execution_all_seven_payload_variants_round_trip() {
             occurrence: 1,
             child: TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: ProcessId::from("p2"),
-                },
+                process_id: ProcessId::from("p2"),
+                incarnation: 1,
+                attempt: Some(2),
                 module_ref: Some("child_mod".to_string()),
                 entry_ref: Some("component:1".to_string()),
                 entry_name: Some("child_main".to_string()),

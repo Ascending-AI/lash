@@ -51,7 +51,8 @@ struct ChildLinkFact {
     parent_entry_name: String,
     parent_node_kind: Option<String>,
     parent_node_label_title: Option<String>,
-    child_graph_key: String,
+    child_graph_key: Option<String>,
+    child_process_id: lash_core::ProcessId,
     child_entry_name: Option<String>,
 }
 
@@ -122,6 +123,7 @@ impl GraphContract {
                         .and_then(|node| node.label_metadata.as_ref())
                         .map(|label| label.title.clone()),
                     child_graph_key: child.child_graph_key.clone(),
+                    child_process_id: child.child_process_id.clone(),
                     child_entry_name: child.child_entry_name.clone(),
                 });
             }
@@ -308,11 +310,11 @@ pub(super) fn assert_graph_lineage_connected(
         .map(|process| process.process_id.as_str())
         .collect::<BTreeSet<_>>();
     for link in &contract.child_links {
-        let linked_graph_exists = graph_keys.contains(link.child_graph_key.as_str());
-        let linked_process_exists = link
+        let linked_graph_exists = link
             .child_graph_key
-            .strip_prefix("process:")
-            .is_some_and(|process_id| process_ids.contains(process_id));
+            .as_deref()
+            .is_some_and(|graph_key| graph_keys.contains(graph_key));
+        let linked_process_exists = process_ids.contains(link.child_process_id.as_str());
         assert!(
             linked_graph_exists || linked_process_exists,
             "child link points nowhere: {link:#?}\ncontract={contract:#?}\nprocesses={processes:#?}"

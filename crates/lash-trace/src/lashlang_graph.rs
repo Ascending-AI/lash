@@ -97,7 +97,46 @@ impl TraceSink for TraceLashlangGraphStore {
         let next = Self::fold(graphs.get(&graph_key), std::slice::from_ref(record))
             .expect("one language-execution record always forms a valid fold input");
         graphs.insert(graph_key, next);
+        resolve_child_graph_keys(&mut graphs);
         Ok(())
+    }
+}
+
+fn resolve_child_graph_keys(graphs: &mut BTreeMap<String, TraceLashlangGraph>) {
+    let process_graphs = graphs
+        .values()
+        .filter_map(|graph| {
+            let crate::TraceRuntimeSubject::Process { process_id } = &graph.subject else {
+                return None;
+            };
+            let generation = graph
+                .history
+                .first()
+                .and_then(|item| item.event.identity.generation)?;
+            Some((
+                process_id.clone(),
+                generation.incarnation(),
+                generation.attempt(),
+                graph.graph_key.clone(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    for graph in graphs.values_mut() {
+        for child in &mut graph.children {
+            let matches = process_graphs
+                .iter()
+                .filter(|(process_id, incarnation, attempt, _)| {
+                    process_id == &child.child_process_id
+                        && *incarnation == child.child_incarnation
+                        && child
+                            .child_attempt
+                            .is_none_or(|expected| expected == *attempt)
+                })
+                .collect::<Vec<_>>();
+            if matches.len() == 1 {
+                child.child_graph_key = Some(matches[0].3.clone());
+            }
+        }
     }
 }
 
@@ -119,9 +158,11 @@ pub fn fold_lashlang_graph(
     let first_event = incoming
         .first()
         .map(|(_, event)| event)
-        .or_else(|| previous.and_then(|graph| graph.history.first().map(|item| &item.event)))
+        .or_else(|| previous.and_then(|graph| graph.history.first().map(|item| &item.event)));
+    let graph_key = first_event
+        .map(|event| event.identity.graph_key())
+        .or_else(|| previous.map(|graph| graph.graph_key.clone()))
         .ok_or(TraceLashlangGraphFoldError::NoLanguageExecutionEvents)?;
-    let graph_key = first_event.identity.graph_key();
     if let Some(previous) = previous
         && previous.graph_key != graph_key
     {
@@ -175,7 +216,16 @@ pub fn fold_lashlang_graph(
         })
         .unwrap_or_default();
     let mut execution_map = previous.and_then(|graph| graph.execution_map.clone());
-    let mut truncation_watermark = previous.and_then(|graph| graph.truncation_watermark.clone());
+    let mut node_retention = previous
+        .map(|graph| {
+            graph
+                .node_retention
+                .iter()
+                .cloned()
+                .map(|retention| (retention.node_id.clone(), retention))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
 
     for (timestamp, mut event) in incoming {
         // Publication-local labels are not logical identity. The fold stores
@@ -195,10 +245,18 @@ pub fn fold_lashlang_graph(
                 Some(current) => canonical_value(current, map.clone()),
             });
         }
-        if truncation_watermark
-            .as_ref()
-            .is_some_and(|watermark| event_identity <= *watermark)
+        if let Some((node_id, occurrence)) = node_occurrence(&event_identity)
+            && node_retention
+                .get(node_id)
+                .is_some_and(|retention| occurrence <= retention.truncation_watermark)
         {
+            merge_late_retained_event(
+                node_retention
+                    .get_mut(node_id)
+                    .expect("retention was checked above"),
+                timestamp,
+                &event,
+            );
             continue;
         }
         let candidate = TraceLashlangGraphHistoryEvent {
@@ -222,21 +280,57 @@ pub fn fold_lashlang_graph(
         }
     }
 
-    while history.len() > history_limit {
-        let Some((dropped, _)) = history.pop_first() else {
-            break;
-        };
-        truncation_watermark = Some(match truncation_watermark {
-            Some(current) => current.max(dropped),
-            None => dropped,
-        });
+    let node_ids = history
+        .keys()
+        .filter_map(|identity| identity.node_id.clone())
+        .collect::<BTreeSet<_>>();
+    for node_id in node_ids {
+        loop {
+            let occurrences = history
+                .keys()
+                .filter_map(|identity| {
+                    (identity.node_id.as_deref() == Some(node_id.as_str()))
+                        .then_some(identity.occurrence)
+                        .flatten()
+                })
+                .collect::<BTreeSet<_>>();
+            if occurrences.len() <= history_limit {
+                break;
+            }
+            let occurrence = *occurrences.first().expect("non-empty occurrence set");
+            let dropped_keys = history
+                .keys()
+                .filter(|identity| {
+                    identity.node_id.as_deref() == Some(node_id.as_str())
+                        && identity.occurrence == Some(occurrence)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let dropped = dropped_keys
+                .iter()
+                .filter_map(|identity| history.remove(identity))
+                .collect::<Vec<_>>();
+            let prior = node_retention.remove(&node_id);
+            node_retention.insert(
+                node_id.clone(),
+                merge_node_retention(
+                    prior,
+                    &node_id,
+                    occurrence,
+                    &dropped,
+                    execution_map.as_ref(),
+                    &identity,
+                ),
+            );
+        }
     }
-    if let Some(watermark) = &truncation_watermark {
-        conflict_variants.retain(|identity, _| identity > watermark);
-    }
-    while conflict_variants.len() > history_limit {
-        conflict_variants.pop_first();
-    }
+    conflict_variants.retain(|identity, _| {
+        node_occurrence(identity).is_none_or(|(node_id, occurrence)| {
+            node_retention
+                .get(node_id)
+                .is_none_or(|retention| occurrence > retention.truncation_watermark)
+        })
+    });
     let conflicts = conflict_variants
         .into_iter()
         .map(|(identity, variants)| TraceLashlangGraphConflict {
@@ -252,7 +346,7 @@ pub fn fold_lashlang_graph(
         history,
         conflicts,
         history_limit,
-        truncation_watermark,
+        node_retention.into_values().collect(),
         status,
     ))
 }
@@ -265,35 +359,42 @@ fn canonical_language_identity(
     previous: Option<&TraceLashlangGraph>,
     incoming: &[(DateTime<Utc>, TraceLanguageExecution)],
 ) -> LanguageIdentity {
-    if let Some(previous) = previous {
-        return LanguageIdentity {
-            scope: previous.scope.clone(),
-            subject: previous.subject.clone(),
-            source_identity: previous.source_identity.clone(),
-            module_ref: previous.module_ref.clone(),
-            entry_kind: previous.entry_kind.clone(),
-            entry_ref: previous.entry_ref.clone(),
-            entry_name: previous.entry_name.clone(),
-            restate_invocation_id: incoming
-                .iter()
-                .filter_map(|(_, event)| event.identity.restate_invocation_id.clone())
-                .min(),
-            generation: incoming
-                .iter()
-                .find_map(|(_, event)| event.identity.generation)
-                .or_else(|| {
-                    previous
-                        .history
-                        .first()
-                        .and_then(|item| item.event.identity.generation)
-                }),
-        };
+    previous
+        .map(|graph| LanguageIdentity {
+            scope: graph.scope.clone(),
+            subject: graph.subject.clone(),
+            source_identity: graph.source_identity.clone(),
+            module_ref: graph.module_ref.clone(),
+            entry_kind: graph.entry_kind.clone(),
+            entry_ref: graph.entry_ref.clone(),
+            entry_name: graph.entry_name.clone(),
+            restate_invocation_id: None,
+            generation: graph
+                .history
+                .first()
+                .and_then(|item| item.event.identity.generation),
+        })
+        .into_iter()
+        .chain(incoming.iter().map(|(_, event)| event.identity.clone()))
+        .reduce(canonical_identity_fields)
+        .expect("caller established a previous snapshot or incoming event")
+}
+
+fn canonical_identity_fields(left: LanguageIdentity, right: LanguageIdentity) -> LanguageIdentity {
+    LanguageIdentity {
+        scope: canonical_value(left.scope, right.scope),
+        subject: canonical_value(left.subject, right.subject),
+        source_identity: left.source_identity.min(right.source_identity),
+        module_ref: left.module_ref.min(right.module_ref),
+        entry_kind: left.entry_kind.min(right.entry_kind),
+        entry_ref: canonical_value(left.entry_ref, right.entry_ref),
+        entry_name: left.entry_name.min(right.entry_name),
+        restate_invocation_id: canonical_value(
+            left.restate_invocation_id,
+            right.restate_invocation_id,
+        ),
+        generation: canonical_value(left.generation, right.generation),
     }
-    incoming
-        .iter()
-        .map(|(_, event)| event.identity.clone())
-        .min_by_key(canonical_bytes)
-        .expect("caller established one incoming event")
 }
 
 fn materialize_graph(
@@ -302,7 +403,7 @@ fn materialize_graph(
     history: Vec<TraceLashlangGraphHistoryEvent>,
     conflicts: Vec<TraceLashlangGraphConflict>,
     history_limit: usize,
-    truncation_watermark: Option<TraceLashlangEventIdentity>,
+    mut node_retention: Vec<TraceLashlangNodeRetention>,
     status: LanguageExecutionStatus,
 ) -> TraceLashlangGraph {
     let mut nodes = BTreeMap::new();
@@ -319,6 +420,18 @@ fn materialize_graph(
                 ),
             );
         }
+        for retention in &mut node_retention {
+            if let Some(static_node) = map.nodes.iter().find(|node| node.id == retention.node_id) {
+                retention.node.kind = static_node.kind.clone();
+                retention.node.label = static_node.label.clone();
+                retention.node.label_metadata = static_node.label_metadata.clone();
+                if let Some(archived) = &mut retention.archived_node {
+                    archived.kind = static_node.kind.clone();
+                    archived.label = static_node.label.clone();
+                    archived.label_metadata = static_node.label_metadata.clone();
+                }
+            }
+        }
         for edge in &map.edges {
             edges.insert(
                 edge.id.clone(),
@@ -334,6 +447,24 @@ fn materialize_graph(
     }
     let mut occurrences = BTreeMap::<OccurrenceKey, OccurrenceFold>::new();
     let mut children = BTreeMap::new();
+    for retention in &node_retention {
+        let key = (retention.node.id.clone(), retention.node.kind.clone());
+        if let Some(node) = nodes.get_mut(&key) {
+            node.branch_selection = retention.node.branch_selection;
+            node.observation = retention.node.observation.clone();
+            node.summary = retention.node.summary.clone();
+        } else {
+            nodes.insert(key, retention.node.clone());
+        }
+        for edge_id in &retention.selected_edge_ids {
+            if let Some(edge) = edges.get_mut(edge_id) {
+                edge.selection = TraceLashlangEdgeSelection::Selected;
+            }
+        }
+        for child in &retention.children {
+            children.insert(child_link_key(child), child.clone());
+        }
+    }
     for item in &history {
         match &item.event.payload {
             TraceLanguageExecutionPayload::ExecutionStarted { .. } => {}
@@ -382,7 +513,7 @@ fn materialize_graph(
                         item.event.identity.incarnation(),
                     ))
                     .or_default()
-                    .terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
+                    .explicit_terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
             }
             TraceLanguageExecutionPayload::NodeFailed {
                 node_id,
@@ -406,7 +537,8 @@ fn materialize_graph(
                         item.event.identity.incarnation(),
                     ))
                     .or_default()
-                    .terminal = Some(OccurrenceTerminal::Failed(item.timestamp, error.clone()));
+                    .explicit_terminal =
+                    Some(OccurrenceTerminal::Failed(item.timestamp, error.clone()));
             }
             TraceLanguageExecutionPayload::BranchSelected {
                 node_id,
@@ -414,19 +546,22 @@ fn materialize_graph(
                 edge_id,
                 selected,
             } => {
-                if let Some(node) = nodes.get_mut(&(node_id.clone(), "branch".to_string())) {
-                    node.branch_selection = Some(*selected);
-                    occurrences
-                        .entry((
-                            node_id.clone(),
-                            "branch".to_string(),
-                            *occurrence,
-                            item.event.identity.attempt(),
-                            item.event.identity.incarnation(),
-                        ))
-                        .or_default()
-                        .terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
-                }
+                let node = nodes
+                    .entry((node_id.clone(), "branch".to_string()))
+                    .or_insert_with(|| {
+                        TraceLashlangGraphNode::unobserved(node_id, "branch", node_id, None)
+                    });
+                node.branch_selection = Some(*selected);
+                occurrences
+                    .entry((
+                        node_id.clone(),
+                        "branch".to_string(),
+                        *occurrence,
+                        item.event.identity.attempt(),
+                        item.event.identity.incarnation(),
+                    ))
+                    .or_default()
+                    .provisional_terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
                 if let Some(edge) = edges.get_mut(edge_id) {
                     edge.selection = TraceLashlangEdgeSelection::Selected;
                 }
@@ -436,18 +571,28 @@ fn materialize_graph(
                 child,
                 ..
             } => {
-                let child_graph_key = child.graph_key();
-                children.insert(
-                    (parent_node_id.clone(), child_graph_key.clone()),
-                    TraceLashlangGraphChildLink {
-                        parent_graph_key: identity.graph_key(),
-                        parent_node_id: parent_node_id.clone(),
-                        child_graph_key,
-                        child_module_ref: child.module_ref.clone(),
-                        child_entry_ref: child.entry_ref.clone(),
-                        child_entry_name: child.entry_name.clone(),
-                    },
-                );
+                nodes
+                    .entry((parent_node_id.clone(), "call".to_string()))
+                    .or_insert_with(|| {
+                        TraceLashlangGraphNode::unobserved(
+                            parent_node_id,
+                            "call",
+                            parent_node_id,
+                            None,
+                        )
+                    });
+                let link = TraceLashlangGraphChildLink {
+                    parent_graph_key: identity.graph_key(),
+                    parent_node_id: parent_node_id.clone(),
+                    child_graph_key: child.graph_key(),
+                    child_process_id: child.process_id.clone(),
+                    child_incarnation: child.incarnation,
+                    child_attempt: child.attempt,
+                    child_module_ref: child.module_ref.clone(),
+                    child_entry_ref: child.entry_ref.clone(),
+                    child_entry_name: child.entry_name.clone(),
+                };
+                children.insert(child_link_key(&link), link);
             }
         }
     }
@@ -472,7 +617,7 @@ fn materialize_graph(
         edges: edges.into_values().collect(),
         children: children.into_values().collect(),
         history_limit,
-        truncation_watermark,
+        node_retention,
         conflicts,
         history,
         execution_map,
@@ -482,7 +627,8 @@ fn materialize_graph(
 #[derive(Default)]
 struct OccurrenceFold {
     start: Option<DateTime<Utc>>,
-    terminal: Option<OccurrenceTerminal>,
+    explicit_terminal: Option<OccurrenceTerminal>,
+    provisional_terminal: Option<OccurrenceTerminal>,
 }
 
 type OccurrenceKey = (String, String, u64, Option<u32>, Option<u64>);
@@ -501,15 +647,15 @@ fn apply_occurrences(
             .iter()
             .filter(|((id, kind, ..), _)| id == node_id && kind == node_kind)
             .collect::<Vec<_>>();
-        node.summary.retained_occurrences = matching.len() as u64;
-        node.summary.started_count = matching
+        node.summary.retained_occurrences += matching.len() as u64;
+        node.summary.started_count += matching
             .iter()
             .filter(|(_, occurrence)| occurrence.start.is_some())
             .count() as u64;
         let terminals = matching
             .iter()
             .filter_map(|((_, _, occurrence, _, _), folded)| {
-                folded.terminal.as_ref().map(|terminal| {
+                folded_terminal(folded).map(|terminal| {
                     let (status, end) = match terminal {
                         OccurrenceTerminal::Completed(end) => {
                             (LanguageExecutionStatus::Completed, end.to_owned())
@@ -526,13 +672,25 @@ fn apply_occurrences(
                 })
             })
             .collect::<Vec<_>>();
-        node.summary.terminal_count = terminals.len() as u64;
-        node.summary.first_terminal = terminals.first().cloned();
-        node.summary.last_terminal = terminals.last().cloned();
+        node.summary.terminal_count += terminals.len() as u64;
+        node.summary.first_terminal = [
+            node.summary.first_terminal.clone(),
+            terminals.first().cloned(),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by_key(|terminal| terminal.occurrence);
+        node.summary.last_terminal = [
+            node.summary.last_terminal.clone(),
+            terminals.last().cloned(),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by_key(|terminal| terminal.occurrence);
         let Some(((_, _, occurrence, _, _), folded)) = matching.last() else {
             continue;
         };
-        node.observation = match &folded.terminal {
+        node.observation = match folded_terminal(folded) {
             Some(OccurrenceTerminal::Completed(end)) => TraceLashlangNodeObservation::Completed {
                 occurrence: *occurrence,
                 start: folded.start,
@@ -559,6 +717,311 @@ fn apply_occurrences(
                 .unwrap_or_default(),
         };
     }
+}
+
+fn folded_terminal(folded: &OccurrenceFold) -> Option<&OccurrenceTerminal> {
+    folded
+        .explicit_terminal
+        .as_ref()
+        .or(folded.provisional_terminal.as_ref())
+}
+
+fn node_occurrence(identity: &TraceLashlangEventIdentity) -> Option<(&str, u64)> {
+    Some((identity.node_id.as_deref()?, identity.occurrence?))
+}
+
+fn child_link_key(
+    child: &TraceLashlangGraphChildLink,
+) -> (String, lash_sansio::ProcessId, u64, Option<u32>) {
+    (
+        child.parent_node_id.clone(),
+        child.child_process_id.clone(),
+        child.child_incarnation,
+        child.child_attempt,
+    )
+}
+
+fn merge_node_retention(
+    prior: Option<TraceLashlangNodeRetention>,
+    node_id: &str,
+    occurrence: u64,
+    dropped: &[TraceLashlangGraphHistoryEvent],
+    execution_map: Option<&LanguageExecutionMap>,
+    identity: &LanguageIdentity,
+) -> TraceLashlangNodeRetention {
+    let archived_node = prior
+        .as_ref()
+        .map(|retention| Box::new(retention.node.clone()));
+    let prior = prior.into_iter().collect::<Vec<_>>();
+    let graph = materialize_graph(
+        identity.clone(),
+        execution_map.cloned(),
+        dropped.to_vec(),
+        Vec::new(),
+        1,
+        prior,
+        LanguageExecutionStatus::Running,
+    );
+    let node = graph
+        .nodes
+        .into_iter()
+        .find(|node| node.id == node_id)
+        .expect("an evicted node event materializes its node");
+    TraceLashlangNodeRetention {
+        node_id: node_id.to_string(),
+        truncation_watermark: occurrence,
+        archived_node,
+        watermark_history: dropped.to_vec(),
+        node,
+        selected_edge_ids: graph
+            .edges
+            .into_iter()
+            .filter(|edge| edge.selection == TraceLashlangEdgeSelection::Selected)
+            .map(|edge| edge.id)
+            .collect(),
+        children: graph
+            .children
+            .into_iter()
+            .filter(|child| child.parent_node_id == node_id)
+            .collect(),
+    }
+}
+
+fn merge_late_retained_event(
+    retention: &mut TraceLashlangNodeRetention,
+    timestamp: DateTime<Utc>,
+    event: &TraceLanguageExecution,
+) {
+    if event_identity(event).occurrence == Some(retention.truncation_watermark) {
+        let mut canonical_event = event.clone();
+        canonical_event.event_key.clear();
+        let identity = event_identity(&canonical_event);
+        let candidate = TraceLashlangGraphHistoryEvent {
+            identity: identity.clone(),
+            timestamp,
+            event: canonical_event,
+        };
+        if let Some(index) = retention
+            .watermark_history
+            .iter()
+            .position(|current| current.identity == identity)
+        {
+            let current = retention.watermark_history[index].clone();
+            retention.watermark_history[index] = canonical_history_event(current, candidate);
+        } else {
+            retention.watermark_history.push(candidate);
+            retention
+                .watermark_history
+                .sort_by(|left, right| left.identity.cmp(&right.identity));
+        }
+        let identity = retention.watermark_history[0].event.identity.clone();
+        let watermark_graph = materialize_graph(
+            identity,
+            None,
+            retention.watermark_history.clone(),
+            Vec::new(),
+            1,
+            Vec::new(),
+            LanguageExecutionStatus::Running,
+        );
+        let mut watermark_node = watermark_graph
+            .nodes
+            .into_iter()
+            .find(|node| node.id == retention.node_id)
+            .expect("watermark history materializes its node");
+        if let Some(archived) = &retention.archived_node {
+            merge_node_summary(&mut watermark_node.summary, &archived.summary);
+        }
+        retention.node = watermark_node;
+        for edge in watermark_graph.edges {
+            if edge.selection == TraceLashlangEdgeSelection::Selected
+                && !retention.selected_edge_ids.contains(&edge.id)
+            {
+                retention.selected_edge_ids.push(edge.id);
+            }
+        }
+        retention.selected_edge_ids.sort();
+        for child in watermark_graph.children {
+            if !retention
+                .children
+                .iter()
+                .any(|current| child_link_key(current) == child_link_key(&child))
+            {
+                retention.children.push(child);
+            }
+        }
+        retention.children.sort_by_key(child_link_key);
+        return;
+    }
+    match &event.payload {
+        TraceLanguageExecutionPayload::NodeStarted { occurrence, .. } => {
+            let start = match &retention.node.observation {
+                TraceLashlangNodeObservation::Running {
+                    occurrence: retained,
+                    start,
+                } if retained == occurrence => Some((*start).min(timestamp)),
+                TraceLashlangNodeObservation::Completed {
+                    occurrence: retained,
+                    start,
+                    ..
+                }
+                | TraceLashlangNodeObservation::Failed {
+                    occurrence: retained,
+                    start,
+                    ..
+                } if retained == occurrence => {
+                    Some(start.map_or(timestamp, |start| start.min(timestamp)))
+                }
+                _ => None,
+            };
+            if let Some(start) = start {
+                let previously_missing = match &retention.node.observation {
+                    TraceLashlangNodeObservation::Completed { start, .. }
+                    | TraceLashlangNodeObservation::Failed { start, .. } => start.is_none(),
+                    _ => false,
+                };
+                retention.node.observation = match &retention.node.observation {
+                    TraceLashlangNodeObservation::Running { occurrence, .. } => {
+                        TraceLashlangNodeObservation::Running {
+                            occurrence: *occurrence,
+                            start,
+                        }
+                    }
+                    TraceLashlangNodeObservation::Completed {
+                        occurrence, end, ..
+                    } => TraceLashlangNodeObservation::Completed {
+                        occurrence: *occurrence,
+                        start: Some(start),
+                        end: *end,
+                        duration_ms: Some(
+                            end.signed_duration_since(start).num_milliseconds().max(0),
+                        ),
+                    },
+                    TraceLashlangNodeObservation::Failed {
+                        occurrence,
+                        end,
+                        error,
+                        ..
+                    } => TraceLashlangNodeObservation::Failed {
+                        occurrence: *occurrence,
+                        start: Some(start),
+                        end: *end,
+                        duration_ms: Some(
+                            end.signed_duration_since(start).num_milliseconds().max(0),
+                        ),
+                        error: error.clone(),
+                    },
+                    TraceLashlangNodeObservation::Unobserved => return,
+                };
+                if previously_missing {
+                    retention.node.summary.started_count += 1;
+                }
+            }
+        }
+        TraceLanguageExecutionPayload::NodeCompleted { occurrence, .. }
+        | TraceLanguageExecutionPayload::NodeFailed { occurrence, .. } => {
+            if retention.node.observation.is_terminal() {
+                return;
+            }
+            let start = match retention.node.observation {
+                TraceLashlangNodeObservation::Running {
+                    occurrence: retained,
+                    start,
+                } if retained == *occurrence => Some(start),
+                _ => None,
+            };
+            let (status, observation) = match &event.payload {
+                TraceLanguageExecutionPayload::NodeCompleted { .. } => (
+                    LanguageExecutionStatus::Completed,
+                    TraceLashlangNodeObservation::Completed {
+                        occurrence: *occurrence,
+                        start,
+                        end: timestamp,
+                        duration_ms: start.map(|start| {
+                            timestamp
+                                .signed_duration_since(start)
+                                .num_milliseconds()
+                                .max(0)
+                        }),
+                    },
+                ),
+                TraceLanguageExecutionPayload::NodeFailed { error, .. } => (
+                    LanguageExecutionStatus::Failed,
+                    TraceLashlangNodeObservation::Failed {
+                        occurrence: *occurrence,
+                        start,
+                        end: timestamp,
+                        duration_ms: start.map(|start| {
+                            timestamp
+                                .signed_duration_since(start)
+                                .num_milliseconds()
+                                .max(0)
+                        }),
+                        error: error.clone(),
+                    },
+                ),
+                _ => unreachable!(),
+            };
+            retention.node.observation = observation;
+            retention.node.summary.terminal_count += 1;
+            let terminal = TraceLashlangNodeTerminalSummary {
+                occurrence: *occurrence,
+                status,
+                end: timestamp,
+            };
+            retention.node.summary.first_terminal = Some(terminal.clone());
+            retention.node.summary.last_terminal = Some(terminal);
+        }
+        TraceLanguageExecutionPayload::BranchSelected {
+            edge_id, selected, ..
+        } => {
+            retention.node.branch_selection = Some(*selected);
+            if !retention.selected_edge_ids.contains(edge_id) {
+                retention.selected_edge_ids.push(edge_id.clone());
+                retention.selected_edge_ids.sort();
+            }
+        }
+        TraceLanguageExecutionPayload::ChildStarted { child, .. } => {
+            let link = TraceLashlangGraphChildLink {
+                parent_graph_key: event.identity.graph_key(),
+                parent_node_id: retention.node_id.clone(),
+                child_graph_key: child.graph_key(),
+                child_process_id: child.process_id.clone(),
+                child_incarnation: child.incarnation,
+                child_attempt: child.attempt,
+                child_module_ref: child.module_ref.clone(),
+                child_entry_ref: child.entry_ref.clone(),
+                child_entry_name: child.entry_name.clone(),
+            };
+            if !retention
+                .children
+                .iter()
+                .any(|current| child_link_key(current) == child_link_key(&link))
+            {
+                retention.children.push(link);
+                retention.children.sort_by_key(child_link_key);
+            }
+        }
+        TraceLanguageExecutionPayload::ExecutionStarted { .. }
+        | TraceLanguageExecutionPayload::ExecutionFinished { .. } => {}
+    }
+}
+
+fn merge_node_summary(target: &mut TraceLashlangNodeSummary, archived: &TraceLashlangNodeSummary) {
+    target.retained_occurrences += archived.retained_occurrences;
+    target.started_count += archived.started_count;
+    target.terminal_count += archived.terminal_count;
+    target.first_terminal = [
+        target.first_terminal.clone(),
+        archived.first_terminal.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .min_by_key(|terminal| terminal.occurrence);
+    target.last_terminal = [target.last_terminal.clone(), archived.last_terminal.clone()]
+        .into_iter()
+        .flatten()
+        .max_by_key(|terminal| terminal.occurrence);
 }
 
 fn event_identity(event: &TraceLanguageExecution) -> TraceLashlangEventIdentity {
@@ -687,868 +1150,4 @@ fn insert_bounded_variant(variants: &mut BTreeSet<String>, variant: String) {
 }
 
 #[cfg(test)]
-mod tests {
-    use chrono::{TimeZone, Utc};
-    use lash_sansio::ProcessId;
-    use lash_sansio::SessionId;
-    use lash_sansio::TurnId;
-
-    use super::*;
-    use crate::{
-        TraceBranchSelection, TraceContext, TraceLabelMetadata, TraceLanguageChildExecution,
-        TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceRuntimeScope,
-        TraceRuntimeSubject,
-    };
-
-    fn identity() -> LanguageIdentity {
-        LanguageIdentity {
-            scope: TraceRuntimeScope {
-                session_id: Some(SessionId::from("session-1".to_string())),
-                turn_id: Some(TurnId::from("turn-1")),
-                turn_index: Some(0),
-                protocol_iteration: Some(0),
-            },
-            subject: TraceRuntimeSubject::Effect {
-                address: lash_sansio::EffectAddress::new(
-                    lash_sansio::ExecutionScope::turn("session-1", "turn-1"),
-                    "exec-replay-1",
-                )
-                .expect("valid trace test effect address"),
-                effect_id: "exec-1".to_string(),
-            },
-            module_ref: "module-1".to_string(),
-            entry_kind: "main".to_string(),
-            entry_ref: None,
-            entry_name: "main".to_string(),
-            restate_invocation_id: None,
-            generation: None,
-        }
-    }
-
-    const EFFECT_GRAPH_KEY: &str = r#"effect:{"version":2,"kind":"turn","session_id":"session-1","execution_id":"turn-1"}:"exec-replay-1""#;
-
-    fn record_at(event: TraceLanguageExecution, ms: i64) -> TraceRecord {
-        TraceRecord::new_with_timestamp(
-            TraceContext::default().for_session("session-1"),
-            TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
-                event,
-            },
-            Utc.timestamp_millis_opt(ms).single().expect("timestamp"),
-        )
-    }
-
-    fn append_at(store: &TraceLashlangGraphStore, event: TraceLanguageExecution, ms: i64) {
-        store
-            .append(&record_at(event, ms))
-            .expect("append lashlang execution event");
-    }
-
-    fn started_event(event_key: &str) -> TraceLanguageExecution {
-        TraceLanguageExecution {
-            event_key: event_key.to_string(),
-            identity: identity(),
-            payload: TraceLanguageExecutionPayload::ExecutionStarted {
-                execution_map: LanguageExecutionMap {
-                    nodes: vec![
-                        TraceLanguageExecutionMapNode {
-                            id: "branch".to_string(),
-                            site: lash_sansio::WorkflowExecutionSite::new(
-                                "main",
-                                [0],
-                                "branch",
-                                "if ready",
-                            ),
-                            kind: "branch".to_string(),
-                            label: "if ready".to_string(),
-                            label_metadata: None,
-                        },
-                        TraceLanguageExecutionMapNode {
-                            id: "then".to_string(),
-                            site: lash_sansio::WorkflowExecutionSite::new(
-                                "main",
-                                [0, 1, 0],
-                                "call",
-                                "notify()",
-                            ),
-                            kind: "call".to_string(),
-                            label: "notify()".to_string(),
-                            label_metadata: None,
-                        },
-                        TraceLanguageExecutionMapNode {
-                            id: "else".to_string(),
-                            site: lash_sansio::WorkflowExecutionSite::new(
-                                "main",
-                                [0, 2, 0],
-                                "call",
-                                "skip()",
-                            ),
-                            kind: "call".to_string(),
-                            label: "skip()".to_string(),
-                            label_metadata: None,
-                        },
-                    ],
-                    // `sequence` is what the producer emits for a control edge
-                    // (`WorkflowEdgeKind::Sequence`); the fixture used to
-                    // invent `then` / `else` labels so the deleted string
-                    // inference had something to match.
-                    edges: vec![
-                        TraceLanguageExecutionMapEdge {
-                            id: "then-edge".to_string(),
-                            from: "branch".to_string(),
-                            to: "then".to_string(),
-                            label: "sequence".to_string(),
-                        },
-                        TraceLanguageExecutionMapEdge {
-                            id: "else-edge".to_string(),
-                            from: "branch".to_string(),
-                            to: "else".to_string(),
-                            label: "sequence".to_string(),
-                        },
-                    ],
-                },
-            },
-        }
-    }
-
-    fn node_started(event_key: &str, occurrence: u64) -> TraceLanguageExecution {
-        TraceLanguageExecution {
-            event_key: event_key.to_string(),
-            identity: identity(),
-            payload: TraceLanguageExecutionPayload::NodeStarted {
-                node_id: "branch".to_string(),
-                node_kind: "branch".to_string(),
-                label: "if ready".to_string(),
-                occurrence,
-                call_id: None,
-            },
-        }
-    }
-
-    fn node_completed(event_key: &str, occurrence: u64) -> TraceLanguageExecution {
-        TraceLanguageExecution {
-            event_key: event_key.to_string(),
-            identity: identity(),
-            payload: TraceLanguageExecutionPayload::NodeCompleted {
-                node_id: "branch".to_string(),
-                node_kind: "branch".to_string(),
-                label: "if ready".to_string(),
-                occurrence,
-                call_id: None,
-            },
-        }
-    }
-
-    fn node_failed(event_key: &str, occurrence: u64, error: &str) -> TraceLanguageExecution {
-        TraceLanguageExecution {
-            event_key: event_key.to_string(),
-            identity: identity(),
-            payload: TraceLanguageExecutionPayload::NodeFailed {
-                node_id: "branch".to_string(),
-                node_kind: "branch".to_string(),
-                label: "if ready".to_string(),
-                occurrence,
-                call_id: None,
-                error: error.to_string(),
-            },
-        }
-    }
-
-    fn execution_finished(
-        event_key: &str,
-        status: LanguageExecutionStatus,
-    ) -> TraceLanguageExecution {
-        TraceLanguageExecution {
-            event_key: event_key.to_string(),
-            identity: identity(),
-            payload: TraceLanguageExecutionPayload::ExecutionFinished {
-                status,
-                error: None,
-            },
-        }
-    }
-
-    #[test]
-    fn graph_store_seeds_static_map_on_execution_start() {
-        let store = TraceLashlangGraphStore::default();
-
-        append_at(&store, started_event("start"), 1_000);
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        assert_eq!(graph.status, LanguageExecutionStatus::Running);
-        assert_eq!(
-            graph.nodes[0].observation,
-            TraceLashlangNodeObservation::Unobserved
-        );
-        assert_eq!(
-            graph.edges[0].selection,
-            TraceLashlangEdgeSelection::Unknown
-        );
-    }
-
-    #[test]
-    fn graph_store_keeps_distinct_site_kinds_for_one_structural_node() {
-        let store = TraceLashlangGraphStore::default();
-        let mut event = started_event("start");
-        if let TraceLanguageExecutionPayload::ExecutionStarted { execution_map } =
-            &mut event.payload
-        {
-            execution_map.nodes.push(TraceLanguageExecutionMapNode {
-                id: "branch".to_string(),
-                site: lash_sansio::WorkflowExecutionSite::new(
-                    "main",
-                    [0],
-                    "resource_operation",
-                    "condition",
-                ),
-                kind: "resource_operation".to_string(),
-                label: "condition".to_string(),
-                label_metadata: None,
-            });
-        }
-
-        append_at(&store, event, 1_000);
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        let sites = graph
-            .nodes
-            .iter()
-            .filter(|node| node.id == "branch")
-            .map(|node| node.kind.as_str())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(sites, BTreeSet::from(["branch", "resource_operation"]));
-    }
-
-    /// A TypeScript session's executions reduce into the same projection.
-    ///
-    /// A record carries the dialect of the source that ran. Ignoring any
-    /// dialect other than Lashlang would empty every TypeScript session's
-    /// execution view, although both dialects run on the same VM.
-    #[test]
-    fn graph_store_reduces_every_dialects_execution_events() {
-        let store = TraceLashlangGraphStore::default();
-        store
-            .append(&TraceRecord::new(
-                TraceContext::default().for_session("session-1"),
-                TraceEvent::LanguageExecution {
-                    language: "typescript".to_string(),
-                    event: started_event("start"),
-                },
-            ))
-            .expect("append a TypeScript execution event");
-
-        assert!(!store.graphs().is_empty());
-    }
-
-    #[test]
-    fn graph_store_preserves_static_label_metadata() {
-        let store = TraceLashlangGraphStore::default();
-        let mut event = started_event("start");
-        if let TraceLanguageExecutionPayload::ExecutionStarted { execution_map, .. } =
-            &mut event.payload
-        {
-            execution_map.nodes[0].label_metadata = Some(TraceLabelMetadata {
-                title: "Choose path".to_string(),
-                description: Some("Branch detail".to_string()),
-            });
-        }
-
-        append_at(&store, event, 1_000);
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        assert_eq!(
-            graph.nodes[0].label_metadata,
-            Some(TraceLabelMetadata {
-                title: "Choose path".to_string(),
-                description: Some("Branch detail".to_string()),
-            })
-        );
-    }
-
-    #[test]
-    fn graph_store_deduplicates_by_logical_identity_not_event_key() {
-        let store = TraceLashlangGraphStore::default();
-
-        append_at(&store, node_started("same-key", 1), 1_000);
-        append_at(&store, node_completed("same-key", 1), 1_250);
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        assert!(matches!(
-            graph.nodes[0].observation,
-            TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
-        ));
-    }
-
-    #[test]
-    fn graph_store_updates_completed_node_duration() {
-        let store = TraceLashlangGraphStore::default();
-
-        append_at(&store, node_started("start-node", 1), 1_000);
-        append_at(&store, node_completed("complete-node", 1), 1_750);
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        let node = &graph.nodes[0];
-        assert!(matches!(
-            node.observation,
-            TraceLashlangNodeObservation::Completed {
-                occurrence: 1,
-                duration_ms: Some(750),
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn graph_store_reentered_node_resets_error_and_measures_current_occurrence() {
-        let store = TraceLashlangGraphStore::default();
-
-        append_at(&store, node_started("first-start", 1), 1_000);
-        append_at(
-            &store,
-            node_failed("first-failure", 1, "first failed"),
-            1_250,
-        );
-        append_at(&store, node_started("second-start", 2), 2_000);
-        append_at(&store, node_completed("second-complete", 2), 2_400);
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        let node = &graph.nodes[0];
-        assert!(matches!(
-            node.observation,
-            TraceLashlangNodeObservation::Completed {
-                occurrence: 2,
-                duration_ms: Some(400),
-                ..
-            }
-        ));
-        let serialized = serde_json::to_value(node).expect("serialize completed node");
-        assert_eq!(serialized.get("error"), None);
-    }
-
-    #[test]
-    fn graph_store_terminal_event_for_different_occurrence_uses_terminal_timestamp() {
-        for terminal in [
-            node_completed("complete-node", 2),
-            node_failed("fail-node", 2, "failed"),
-        ] {
-            let store = TraceLashlangGraphStore::default();
-            append_at(&store, node_started("start-node", 1), 1_000);
-            append_at(&store, terminal, 1_750);
-
-            let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-            let (occurrence, start, _end, duration_ms) = match &graph.nodes[0].observation {
-                TraceLashlangNodeObservation::Completed {
-                    occurrence,
-                    start,
-                    end,
-                    duration_ms,
-                }
-                | TraceLashlangNodeObservation::Failed {
-                    occurrence,
-                    start,
-                    end,
-                    duration_ms,
-                    ..
-                } => (occurrence, start, end, duration_ms),
-                observation => panic!("node was not terminal: {observation:#?}"),
-            };
-            assert_eq!(*occurrence, 2);
-            assert_eq!(*start, None);
-            assert_eq!(*duration_ms, None);
-        }
-    }
-
-    #[test]
-    fn graph_store_branch_selection_completes_unstarted_node_with_zero_duration() {
-        let store = TraceLashlangGraphStore::default();
-
-        append_at(&store, started_event("start"), 1_000);
-        append_at(
-            &store,
-            TraceLanguageExecution {
-                event_key: "branch".to_string(),
-                identity: identity(),
-                payload: TraceLanguageExecutionPayload::BranchSelected {
-                    node_id: "branch".to_string(),
-                    occurrence: 1,
-                    edge_id: "then-edge".to_string(),
-                    selected: TraceBranchSelection::Then,
-                },
-            },
-            1_100,
-        );
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        let node = graph
-            .nodes
-            .iter()
-            .find(|node| node.id == "branch")
-            .expect("branch node");
-        let TraceLashlangNodeObservation::Completed {
-            occurrence,
-            start,
-            end: _,
-            duration_ms,
-        } = &node.observation
-        else {
-            panic!("branch node was not completed: {node:#?}");
-        };
-        assert_eq!(*occurrence, 1);
-        assert_eq!(*start, None);
-        assert_eq!(*duration_ms, None);
-
-        let serialized = serde_json::to_value(node).expect("serialize branch node");
-        assert_eq!(serialized["status"], "completed");
-        assert!(serialized.get("duration_ms").is_none());
-        assert!(serialized.get("observation").is_none());
-    }
-
-    #[test]
-    fn graph_store_records_the_typed_branch_arm_and_marks_the_selected_edge() {
-        let store = TraceLashlangGraphStore::default();
-
-        append_at(&store, started_event("start"), 1_000);
-        append_at(
-            &store,
-            TraceLanguageExecution {
-                event_key: "branch".to_string(),
-                identity: identity(),
-                payload: TraceLanguageExecutionPayload::BranchSelected {
-                    node_id: "branch".to_string(),
-                    occurrence: 1,
-                    edge_id: "then-edge".to_string(),
-                    selected: TraceBranchSelection::Then,
-                },
-            },
-            1_100,
-        );
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        let branch = graph
-            .nodes
-            .iter()
-            .find(|node| node.id == "branch")
-            .expect("branch node");
-        let serialized = serde_json::to_value(branch).expect("serialize branch node");
-        assert_eq!(serialized["branch_selection"], serde_json::json!("then"));
-        // The selection rides beside a flattened observation, so pin the
-        // round trip rather than only the encode.
-        assert_eq!(
-            &serde_json::from_value::<TraceLashlangGraphNode>(serialized)
-                .expect("decode branch node"),
-            branch,
-        );
-        assert_eq!(
-            graph
-                .edges
-                .iter()
-                .find(|edge| edge.id == "then-edge")
-                .map(|edge| edge.selection),
-            Some(TraceLashlangEdgeSelection::Selected)
-        );
-        // The sibling edge stays unmarked: no live producer labels a branch
-        // arm, so the reducer cannot tell an unselected arm from an ordinary
-        // sequencing or data-dependency edge leaving the same node (ADR 0037).
-        assert_eq!(
-            graph
-                .edges
-                .iter()
-                .find(|edge| edge.id == "else-edge")
-                .map(|edge| edge.selection),
-            Some(TraceLashlangEdgeSelection::Unknown)
-        );
-    }
-
-    #[test]
-    fn graph_store_records_child_links() {
-        let store = TraceLashlangGraphStore::default();
-
-        append_at(
-            &store,
-            TraceLanguageExecution {
-                event_key: "child".to_string(),
-                identity: identity(),
-                payload: TraceLanguageExecutionPayload::ChildStarted {
-                    parent_node_id: "spawn".to_string(),
-                    occurrence: 1,
-                    child: TraceLanguageChildExecution {
-                        scope: TraceRuntimeScope::new("session-1"),
-                        subject: TraceRuntimeSubject::Process {
-                            process_id: ProcessId::from("process:child".to_string()),
-                        },
-                        module_ref: Some("module-1".to_string()),
-                        entry_ref: Some("process:0".to_string()),
-                        entry_name: Some("child".to_string()),
-                    },
-                },
-            },
-            1_000,
-        );
-
-        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-        assert_eq!(graph.children[0].parent_node_id, "spawn");
-        assert_eq!(graph.children[0].child_graph_key, "process:process:child");
-        assert_eq!(graph.children[0].child_entry_name.as_deref(), Some("child"));
-    }
-
-    #[test]
-    fn regression_fold_is_independent_of_the_three_temporal_arrival_orders() {
-        let orders = [
-            vec![
-                (started_event("seed"), 900),
-                (node_started("node-start", 1), 1_000),
-                (node_completed("node-complete", 1), 1_250),
-            ],
-            vec![
-                (node_started("node-start", 1), 1_000),
-                (node_completed("node-complete", 1), 1_250),
-                (started_event("seed"), 900),
-            ],
-            vec![
-                (node_completed("node-complete", 1), 1_250),
-                (node_started("node-start", 1), 1_000),
-                (started_event("seed"), 900),
-            ],
-        ];
-        let snapshots = orders.map(|events| {
-            let store = TraceLashlangGraphStore::default();
-            for (event, timestamp) in events {
-                append_at(&store, event, timestamp);
-            }
-            serde_json::to_vec(&store.graph(EFFECT_GRAPH_KEY).expect("graph"))
-                .expect("serialize graph")
-        });
-
-        assert_eq!(snapshots[0], snapshots[1]);
-        assert_eq!(snapshots[0], snapshots[2]);
-    }
-
-    #[test]
-    fn missing_and_late_seed_are_explicit_and_do_not_change_observations() {
-        let events = [
-            record_at(node_started("start", 1), 1_000),
-            record_at(node_completed("complete", 1), 1_250),
-        ];
-        let missing = TraceLashlangGraphStore::fold(None, &events).expect("fold without map");
-        assert_eq!(
-            missing.completeness,
-            TraceLashlangGraphCompleteness::IncompleteMap
-        );
-
-        let late =
-            TraceLashlangGraphStore::fold(Some(&missing), &[record_at(started_event("seed"), 900)])
-                .expect("late seed");
-        assert_eq!(late.completeness, TraceLashlangGraphCompleteness::Complete);
-        assert!(matches!(
-            late.nodes[0].observation,
-            TraceLashlangNodeObservation::Completed {
-                duration_ms: Some(250),
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn identical_duplicate_is_a_noop_and_conflicting_duplicate_is_typed() {
-        let start = record_at(node_started("publisher-a", 1), 1_000);
-        let mut duplicate = start.clone();
-        let TraceEvent::LanguageExecution { event, .. } = &mut duplicate.event else {
-            unreachable!()
-        };
-        event.event_key = "publisher-b".to_string();
-        let deduplicated =
-            TraceLashlangGraphStore::fold(None, &[start.clone(), duplicate]).expect("duplicate");
-        assert_eq!(deduplicated.history.len(), 1);
-        assert!(deduplicated.conflicts.is_empty());
-
-        let conflict = TraceLashlangGraphStore::fold(
-            None,
-            &[start, record_at(node_started("publisher-c", 1), 1_001)],
-        )
-        .expect("conflict");
-        assert_eq!(conflict.conflicts.len(), 1);
-        assert_eq!(
-            conflict.conflicts[0].kind,
-            TraceLashlangGraphConflictKind::ConflictingDuplicate
-        );
-        assert_eq!(conflict.conflicts[0].variants.len(), 2);
-    }
-
-    #[test]
-    fn terminal_occurrence_never_downgrades_and_next_occurrence_is_visible() {
-        let graph = TraceLashlangGraphStore::fold(
-            None,
-            &[
-                record_at(node_completed("complete-1", 1), 1_250),
-                record_at(node_started("late-start-1", 1), 1_000),
-                record_at(node_started("start-2", 2), 2_000),
-            ],
-        )
-        .expect("fold occurrences");
-        assert!(matches!(
-            graph.nodes[0].observation,
-            TraceLashlangNodeObservation::Running { occurrence: 2, .. }
-        ));
-        assert_eq!(graph.nodes[0].summary.retained_occurrences, 2);
-        assert_eq!(graph.nodes[0].summary.terminal_count, 1);
-    }
-
-    #[test]
-    fn terminal_execution_status_beats_a_conflicting_running_status() {
-        let events = [
-            record_at(
-                execution_finished("terminal", LanguageExecutionStatus::Completed),
-                2_000,
-            ),
-            record_at(
-                execution_finished("running", LanguageExecutionStatus::Running),
-                1_000,
-            ),
-        ];
-        for ordered in [events.clone(), [events[1].clone(), events[0].clone()]] {
-            let graph = TraceLashlangGraphStore::fold(None, &ordered).expect("fold statuses");
-            assert_eq!(graph.status, LanguageExecutionStatus::Completed);
-            assert_eq!(graph.conflicts.len(), 1);
-        }
-    }
-
-    #[test]
-    fn branch_selection_and_terminal_observation_are_distinct_facts() {
-        let selection = TraceLanguageExecution {
-            event_key: "branch".to_string(),
-            identity: identity(),
-            payload: TraceLanguageExecutionPayload::BranchSelected {
-                node_id: "branch".to_string(),
-                occurrence: 1,
-                edge_id: "then-edge".to_string(),
-                selected: TraceBranchSelection::Then,
-            },
-        };
-        let graph = TraceLashlangGraphStore::fold(
-            None,
-            &[
-                record_at(started_event("seed"), 900),
-                record_at(selection, 1_100),
-                record_at(node_completed("complete", 1), 1_200),
-            ],
-        )
-        .expect("fold branch facts");
-        assert!(graph.conflicts.is_empty());
-        assert_eq!(
-            graph.nodes[0].branch_selection,
-            Some(TraceBranchSelection::Then)
-        );
-        assert!(graph.nodes[0].observation.is_terminal());
-    }
-
-    #[test]
-    fn every_permutation_and_incremental_partition_is_byte_identical() {
-        let events = [
-            record_at(started_event("seed"), 900),
-            record_at(node_started("start", 1), 1_000),
-            record_at(node_completed("complete", 1), 1_250),
-        ];
-        let permutations = [
-            [0, 1, 2],
-            [0, 2, 1],
-            [1, 0, 2],
-            [1, 2, 0],
-            [2, 0, 1],
-            [2, 1, 0],
-        ];
-        let expected = TraceLashlangGraphStore::fold(None, &events).expect("batch");
-        let expected_bytes = serde_json::to_vec(&expected).expect("serialize batch");
-        for permutation in permutations {
-            let batch = permutation.map(|index| events[index].clone());
-            let actual = TraceLashlangGraphStore::fold(None, &batch).expect("permuted batch");
-            assert_eq!(
-                serde_json::to_vec(&actual).expect("serialize permutation"),
-                expected_bytes
-            );
-        }
-        for split in 1..events.len() {
-            let first =
-                TraceLashlangGraphStore::fold(None, &events[..split]).expect("first partition");
-            let second = TraceLashlangGraphStore::fold(Some(&first), &events[split..])
-                .expect("second partition");
-            assert_eq!(
-                serde_json::to_vec(&second).expect("serialize incremental"),
-                expected_bytes
-            );
-        }
-    }
-
-    #[test]
-    fn history_is_bounded_with_a_canonical_truncation_watermark() {
-        let events = [
-            record_at(node_started("one", 1), 1_000),
-            record_at(node_started("two", 2), 2_000),
-            record_at(node_started("three", 3), 3_000),
-        ];
-        let batch = TraceLashlangGraphStore::fold_with_history_limit(None, &events, 2)
-            .expect("bounded batch");
-        assert_eq!(batch.history.len(), 2);
-        assert_eq!(
-            batch
-                .truncation_watermark
-                .as_ref()
-                .and_then(|watermark| watermark.occurrence),
-            Some(1)
-        );
-        let first = TraceLashlangGraphStore::fold_with_history_limit(None, &events[1..], 2)
-            .expect("high identities first");
-        let incremental =
-            TraceLashlangGraphStore::fold_with_history_limit(Some(&first), &events[..1], 2)
-                .expect("late truncated identity");
-        assert_eq!(
-            serde_json::to_vec(&incremental).expect("serialize incremental"),
-            serde_json::to_vec(&batch).expect("serialize batch")
-        );
-    }
-
-    #[test]
-    fn late_static_map_below_the_watermark_matches_batch_folding() {
-        let seed = record_at(started_event("seed"), 900);
-        let node_events = [
-            record_at(node_started("one", 1), 1_000),
-            record_at(node_started("two", 2), 2_000),
-        ];
-        let batch = TraceLashlangGraphStore::fold_with_history_limit(
-            None,
-            &[seed.clone(), node_events[0].clone(), node_events[1].clone()],
-            1,
-        )
-        .expect("bounded batch");
-        let first = TraceLashlangGraphStore::fold_with_history_limit(None, &node_events, 1)
-            .expect("node events first");
-        let incremental =
-            TraceLashlangGraphStore::fold_with_history_limit(Some(&first), &[seed], 1)
-                .expect("late static map");
-
-        assert_eq!(incremental, batch);
-        assert_eq!(
-            incremental.completeness,
-            TraceLashlangGraphCompleteness::Complete
-        );
-    }
-
-    #[test]
-    fn terminal_graph_status_survives_history_truncation() {
-        let finished = record_at(
-            execution_finished("finished", LanguageExecutionStatus::Completed),
-            3_000,
-        );
-        let node_events = [
-            record_at(node_started("one", 1), 1_000),
-            record_at(node_started("two", 2), 2_000),
-        ];
-        let batch = TraceLashlangGraphStore::fold_with_history_limit(
-            None,
-            &[
-                finished.clone(),
-                node_events[0].clone(),
-                node_events[1].clone(),
-            ],
-            1,
-        )
-        .expect("bounded batch");
-        let first = TraceLashlangGraphStore::fold_with_history_limit(None, &node_events, 1)
-            .expect("node events first");
-        let incremental =
-            TraceLashlangGraphStore::fold_with_history_limit(Some(&first), &[finished], 1)
-                .expect("late terminal status");
-
-        assert_eq!(incremental, batch);
-        assert_eq!(incremental.status, LanguageExecutionStatus::Completed);
-    }
-
-    #[test]
-    fn terminal_classification_is_exhaustive() {
-        assert!(!LanguageExecutionStatus::Running.is_terminal());
-        assert!(LanguageExecutionStatus::Completed.is_terminal());
-        assert!(LanguageExecutionStatus::Failed.is_terminal());
-        assert!(LanguageExecutionStatus::Cancelled.is_terminal());
-
-        assert!(!TraceLashlangNodeObservation::Unobserved.is_terminal());
-        assert!(
-            !TraceLashlangNodeObservation::Running {
-                occurrence: 1,
-                start: Utc.timestamp_millis_opt(1).single().expect("timestamp"),
-            }
-            .is_terminal()
-        );
-        assert!(
-            TraceLashlangNodeObservation::Completed {
-                occurrence: 1,
-                start: None,
-                end: Utc.timestamp_millis_opt(2).single().expect("timestamp"),
-                duration_ms: None,
-            }
-            .is_terminal()
-        );
-        assert!(
-            TraceLashlangNodeObservation::Failed {
-                occurrence: 1,
-                start: None,
-                end: Utc.timestamp_millis_opt(2).single().expect("timestamp"),
-                duration_ms: None,
-                error: "failed".to_string(),
-            }
-            .is_terminal()
-        );
-    }
-
-    #[test]
-    fn graph_decode_checks_version_before_shape_and_tolerates_additive_fields() {
-        let graph =
-            TraceLashlangGraphStore::fold(None, &[record_at(node_started("start", 1), 1_000)])
-                .expect("graph");
-        let mut value = serde_json::to_value(&graph).expect("encode graph");
-        value["future_field"] = serde_json::json!(true);
-        assert_eq!(
-            serde_json::from_value::<TraceLashlangGraph>(value.clone()).expect("additive field"),
-            graph
-        );
-        value["schema_version"] = serde_json::json!(TRACE_SCHEMA_VERSION - 1);
-        value["completeness"] = serde_json::json!("future_variant");
-        let error = serde_json::from_value::<TraceLashlangGraph>(value)
-            .expect_err("predecessor must be refused before shape");
-        assert!(
-            error
-                .to_string()
-                .contains("unsupported trace schema version")
-        );
-    }
-
-    #[test]
-    fn graph_decode_refuses_unknown_closed_variant_at_the_current_version() {
-        let graph =
-            TraceLashlangGraphStore::fold(None, &[record_at(node_started("start", 1), 1_000)])
-                .expect("graph");
-        let value = serde_json::to_value(graph).expect("encode graph");
-        for (field, changed) in [
-            ("completeness", {
-                let mut changed = value.clone();
-                changed["completeness"] = serde_json::json!("future_variant");
-                changed
-            }),
-            ("graph status", {
-                let mut changed = value.clone();
-                changed["status"] = serde_json::json!("future_variant");
-                changed
-            }),
-            ("node observation status", {
-                let mut changed = value.clone();
-                changed["nodes"][0]["status"] = serde_json::json!("future_variant");
-                changed
-            }),
-        ] {
-            let error = serde_json::from_value::<TraceLashlangGraph>(changed)
-                .expect_err(&format!("unknown {field} variant must be refused"));
-            assert!(
-                error.to_string().contains("future_variant"),
-                "unexpected {field} error: {error}"
-            );
-        }
-    }
-}
+mod tests;

@@ -8,7 +8,7 @@ use crate::{
     TraceRuntimeSubject, ensure_trace_schema_version,
 };
 
-/// Default number of canonical language-execution events retained per graph.
+/// Default number of occurrence histories retained for each graph node.
 pub const DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT: usize = 256;
 
 /// Whether the static execution map was available to the fold.
@@ -89,8 +89,7 @@ pub struct TraceLashlangGraph {
     pub edges: Vec<TraceLashlangGraphEdge>,
     pub children: Vec<TraceLashlangGraphChildLink>,
     pub history_limit: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub truncation_watermark: Option<TraceLashlangEventIdentity>,
+    pub node_retention: Vec<TraceLashlangNodeRetention>,
     pub conflicts: Vec<TraceLashlangGraphConflict>,
     pub history: Vec<TraceLashlangGraphHistoryEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,7 +113,7 @@ struct TraceLashlangGraphWire {
     edges: Vec<TraceLashlangGraphEdge>,
     children: Vec<TraceLashlangGraphChildLink>,
     history_limit: usize,
-    truncation_watermark: Option<TraceLashlangEventIdentity>,
+    node_retention: Vec<TraceLashlangNodeRetention>,
     conflicts: Vec<TraceLashlangGraphConflict>,
     history: Vec<TraceLashlangGraphHistoryEvent>,
     execution_map: Option<LanguageExecutionMap>,
@@ -150,12 +149,25 @@ impl<'de> Deserialize<'de> for TraceLashlangGraph {
             edges: wire.edges,
             children: wire.children,
             history_limit: wire.history_limit,
-            truncation_watermark: wire.truncation_watermark,
+            node_retention: wire.node_retention,
             conflicts: wire.conflicts,
             history: wire.history,
             execution_map: wire.execution_map,
         })
     }
+}
+
+/// Aggregate facts for occurrences evicted from one node's bounded history.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceLashlangNodeRetention {
+    pub node_id: String,
+    pub truncation_watermark: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_node: Option<Box<TraceLashlangGraphNode>>,
+    pub watermark_history: Vec<TraceLashlangGraphHistoryEvent>,
+    pub node: TraceLashlangGraphNode,
+    pub selected_edge_ids: Vec<String>,
+    pub children: Vec<TraceLashlangGraphChildLink>,
 }
 
 /// One occurrence's observed Lashlang graph node state.
@@ -283,7 +295,12 @@ pub struct TraceLashlangGraphEdge {
 pub struct TraceLashlangGraphChildLink {
     pub parent_graph_key: String,
     pub parent_node_id: String,
-    pub child_graph_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_graph_key: Option<String>,
+    pub child_process_id: lash_sansio::ProcessId,
+    pub child_incarnation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_module_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

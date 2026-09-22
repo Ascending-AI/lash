@@ -722,12 +722,6 @@ IDENTIFIER_RENAME_BASELINES = {
 # must not merge independently and publish the reserved version without the
 # pinned upper-branch shape.
 STACKED_VERSION_BASELINES = {
-    # Trace schema 25 is the one bump reserved by FIG-3460 for the atomic trace
-    # cutover. FIG-3461 adds replay-stable observation identity and the bounded
-    # fold on the upper branch under this pinned reviewed shape.
-    "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
-        "sha256:b4178b763c868cbcb024ae6934f7592b44049d466aa6c581cf3e881614a74c09"
-    ),
     # Protocol window 54 retires the window-53 pin. Layer 1 reserves 54;
     # FIG-1944 inline sources, FIG-2000 slot-free bodies, and FIG-2357 retained
     # host capability snapshots form one atomic train with this final shape.

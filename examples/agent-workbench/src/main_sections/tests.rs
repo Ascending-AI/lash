@@ -193,7 +193,7 @@ fn test_graph(
         edges: Vec::new(),
         children,
         history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
-        truncation_watermark: None,
+        node_retention: Vec::new(),
         conflicts: Vec::new(),
         history: Vec::new(),
         execution_map: None,
@@ -385,9 +385,9 @@ fn lashlang_graph_store_builds_graph_state() {
             occurrence: 1,
             child: TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: ProcessId::from("p2"),
-                },
+                process_id: ProcessId::from("p2"),
+                incarnation: 1,
+                attempt: Some(1),
                 module_ref: Some("m1".to_string()),
                 entry_ref: Some("r2:1".to_string()),
                 entry_name: Some("child".to_string()),
@@ -398,7 +398,10 @@ fn lashlang_graph_store_builds_graph_state() {
     let graph = store.graph("process:p1").expect("graph");
     assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);
     assert_eq!(graph.children.len(), 1);
-    assert_eq!(graph.children[0].child_graph_key, "process:p2");
+    assert_eq!(
+        graph.children[0].child_graph_key.as_deref(),
+        Some("process:p2:incarnation:1:attempt:1")
+    );
     assert_eq!(
         graph
             .edges

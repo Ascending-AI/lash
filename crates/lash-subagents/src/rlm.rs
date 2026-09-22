@@ -81,12 +81,16 @@ impl RlmSubagentToolsProvider {
             "subagent",
             Some("spawn".to_string()),
         ));
-        context
+        let child = context
             .start_process(request)
             .await
             .map_err(|err| format!("failed to start subagent process: {err}"))?;
-        context
-            .emit_child_process_started(prepared.process_id.clone(), Some("subagent".to_string()));
+        context.emit_child_process_started(
+            child.process_id,
+            child.incarnation,
+            None,
+            Some("subagent".to_string()),
+        );
         let output = context
             .await_process(&prepared.process_id)
             .await
