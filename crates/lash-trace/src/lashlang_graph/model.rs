@@ -2,9 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    TRACE_SCHEMA_VERSION, TraceBranchSelection, TraceLabelMetadata, TraceLanguageExecution,
-    TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity as LanguageIdentity,
-    TraceLanguageExecutionMap as LanguageExecutionMap,
+    TraceBranchSelection, TraceLabelMetadata, TraceLanguageExecution,
+    TraceLanguageExecutionGeneration, TraceLanguageExecutionMap as LanguageExecutionMap,
     TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRuntimeScope,
     TraceRuntimeSubject, ensure_trace_schema_version,
 };

@@ -56,9 +56,7 @@ pub fn trace_lashlang_process_map(
 ) -> Option<TraceLanguageExecutionMap> {
     let graph =
         lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
-    let Some(process) = graph.process(process_name) else {
-        return None;
-    };
+    let process = graph.process(process_name)?;
     Some(trace_workflow_subgraph(&process.body))
 }
 

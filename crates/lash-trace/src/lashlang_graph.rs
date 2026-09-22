@@ -3,16 +3,15 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use lash_sansio::sync::MutexExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    TRACE_SCHEMA_VERSION, TraceBranchSelection, TraceEvent, TraceLabelMetadata,
-    TraceLanguageExecution, TraceLanguageExecutionGeneration,
+    TRACE_SCHEMA_VERSION, TraceEvent, TraceLanguageExecution,
     TraceLanguageExecutionIdentity as LanguageIdentity,
     TraceLanguageExecutionMap as LanguageExecutionMap, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeSubject, TraceSink, TraceSinkError, ensure_trace_schema_version,
+    TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord, TraceSink,
+    TraceSinkError,
 };
 
 mod model;
@@ -78,6 +77,10 @@ impl TraceLashlangGraphStore {
 }
 
 impl TraceSink for TraceLashlangGraphStore {
+    #[expect(
+        clippy::expect_used,
+        reason = "the event graph key is selected from this same single-record fold input"
+    )]
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
         let TraceEvent::LanguageExecution { language, event } = &record.event else {
             return Ok(());
@@ -254,6 +257,10 @@ pub fn fold_lashlang_graph(
     ))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller rejects an empty fold before selecting the canonical identity"
+)]
 fn canonical_language_identity(
     previous: Option<&TraceLashlangGraph>,
     incoming: &[(DateTime<Utc>, TraceLanguageExecution)],
@@ -325,8 +332,7 @@ fn materialize_graph(
             );
         }
     }
-    let mut occurrences =
-        BTreeMap::<(String, String, u64, Option<u32>, Option<u64>), OccurrenceFold>::new();
+    let mut occurrences = BTreeMap::<OccurrenceKey, OccurrenceFold>::new();
     let mut children = BTreeMap::new();
     for item in &history {
         match &item.event.payload {
@@ -479,6 +485,8 @@ struct OccurrenceFold {
     terminal: Option<OccurrenceTerminal>,
 }
 
+type OccurrenceKey = (String, String, u64, Option<u32>, Option<u64>);
+
 enum OccurrenceTerminal {
     Completed(DateTime<Utc>),
     Failed(DateTime<Utc>, String),
@@ -486,7 +494,7 @@ enum OccurrenceTerminal {
 
 fn apply_occurrences(
     nodes: &mut BTreeMap<(String, String), TraceLashlangGraphNode>,
-    occurrences: &BTreeMap<(String, String, u64, Option<u32>, Option<u64>), OccurrenceFold>,
+    occurrences: &BTreeMap<OccurrenceKey, OccurrenceFold>,
 ) {
     for ((node_id, node_kind), node) in nodes {
         let matching = occurrences
@@ -656,6 +664,10 @@ fn canonical_execution_status(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fold only serializes its own infallible in-memory trace value types"
+)]
 fn canonical_bytes(value: &impl Serialize) -> Vec<u8> {
     serde_json::to_vec(value).expect("trace graph fold values serialize")
 }
@@ -684,7 +696,8 @@ mod tests {
     use super::*;
     use crate::{
         TraceBranchSelection, TraceContext, TraceLabelMetadata, TraceLanguageChildExecution,
-        TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
+        TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceRuntimeScope,
+        TraceRuntimeSubject,
     };
 
     fn identity() -> LanguageIdentity {

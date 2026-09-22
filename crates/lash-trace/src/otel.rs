@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use chrono::{DateTime, Utc};
 use opentelemetry::trace::{
     Span, SpanContext, SpanKind, Status, TraceContextExt, Tracer, TracerProvider,
 };

@@ -116,7 +116,7 @@ impl ProcessExecutionWriteAuthority {
     /// Returns the bound attempt only when this authority names `process_id`.
     pub fn attempt_for(&self, process_id: &ProcessId) -> Option<u32> {
         match self {
-            Self::Lease { lease, attempt } if &lease.process_id == process_id => *attempt,
+            Self::Lease { lease, attempt } if lease.process_id == process_id => *attempt,
             Self::Invocation {
                 process_id: authority_process_id,
                 attempt,
