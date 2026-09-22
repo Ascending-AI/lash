@@ -624,7 +624,7 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
 pub struct ExecutionHostError {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    tool_failure: Option<ExecutionHostToolFailure>,
+    tool_failure: Option<Box<ExecutionHostToolFailure>>,
 }
 
 impl ExecutionHostError {
@@ -644,13 +644,13 @@ impl ExecutionHostError {
     pub fn from_tool_failure(failure: &ToolFailure, replay_key: impl Into<String>) -> Self {
         Self {
             message: failure.message.clone(),
-            tool_failure: Some(ExecutionHostToolFailure {
+            tool_failure: Some(Box::new(ExecutionHostToolFailure {
                 class: failure.class.clone(),
                 code: failure.code.clone(),
                 source: failure.source.clone(),
                 retry: failure.retry.clone(),
                 replay_key: replay_key.into(),
-            }),
+            })),
         }
     }
 
