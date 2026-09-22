@@ -87,7 +87,7 @@ pub fn validate_responses_attachments(
                 {
                     let mime = &attachment_ref.media_type;
                     return Err(LlmTransportError::new(format!("{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"))
-                .with_kind(ProviderFailureKind::Validation).with_adapter_code(TurnFailureCode::StoredAttachmentNotResolved));
+                .with_kind(ProviderFailureKind::Validation).with_lash_code(TurnFailureCode::StoredAttachmentNotResolved));
                 }
 
                 Ok(())
@@ -706,7 +706,7 @@ impl ResponsesStreamState {
             |error| {
                 LlmTransportError::new(format!("Responses stream {error}"))
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_adapter_code(TurnFailureCode::from_wire(error.code()))
+                    .with_lash_code(TurnFailureCode::from_wire(error.code()))
             },
         )
     }

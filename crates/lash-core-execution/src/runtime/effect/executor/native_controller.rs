@@ -43,7 +43,7 @@ use crate::ProcessId;
 use crate::SessionId;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use lash_sansio::sync::{MutexExt, RwLockExt};
 use tokio::sync::Notify;
@@ -53,13 +53,20 @@ use super::super::await_events::AwaitEventRegistry;
 use super::super::envelope::{
     ProcessCommand, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome,
 };
+use super::super::group::EffectGroupDrainBudget;
 use super::super::group::{
     EffectGroupHandle, EffectGroupRecordAccessor, GroupSettlement, GroupWakePolicy, LoserPolicy,
-    RuntimeEffectGroup, await_cancelled_error, child_cancelled_error, closed_group_error,
-    exhausted_group_error, fence_reopen, group_shape_error,
+    RankedGroupSettlement, RuntimeEffectGroup, await_cancelled_error, child_cancelled_error,
+    closed_group_error, exhausted_group_error, fence_reopen, group_shape_error,
+};
+use super::super::group_closing::{
+    GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
+    StoreEffectGroupClosing,
 };
 use super::super::group_drain::GroupExecutors;
-use super::super::group_journal::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
+use super::super::group_journal::{
+    EffectGroupChildCommitOutcome, EffectGroupLifecycle, FinalizationStep, GroupChildFinalCommit,
+};
 use super::control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
     ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
@@ -298,6 +305,15 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         NativeEffectGroups::await_next_settlement(&self.groups, handle, cancel).await
     }
 
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        self.groups.registered_executors()?;
+        NativeEffectGroups::read_settlement(&self.groups, group_key, rank)
+    }
+
     async fn close_effect_group(
         &self,
         handle: EffectGroupHandle,
@@ -353,6 +369,21 @@ impl NativeRuntimeEffectController {
             groups: Arc::new(NativeEffectGroups::default()),
             process_lifetime_completion_keys_enabled: false,
         }
+    }
+
+    /// How long group finalization waits on a cancel-decided child's attempt
+    /// body after its decision committed (ADR 0099 §7). A builder-time option
+    /// like the SQL tiers' `*_EffectReplayOptions::drain_budget`: operational,
+    /// never semantic.
+    ///
+    /// The groups table is empty at construction, so replacing it moves the
+    /// budget and nothing else.
+    pub fn drain_budget(mut self, budget: EffectGroupDrainBudget) -> Self {
+        self.groups = Arc::new(NativeEffectGroups {
+            drain_budget: budget,
+            ..NativeEffectGroups::default()
+        });
+        self
     }
 
     /// Opt into externally routable keys that remain valid only while this
@@ -474,6 +505,10 @@ pub(crate) struct NativeEffectGroups {
     /// the host that owns the runners. Absent until then, which is the same
     /// thing as this controller not supporting effect groups.
     executors: std::sync::OnceLock<Arc<dyn GroupExecutors>>,
+    /// How long finalization waits on a cancel-decided child's attempt body
+    /// after the decision committed — the same §7 bound the SQL tiers take at
+    /// construction, set here by the controller builder.
+    drain_budget: crate::runtime::effect::group::EffectGroupDrainBudget,
     /// The final record of every reaped group, so the reference tier's own
     /// tests can observe a completed group's settlement order. Test-only, in the
     /// style of `AwaitEventRegistry`'s cache counter: production keeps nothing
@@ -516,6 +551,11 @@ struct NativeEffectGroup {
     positions: HashMap<String, usize>,
     state: Mutex<NativeEffectGroupState>,
     settled: Notify,
+    /// Fired when a child task *returns* — not when it settles, which `settled`
+    /// already covers. Finalization's step-1 wait blocks on this: a
+    /// cancel-decided task whose `record` early-returns still ends here, which
+    /// is the signal the drain budget is a bound on.
+    task_finished: Notify,
 }
 
 /// Which side of a child's §4 point committed, matching the durable tiers'
@@ -561,9 +601,22 @@ struct NativeEffectGroupState {
     /// makes append order sequence order, so rank *n* is `order[n - 1]` and the
     /// rank read is an index rather than a sort.
     order: Vec<NativeSettlement>,
-    /// The disposition in force, which a close may narrow but never widen.
-    effective: LoserPolicy,
+    /// The group's lifecycle, mirroring the durable tiers' `lifecycle` column
+    /// (ADR 0099 §7): `live` while children may claim, `closing` once close is
+    /// recorded — written here *before* any cancel decision is seated, the same
+    /// ordering §7 makes normative — and `settled` once finalization finished.
+    /// The closing disposition it carries is the effective one, narrowed
+    /// cumulatively like the `effective` field it replaces.
+    lifecycle: EffectGroupLifecycle,
     closed: bool,
+    /// Positions this controller dispatched that have not returned — the set
+    /// finalization step 1 waits on: a `RunToCompletion` member of it is a
+    /// protected obligation, a cancel-decided one is waited on only up to its
+    /// drain budget.
+    running: HashSet<usize>,
+    /// Position → the instant its cancel decision committed. The drain budget
+    /// is measured from the decision, per §7, not from the close.
+    decided_at: HashMap<usize, Instant>,
 }
 
 struct NativeSettlement {
@@ -622,10 +675,13 @@ impl NativeEffectGroup {
                 commits: HashMap::new(),
                 drained: HashSet::new(),
                 order: Vec::new(),
-                effective: group.loser_disposition(),
+                lifecycle: EffectGroupLifecycle::Live,
                 closed: false,
+                running: HashSet::new(),
+                decided_at: HashMap::new(),
             }),
             settled: Notify::new(),
+            task_finished: Notify::new(),
             tasks: std::sync::Mutex::new(tokio::task::JoinSet::new()),
         }
     }
@@ -780,6 +836,9 @@ impl NativeEffectGroups {
             let group_key = Arc::clone(&group_key);
             let cancel = state.cancel.child_token();
             let task_owner = Arc::clone(&state);
+            // Registered before the task exists, so a fast-finishing child
+            // cannot remove a position that was never inserted.
+            state.state.lock_recover().running.insert(position);
             let child_task = tracing::Instrument::instrument(
                 async move {
                     let execution = executor.execute(child);
@@ -803,6 +862,14 @@ impl NativeEffectGroups {
                         outcome = &mut execution => outcome,
                     };
                     Self::record(&groups, &group_key, &state, position, outcome);
+                    {
+                        // Removed before the notify so a finalizer woken by it
+                        // reads the task as finished rather than still running.
+                        let mut inner = state.state.lock_recover();
+                        inner.running.remove(&position);
+                        inner.decided_at.remove(&position);
+                    }
+                    state.task_finished.notify_waiters();
                 },
                 tracing::Span::current(),
             );
@@ -853,7 +920,12 @@ impl NativeEffectGroups {
                 sequence,
                 outcome,
             });
-            inner.closed && inner.order.len() == state.children
+            // Retirement additionally waits on the recorded lifecycle: a
+            // closed-and-complete group whose finalizer has not yet written
+            // `settled` still owns that write.
+            inner.closed
+                && inner.order.len() == state.children
+                && matches!(inner.lifecycle, EffectGroupLifecycle::Settled { .. })
         };
         state.settled.notify_waiters();
         if complete {
@@ -905,6 +977,41 @@ impl NativeEffectGroups {
         }
     }
 
+    /// Serves the settlement recorded at `rank` without touching any caller
+    /// cursor (ADR 0099 §8): the read a §6 incorporation prefix makes, which
+    /// needs the child's durable identity rather than its declared position.
+    fn read_settlement(
+        groups: &Arc<Self>,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        let state = groups.lookup(group_key)?;
+        let inner = state.state.lock_recover();
+        let index = usize::try_from(rank)
+            .ok()
+            .and_then(|rank| rank.checked_sub(1));
+        let Some(settled) = index.and_then(|index| inner.order.get(index)) else {
+            return Ok(None);
+        };
+        let child_replay_key = state
+            .positions
+            .iter()
+            .find(|(_, position)| **position == settled.position)
+            .map(|(replay_key, _)| replay_key.clone())
+            .ok_or_else(|| {
+                group_shape_error(format!(
+                    "durable effect group {group_key} recorded a settlement at position \
+                     {} that no member replay key names",
+                    settled.position
+                ))
+            })?;
+        Ok(Some(RankedGroupSettlement {
+            sequence: settled.sequence,
+            child_replay_key,
+            outcome: settled.outcome.clone(),
+        }))
+    }
+
     /// Releases the caller's interest, applying the disposition the close
     /// resolves to.
     fn close(
@@ -919,16 +1026,34 @@ impl NativeEffectGroups {
         let Some(state) = groups.get(handle.group_key()) else {
             return Ok(());
         };
-        let (cancelled, complete) = {
+        let cancelled = {
             let mut inner = state.state.lock_recover();
+            // The lifecycle is written *before* any cancel decision is seated —
+            // the same ordering ADR 0099 §7 makes normative on the durable
+            // tiers, where `closing` is a journal fact rather than a flag —
+            // so a reader can never observe a decision whose closing was not
+            // already recorded.
+            let recorded = inner
+                .lifecycle
+                .closing_disposition()
+                .unwrap_or(state.declared);
             // Resolved against the disposition in force rather than the declared
             // one, so narrowing is cumulative: a group closed as `Cancel` cannot
             // be reopened to `RunToCompletion` by a second close either.
-            let effective = LoserPolicy::resolve_close(inner.effective, requested)?;
-            inner.effective = effective;
+            let effective = LoserPolicy::resolve_close(recorded, requested)?;
+            let finalized = match inner.lifecycle {
+                EffectGroupLifecycle::Settled { .. } => return Ok(()),
+                EffectGroupLifecycle::Live => FinalizationStep::NONE,
+                EffectGroupLifecycle::Closing { finalized, .. } => finalized,
+            };
+            inner.lifecycle = EffectGroupLifecycle::Closing {
+                disposition: effective,
+                finalized,
+            };
             inner.closed = true;
             let cancelled = matches!(effective, LoserPolicy::Cancel);
             if cancelled {
+                let decided = Instant::now();
                 // Each cancellation is decided and journaled as that child's
                 // terminal, here and now rather than whenever the task notices,
                 // so a caller that has closed under `Cancel` can read every
@@ -942,6 +1067,12 @@ impl NativeEffectGroups {
                     inner
                         .decisions
                         .insert(position, NativeChildDecision::Cancelled);
+                    // The drain budget is measured from the decision, per §7:
+                    // the rank this seat owns is already durable, and the
+                    // budget bounds how long finalization waits on the body.
+                    if inner.running.contains(&position) {
+                        inner.decided_at.entry(position).or_insert(decided);
+                    }
                     inner.next_sequence += 1;
                     let sequence = inner.next_sequence;
                     inner.order.push(NativeSettlement {
@@ -951,16 +1082,190 @@ impl NativeEffectGroups {
                     });
                 }
             }
-            (cancelled, inner.order.len() == state.children)
+            cancelled
         };
         if cancelled {
             state.cancel.cancel();
         }
         state.settled.notify_waiters();
-        if complete {
-            groups.reap(handle.group_key(), &state);
-        }
+        // Releasing caller interest never waits on finalization, but the
+        // finalizer is this host's to drive — spawned here so a `close` that
+        // returns cannot leave the recorded `closing` unworked.
+        let finalize_groups = Arc::clone(groups);
+        let finalize_key = handle.group_key().to_string();
+        crate::task::spawn(async move {
+            match NativeEffectGroups::finalize(
+                &finalize_groups,
+                &finalize_key,
+                &GroupOnlyFinalization,
+            )
+            .await
+            {
+                Ok(report) => {
+                    tracing::debug!(group_key = %finalize_key, ?report, "group finalization report")
+                }
+                Err(error) => tracing::warn!(
+                    group_key = %finalize_key,
+                    %error,
+                    "group finalization failed; `closing` remains recorded for a \
+                     resume to retry"
+                ),
+            }
+        });
         Ok(())
+    }
+
+    /// The in-memory twin of the SQL tiers' four-step finalization (ADR 0099
+    /// §7): same cursor, same ordering, same guarded retire — the only
+    /// difference is that the lifecycle lives under the group's own lock
+    /// instead of a `lifecycle` column, so the CAS is a read-modify-write
+    /// taken under it.
+    ///
+    /// Step 1 waits on this controller's running children through
+    /// `task_finished`: a `RunToCompletion` child unbounded (a protected
+    /// obligation), a cancel-decided one only up to the drain budget measured
+    /// from its decision. Steps 2 and 3 are the opener's, through
+    /// `steps`. Step 4 writes `settled` and reaps through the same guarded
+    /// check every other path uses.
+    async fn finalize(
+        groups: &Arc<Self>,
+        group_key: &str,
+        steps: &dyn OpenerFinalizationSteps,
+    ) -> Result<GroupFinalizationReport, RuntimeEffectControllerError> {
+        use crate::runtime::effect::GroupFinalizationReport as Report;
+        let Some(state) = groups.get(group_key) else {
+            // A group this controller does not hold was never opened or is
+            // already reaped — either way there is nothing left to finalize.
+            return Ok(Report::Settled {
+                group_key: group_key.to_string(),
+            });
+        };
+        loop {
+            let step = {
+                let inner = state.state.lock_recover();
+                match inner.lifecycle {
+                    EffectGroupLifecycle::Live => {
+                        return Err(group_shape_error(format!(
+                            "durable effect group {group_key} is live; only a \
+                             group whose close is recorded can be finalized"
+                        )));
+                    }
+                    EffectGroupLifecycle::Settled { .. } => {
+                        return Ok(Report::Settled {
+                            group_key: group_key.to_string(),
+                        });
+                    }
+                    EffectGroupLifecycle::Closing { finalized, .. } => finalized.completed(),
+                }
+            };
+            match step {
+                0 => {
+                    Self::await_local_obligations(&state, groups.drain_budget.duration()).await;
+                    let unsettled = {
+                        let inner = state.state.lock_recover();
+                        state.children - inner.order.len()
+                    };
+                    if unsettled != 0 {
+                        return Ok(Report::Pending {
+                            group_key: group_key.to_string(),
+                            unsettled,
+                        });
+                    }
+                    Self::record_finalization_step(&state, 0);
+                }
+                1 => {
+                    steps.commit_outcome_and_accounting(group_key).await?;
+                    Self::record_finalization_step(&state, 1);
+                }
+                2 => {
+                    steps.record_parent_end(group_key).await?;
+                    Self::record_finalization_step(&state, 2);
+                }
+                _ => {
+                    {
+                        let mut inner = state.state.lock_recover();
+                        if let EffectGroupLifecycle::Closing { disposition, .. } = inner.lifecycle {
+                            inner.lifecycle = EffectGroupLifecycle::settled(disposition);
+                        }
+                    }
+                    groups.reap(group_key, &state);
+                    return Ok(Report::Settled {
+                        group_key: group_key.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Record that finalization step `completed` (0-indexed) finished: advance
+    /// the cursor under the group lock, but only while it still reads
+    /// `completed` — a racing finalizer's further-along cursor is kept, which
+    /// is the in-memory analogue of the SQL tiers' guarded CAS returning the
+    /// value now durable.
+    fn record_finalization_step(state: &Arc<NativeEffectGroup>, completed: u8) {
+        let mut inner = state.state.lock_recover();
+        if let EffectGroupLifecycle::Closing {
+            disposition,
+            finalized,
+        } = inner.lifecycle
+            && finalized.completed() == completed
+            && let Some(next) = finalized.next()
+        {
+            inner.lifecycle = EffectGroupLifecycle::Closing {
+                disposition,
+                finalized: next,
+            };
+        }
+    }
+
+    /// The step-1 wait, on `task_finished` rather than a fixed sleep: a
+    /// cancel-decided task is awaited only up to `budget` measured from its
+    /// decision, and a `RunToCompletion` task — this controller's protected
+    /// obligation — without bound. Recomputed on every wake, so a body that
+    /// returned early stops being waited for the moment its notify lands.
+    async fn await_local_obligations(state: &Arc<NativeEffectGroup>, budget: Duration) {
+        loop {
+            // A fresh `notified()` each pass: a `Notified` that already resolved
+            // stays ready forever, so re-arming the same future would spin
+            // instead of sleeping.
+            let notified = state.task_finished.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let deadline = {
+                let inner = state.state.lock_recover();
+                let now = Instant::now();
+                let mut latest: Option<Instant> = None;
+                let mut waiting = false;
+                for position in &inner.running {
+                    match inner.decided_at.get(position) {
+                        None => waiting = true,
+                        Some(decided_at) => {
+                            let expiry = *decided_at + budget;
+                            if now < expiry {
+                                waiting = true;
+                                latest = Some(latest.map_or(expiry, |so_far| so_far.max(expiry)));
+                            }
+                            // Past its budget: logically cancelled — its seat
+                            // is already recorded, and whatever the body still
+                            // does cannot take it back.
+                        }
+                    }
+                }
+                if !waiting {
+                    return;
+                }
+                latest
+            };
+            match deadline {
+                Some(deadline) => {
+                    tokio::select! {
+                        () = &mut notified => {}
+                        () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {}
+                    }
+                }
+                None => notified.as_mut().await,
+            }
+        }
     }
 
     /// The §4 boundary commit, under the same lock `record` and `close` take:
@@ -1132,7 +1437,9 @@ impl NativeEffectGroups {
             // caller's check must not be retired out from under it.
             Arc::ptr_eq(current, state) && {
                 let inner = current.state.lock_recover();
-                inner.closed && inner.order.len() == current.children
+                inner.closed
+                    && inner.order.len() == current.children
+                    && matches!(inner.lifecycle, EffectGroupLifecycle::Settled { .. })
             }
         }) {
             open.remove(group_key);
@@ -1198,5 +1505,72 @@ impl NativeEffectGroups {
             .iter()
             .map(|settled| (settled.position, settled.sequence, settled.outcome.is_ok()))
             .collect()
+    }
+
+    /// The `closing` groups under `scope` — the set `resume_closing_groups`
+    /// runs. `closing` because a `live` group owes no finalization and a
+    /// `settled` one has none left.
+    fn closing_groups_under(&self, scope: &ExecutionScope) -> Vec<Arc<NativeEffectGroup>> {
+        self.open
+            .read_recover()
+            .values()
+            .filter(|state| {
+                state.scope == *scope
+                    && matches!(
+                        state.state.lock_recover().lifecycle,
+                        EffectGroupLifecycle::Closing { .. }
+                    )
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+/// The [`StoreEffectGroupClosing`] over this tier's in-memory group table —
+/// the same seam the SQL hosts hand out over their driver, so the W9–W12
+/// laws run here too. There is no journal row, so "the durable read" is the
+/// lifecycle under the group's own lock; everything else — cursor order,
+/// budget wait, guarded retire — is identical.
+pub(crate) struct NativeGroupClosing {
+    groups: Arc<NativeEffectGroups>,
+}
+
+impl NativeGroupClosing {
+    pub(crate) fn new(groups: Arc<NativeEffectGroups>) -> Self {
+        Self { groups }
+    }
+}
+
+#[async_trait::async_trait]
+impl StoreEffectGroupClosing for NativeGroupClosing {
+    async fn read_group_lifecycle(
+        &self,
+        group_key: &str,
+    ) -> Result<Option<EffectGroupLifecycle>, RuntimeEffectControllerError> {
+        Ok(self
+            .groups
+            .get(group_key)
+            .map(|state| state.state.lock_recover().lifecycle))
+    }
+
+    async fn finalize_group(
+        &self,
+        group_key: &str,
+        steps: &dyn OpenerFinalizationSteps,
+    ) -> Result<GroupFinalizationReport, RuntimeEffectControllerError> {
+        NativeEffectGroups::finalize(&self.groups, group_key, steps).await
+    }
+
+    async fn resume_closing_groups(
+        &self,
+        scope: &ExecutionScope,
+        steps: &dyn OpenerFinalizationSteps,
+    ) -> Result<Vec<GroupFinalizationReport>, RuntimeEffectControllerError> {
+        let mut reports = Vec::new();
+        for state in self.groups.closing_groups_under(scope) {
+            reports
+                .push(NativeEffectGroups::finalize(&self.groups, &state.group_key, steps).await?);
+        }
+        Ok(reports)
     }
 }

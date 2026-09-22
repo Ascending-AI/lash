@@ -7,6 +7,7 @@ mod envelope;
 #[doc(hidden)]
 pub mod executor;
 mod group;
+pub mod group_closing;
 pub mod group_drain;
 mod group_journal;
 use lash_core_store::effect_identity as identity_types;
@@ -57,8 +58,13 @@ pub use executor::{
     turn_control_binding_id_for_scope,
 };
 pub use group::{
-    EffectGroupHandle, EffectGroupMembership, GroupChildBinding, GroupSettlement, GroupWakePolicy,
-    LoserPolicy, RuntimeEffectGroup, refuse_unhonored_group_membership,
+    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,
+    GroupSettlement, GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement,
+    RuntimeEffectGroup, refuse_unhonored_group_membership,
+};
+pub use group_closing::{
+    GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
+    StoreEffectGroupClosing,
 };
 pub use group_drain::{
     ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,

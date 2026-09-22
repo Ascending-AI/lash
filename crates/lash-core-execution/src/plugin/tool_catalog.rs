@@ -17,8 +17,32 @@ pub struct ToolCatalogContext {
 
 #[derive(Clone, Debug)]
 pub struct PluginAbort {
-    pub code: String,
+    /// The plugin's abort code under its own namespace — never reinterpreted
+    /// into a Lash spelling.
+    pub code: crate::FailureCode,
     pub message: String,
+}
+
+impl PluginAbort {
+    /// Attach the plugin's namespace to the spelling it emitted.
+    ///
+    /// The plugin id is the namespace when it satisfies namespace validation;
+    /// a plugin id that cannot be a namespace falls back to the shared
+    /// `plugin` namespace, keeping the spelling verbatim either way.
+    #[expect(
+        clippy::expect_used,
+        reason = "the literal `plugin` is a fixed valid host-namespace spelling, so validation cannot fail"
+    )]
+    pub fn new(plugin_id: &str, code: impl Into<String>, message: impl Into<String>) -> Self {
+        let namespace = lash_sansio::Namespace::host(plugin_id).unwrap_or_else(|_| {
+            lash_sansio::Namespace::host("plugin").expect("`plugin` is a valid host namespace")
+        });
+        Self {
+            code: crate::FailureCode::foreign(namespace, code)
+                .expect("a validated host namespace is foreign-mintable"),
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]

@@ -758,6 +758,7 @@ mod span_identity_tests {
                 call_id: Some("call_abc".to_string()),
                 name: "read_file".to_string(),
                 args: serde_json::json!({}),
+                issuing_node_id: None,
             },
         );
         assert_eq!(context.graph_node_id.as_deref(), Some("tool:call_abc"));
@@ -914,6 +915,7 @@ mod span_identity_tests {
                 call_id: None,
                 name: "read_file".to_string(),
                 args: serde_json::json!({}),
+                issuing_node_id: None,
             },
         );
         assert_eq!(context.graph_node_id, None);
@@ -963,9 +965,7 @@ mod span_identity_tests {
                     }),
                     error: Some(crate::NormalizedError {
                         class: "rate_limited".to_string(),
-                        provider_code: Some("rate_limit_exceeded".to_string()),
-                        adapter_code: None,
-                        refusal_code: None,
+                        code: Some(crate::FailureCode::provider("rate_limit_exceeded")),
                         http_status: Some(429),
                         provider_request_id: None,
                         retry_after: Some(std::time::Duration::from_millis(250)),
@@ -1002,9 +1002,7 @@ mod span_identity_tests {
             retryable: true,
             kind: crate::ProviderFailureKind::Http,
             raw: None,
-            code: Some(crate::FailureCode::Provider(
-                "rate_limit_exceeded".to_string(),
-            )),
+            code: Some(crate::FailureCode::provider("rate_limit_exceeded")),
             terminal_reason: crate::LlmTerminalReason::ProviderError,
             request_body: None,
             partial_response: None,

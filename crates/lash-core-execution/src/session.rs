@@ -19,6 +19,9 @@ pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
+pub(crate) use execution_context::{
+    attach_process_invocation_correlation, clear_process_invocation_correlation,
+};
 pub use settlement_incorporation::{
     Incorporated, IncorporationLedger, SettlementSource, UsageChargeSink, UsageDeltaIdentity,
 };

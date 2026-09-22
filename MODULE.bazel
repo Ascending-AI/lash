@@ -54,7 +54,35 @@ crate.annotation(
     deps = ["@crates//:aws_lc_sys_build_info"],
     extra_aliased_targets = {"aws_lc_sys_build_info": "aws_lc_sys_build_info"},
     gen_build_script = "off",
+    repositories = ["crates"],
     rustc_flags = ["--cfg=use_bindgen_pregenerated"],
 )
 inject_repo(crate, "aws-lc")
 use_repo(crate, "crates")
+
+runtime_off_sources = use_repo_rule("//tools/bazel:runtime_off_repository.bzl", "runtime_off_sources")
+runtime_off_sources(name = "runtime_off_sources")
+crate.from_cargo(
+    name = "runtime_off_crates",
+    prune_unreachable = True,
+    cargo_lock = "@runtime_off_sources//:sources/witness/Cargo.lock",
+    cargo_toml = "@runtime_off_sources//:sources/witness/Cargo.toml",
+    platform_triples = ["x86_64-unknown-linux-gnu"],
+)
+use_repo(crate, "runtime_off_crates")
+crate.annotation(
+    additive_build_file = "@rules_rs//3rd_party/aws-lc-sys:additive.BUILD.bazel",
+    crate = "aws-lc-sys",
+    deps = ["@runtime_off_crates//:aws_lc_sys_build_info"],
+    extra_aliased_targets = {"aws_lc_sys_build_info": "aws_lc_sys_build_info"},
+    gen_build_script = "off",
+    repositories = ["runtime_off_crates"],
+    rustc_flags = ["--cfg=use_bindgen_pregenerated"],
+)
+
+single_version_override(
+    module_name = "rules_rs",
+    version = "0.0.110",
+    patches = ["//tools/bazel:patches/rules-rs-reachable-features.patch"],
+    patch_strip = 1,
+)

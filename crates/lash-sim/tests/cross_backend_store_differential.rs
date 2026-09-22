@@ -43,6 +43,8 @@ use sqlx::{Connection, PgConnection, PgPool};
 mod attachment_seeding;
 #[path = "cross_backend_store_differential/checkpoint_cases.rs"]
 mod checkpoint_cases;
+#[path = "cross_backend_store_differential/claim_cases.rs"]
+mod claim_cases;
 #[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
 mod coalesced_batch_oracles;
 #[path = "cross_backend_store_differential/corrupt_input_cases.rs"]
@@ -55,6 +57,8 @@ mod generated_surface;
 mod observations;
 #[path = "cross_backend_store_differential/plugin_state_case.rs"]
 mod plugin_state_case;
+#[path = "cross_backend_store_differential/process_event_pages.rs"]
+mod process_event_pages;
 #[path = "cross_backend_store_differential/raw_durable_reader.rs"]
 mod raw_durable_reader;
 #[path = "cross_backend_store_differential/residue.rs"]
@@ -86,6 +90,9 @@ enum CaseName {
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
     SettleClaimBeforeSuccessorReclaim,
+    TurnInputClaimSupersededAfterReclaim,
+    QueuedWorkClaimSupersededAfterReclaim,
+    SameGenerationExactClaimDeferral,
     CheckpointBodiesThenRefOnly,
     CheckpointBodiesThenCleared,
     MissingCheckpointComponentRef,
@@ -132,6 +139,13 @@ impl CaseName {
             Self::SettleClaimBeforeSuccessorReclaim => {
                 "settle_claim_after_session_lease_handoff_before_reclaim"
             }
+            Self::TurnInputClaimSupersededAfterReclaim => {
+                "turn_input_claim_superseded_after_successor_reclaim"
+            }
+            Self::QueuedWorkClaimSupersededAfterReclaim => {
+                "queued_work_claim_superseded_after_successor_reclaim"
+            }
+            Self::SameGenerationExactClaimDeferral => "same_generation_exact_claim_defers",
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
             Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
@@ -208,10 +222,22 @@ enum StoreOperation {
         lease: LeaseSlot,
     },
     AbandonQueuedWorkClaim,
+    /// Re-claim, by exact batch id, work this generation already holds. Every
+    /// backend must report no newly claimed rows — the shared claim planner's
+    /// deferral agreement check (FIG-1065).
+    ClaimHeldBatchById {
+        lease: LeaseSlot,
+    },
+    /// Snapshots the claims a successor-generation reclaim will supersede, so
+    /// a later stale settlement can present the superseded authority.
+    RetainStaleClaims,
     ReleaseSessionLease {
         lease: LeaseSlot,
     },
     CommitStaleTurnInputClaim {
+        expected_head_revision: u64,
+    },
+    CommitStaleQueuedWorkClaim {
         expected_head_revision: u64,
     },
     /// SQLite and PostgreSQL discard the live store/factory and reopen through
@@ -280,9 +306,14 @@ impl StoreOperation {
             Self::ClaimNextTurnInput { .. } => "claim_next_turn_input",
             Self::ClaimQueuedWork { .. } => "claim_queued_work",
             Self::AbandonQueuedWorkClaim => "abandon_queued_work_claim",
+            Self::ClaimHeldBatchById { .. } => "claim_held_batch_by_id",
+            Self::RetainStaleClaims => "retain_stale_claims",
             Self::ReleaseSessionLease { .. } => "release_first_session_lease_generation",
             Self::CommitStaleTurnInputClaim { .. } => {
                 "commit_stale_claim_before_successor_reclaims_row"
+            }
+            Self::CommitStaleQueuedWorkClaim { .. } => {
+                "commit_stale_queued_work_claim_after_successor_reclaims_row"
             }
             Self::ColdReopenSession => "cold_reopen_session",
             Self::DeleteSession => "delete_session",
@@ -564,32 +595,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
             ],
         },
-        GeneratedCase {
-            name: CaseName::SettleClaimBeforeSuccessorReclaim,
-            // FIG-641 / ADR 0029: supersession is reclaim-mediated by design.
-            // All three backends currently accept this pre-reclaim settlement;
-            // this differential demonstrates agreement, not a conformance law.
-            operations: vec![
-                StoreOperation::EnqueueNextTurnInput,
-                StoreOperation::AcquireSessionLease {
-                    slot: LeaseSlot::First,
-                    owner: "first-owner",
-                },
-                StoreOperation::ClaimNextTurnInput {
-                    lease: LeaseSlot::First,
-                },
-                StoreOperation::ReleaseSessionLease {
-                    lease: LeaseSlot::First,
-                },
-                StoreOperation::AcquireSessionLease {
-                    slot: LeaseSlot::Successor,
-                    owner: "successor-owner",
-                },
-                StoreOperation::CommitStaleTurnInputClaim {
-                    expected_head_revision: 0,
-                },
-            ],
-        },
+        claim_cases::settle_claim_before_successor_reclaim(),
         checkpoint_cases::bodies_then_ref_only(),
         checkpoint_cases::bodies_then_cleared(),
         checkpoint_cases::missing_component_ref(),
@@ -621,20 +627,10 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 StoreOperation::UnpinLeaf,
             ],
         },
-        GeneratedCase {
-            name: CaseName::QueuedWorkClaimAndAbandon,
-            operations: vec![
-                StoreOperation::EnqueueClaimableQueuedWork,
-                StoreOperation::AcquireSessionLease {
-                    slot: LeaseSlot::First,
-                    owner: "queued-work-owner",
-                },
-                StoreOperation::ClaimQueuedWork {
-                    lease: LeaseSlot::First,
-                },
-                StoreOperation::AbandonQueuedWorkClaim,
-            ],
-        },
+        claim_cases::queued_work_claim_and_abandon(),
+        claim_cases::same_generation_exact_claim_deferral(),
+        claim_cases::queued_work_claim_superseded_after_reclaim(),
+        claim_cases::turn_input_claim_superseded_after_reclaim(),
         GeneratedCase {
             name: CaseName::DeleteThenAttemptAdmission,
             operations: vec![
@@ -1085,7 +1081,9 @@ struct BackendRunner {
     first_lease: Option<lash_core::SessionExecutionLease>,
     successor_lease: Option<lash_core::SessionExecutionLease>,
     stale_turn_input_claim: Option<TurnInputClaim>,
+    retained_stale_turn_input_claim: Option<TurnInputClaim>,
     queued_work_claim: Option<QueuedWorkClaim>,
+    stale_queued_work_claim: Option<QueuedWorkClaim>,
     current_frame_node_id: Option<lash_core::FrameNodeId>,
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
@@ -1454,6 +1452,42 @@ impl BackendRunner {
                     .await
                     .map(|_| None)
             }
+            StoreOperation::ClaimHeldBatchById { lease } => {
+                let lease = self.lease(*lease);
+                let owner = lease.owner.clone();
+                let held_batch_ids = self
+                    .queued_work_claim
+                    .as_ref()
+                    .expect("generated sequence claimed queued work before the held re-claim")
+                    .data
+                    .batches
+                    .iter()
+                    .map(|batch| batch.batch_id.clone())
+                    .collect::<Vec<_>>();
+                let outcome = self
+                    .store()
+                    .claim_ready_queued_work_by_batch_ids(
+                        &self.session_id,
+                        &lease.fence(),
+                        &owner,
+                        QueuedWorkClaimBoundary::Idle,
+                        &held_batch_ids,
+                        lash_core::testing::queued_work_claim_policy(1),
+                    )
+                    .await?;
+                assert!(
+                    outcome.claim.is_none() && outcome.already_satisfied_batch_ids.is_empty(),
+                    "{} must report no newly claimed rows when this generation \
+                     exact-claims a batch it already holds",
+                    self.name
+                );
+                Ok(None)
+            }
+            StoreOperation::RetainStaleClaims => {
+                self.retained_stale_turn_input_claim = self.stale_turn_input_claim.clone();
+                self.stale_queued_work_claim = self.queued_work_claim.clone();
+                Ok(None)
+            }
             StoreOperation::ReleaseSessionLease { lease } => self
                 .store()
                 .release_session_execution_lease(&self.lease(*lease).completion())
@@ -1463,8 +1497,9 @@ impl BackendRunner {
                 expected_head_revision,
             } => {
                 let claim = self
-                    .stale_turn_input_claim
+                    .retained_stale_turn_input_claim
                     .as_ref()
+                    .or(self.stale_turn_input_claim.as_ref())
                     .expect("generated sequence claimed input before stale settlement");
                 let graph = GraphSpec {
                     nodes: vec![NodeSpec::new("stale-claim-node", None, "stale-claim")],
@@ -1483,6 +1518,35 @@ impl BackendRunner {
                             Vec::new(),
                         )
                         .completing_turn_input_claim(claim.completion()),
+                    )
+                    .await
+                    .map(|result| Some(result.into()))
+            }
+            StoreOperation::CommitStaleQueuedWorkClaim {
+                expected_head_revision,
+            } => {
+                let claim = self
+                    .stale_queued_work_claim
+                    .as_ref()
+                    .or(self.queued_work_claim.as_ref())
+                    .expect("generated sequence claimed queued work before stale settlement");
+                let graph = GraphSpec {
+                    nodes: vec![NodeSpec::new("stale-claim-node", None, "stale-claim")],
+                    leaf_node_id: Some("stale-claim-node"),
+                };
+                self.store()
+                    .commit_runtime_state(
+                        runtime_commit(
+                            &self.session_id,
+                            *expected_head_revision,
+                            &graph,
+                            None,
+                            self.current_frame_node_id.clone(),
+                            HydratedSessionCheckpoint::default(),
+                            Vec::new(),
+                            Vec::new(),
+                        )
+                        .completing_queue_claim(claim.completion()),
                     )
                     .await
                     .map(|result| Some(result.into()))
@@ -2053,7 +2117,9 @@ async fn runners_for_case_with_clock(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            retained_stale_turn_input_claim: None,
             queued_work_claim: None,
+            stale_queued_work_claim: None,
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2080,7 +2146,9 @@ async fn runners_for_case_with_clock(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            retained_stale_turn_input_claim: None,
             queued_work_claim: None,
+            stale_queued_work_claim: None,
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2107,7 +2175,9 @@ async fn runners_for_case_with_clock(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            retained_stale_turn_input_claim: None,
             queued_work_claim: None,
+            stale_queued_work_claim: None,
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2151,7 +2221,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 24);
+    assert_eq!(cases.len(), 27);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2175,6 +2245,9 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "rewind_fork_delete_source_refork",
             "attachment_intent_adopted_by_commit",
             "queued_work_claim_abandon_preserves_fencing_token",
+            "same_generation_exact_claim_defers",
+            "queued_work_claim_superseded_after_successor_reclaim",
+            "turn_input_claim_superseded_after_successor_reclaim",
             "delete_then_attempt_admission",
             "store_surface_sweep",
             "refused_surface_on_deleted_session_leaves_no_residue",
@@ -2185,190 +2258,6 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "corrupt_prior_checkpoint_refuses_read_modify_write",
         ]
     );
-}
-
-async fn read_all_event_metadata<R>(
-    registry: &R,
-    process_id: &lash_sansio::ProcessId,
-    mode: lash_core::ProcessEventQueryMode,
-) -> Result<(u64, Vec<usize>), lash_core::PluginError>
-where
-    R: lash_core::ProcessEventLog + ?Sized,
-{
-    let limit = std::num::NonZeroUsize::new(127).unwrap_or(std::num::NonZeroUsize::MIN);
-    let mut continuation = None;
-    let mut expected_sequence = 1;
-    let mut page_lengths = Vec::new();
-    loop {
-        let outcome = registry
-            .event_page(process_id, limit, mode, continuation)
-            .await?;
-        let lash_core::ProcessEventReadOutcome::Retained(page) = outcome else {
-            panic!("seeded event history must remain retained");
-        };
-        assert!(
-            page.events.len() <= limit.get(),
-            "a backend returned more rows than the requested page bound"
-        );
-        page_lengths.push(page.events.len());
-        assert!(
-            page_lengths.len() <= 80,
-            "event-page continuation did not advance through 10,000 rows"
-        );
-        let metadata = match page.events {
-            lash_core::ProcessEventPageEvents::Full(page_events) => page_events
-                .into_iter()
-                .map(|event| (event.sequence, event.event_type))
-                .collect::<Vec<_>>(),
-            lash_core::ProcessEventPageEvents::Lite(page_events) => page_events
-                .into_iter()
-                .map(|event| (event.sequence, event.event_type))
-                .collect::<Vec<_>>(),
-        };
-        for (sequence, event_type) in metadata {
-            assert_eq!(sequence, expected_sequence);
-            assert_eq!(event_type, "page.event");
-            expected_sequence += 1;
-        }
-        continuation = match page.more {
-            lash_core::ProcessEventPageMore::Complete => break,
-            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
-        };
-    }
-    Ok((expected_sequence - 1, page_lengths))
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "cross-backend fixture: setup failures must stop the differential at their source"
-)]
-async fn compare_bounded_process_event_pages(
-    sqlite_root: &Path,
-    postgres: &PostgresStorage,
-    run_nonce: &str,
-) {
-    // The differential verifies ordered Full/Lite pages of at most 127 events over 10,000 rows on both backends; bounded memory is inferred from the limited SQL reads (rendered-SQL pin), not measured.
-    const EVENT_COUNT: u64 = 10_000;
-    let process_id = lash_sansio::ProcessId::from(format!("event-pages-{run_nonce}"));
-    let registration = || {
-        lash_core::ProcessRegistration::new(
-            process_id.clone(),
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::ExternallyOwned,
-            lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
-        )
-        .with_extra_event_types([lash_core::ProcessEventType {
-            name: "page.event".to_string(),
-            payload_schema: lash_core::LashSchema::any(),
-            semantics: lash_core::ProcessEventSemanticsSpec::default(),
-        }])
-    };
-
-    let sqlite_path = sqlite_root.join("process-event-pages.db");
-    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(
-        &sqlite_path,
-        sqlite_root.join("process-event-page-sessions"),
-    )
-    .await
-    .expect("open SQLite process-event page fixture");
-    let postgres_registry = postgres.process_registry();
-    let sqlite_record = sqlite
-        .register_process(registration())
-        .await
-        .expect("register SQLite page process");
-    let postgres_record = postgres_registry
-        .register_process(registration())
-        .await
-        .expect("register PostgreSQL page process");
-    assert_eq!(sqlite_record.incarnation, postgres_record.incarnation);
-
-    let request = || {
-        lash_core::ProcessEventAppendRequest::new(
-            "page.event",
-            serde_json::json!({"body": "payload excluded by lite projection"}),
-        )
-        .with_replay_key("page-event-1")
-    };
-    let first = sqlite
-        .append_event(&process_id, request())
-        .await
-        .expect("append SQLite seed event")
-        .event;
-    postgres_registry
-        .append_event(&process_id, request())
-        .await
-        .expect("append PostgreSQL seed event");
-
-    {
-        let mut connection = rusqlite::Connection::open(&sqlite_path)
-            .expect("open SQLite page fixture for bulk seed");
-        let transaction = connection
-            .transaction()
-            .expect("begin SQLite page seed transaction");
-        let mut insert = transaction
-            .prepare(
-                "INSERT INTO process_events
-                 (process_id, process_incarnation, sequence, event_type, idempotency_key, event_json)
-                 VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
-            )
-            .expect("prepare SQLite page seed");
-        for sequence in 2..=EVENT_COUNT {
-            let mut event = first.clone();
-            event.sequence = sequence;
-            insert
-                .execute(rusqlite::params![
-                    process_id.as_str(),
-                    sqlite_record.incarnation.registration_sequence() as i64,
-                    sequence as i64,
-                    "page.event",
-                    serde_json::to_string(&event).expect("encode SQLite seed event"),
-                ])
-                .expect("insert SQLite seed event");
-        }
-        drop(insert);
-        transaction.commit().expect("commit SQLite page seed");
-    }
-    sqlx::query(
-        "INSERT INTO lash_process_events
-         (process_id, process_incarnation, sequence, event_type, idempotency_key, event_json)
-         SELECT $1, $2, sequence, $3, NULL,
-                jsonb_set($4::jsonb, '{sequence}', to_jsonb(sequence))::text
-           FROM generate_series(2, $5) AS sequence",
-    )
-    .bind(process_id.as_str())
-    .bind(postgres_record.incarnation.registration_sequence() as i64)
-    .bind("page.event")
-    .bind(serde_json::to_string(&first).expect("encode PostgreSQL seed event"))
-    .bind(EVENT_COUNT as i64)
-    .execute(postgres.pool())
-    .await
-    .expect("seed PostgreSQL process events");
-
-    for mode in [
-        lash_core::ProcessEventQueryMode::Full,
-        lash_core::ProcessEventQueryMode::Lite,
-    ] {
-        let sqlite_events = read_all_event_metadata(&sqlite, &process_id, mode)
-            .await
-            .expect("read bounded SQLite process-event pages");
-        let postgres_events = read_all_event_metadata(&postgres_registry, &process_id, mode)
-            .await
-            .expect("read bounded PostgreSQL process-event pages");
-        assert_eq!(sqlite_events.0, EVENT_COUNT);
-        assert_eq!(sqlite_events, postgres_events, "{mode:?} pages diverged");
-    }
-
-    sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
-        .bind(process_id.as_str())
-        .execute(postgres.pool())
-        .await
-        .expect("clean up PostgreSQL page process");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2421,7 +2310,12 @@ async fn cross_backend_store_differential_agrees() {
     let sqlite_root = tempfile::tempdir().expect("create SQLite differential root");
     verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();
-    compare_bounded_process_event_pages(sqlite_root.path(), &postgres, &run_nonce).await;
+    process_event_pages::compare_bounded_process_event_pages(
+        sqlite_root.path(),
+        &postgres,
+        &run_nonce,
+    )
+    .await;
     plugin_state_case::compare_plugin_state(
         sqlite_root.path(),
         &postgres,

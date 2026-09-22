@@ -21,6 +21,7 @@ mod tool_intents;
 pub mod tool_output;
 pub mod turn;
 pub mod turn_driver;
+mod workflow;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Identity version mixed into every Lashlang and TypeScript module-artifact hash.
@@ -78,13 +79,14 @@ pub use session::{
 pub use session_model::message::{MessageOrigin, TurnOutputSource};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope, FailureCode,
-    MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence, NoProgressBudget, Part,
-    PartAttachment, PartKind, PromptBuiltin, PromptLayer, PromptSlot, PromptSlotLayer,
-    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, ProtocolEvent, RenderedPrompt,
-    ResolvedPromptLayer, SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, TokenUsage,
-    TokenUsageOverflow, TurnBudget, TurnCancelDisposition, TurnCancelMode,
-    TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
-    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
+    InvalidNamespace, MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence, Namespace,
+    NoProgressBudget, Part, PartAttachment, PartKind, PromptBuiltin, PromptLayer, PromptSlot,
+    PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection, ProtocolEvent,
+    RenderedPrompt, ResolvedPromptLayer, SessionAppendNode, SessionHistoryRecord,
+    SessionStreamEvent, TokenUsage, TokenUsageOverflow, TurnBudget, TurnCancelDisposition,
+    TurnCancelMode, TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish,
+    TurnOutcome, TurnStop, default_prompt_template, messages_are_prompt_resume_safe,
+    resolve_prompt_layers, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
 pub use tool_catalog::{
@@ -113,6 +115,7 @@ pub use turn_driver::{
     TurnDriverConfig, TurnDriverPreamble, append_assistant_text_part, normalized_response_parts,
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
+pub use workflow::WorkflowExecutionSite;
 
 pub fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {
     let raw_len = value.chars().count();

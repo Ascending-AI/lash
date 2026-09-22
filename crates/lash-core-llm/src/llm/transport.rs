@@ -55,7 +55,7 @@ pub fn unsupported_attachment_capability(
     };
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Validation)
-        .with_adapter_code(TurnFailureCode::UnsupportedAttachmentCapability)
+        .with_lash_code(TurnFailureCode::UnsupportedAttachmentCapability)
 }
 
 pub fn source_kind(source: &AttachmentSource) -> &'static str {

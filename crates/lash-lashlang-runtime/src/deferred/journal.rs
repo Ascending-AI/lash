@@ -39,7 +39,7 @@ where
     }
     let effect_id = format!("{}:deferred-tool-resolution", link_key.address.replay_key);
     let operation = format!(
-        "deferred_tool_resolution:v1:{}",
+        "deferred_tool_resolution:v2:{}",
         serde_json::to_string(&referenced)
             .expect("deferred call-path strings encode as canonical JSON")
     );

@@ -677,10 +677,23 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             stream_summary,
             attempts,
         } => {
-            attrs.push(KeyValue::new(
-                attr::ERROR_TYPE,
-                error.code.clone().unwrap_or_default(),
-            ));
+            // `error.type` is the failure kind/category, not the code
+            // spelling or the terminal reason: a timeout reports `timeout`,
+            // not `provider_error`. Anything outside the provider-failure
+            // vocabulary demotes to `_OTHER`.
+            let error_type = match error.failure_kind.as_deref() {
+                Some(
+                    kind @ ("transport" | "timeout" | "http" | "stream" | "auth" | "validation"
+                    | "quota" | "unsupported"),
+                ) => kind.to_string(),
+                _ => "_OTHER".to_string(),
+            };
+            attrs.push(KeyValue::new(attr::ERROR_TYPE, error_type));
+            // `lash.error.code` is the code's spelling alone — `code` arrives
+            // already projected to spelling-only by the trace producers.
+            if let Some(code) = &error.code {
+                attrs.push(KeyValue::new(attr::LASH_ERROR_CODE, code.clone()));
+            }
             attrs.push(KeyValue::new(attr::ERROR_MESSAGE, error.message.clone()));
             attrs.push(KeyValue::new(attr::LASH_ERROR_RETRYABLE, error.retryable));
             push_payload_json(
@@ -872,8 +885,10 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             call_id,
             name,
             args,
+            issuing_node_id,
         } => {
             push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, call_id);
+            push_opt(&mut attrs, attr::LASH_TOOL_ISSUING_NODE_ID, issuing_node_id);
             attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
             push_payload_json(&mut attrs, options, attr::LASH_TOOL_ARGS_JSON, args);
         }
@@ -883,9 +898,11 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             args,
             output,
             duration_ms,
+            issuing_node_id,
             attempts,
         } => {
             push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, call_id);
+            push_opt(&mut attrs, attr::LASH_TOOL_ISSUING_NODE_ID, issuing_node_id);
             attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
             attrs.push(KeyValue::new(attr::LASH_TOOL_SUCCESS, output.is_success()));
             attrs.push(KeyValue::new(
@@ -1133,6 +1150,10 @@ fn language_execution_attributes(
         ));
     }
     attrs.push(KeyValue::new(
+        attr::LASH_LANGUAGE_EXECUTION_SOURCE_IDENTITY,
+        event.identity.source_identity.clone(),
+    ));
+    attrs.push(KeyValue::new(
         attr::LASH_LANGUAGE_EXECUTION_MODULE_REF,
         event.identity.module_ref.clone(),
     ));
@@ -1149,6 +1170,11 @@ fn language_execution_attributes(
         attr::LASH_LANGUAGE_EXECUTION_ENTRY_NAME,
         event.identity.entry_name.clone(),
     ));
+    push_opt(
+        attrs,
+        attr::LASH_LANGUAGE_EXECUTION_RESTATE_INVOCATION_ID,
+        &event.identity.restate_invocation_id,
+    );
     match &event.identity.subject {
         crate::TraceRuntimeSubject::Effect { effect_id, .. } => {
             attrs.push(KeyValue::new(
@@ -1177,18 +1203,21 @@ fn language_execution_attributes(
             node_id,
             node_kind,
             occurrence,
+            call_id,
             ..
         }
         | Payload::NodeCompleted {
             node_id,
             node_kind,
             occurrence,
+            call_id,
             ..
         }
         | Payload::NodeFailed {
             node_id,
             node_kind,
             occurrence,
+            call_id,
             ..
         } => {
             attrs.push(KeyValue::new(
@@ -1203,6 +1232,7 @@ fn language_execution_attributes(
                 attr::LASH_LANGUAGE_EXECUTION_OCCURRENCE,
                 *occurrence as i64,
             ));
+            push_opt(attrs, attr::LASH_LANGUAGE_EXECUTION_CALL_ID, call_id);
         }
         Payload::BranchSelected {
             node_id,

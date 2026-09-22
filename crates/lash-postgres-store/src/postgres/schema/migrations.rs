@@ -31,8 +31,10 @@ use super::*;
 /// reject-and-recreate. Component 111 adds settlement-fact carriage and
 /// component 112 cuts over message parts; both change encoded payloads.
 /// Component 113 removes observer selectors and attribution. Component 114
-/// adds durable queued-run admissions and normalized membership. The retained
-/// endpoint is 113; no arm targets the current component 114, so admission
+/// puts ADR 0099 section 7's group lifecycle in service (FIG-3410), a values-only
+/// cutover. Component 115 adds durable queued-run admissions and normalized
+/// membership. The retained endpoint is 114; no arm targets the current component 115,
+/// so admission
 /// refuses every predecessor without migrating it. The
 /// `source_missing_*` lists stay keyed to this build's catalog — a
 /// pre-cutover store lacks the component-109 and -110 additions against it —
@@ -65,7 +67,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
         from: 101,
-        to: 113,
+        to: 114,
         // The lists are keyed to the floor, not to one generation: a relation
         // or column introduced after 105 belongs here too, so the fixture
         // rebuilds the published component-101 catalog by removing them.
@@ -103,7 +105,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 113,
+        to: 114,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -129,7 +131,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 113,
+        to: 114,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -154,7 +156,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 113,
+        to: 114,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -180,7 +182,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 113,
+        to: 114,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -206,7 +208,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 113,
+        to: 114,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -234,7 +236,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 113,
+        to: 114,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -255,7 +257,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 113,
+        to: 114,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -281,10 +283,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // A component-109 catalog predates the ADR 0099 §§4–5 arbitration state
     // wholesale: the commit-protocol columns and guards on the replay row, the
     // group counters, and both renames. Component 111 adds no relational DDL
-    // of its own; this historical arm now targets the retained endpoint 113.
+    // of its own; this historical arm now targets the retained endpoint 114.
     SchemaMigration {
         from: 109,
-        to: 113,
+        to: 114,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -308,17 +310,17 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // declares no route across the current queued-run cutover.
     SchemaMigration {
         from: 110,
-        to: 113,
+        to: 114,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         introduced_relations: &[],
         statements: &[],
     },
-    // Retained historical endpoint only: component 114 remains unreachable.
+    // Retained historical endpoint only: component 115 remains unreachable.
     SchemaMigration {
         from: 111,
-        to: 113,
+        to: 114,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -327,7 +329,16 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 112,
-        to: 113,
+        to: 114,
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
+    },
+    SchemaMigration {
+        from: 113,
+        to: 114,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],

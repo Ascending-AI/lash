@@ -761,9 +761,7 @@ fn law_billed_completion() -> crate::DirectCompletion {
                     retry_decision: None,
                     error: Some(crate::NormalizedError {
                         class: "provider_error".to_string(),
-                        provider_code: None,
-                        adapter_code: None,
-                        refusal_code: None,
+                        code: None,
                         http_status: Some(503),
                         provider_request_id: None,
                         retry_after: None,
@@ -1906,6 +1904,7 @@ mod commit_boundary;
 mod driver;
 mod foreign_opener;
 mod incarnation;
+mod incorporation;
 mod recovery;
 mod usage;
 
@@ -1915,5 +1914,6 @@ pub use commit_boundary::*;
 pub use driver::*;
 pub use foreign_opener::*;
 pub use incarnation::*;
+pub use incorporation::*;
 pub use recovery::*;
 pub use usage::*;

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/ci/launcher-test-sandbox.sh"
+launcher_test_sandbox "$@"
 test_tmp="$(mktemp -d)"
 mock_bin="$test_tmp/bin"
 mock_state="$test_tmp/mock-state"

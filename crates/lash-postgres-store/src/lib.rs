@@ -48,9 +48,8 @@ use lash_core::runtime::{
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, WorkClaimLease, claim_scan_limit, derive_batch_id,
-    select_exact_turn_work_claim_prefix, select_leading_session_command,
-    select_turn_work_claim_prefix,
+    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_exact_turn_work_claim_prefix,
+    select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
@@ -429,7 +428,14 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Component-111 catalogs are rejected and recreated, including effect payloads.
 // Version 113 removes implicit fork observer selection and attribution.
 // Hosts persist exact process references; component-112 catalogs are recreated.
-const SCHEMA_VERSION: i32 = 114;
+// Version 114 (FIG-3410) puts ADR 0099 §7's group lifecycle in service: the
+// `lifecycle` column component 110 reserved now carries `closing` and
+// `settled` values beside `live`. No DDL changes — a values-only cutover —
+// but a pre-114 build reads the column as always `live` and would permit the
+// retries §7 forbids, so component-113 catalogs are rejected and recreated.
+// Version 115 adds durable queued-run admissions and normalized membership.
+// Component-114 catalogs require recreation.
+const SCHEMA_VERSION: i32 = 115;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

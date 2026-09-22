@@ -146,7 +146,7 @@ impl Provider for ContradictoryPartialFailureProvider {
         Err(LlmTransportError::new("original partial provider failure")
             .with_kind(ProviderFailureKind::Stream)
             .with_http_status(502)
-            .with_provider_code("original_partial_code")
+            .with_code(FailureCode::provider("original_partial_code"))
             .with_raw("original raw provider evidence")
             .with_headers([("x-request-id", "original-request")])
             .with_request_body("original request body")
@@ -279,7 +279,7 @@ impl Provider for PartialStreamFailureProvider {
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
-            .with_provider_code("stream_ended_before_terminal")
+            .with_code(FailureCode::provider("stream_ended_before_terminal"))
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
                 parts: vec![LlmOutputPart::Text {
@@ -336,7 +336,7 @@ impl Provider for CountedPartialStreamFailureProvider {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
-            .with_provider_code("stream_ended_before_terminal")
+            .with_code(FailureCode::provider("stream_ended_before_terminal"))
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
                 parts: vec![LlmOutputPart::Text {
@@ -835,7 +835,7 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
         .await
         .expect_err("endpoint userinfo is rejected before transport");
 
-    assert_eq!(code_of(&failure.error), "adapter:invalid_provider_endpoint");
+    assert_eq!(code_of(&failure.error), "lash:invalid_provider_endpoint");
     assert_eq!(failure.call_record.attempts.len(), 1);
     assert_eq!(
         failure.call_record.attempts[0].outcome,
@@ -851,7 +851,7 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
 fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
     let failure = LlmTransportError::new("internal task failed: cancelled")
         .with_kind(ProviderFailureKind::Unknown)
-        .with_adapter_code(TurnFailureCode::TaskJoinFailed)
+        .with_lash_code(TurnFailureCode::TaskJoinFailed)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable);
     let record = synthetic_terminal_call_record(
         7,
@@ -874,8 +874,8 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
         record.attempts[0]
             .error
             .as_ref()
-            .and_then(|error| error.adapter_code.as_ref()),
-        Some(&TurnFailureCode::TaskJoinFailed)
+            .and_then(|error| error.code.as_ref()),
+        Some(&TurnFailureCode::TaskJoinFailed.into())
     );
 }
 
@@ -892,7 +892,7 @@ async fn provider_handle_rejects_instead_of_recertifying_foreign_stamped_output(
 
     assert_eq!(
         code_of(&failure.error),
-        "adapter:provider_replay_origin_conflict"
+        "lash:provider_replay_origin_conflict"
     );
     assert!(!failure.error.is_retryable());
     assert!(failure.error.message.contains("gateway-a.example"));
@@ -912,7 +912,7 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
 
     assert_eq!(
         code_of(&failure.error),
-        "adapter:provider_replay_origin_conflict"
+        "lash:provider_replay_origin_conflict"
     );
     assert_eq!(failure.error.kind, ProviderFailureKind::Validation);
     assert!(!failure.error.is_retryable());
@@ -945,8 +945,8 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
         .expect("original provider failure evidence remains attached");
     assert_eq!(original.class, ProviderFailureKind::Stream.code());
     assert_eq!(
-        original.provider_code.as_deref(),
-        Some("original_partial_code")
+        original.code.as_ref().map(|code| code.namespaced()),
+        Some("provider:original_partial_code".to_string())
     );
     assert_eq!(original.http_status, Some(502));
     assert!(
@@ -1400,10 +1400,7 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
         .expect_err("paid output cannot be safely retried by the host");
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        code_of(&failure),
-        "refusal:unsafe_retry_after_output_started"
-    );
+    assert_eq!(code_of(&failure), "lash:unsafe_retry_after_output_started");
     assert!(!failure.is_retryable());
     assert_eq!(
         failure.call_record.attempts[0]
@@ -2212,10 +2209,7 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert!(!err.is_retryable());
     assert_eq!(err.kind, ProviderFailureKind::Http);
-    assert_eq!(
-        code_of(&err),
-        "refusal:unsafe_retry_after_response_observed"
-    );
+    assert_eq!(code_of(&err), "lash:unsafe_retry_after_response_observed");
 }
 
 #[tokio::test]
@@ -2404,7 +2398,7 @@ fn default_failure_classifier_makes_structured_validation_forbidden_without_scra
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_provider_code("invalid_request_error")
+            .with_code(FailureCode::provider("invalid_request_error"))
             .with_raw(
                 r#"{"error":{"message":"The user wrote: context length is a useful phrase"}}"#,
             )
@@ -2426,7 +2420,7 @@ fn default_failure_classifier_does_not_override_structured_hard_quota_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_provider_code("invalid_request_error")
+            .with_code(FailureCode::provider("invalid_request_error"))
             .with_raw(r#"{"echo":"insufficient_quota"}"#),
     );
 
@@ -2440,7 +2434,7 @@ fn default_failure_classifier_does_not_override_structured_content_filter_echo()
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_provider_code("invalid_request_error")
+            .with_code(FailureCode::provider("invalid_request_error"))
             .with_raw(r#"{"echo":"the user asked about safety"}"#),
     );
 
@@ -2452,7 +2446,7 @@ fn default_failure_classifier_does_not_override_structured_unsupported_model_ech
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_provider_code("invalid_request_error")
+            .with_code(FailureCode::provider("invalid_request_error"))
             .with_raw(r#"{"echo":"the example model does not exist"}"#),
     );
 

@@ -15,7 +15,7 @@ impl lash_core::RuntimeEffectController for FailingDeferredJournalController {
         if matches!(
             &envelope.command,
             lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
-                if operation.starts_with("deferred_tool_resolution:v1:")
+                if operation.starts_with("deferred_tool_resolution:v2:")
         ) {
             local_executor.execute(envelope).await?;
             Err(lash_core::RuntimeEffectControllerError::new(
@@ -80,7 +80,7 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
         let is_deferred = matches!(
             &envelope.command,
             lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
-                if operation.starts_with("deferred_tool_resolution:v1:")
+                if operation.starts_with("deferred_tool_resolution:v2:")
         );
         if !is_deferred {
             return self.inner.execute_effect(envelope, local_executor).await;
@@ -115,6 +115,16 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
         cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
+    }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
     }
 
     async fn close_effect_group(

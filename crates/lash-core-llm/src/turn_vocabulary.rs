@@ -120,9 +120,11 @@ pub struct TurnIssue {
     /// Typed origin of the failure, carrying the same wire spelling the field
     /// held as a bare `String`.
     pub kind: crate::TurnFailureKind,
-    /// Typed failure code within `kind`.
+    /// Namespaced failure code: `lash:` codes are this workspace's
+    /// `TurnFailureCode` vocabulary; provider, host, and plugin codes carry
+    /// their own namespaces and are never reinterpreted into Lash's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<crate::TurnFailureCode>,
+    pub code: Option<crate::FailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<crate::LlmTerminalReason>,
     pub message: String,

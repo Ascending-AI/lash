@@ -976,6 +976,167 @@ class VersionBumpFixtureTest(unittest.TestCase):
                     "WORKFLOW_GRAPH_SCHEMA_VERSION",
                 )
 
+    def test_each_runtime_node_identity_helper_demands_graph_and_segment_bumps(
+        self,
+    ) -> None:
+        constants = {"WORKFLOW_GRAPH_SCHEMA_VERSION", "LASHLANG_SEGMENT_STATE_VERSION"}
+        surfaces = {
+            surface.constant: surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant in constants
+        }
+        helper_symbols = (
+            "workflow_node_id",
+            "from_indices",
+            "indices",
+            "path_for_ast",
+            "for_main",
+            "visible_expression",
+            "ast_root",
+            "ownership_map",
+            "into_ownership_map",
+            "main_workflow_projection",
+            "process_workflow_projection",
+            "workflow_projection",
+            "process_execution_body_path",
+            "push_child_index",
+            "collect_workflow_block_paths",
+            "collect_workflow_statement_paths",
+            "collect_workflow_node_paths",
+            "map_workflow_node_subtree",
+            "workflow_block_wrapper_inner",
+            "authored_workflow_statement",
+            "is_lowered_member_assignment",
+            "execution_sites",
+            "collect_execution_sites",
+            "push_execution_site_descriptor",
+            "collect_child_execution_sites",
+            "workflow_owner",
+            "node_site",
+            "branch_site",
+            "branch_edge_id",
+        )
+        for constant in constants:
+            guarded = {
+                symbol
+                for guard in surfaces[constant].guards
+                if guard.kind == "rust_items"
+                for symbol in guard.symbols
+            }
+            self.assertLessEqual(set(helper_symbols), guarded)
+
+        symbols = ", ".join(f'"{symbol}"' for symbol in helper_symbols)
+        config = f"""
+        [[surface]]
+        constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
+        constant_path = "src/versions.rs"
+        description = "fixture graph node identity"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/identity.rs"]
+        symbols = [{symbols}]
+
+        [[surface]]
+        constant = "LASHLANG_SEGMENT_STATE_VERSION"
+        constant_path = "src/versions.rs"
+        description = "fixture persisted runtime node identity"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/identity.rs"]
+        symbols = [{symbols}]
+        """
+        source = "\n".join(f"fn {symbol}() {{ stable(); }}" for symbol in helper_symbols) + "\n"
+        for symbol in helper_symbols:
+            with self.subTest(symbol=symbol):
+                fixture = FixtureRepository(config)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/versions.rs",
+                    "pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 14;\n"
+                    "pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 13;\n",
+                )
+                fixture.write_file("src/identity.rs", source)
+                base = fixture.commit("node identity helper base")
+                fixture.write_file(
+                    "src/identity.rs",
+                    source.replace(
+                        f"fn {symbol}() {{ stable(); }}",
+                        f"fn {symbol}() {{ changed(); }}",
+                    ),
+                )
+                head = fixture.commit(f"change {symbol} without bumps")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(
+                    {failure.surface.constant for failure in result.failures},
+                    constants,
+                )
+
+    def test_workflow_execution_site_shape_demands_graph_and_trace_bumps(self) -> None:
+        constants = {"WORKFLOW_GRAPH_SCHEMA_VERSION", "TRACE_SCHEMA_VERSION"}
+        surfaces = {
+            surface.constant: surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant in constants
+        }
+        workflow_path = "crates/lash-sansio/src/workflow.rs"
+        for constant in constants:
+            guards = [
+                guard
+                for guard in surfaces[constant].guards
+                if guard.kind == "rust_items" and guard.paths == (workflow_path,)
+            ]
+            self.assertEqual(len(guards), 1)
+            self.assertIn("WorkflowExecutionSite", guards[0].symbols)
+
+        config = """
+        [[surface]]
+        constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
+        constant_path = "src/versions.rs"
+        description = "fixture graph site carrier"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/workflow.rs"]
+        symbols = ["WorkflowExecutionSite"]
+
+        [[surface]]
+        constant = "TRACE_SCHEMA_VERSION"
+        constant_path = "src/versions.rs"
+        description = "fixture trace site carrier"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/workflow.rs"]
+        symbols = ["WorkflowExecutionSite"]
+        """
+        fixture = FixtureRepository(config)
+        self.addCleanup(fixture.close)
+        fixture.write_file(
+            "src/versions.rs",
+            "pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 14;\n"
+            "pub const TRACE_SCHEMA_VERSION: u32 = 25;\n",
+        )
+        source = "pub struct WorkflowExecutionSite { pub path: Vec<u32> }\n"
+        fixture.write_file("src/workflow.rs", source)
+        base = fixture.commit("workflow site base")
+        fixture.write_file(
+            "src/workflow.rs",
+            source.replace("pub path: Vec<u32>", "pub path: Vec<u64>"),
+        )
+        head = fixture.commit("change workflow site without bumps")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(
+            {failure.surface.constant for failure in result.failures}, constants
+        )
+
     def test_rust_impl_guard_detects_custom_serializer_changes(self) -> None:
         config = """
         [[surface]]

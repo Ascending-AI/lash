@@ -147,6 +147,7 @@ pub enum RuntimeErrorCode {
     EffectJournalRetirementUnsupported,
     EffectScopeRetired,
     EffectScopeNotQuiescent,
+    EffectGroupLifecyclePinned,
     AwaitEventScopeNotRetirable,
     InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
@@ -260,6 +261,10 @@ pub enum RuntimeErrorCode {
     /// linearization point, so its late final record was refused and nothing
     /// was journaled (ADR 0099 §4, W17).
     RuntimeEffectGroupChildCancelDecided,
+    /// A successor attaching a retained child invocation id found the
+    /// original's retention expired; the retained invocation is gone and the
+    /// child is never re-run under a fresh identity (ADR 0099 §8).
+    RuntimeEffectGroupChildAttachExpired,
     /// Drain deferred while this host still works the group or its children.
     /// Retry succeeds once it finishes; permanent refusal uses
     /// `RuntimeEffectGroupShape`.
@@ -496,6 +501,7 @@ impl RuntimeErrorCode {
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
             Self::EffectScopeRetired => "effect_scope_retired",
             Self::EffectScopeNotQuiescent => "effect_scope_not_quiescent",
+            Self::EffectGroupLifecyclePinned => "effect_group_lifecycle_pinned",
             Self::AwaitEventScopeNotRetirable => "await_event_scope_not_retirable",
             Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
@@ -581,6 +587,9 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupChildCancelled => "runtime_effect_group_child_cancelled",
             Self::RuntimeEffectGroupChildCancelDecided => {
                 "runtime_effect_group_child_cancel_decided"
+            }
+            Self::RuntimeEffectGroupChildAttachExpired => {
+                "runtime_effect_group_child_attach_expired"
             }
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
@@ -763,6 +772,7 @@ impl RuntimeErrorCode {
             | Self::EffectJournalRetirementUnsupported
             | Self::EffectScopeRetired
             | Self::EffectScopeNotQuiescent
+            | Self::EffectGroupLifecyclePinned
             | Self::AwaitEventScopeNotRetirable
             | Self::InvalidAwaitEventSessionId
             | Self::InvalidAwaitEventWaitIdentity
@@ -817,6 +827,7 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectGroupAwaitCancelled
             | Self::RuntimeEffectGroupChildCancelled
             | Self::RuntimeEffectGroupChildCancelDecided
+            | Self::RuntimeEffectGroupChildAttachExpired
             | Self::RuntimeEffectGroupShape
             | Self::RuntimeEffectInvocationSubject
             | Self::RuntimeEffectScopeMismatch
@@ -966,6 +977,7 @@ impl RuntimeErrorCode {
         Self::EffectJournalRetirementUnsupported,
         Self::EffectScopeRetired,
         Self::EffectScopeNotQuiescent,
+        Self::EffectGroupLifecyclePinned,
         Self::AwaitEventScopeNotRetirable,
         Self::InvalidAwaitEventSessionId,
         Self::InvalidAwaitEventWaitIdentity,
@@ -1035,6 +1047,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupAwaitCancelled,
         Self::RuntimeEffectGroupChildCancelled,
         Self::RuntimeEffectGroupChildCancelDecided,
+        Self::RuntimeEffectGroupChildAttachExpired,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
         Self::RuntimeEffectToolChildCancellationAuthority,
@@ -1171,6 +1184,7 @@ impl RuntimeErrorCode {
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
             "effect_scope_retired" => Self::EffectScopeRetired,
             "effect_scope_not_quiescent" => Self::EffectScopeNotQuiescent,
+            "effect_group_lifecycle_pinned" => Self::EffectGroupLifecyclePinned,
             "await_event_scope_not_retirable" => Self::AwaitEventScopeNotRetirable,
             "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
@@ -1257,6 +1271,9 @@ impl RuntimeErrorCode {
             "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
             "runtime_effect_group_child_cancel_decided" => {
                 Self::RuntimeEffectGroupChildCancelDecided
+            }
+            "runtime_effect_group_child_attach_expired" => {
+                Self::RuntimeEffectGroupChildAttachExpired
             }
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
@@ -1349,7 +1366,34 @@ impl RuntimeErrorCode {
             other => Self::ForeignCode(other.to_string()),
         }
     }
+
+    /// The namespaced spelling an extension minted, when this is
+    /// [`Self::ForeignCode`].
+    pub fn foreign_code(&self) -> Option<&str> {
+        match self {
+            Self::ForeignCode(code) => Some(code.as_str()),
+            _ => None,
+        }
+    }
 }
+
+impl From<&RuntimeErrorCode> for lash_sansio::FailureCode {
+    /// Maps a runtime error code onto a namespaced failure code: built-in
+    /// spellings are workspace vocabulary and land in `lash`, while a
+    /// [`RuntimeErrorCode::ForeignCode`] decodes through the foreign-ingress
+    /// path — a genuine foreign pair keeps its namespace verbatim, and a
+    /// foreign value claiming a reserved namespace or carrying no namespace
+    /// lands in `foreign`, never re-minted as a `lash` code.
+    fn from(code: &RuntimeErrorCode) -> Self {
+        match code.foreign_code() {
+            Some(foreign) => lash_sansio::FailureCode::from_foreign_wire(foreign),
+            None => lash_sansio::FailureCode::lash(lash_sansio::TurnFailureCode::from_wire(
+                code.as_str(),
+            )),
+        }
+    }
+}
+
 impl std::fmt::Display for RuntimeErrorCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -1405,6 +1449,16 @@ impl RuntimeError {
             summary: None,
             cause: None,
         }
+    }
+
+    /// Constructs an error carrying a code minted outside the built-in
+    /// [`RuntimeErrorCode`] vocabulary — a plugin abort or a host effect
+    /// completion. The namespaced spelling lands in
+    /// [`RuntimeErrorCode::ForeignCode`] verbatim and is never re-parsed into
+    /// a built-in arm. First-party producers use [`Self::new`], whose typed
+    /// argument makes an unclassified string a compile error.
+    pub fn foreign(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::ForeignCode(code.into()), message)
     }
 
     /// Sets the cause carried by a `RuntimeError` for effect-host implementors while creating,

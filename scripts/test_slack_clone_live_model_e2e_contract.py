@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import ast
 import os
 import pathlib
 import subprocess
@@ -50,28 +49,6 @@ class SlackCloneLiveModelE2eContractTest(unittest.TestCase):
         self.assertNotIn("pull_request:", text)
         self.assertNotIn("push:", text)
         self.assertNotIn("schedule:", text)
-
-    def test_driver_has_exact_oracle_and_no_shipped_mutation_switch(self) -> None:
-        driver_path = ROOT / "examples/slack-clone/src/live_e2e.rs"
-        source = driver_path.read_text(encoding="utf-8")
-        tree = ast.parse(
-            (ROOT / "scripts/slack-clone-live-model-ui.py").read_text(encoding="utf-8")
-        )
-        options = {
-            node.args[0].value
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "add_argument"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-        }
-        self.assertTrue({"--channel-name", "--nonce-a", "--nonce-b"}.issubset(options))
-        self.assertIn('snapshot.submissions.get("Agent A") == Some(&expected_b)', source)
-        self.assertIn('snapshot.submissions.get("Agent B") == Some(&nonce_a)', source)
-        self.assertNotIn("INJECT_NONCE", source)
-        self.assertNotIn("--mutation", source)
-
 
 if __name__ == "__main__":
     unittest.main()

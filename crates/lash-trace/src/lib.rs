@@ -114,7 +114,13 @@ pub use lashlang_graph::{
 /// provider item's sub-blocks — e.g. OpenAI `rs_*:summary:0` / `:summary:1` —
 /// stay distinguishable; `item_id` alone collapses them to the item.
 /// Version 25 uses generic compaction and prompt-view event names.
-pub const TRACE_SCHEMA_VERSION: u32 = 25;
+/// Version 26 (FIG-3435) splits `TraceError.code` into the spelling plus a
+/// `code_namespace` and adds `failure_kind`: `code` now carries the
+/// failure code's spelling alone, never the namespaced form, and the kind
+/// carries the failure classification OTel `error.type` projects.
+/// Version 27 (FIG-3460) unifies workflow node identity and adds structured
+/// execution sites, language-node/tool cross-links, and Restate correlation.
+pub const TRACE_SCHEMA_VERSION: u32 = 27;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -429,6 +435,8 @@ pub enum TraceEvent {
         call_id: Option<String>,
         name: String,
         args: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        issuing_node_id: Option<String>,
     },
     ToolCallCompleted {
         call_id: Option<String>,
@@ -436,6 +444,8 @@ pub enum TraceEvent {
         args: Value,
         output: TraceToolCallOutput,
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        issuing_node_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempts: Option<Vec<TraceRetryAttempt>>,
     },
@@ -1430,11 +1440,14 @@ impl TraceRuntimeSubject {
 pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
+    pub source_identity: String,
     pub module_ref: String,
     pub entry_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_ref: Option<String>,
     pub entry_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restate_invocation_id: Option<String>,
 }
 
 impl TraceLanguageExecutionIdentity {
@@ -1467,18 +1480,24 @@ pub enum TraceLanguageExecutionPayload {
         node_kind: String,
         label: String,
         occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
     },
     NodeCompleted {
         node_id: String,
         node_kind: String,
         label: String,
         occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
     },
     NodeFailed {
         node_id: String,
         node_kind: String,
         label: String,
         occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
         error: String,
     },
     BranchSelected {
@@ -1543,6 +1562,7 @@ pub struct TraceLanguageExecutionMap {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLanguageExecutionMapNode {
     pub id: String,
+    pub site: lash_sansio::WorkflowExecutionSite,
     pub kind: String,
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1570,8 +1590,18 @@ pub struct TraceError {
     pub retryable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<String>,
+    /// The transport's failure classification (`timeout`, `auth`, …), when
+    /// the failure carried a known one. OTel `error.type` projects this —
+    /// an absent or unrecognized kind projects `_OTHER`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<String>,
+    /// The failure code's spelling within its namespace — never the
+    /// namespaced form. OTel `lash.error.code` projects this verbatim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// The namespace owning `code`'s spelling, when a code is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_namespace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }

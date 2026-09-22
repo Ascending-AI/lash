@@ -107,6 +107,11 @@ pub struct DrainWorldSpec {
     /// queue to report. A backend must honour it rather than substituting a
     /// resolver of its own.
     pub executors: Option<Arc<dyn GroupExecutors>>,
+    /// The controller's drain budget (ADR 0099 §7): how long a close's
+    /// finalization waits on a cancel-decided child's attempt body after the
+    /// decision commits. `None` means the tier's default; the budget law asks
+    /// for a tiny one.
+    pub drain_budget: Option<Duration>,
 }
 
 /// Callable from any runtime — a crash law calls it from a runtime it is about
@@ -127,6 +132,8 @@ pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     a_child_this_host_cannot_run_is_reported_not_invented(&make, &prefix).await;
     a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(&make, &prefix).await;
     a_reopen_offering_a_retained_key_under_a_different_request_lends_nothing(&make, &prefix).await;
+    a_successor_is_served_the_unconsumed_prefix_without_re_running_a_child(&make, &prefix).await;
+    a_settlement_written_by_another_host_wakes_the_parked_awaiter(&make, &prefix).await;
 }
 
 /// The drain reclaims groups whose caller is gone, and this process can see
@@ -976,6 +983,191 @@ async fn a_reopen_offering_a_retained_key_under_a_different_request_lends_nothin
         .expect("the caller closes");
 }
 
+/// The wake is the store's, not the host's: a settlement committed by a
+/// *different* host over the same database reaches a caller parked here.
+///
+/// The await loop has no poll arm — a `SETTLEMENT_POLL` would be the only
+/// other thing that could deliver this settlement, and it is gone — so the
+/// `AWAIT_BUDGET` timeout inside [`next`] is what a missing notification
+/// costs. The waiter parks first (its child is claimed and running, so the
+/// rank cannot already exist), then the second host reopens the identical
+/// group and closes it under `Cancel`, which journals the cancel decision —
+/// and its rank — from the retained membership, on a connection the waiter
+/// does not share.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_settlement_written_by_another_host_wakes_the_parked_awaiter(
+    make: &DrainWorldFactory,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "cross-host-wake");
+    let scope = scope(prefix, "cross-host-wake");
+
+    let waiter = make(spec(LIVE_LEASE_MS, &RecordingExecutors::settling())).await;
+    let scoped_waiter = waiter.host.scoped(admit(scope.clone())).expect("scope");
+    let entered = Arc::new(AtomicUsize::new(0));
+    let mut handle = open(&scoped_waiter, &key, 1, RUN, vec![blocking(&entered)]).await;
+    // The child's claim is committed before the law parks: the rank genuinely
+    // does not exist yet, so a settlement delivered now can only have come
+    // from the wake, never from the first read.
+    until(|| entered.load(Ordering::SeqCst) == 1).await;
+
+    let writer = make(spec(LIVE_LEASE_MS, &RecordingExecutors::settling())).await;
+    let scoped_writer = writer.host.scoped(admit(scope)).expect("scope");
+
+    let write = async {
+        // Let the awaiter reach its park before the write lands; the read
+        // after `enable()` is the race the ordering already owns, so a fixed
+        // beat here is plenty.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let writer_handle = open(&scoped_writer, &key, 1, RUN, vec![never()]).await;
+        close(&scoped_writer, writer_handle, CANCEL)
+            .await
+            .expect("the second host's cancel close commits the decision");
+    };
+
+    let (settlement, ()) = tokio::join!(next(&scoped_waiter, &mut handle), write);
+    let settlement =
+        settlement.unwrap_or_else(|err| panic!("the parked await is served rank 1: {err}"));
+    assert_eq!(settlement.position, 0);
+    let error = settlement.outcome.expect_err(
+        "the settlement the second host wrote is the disposition's cancelled \
+         terminal, not an outcome an execution produced",
+    );
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+        "the wake carried exactly the rank the other host committed: {error}"
+    );
+
+    close(&scoped_waiter, handle, CANCEL)
+        .await
+        .expect("the caller closes");
+}
+
+/// §8: a successor that picks the group up at its saved cursor is served the
+/// next rank out of the journal — the retained settlements — not out of any
+/// child running again.
+///
+/// The opener consumes rank 1 of a two-child group and dies with the cursor
+/// there; its children settled before it died, so every fact the successor
+/// needs is already durable. The successor reopens the identical group — the
+/// open replays the retained records rather than dispatching, which the
+/// counting executors assert — and a handle restored at `consumed = 1` is
+/// served rank 2's payload: the surviving child's settlement, not a replay of
+/// the rank the dead process already consumed. Either child can win rank 1,
+/// so the dead process hands the successor the position it consumed through
+/// `consumed_position` — the law's own continuation record.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_successor_is_served_the_unconsumed_prefix_without_re_running_a_child(
+    make: &DrainWorldFactory,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "consumed-prefix");
+    let scope = scope(prefix, "consumed-prefix");
+    // The fact a real continuation would journal: which position the consumed
+    // rank settled. Written by the dying process, read by the successor.
+    let consumed_position = Arc::new(AtomicUsize::new(usize::MAX));
+
+    crashed_process(make, {
+        let key = key.clone();
+        let scope = scope.clone();
+        let consumed_position = Arc::clone(&consumed_position);
+        move |world| {
+            Box::pin(async move {
+                let scoped = world.host.scoped(admit(scope)).expect("scope");
+                let mut handle = open(&scoped, &key, 2, RUN, vec![settles(0), settles(1)]).await;
+                let first = next(&scoped, &mut handle)
+                    .await
+                    .expect("the opener consumes rank 1");
+                consumed_position.store(first.position, Ordering::SeqCst);
+                assert_eq!(handle.consumed(), 1);
+                // Rank 2 durable before the process dies: what the successor
+                // is served must be a retained fact, not a child it ran.
+                tokio::time::timeout(AWAIT_BUDGET, async {
+                    loop {
+                        let settled = scoped
+                            .controller()
+                            .read_group_settlement(&key, 2)
+                            .await
+                            .map(|settled| settled.is_some())
+                            .unwrap_or(false);
+                        if settled {
+                            break;
+                        }
+                        tokio::time::sleep(POLL).await;
+                    }
+                })
+                .await
+                .expect("rank 2 is journaled before the opener dies");
+            })
+        }
+    })
+    .await;
+
+    let successor = make(spec(LIVE_LEASE_MS, &RecordingExecutors::settling())).await;
+    let scoped = successor.host.scoped(admit(scope)).expect("scope");
+
+    // The reopen's executors count what dispatch runs: every child holds a
+    // terminal already, so a replayed record — never an execution — is what
+    // answers each dispatch.
+    let ran = Arc::new(AtomicUsize::new(0));
+    let _reopened = open(
+        &scoped,
+        &key,
+        2,
+        RUN,
+        (0..2)
+            .map(|_| {
+                let ran = Arc::clone(&ran);
+                RuntimeEffectLocalExecutor::testing(move |_| {
+                    let ran = Arc::clone(&ran);
+                    async move {
+                        ran.fetch_add(1, Ordering::SeqCst);
+                        std::future::pending::<
+                            Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+                        >()
+                        .await
+                    }
+                })
+            })
+            .collect(),
+    )
+    .await;
+    assert_eq!(
+        ran.load(Ordering::SeqCst),
+        0,
+        "the successor's reopen replayed the retained records: no child ran again"
+    );
+
+    let consumed = consumed_position.load(Ordering::SeqCst);
+    assert_ne!(consumed, usize::MAX, "the dead process recorded its cursor");
+    let surviving = 1 - consumed;
+    let mut handle = EffectGroupHandle::restored(key.clone(), 2, 1).expect("cursor 1 restores");
+    let settlement = next(&scoped, &mut handle)
+        .await
+        .expect("the successor is served the next rank");
+    assert_eq!(
+        settlement.position, surviving,
+        "the cursor skips the rank the dead process consumed: {settlement:?}"
+    );
+    assert_eq!(handle.consumed(), 2);
+    let outcome = settlement.outcome.expect("the second child settled");
+    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = outcome else {
+        panic!("the journaled payload is the child's own outcome: {outcome:?}")
+    };
+    assert_eq!(
+        value,
+        serde_json::json!({ "position": surviving }),
+        "the payload is the journaled settlement's, not a re-execution's"
+    );
+}
+
 // =============================================================================
 // Fixtures
 // =============================================================================
@@ -990,7 +1182,7 @@ pub(crate) const CRASH_LEASE_MS: u64 = 900;
 
 /// The lease window a live-group law uses: longer than the law, so a lease
 /// expiring mid-test can never be mistaken for the drain honoring it.
-const LIVE_LEASE_MS: u64 = 60_000;
+pub(crate) const LIVE_LEASE_MS: u64 = 60_000;
 
 const POLL: Duration = Duration::from_millis(25);
 
@@ -998,9 +1190,20 @@ const POLL: Duration = Duration::from_millis(25);
 const AWAIT_BUDGET: Duration = Duration::from_secs(60);
 
 pub(crate) fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
+    spec_with_budget(lease_ttl_ms, executors, None)
+}
+
+/// A world whose controller carries an explicit drain budget — the
+/// `closing`-suite laws that assert on the budget ask for one.
+pub(crate) fn spec_with_budget(
+    lease_ttl_ms: u64,
+    executors: &Arc<RecordingExecutors>,
+    drain_budget: Option<Duration>,
+) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
         executors: Some(Arc::clone(executors) as Arc<dyn GroupExecutors>),
+        drain_budget,
     }
 }
 
@@ -1009,6 +1212,7 @@ pub(crate) fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
         executors: None,
+        drain_budget: None,
     }
 }
 
@@ -1225,7 +1429,7 @@ fn child_with_operation(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-fn group(
+pub(crate) fn group(
     execution_scope: &ExecutionScope,
     key: &str,
     children: usize,
@@ -1457,7 +1661,7 @@ pub(crate) fn impostor(
 
 /// What a recording host answers for one child.
 #[derive(Clone)]
-enum ExecutorAnswer {
+pub(crate) enum ExecutorAnswer {
     Settle,
     /// This host cannot run the command.
     Refuse,
@@ -1546,7 +1750,10 @@ impl RecordingExecutors {
         Self::uniform(ExecutorAnswer::Refuse)
     }
 
-    fn by_position(by_position: Vec<ExecutorAnswer>, otherwise: ExecutorAnswer) -> Arc<Self> {
+    pub(crate) fn by_position(
+        by_position: Vec<ExecutorAnswer>,
+        otherwise: ExecutorAnswer,
+    ) -> Arc<Self> {
         Arc::new(Self {
             asked: std::sync::Mutex::new(Vec::new()),
             executed: ExecutionLog::default(),

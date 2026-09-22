@@ -93,7 +93,7 @@ impl RuntimeTurnDriver<'_> {
                 }
                 machine.fail_turn(make_error_event(
                     crate::TurnFailureKind::ProtocolBeforeLlmCall,
-                    Some(crate::TurnFailureCode::BeforeLlmCallFailed),
+                    Some(crate::TurnFailureCode::BeforeLlmCallFailed.into()),
                     err_string.clone(),
                     Some(err_string),
                 ));
@@ -172,11 +172,8 @@ impl RuntimeTurnDriver<'_> {
             result => result,
         };
         let loud_provider_panic = result.as_ref().err().and_then(|error| {
-            matches!(
-                &error.code,
-                Some(FailureCode::Adapter(TurnFailureCode::ProviderPanicked))
-            )
-            .then(|| error.message.clone())
+            (error.code == Some(FailureCode::lash(TurnFailureCode::ProviderPanicked)))
+                .then(|| error.message.clone())
         });
         // FIG-793: the LLM run is the deployed first journal command for this
         // protocol iteration, so it must be emitted and awaited before any

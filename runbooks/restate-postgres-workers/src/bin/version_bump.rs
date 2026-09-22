@@ -96,11 +96,18 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
     "lash_turn_cancel_affected_inputs",
     "uq_lash_runtime_effect_replay_commit_seq",
 ];
-/// Component 112 changed encoded payloads without introducing relations.
-/// The retained 111-to-112 arm therefore has no divergent artifacts.
+/// What the newest generation alone introduced — the `introduced_relations` of
+/// the migration out of the immediate predecessor version. The divergent fixture
+/// records that predecessor over the *current* catalog, so these are exactly the
+/// artifacts its refusal must enumerate.
+///
+/// Under the component-115 boundary the retained generation is 114. Its
+/// immediate predecessor, component 113, only removed observer-selection
+/// metadata the current walk no longer enumerates, so
+/// no introduced relational artifacts are listed.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
-/// Component 114 adds queued-run admission. No migration targets this
-/// generation; a component-113 stamp requires recreation.
+/// Components 114 and 115 require recreation: lifecycle values and queued-run
+/// admission have no migration from a predecessor stamp.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even

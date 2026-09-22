@@ -17,3 +17,5 @@ filegroup(
     srcs = ["target-inventory.json"],
     visibility = ["//visibility:public"],
 )
+
+exports_files(["patches/rules-rs-reachable-features.patch"])

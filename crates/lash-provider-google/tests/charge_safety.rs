@@ -113,7 +113,7 @@ fn charge_safety_google_escaped_content_refuses_retry_with_typed_reason() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         failure.error.code.as_ref().map(|code| code.to_string()),
-        Some("refusal:unsafe_retry_after_output_started".to_string())
+        Some("lash:unsafe_retry_after_output_started".to_string())
     );
     assert_eq!(
         failure

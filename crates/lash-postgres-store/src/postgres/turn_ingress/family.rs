@@ -168,30 +168,15 @@ lash_store_sql::statements! {
         /// The source key of batch `?2` of session `?1`, if claim `?3`/`?4`
         /// still holds it.
         ///
-        /// PostgreSQL takes the wake source's advisory lock between reading a
-        /// settling batch's wake identity and writing the redelivery fence, so
-        /// it reads the two facts it needs — this and the head payload — and
-        /// writes the fence separately. SQLite does all three in one statement
-        /// under the write lock it already holds.
+        /// The settlement observation needs the source key to decide whether a
+        /// settled batch consumed a process wake (and so which fence to raise
+        /// before the row goes away). The head payload is the shared
+        /// [`QueuedBatchStatements::select_claimed_batch_head_payload`].
         select_claimed_batch_source_key = "SELECT source_key
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
                AND claim_id = ?3
                AND claim_token = ?4";
-
-        /// The first payload of batch `?2` of session `?1`, if claim `?3`/`?4`
-        /// still holds it: the wake identity a settled batch contributes to its
-        /// redelivery fence. Same fork as
-        /// [`select_claimed_batch_source_key`](Self::select_claimed_batch_source_key).
-        select_claimed_batch_head_payload = "SELECT item.payload_json
-             FROM queued_work_batches AS batch
-             JOIN queued_work_items AS item ON item.batch_id = batch.batch_id
-             WHERE batch.session_id = ?1
-               AND batch.batch_id = ?2
-               AND batch.claim_id = ?3
-               AND batch.claim_token = ?4
-             ORDER BY item.item_index ASC
-             LIMIT 1";
     }
 }

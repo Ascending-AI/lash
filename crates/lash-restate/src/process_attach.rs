@@ -27,8 +27,8 @@ use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::durable_wait::{
-    LashDurableWaitIndexClient, RestateDurableWaitAddress, RestateDurableWaitResolveRequest,
-    durable_wait_index_object_key,
+    LASH_REPLAY_KEY_HEADER, LashDurableWaitIndexClient, RestateDurableWaitAddress,
+    RestateDurableWaitResolveRequest, durable_wait_index_object_key,
 };
 use crate::process::{LashProcessWorkflowClient, RestateProcessAwaitRequest};
 
@@ -84,17 +84,18 @@ impl LashProcessAttach for LashProcessAttachImpl {
             Ok(Json(output)) => match serde_json::to_value(&output) {
                 Ok(value) => Resolution::Ok(value),
                 Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
-                    code: "process_terminal_encode".to_string(),
+                    code: lash_core::TurnFailureCode::from_wire("process_terminal_encode").into(),
                     message: error.to_string(),
                     raw: None,
                 }),
             },
             Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
-                code: "process_terminal_unobservable".to_string(),
+                code: lash_core::TurnFailureCode::from_wire("process_terminal_unobservable").into(),
                 message: error.to_string(),
                 raw: None,
             }),
         };
+        let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
         // Resolve through the index rather than the wait workflow directly: the
         // index retains the resolution for a registration that has not happened
@@ -103,6 +104,7 @@ impl LashProcessAttach for LashProcessAttachImpl {
         let Json(_outcome) = ctx
             .object_client::<LashDurableWaitIndexClient>(durable_wait_index_object_key(&address))
             .resolve(Json(RestateDurableWaitResolveRequest { key, resolution }))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
             .await?;
         Ok(Json(()))

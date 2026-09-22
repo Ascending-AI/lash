@@ -345,10 +345,22 @@ impl RuntimeTurnDriver<'_> {
                     );
                 }
             } else {
-                merge_pending_checkpoint_turn_input_claim(
-                    &mut self.pending_checkpoint_turn_input_claim,
-                    claim,
+                // A replayed checkpoint outcome can re-deliver a claim this
+                // turn already drives — the withheld claim a follow-on turn
+                // was admitted with is carried by the journaled claim set.
+                // Reconcile it against the resident drives first so the same
+                // authority registers exactly one drive; only rows no drive
+                // covers are new work for the pending checkpoint slot.
+                merge_pending_turn_input_claim_authority(
+                    &mut self.pending_turn_input_claims,
+                    &mut claim,
                 )?;
+                if !claim.inputs.is_empty() {
+                    merge_pending_checkpoint_turn_input_claim(
+                        &mut self.pending_checkpoint_turn_input_claim,
+                        claim,
+                    )?;
+                }
             }
         }
         Ok(delivery)
@@ -613,8 +625,11 @@ impl RuntimeTurnDriver<'_> {
         committed.extend(applied.messages);
         emit_session_events(event_tx, applied.events).await;
         if let Some(abort) = applied.abort {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::from_wire_code(&abort.code),
+            // A plugin's abort code is plugin-authored vocabulary: it lands
+            // in `ForeignCode` verbatim (namespace included) and is never
+            // re-parsed into a Lash `RuntimeErrorCode` arm.
+            return Err(RuntimeError::foreign(
+                abort.code.namespaced(),
                 abort.message,
             ));
         }

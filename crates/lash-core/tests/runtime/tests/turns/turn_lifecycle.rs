@@ -257,7 +257,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         TurnOutcome::AgentFrameSwitch { .. }
     ));
     assert!(committed.errors.iter().any(|issue| {
-        issue.code == Some(lash_core::TurnFailureCode::ProtocolRestoreSession)
+        issue.code == Some(lash_core::TurnFailureCode::ProtocolRestoreSession.into())
             && issue.retryable == Some(false)
     }));
     assert!(matches!(
@@ -1806,6 +1806,16 @@ impl lash_core::RuntimeEffectController for JournalReplayEffectController {
         cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.native.await_next_settlement(handle, cancel).await
+    }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
     }
 
     async fn close_effect_group(

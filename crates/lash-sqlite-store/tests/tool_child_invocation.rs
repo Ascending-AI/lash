@@ -33,6 +33,7 @@ async fn world(path: PathBuf, spec: ToolChildWorldSpec) -> ToolChildWorld {
     let options = SqliteEffectReplayOptions {
         lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the law asks for a ttl at least three renew intervals wide"),
+        drain_budget: Default::default(),
     };
     let host = SqliteEffectHost::open_with_options(&path, options)
         .await

@@ -46,6 +46,7 @@ impl RuntimeExecutionContext<'_> {
         batch: crate::PreparedToolBatch,
         parent_invocation: crate::RuntimeInvocation,
         child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+        issuing_node_ids: std::sync::Arc<HashMap<String, String>>,
     ) -> Result<crate::ToolBatchEffectOutcome, crate::RuntimeEffectControllerError> {
         let indexed_tools = batch.calls.into_iter().enumerate().collect::<Vec<_>>();
         let cancellation = self.cancellation_token.clone().unwrap_or_default();
@@ -73,10 +74,12 @@ impl RuntimeExecutionContext<'_> {
                 }
                 let child_execution_trace_hook =
                     child_trace_hooks.get(&child.call.call_id).cloned();
+                let issuing_node_id = issuing_node_ids.get(&child.call.call_id).cloned();
                 let outcome = Box::pin(context.execute_prepared_tool_batch_child(
                     child,
                     parent_invocation.clone(),
                     child_execution_trace_hook,
+                    issuing_node_id,
                     None,
                 ))
                 .await?;
@@ -100,6 +103,7 @@ impl RuntimeExecutionContext<'_> {
             let cancellation = cancellation.clone();
             let tool_cancel = tool_cancel.clone();
             let child_trace_hooks = std::sync::Arc::clone(&child_trace_hooks);
+            let issuing_node_ids = std::sync::Arc::clone(&issuing_node_ids);
             let intent_drain_gate = std::sync::Arc::clone(&intent_drain_gate);
             move |(index, child)| {
                 let context = context.clone().with_cancellation_token(tool_cancel.clone());
@@ -109,6 +113,7 @@ impl RuntimeExecutionContext<'_> {
                 let cancelled_tool = child.call.clone();
                 let child_execution_trace_hook =
                     child_trace_hooks.get(&child.call.call_id).cloned();
+                let issuing_node_id = issuing_node_ids.get(&child.call.call_id).cloned();
                 let (intent_drain_slot, mut final_result_committed) =
                     crate::tool_dispatch::IntentDrainGuard::new(
                         std::sync::Arc::clone(&intent_drain_gate),
@@ -119,6 +124,7 @@ impl RuntimeExecutionContext<'_> {
                         child,
                         parent_invocation,
                         child_execution_trace_hook,
+                        issuing_node_id,
                         Some(intent_drain_slot),
                     );
                     tokio::pin!(tool_call);
@@ -188,8 +194,12 @@ impl RuntimeExecutionContext<'_> {
         child: crate::PreparedToolBatchCall,
         parent_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+        issuing_node_id: Option<String>,
         intent_drain_slot: Option<crate::tool_dispatch::IntentDrainGuard>,
     ) -> Result<CoordinatedToolLaunch, crate::RuntimeEffectControllerError> {
+        let context = issuing_node_id
+            .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
+            .unwrap_or_else(|| self.clone());
         let authorization = match child.execution_grant {
             Some(grant) => ToolCallAuthorization::Granted(grant),
             None => ToolCallAuthorization::Catalog(child.call.tool_id.clone()),
@@ -199,17 +209,19 @@ impl RuntimeExecutionContext<'_> {
         let args = child.call.args.clone();
         let replay = child.call.replay.clone();
         let activity_id = tool_activity_id(&call_id);
-        self.emit_tool_call_started(&call_id, &tool_name, args.clone(), activity_id.clone())
+        context
+            .emit_tool_call_started(&call_id, &tool_name, args.clone(), activity_id.clone())
             .await;
 
         if authorization.allows_orchestration()
             && self.dispatch.is_orchestrating_tool(&child.call.tool_id)
         {
-            let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&self.dispatch))
+            let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&context.dispatch))
                 .prepared_call(&child.call)
                 .cancellation_token(self.cancellation_token.clone())
                 .runtime_execution_context(
-                    self.clone()
+                    context
+                        .clone()
                         .with_parent_invocation(parent_invocation.clone()),
                 )
                 .parent_invocation(Some(parent_invocation))
@@ -226,7 +238,7 @@ impl RuntimeExecutionContext<'_> {
             // rather than at the end of this function keeps the release point
             // where the former hand-written discharge stood.
             drop(intent_drain_slot);
-            let completed = self.complete_tool_call(call_id, replay, outcome).await;
+            let completed = context.complete_tool_call(call_id, replay, outcome).await;
             return Ok(CoordinatedToolLaunch {
                 launch: crate::runtime::ToolCallLaunch::Done {
                     result: Box::new(completed.completed),
@@ -238,7 +250,7 @@ impl RuntimeExecutionContext<'_> {
         }
 
         let retry_policy = crate::tool_dispatch::resolve_retry_policy(
-            self.dispatch.as_ref(),
+            context.dispatch.as_ref(),
             &child.call.tool_id,
             authorization.execution_grant(),
         );
@@ -265,8 +277,9 @@ impl RuntimeExecutionContext<'_> {
             intent_trace_hook,
             |completion_key| {
                 crate::RuntimeEffectLocalExecutor::tool_batch(
-                    self.clone(),
+                    context.clone(),
                     trace_hooks.clone(),
+                    HashMap::new(),
                     completion_key,
                 )
             },
@@ -275,18 +288,19 @@ impl RuntimeExecutionContext<'_> {
         let outcome = match coordinated.launch {
             ToolCallLaunch::Done(outcome) => *outcome,
             ToolCallLaunch::Pending(pending) => {
-                self.await_pending_tool_dispatch_outcome_with_suffix(
-                    &call_id,
-                    Some(parent_invocation),
-                    format!("{}:await", child.replay_suffix),
-                    *pending,
-                    self.cancellation_token.clone(),
-                )
-                .await
+                context
+                    .await_pending_tool_dispatch_outcome_with_suffix(
+                        &call_id,
+                        Some(parent_invocation),
+                        format!("{}:await", child.replay_suffix),
+                        *pending,
+                        self.cancellation_token.clone(),
+                    )
+                    .await
             }
             ToolCallLaunch::ControllerAborted(error) => return Err(error),
         };
-        let completed = self.complete_tool_call(call_id, replay, outcome).await;
+        let completed = context.complete_tool_call(call_id, replay, outcome).await;
         Ok(CoordinatedToolLaunch {
             launch: crate::runtime::ToolCallLaunch::Done {
                 result: Box::new(completed.completed),
@@ -311,6 +325,14 @@ impl RuntimeExecutionContext<'_> {
         }
 
         let batch_id = deterministic_tool_invocation_batch_id(&calls, occurrence);
+        let issuing_node_ids = calls
+            .iter()
+            .filter_map(|call| {
+                call.issuing_language_node_id
+                    .clone()
+                    .map(|node_id| (call.id.clone(), node_id))
+            })
+            .collect::<HashMap<_, _>>();
         let mut replies = vec![None; calls.len()];
         // A failed batch reports an empty settlement order by construction: downstream
         // settlement-selecting aggregates treat the order as evidence of what settled.
@@ -336,6 +358,11 @@ impl RuntimeExecutionContext<'_> {
         let mut settled_during_preparation = Vec::new();
 
         for (index, mut call) in calls.into_iter().enumerate() {
+            let context = call
+                .issuing_language_node_id
+                .clone()
+                .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
+                .unwrap_or_else(|| self.clone());
             let authorization = ToolCallAuthorization::from_invocation(&mut call);
             let Some(tool_name) = authorization.tool_name(self.dispatch.as_ref()) else {
                 let outcome = ToolDispatchOutcome {
@@ -356,7 +383,7 @@ impl RuntimeExecutionContext<'_> {
                     captures: Vec::new(),
                     triggers: Vec::new(),
                 };
-                let completed = self
+                let completed = context
                     .complete_undispatched_tool_call(call.id, None, outcome)
                     .await;
                 replies[index] = Some(
@@ -385,7 +412,7 @@ impl RuntimeExecutionContext<'_> {
                     ));
                 }
                 ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = self
+                    let completed = context
                         .complete_undispatched_tool_call(call.id, None, *outcome)
                         .await;
                     replies[index] = Some(
@@ -422,14 +449,16 @@ impl RuntimeExecutionContext<'_> {
             let local_executor = crate::RuntimeEffectLocalExecutor::tool_batch(
                 self.clone(),
                 child_trace_hooks,
+                issuing_node_ids,
                 None,
             );
-            let raw_outcome = self
-                .dispatch
-                .effect_controller
-                .scoped()
-                .execute_effect(envelope, local_executor)
-                .await;
+            let raw_outcome = Box::pin(
+                self.dispatch
+                    .effect_controller
+                    .scoped()
+                    .execute_effect(envelope, local_executor),
+            )
+            .await;
             let mut outcome =
                 match raw_outcome.and_then(crate::RuntimeEffectOutcome::into_tool_batch_effect) {
                     Ok(outcome) => outcome,
@@ -743,7 +772,7 @@ mod tests {
 
     #[derive(Default)]
     struct ToolLifecycleTraceSink {
-        lifecycle: Mutex<Vec<(String, &'static str)>>,
+        lifecycle: Mutex<Vec<(String, &'static str, Option<String>)>>,
     }
 
     impl lash_trace::TraceSink for ToolLifecycleTraceSink {
@@ -754,12 +783,14 @@ mod tests {
             let entry = match &record.event {
                 lash_trace::TraceEvent::ToolCallStarted {
                     call_id: Some(call_id),
+                    issuing_node_id,
                     ..
-                } => Some((call_id.clone(), "started")),
+                } => Some((call_id.clone(), "started", issuing_node_id.clone())),
                 lash_trace::TraceEvent::ToolCallCompleted {
                     call_id: Some(call_id),
+                    issuing_node_id,
                     ..
-                } => Some((call_id.clone(), "completed")),
+                } => Some((call_id.clone(), "completed", issuing_node_id.clone())),
                 _ => None,
             };
             if let Some(entry) = entry {
@@ -792,17 +823,20 @@ mod tests {
                         "missing-call-a",
                         crate::ToolId::from("tool:missing-a"),
                         serde_json::json!({}),
-                    ),
+                    )
+                    .with_issuing_language_node_id("node-a"),
                     ToolInvocation::new(
                         "missing-call-b",
                         crate::ToolId::from("tool:missing-b"),
                         serde_json::json!({}),
-                    ),
+                    )
+                    .with_issuing_language_node_id("node-b"),
                     ToolInvocation::new(
                         "invalid-prepared",
                         crate::ToolId::from("tool:batch_failure"),
                         serde_json::Value::Null,
-                    ),
+                    )
+                    .with_issuing_language_node_id("node-invalid"),
                 ],
                 crate::session::ToolBatchOccurrence::Opener(1),
             )
@@ -812,7 +846,11 @@ mod tests {
         // lifecycle attempt. Each call id therefore owns one ordered Started
         // then Completed pair; the failure path must never publish a bare
         // completion or borrow another call's correlation.
-        for call_id in ["missing-call-a", "missing-call-b", "invalid-prepared"] {
+        for (call_id, node_id) in [
+            ("missing-call-a", "node-a"),
+            ("missing-call-b", "node-b"),
+            ("invalid-prepared", "node-invalid"),
+        ] {
             let started = turn_rx.recv().await.expect("tool start activity");
             let completed = turn_rx.recv().await.expect("tool completion activity");
             let correlation_id = crate::TurnActivityId::new(format!("tool:{call_id}"));
@@ -836,12 +874,17 @@ mod tests {
                 .lifecycle
                 .lock_recover()
                 .iter()
-                .filter_map(|(observed, event)| (observed == call_id).then_some(*event))
+                .filter_map(|(observed, event, issuing_node_id)| {
+                    (observed == call_id).then_some((*event, issuing_node_id.clone()))
+                })
                 .collect::<Vec<_>>();
             assert_eq!(
                 trace_lifecycle,
-                ["started", "completed"],
-                "exactly one ordered trace pair keyed by {call_id}"
+                [
+                    ("started", Some(node_id.to_string())),
+                    ("completed", Some(node_id.to_string())),
+                ],
+                "exactly one ordered trace pair keyed by {call_id} and linked to {node_id}"
             );
         }
         assert!(
@@ -886,6 +929,7 @@ mod tests {
                     call_id: Some(ref call_id),
                     ref name,
                     ref args,
+                    ..
                 } if call_id == "start-order"
                     && name == "granted_orchestration_probe"
                     && args == &serde_json::json!({ "probe": true })

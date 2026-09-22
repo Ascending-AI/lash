@@ -9,10 +9,10 @@ use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectGroupChildCommitOutcome, EffectGroupHandle, EffectHost,
     EffectJournalRetirement, ExecutionScope, GroupChildFinalCommit, GroupSettlement, LoserPolicy,
-    NativeRuntimeEffectController, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    SegmentProgress, TurnControlParticipation,
+    NativeRuntimeEffectController, RankedGroupSettlement, Resolution, ResolveOutcome,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlParticipation,
 };
 use crate::RuntimeError;
 
@@ -346,6 +346,18 @@ impl EffectHost for NativeEffectHost {
         )?))
     }
 
+    /// The §7 closing seam, answered against the controller's in-memory group
+    /// table — the same vocabulary the SQL tiers serve, minus the journal.
+    /// `None` on a host over a foreign controller, for the same reason
+    /// `scoped_for_group_child` refuses there: its group state is not
+    /// inspectable, so there is no lifecycle to read or advance.
+    fn effect_group_closing(&self) -> Option<Arc<dyn super::StoreEffectGroupClosing>> {
+        self.groups_admin.as_ref().map(|groups| {
+            Arc::new(super::executor::NativeGroupClosing::new(Arc::clone(groups)))
+                as Arc<dyn super::StoreEffectGroupClosing>
+        })
+    }
+
     fn install_tool_child_host(
         &self,
         candidate: Arc<super::ToolChildHost>,
@@ -628,6 +640,13 @@ impl RuntimeEffectController for FencedNativeController {
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.host.await_next_settlement(handle, cancel).await
     }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        self.host.read_group_settlement(group_key, rank).await
+    }
 
     async fn close_effect_group(
         &self,
@@ -715,6 +734,13 @@ impl RuntimeEffectController for NativeEffectHost {
         cancel: CancellationToken,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.controller.await_next_settlement(handle, cancel).await
+    }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        self.controller.read_group_settlement(group_key, rank).await
     }
 
     async fn close_effect_group(

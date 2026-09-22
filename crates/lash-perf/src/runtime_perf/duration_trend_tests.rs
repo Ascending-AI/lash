@@ -2,7 +2,7 @@
 //! level shifts that reset a series' comparison window.
 //!
 //! A sibling file rather than an inline `mod tests`: `duration_trend.rs` is the
-//! signal, and `scripts/check-production-file-size.sh` budgets a production
+//! signal, and `scripts/check-production-file-size.py` budgets a production
 //! source file at 1600 lines against 2500 for a `*_tests.rs` one.
 
 use super::*;

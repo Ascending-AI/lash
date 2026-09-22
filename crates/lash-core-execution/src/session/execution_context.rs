@@ -42,6 +42,8 @@ pub struct RuntimeExecutionContext<'run> {
     /// call to its code block without ordering heuristics. `None` when the
     /// context is not executing a code block.
     code_block_graph_key: Option<String>,
+    /// Workflow node that issued tool calls through this context.
+    issuing_language_node_id: Option<Arc<str>>,
     /// `None` for top-level tool execution.
     batch_parent_call_id: Option<String>,
     /// Work-driver handle for this execution's process wiring, when the
@@ -66,6 +68,36 @@ pub struct RuntimeExecutionContext<'run> {
     /// `to_static`, so a rebound or handed-over context incorporates against
     /// the same set.
     pub(crate) incorporation_ledger: Arc<std::sync::Mutex<crate::session::IncorporationLedger>>,
+}
+
+#[derive(Clone)]
+struct ProcessInvocationCorrelation {
+    process_id: ProcessId,
+    authority: crate::ProcessExecutionWriteAuthority,
+}
+
+/// Carries attempt-bound process invocation authority into one live child turn.
+///
+/// The private input type prevents an ordinary [`crate::TurnContext`] caller
+/// from fabricating the correlation with a string. The runtime revalidates the
+/// process and attempt when it reads the value.
+pub(crate) fn attach_process_invocation_correlation(
+    turn_context: &mut crate::TurnContext,
+    process_id: &ProcessId,
+    authority: &crate::ProcessExecutionWriteAuthority,
+) {
+    if authority.restate_invocation_id(process_id).is_some() {
+        turn_context.set_runtime_correlation(ProcessInvocationCorrelation {
+            process_id: process_id.clone(),
+            authority: authority.clone(),
+        });
+    } else {
+        turn_context.clear_runtime_correlation::<ProcessInvocationCorrelation>();
+    }
+}
+
+pub(crate) fn clear_process_invocation_correlation(turn_context: &mut crate::TurnContext) {
+    turn_context.clear_runtime_correlation::<ProcessInvocationCorrelation>();
 }
 
 #[derive(Clone)]
@@ -128,6 +160,7 @@ impl RuntimeExecutionTracing {
         &self,
         record: &crate::ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
+        issuing_node_id: Option<&str>,
         clock: &dyn crate::Clock,
     ) {
         self.emit(
@@ -137,6 +170,7 @@ impl RuntimeExecutionTracing {
                 args: record.args.clone(),
                 output: crate::trace::trace_tool_call_output(&record.output),
                 duration_ms: record.duration_ms,
+                issuing_node_id: issuing_node_id.map(str::to_string),
                 attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
             },
             clock,
@@ -197,7 +231,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         clippy::expect_used,
         reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
     )]
-    fn language_runtime_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
+    pub(crate) fn language_runtime_invocation(
+        &self,
+        effect_id: &str,
+    ) -> crate::RuntimeEffectInvocation {
         let execution_scope = self
             .dispatch
             .effect_controller
@@ -390,6 +427,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_cancel_scope: None,
             tracing: None,
             code_block_graph_key: None,
+            issuing_language_node_id: None,
             batch_parent_call_id: None,
             process_work: None,
         }
@@ -415,6 +453,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
+            issuing_language_node_id: self.issuing_language_node_id.clone(),
             batch_parent_call_id: self.batch_parent_call_id.clone(),
             process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
@@ -524,6 +563,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    pub fn with_issuing_language_node_id(mut self, node_id: impl Into<String>) -> Self {
+        self.issuing_language_node_id = Some(Arc::from(node_id.into()));
+        self
+    }
+
     pub(crate) fn with_batch_parent_call_id(mut self, parent_call_id: Option<String>) -> Self {
         self.batch_parent_call_id = parent_call_id;
         self
@@ -554,6 +598,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                     call_id: Some(call_id.to_string()),
                     name: name.to_string(),
                     args: args.clone(),
+                    issuing_node_id: self.issuing_language_node_id.as_deref().map(str::to_string),
                 },
                 self.dispatch.clock.as_ref(),
             );
@@ -567,7 +612,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         attempts: &[lash_trace::TraceRetryAttempt],
     ) {
         if let Some(tracing) = self.tracing.as_ref() {
-            tracing.emit_tool_call_completed(record, attempts, self.dispatch.clock.as_ref());
+            tracing.emit_tool_call_completed(
+                record,
+                attempts,
+                self.issuing_language_node_id.as_deref(),
+                self.dispatch.clock.as_ref(),
+            );
         }
     }
 
@@ -721,6 +771,24 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.process_execution
             .as_ref()
             .and_then(|exec| exec.event_context.as_ref())
+    }
+
+    /// Restate invocation that owns the enclosing process execution, when this
+    /// context runs inside an attempt-bound Restate process.
+    pub fn restate_invocation_id(&self) -> Option<&str> {
+        if let Some(execution) = self.process_execution.as_ref() {
+            return execution
+                .event_context
+                .as_ref()?
+                .execution_write_authority
+                .restate_invocation_id(&execution.process_id);
+        }
+        let correlation = self
+            .turn_context
+            .runtime_correlation::<ProcessInvocationCorrelation>()?;
+        correlation
+            .authority
+            .restate_invocation_id(&correlation.process_id)
     }
 
     pub(crate) fn is_run_local_process(&self, process_id: &ProcessId) -> bool {
@@ -978,8 +1046,11 @@ impl<'run> RuntimeExecutionContext<'run> {
             .await?;
         match outcome.into_await_event()? {
             crate::Resolution::Ok(value) => Ok(value),
-            crate::Resolution::Err(err) => Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::from_wire_code(&err.code),
+            crate::Resolution::Err(err) => Err(crate::RuntimeEffectControllerError::foreign(
+                // A host's completion code is host-authored vocabulary: it
+                // lands in `ForeignCode` verbatim (namespace included) and is
+                // never re-parsed into a Lash `RuntimeErrorCode` arm.
+                err.code.namespaced(),
                 err.message,
             )),
             crate::Resolution::Timeout => Err(crate::RuntimeEffectControllerError::new(

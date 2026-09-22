@@ -64,10 +64,11 @@ async fn interpret_directive(
                 crate::plugin::AmbientDirectiveAction::None => Ok(DirectiveAction::None),
             }
         }
-        TurnPluginDirective::AbortTurn(directive) => Ok(DirectiveAction::Abort(PluginAbort {
-            code: directive.code,
-            message: directive.message,
-        })),
+        TurnPluginDirective::AbortTurn(directive) => Ok(DirectiveAction::Abort(PluginAbort::new(
+            &plugin_id,
+            directive.code,
+            directive.message,
+        ))),
         TurnPluginDirective::EnqueueMessages(directive) => {
             Ok(DirectiveAction::EnqueueMessages(directive.messages))
         }

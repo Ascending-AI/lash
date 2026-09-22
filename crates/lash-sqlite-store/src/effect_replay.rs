@@ -22,14 +22,15 @@ use lash_core::facade_support::effect_replay_driver::{
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectCommitState,
     EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
     EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupColumn,
-    EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayCapabilities,
-    EffectReplayRowStore, EffectReplayVocabulary, EffectRowStatus, EffectTerminal,
-    StoreEffectReplayDriver, StoredChildArbitration, StoredEffectRow, StoredGroupSettlement,
-    ToolBatchRedrive, UnsettledGroupChild, decide_effect_claim,
+    EffectGroupLifecycle, EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence,
+    EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore, EffectReplayVocabulary,
+    EffectRowStatus, EffectTerminal, StoreEffectReplayDriver, StoredChildArbitration,
+    StoredEffectRow, StoredGroupSettlement, ToolBatchRedrive, UnsettledGroupChild,
+    decide_effect_claim,
 };
 use lash_core::{
     EffectJournalRetirement, EffectRetirementGate, ExecutionScope, GroupExecutors,
-    RuntimeEffectControllerError, RuntimeError, StoreEffectGroupDrain,
+    RuntimeEffectControllerError, RuntimeError, StoreEffectGroupClosing, StoreEffectGroupDrain,
     facade_support::LeaseTimings,
 };
 
@@ -45,6 +46,7 @@ use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events, wait_sql}
 use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
 
 mod row_store;
+mod settlement_notify;
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
@@ -163,6 +165,33 @@ lash_store_sql::statements! {
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING";
+
+        /// The §7 lifecycle CAS: set `lifecycle = ?2` on `?1` while its phase
+        /// tag is one of the `?3` JSON array's strings (an empty array is a
+        /// guaranteed miss), and return the lifecycle now durable — the
+        /// written value on a hit. `json_extract`/`json_each` are SQLite's
+        /// JSON operators; PostgreSQL spells the same guard `= ANY(?3)`.
+        transition_lifecycle = "UPDATE runtime_effect_group
+             SET lifecycle = ?2
+             WHERE group_key = ?1
+               AND json_extract(lifecycle, '$.type') IN (
+                   SELECT value FROM json_each(?3))
+             RETURNING lifecycle";
+
+        /// Every `closing` group under scope `?1` — the resumable
+        /// finalization set (ADR 0099 §7).
+        select_closing_by_scope = "SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    expected_children, lifecycle, created_at_ms
+             FROM runtime_effect_group
+             WHERE scope_id = ?1
+               AND json_extract(lifecycle, '$.type') = 'closing'";
+
+        /// `(group_key, lifecycle)` for every non-`settled` group owned by
+        /// session `?1` — the pins session deletion refuses on.
+        select_session_pins = "SELECT group_key, lifecycle
+             FROM runtime_effect_group
+             WHERE session_id = ?1
+               AND json_extract(lifecycle, '$.type') != 'settled'";
     }
 }
 
@@ -255,6 +284,11 @@ pub struct SqliteEffectReplayOptions {
     /// [`LeaseTimings`] they configure on the runtime so effect leases expire
     /// on the same failover window as session and process leases.
     pub lease_timings: LeaseTimings,
+    /// How long a group's finalization waits on a cancel-decided child's
+    /// attempt body after the decision commits (ADR 0099 §7). Construction-
+    /// level like `lease_timings`: the bound is operational, never semantic —
+    /// it changes how long the finalizer waits, never what it commits.
+    pub drain_budget: lash_core::EffectGroupDrainBudget,
 }
 
 /// Deployment-level SQLite effect host.
@@ -456,9 +490,15 @@ impl SqliteEffectHost {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
+        // Opening creates the database before the host is returned, so the
+        // canonical path is a stable identity across relative paths and
+        // symlinked deployment configuration. Fall back only for platforms
+        // that cannot canonicalize an already-open file.
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let registry = Arc::new(RegistryAttachment::default());
         let inner = open_effect_replay_driver(
             path,
+            &binding_path,
             StoreBacking::File,
             options,
             clock,
@@ -467,11 +507,6 @@ impl SqliteEffectHost {
         .await?;
         let closure_lifecycle = SqliteConnection::open(path).await?;
         let closure_registry = Arc::new(RegistryAttachment::default());
-        // Opening creates the database before the host is returned, so the
-        // canonical path is a stable identity across relative paths and
-        // symlinked deployment configuration. Fall back only for platforms
-        // that cannot canonicalize an already-open file.
-        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
             inner,
             fence_database: Some(path.to_path_buf()),
@@ -514,6 +549,14 @@ impl SqliteEffectHost {
     pub fn group_drain(&self) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::clone(&self.inner).into_group_drain()
     }
+
+    /// The closing/finalization seam over this host's effect journal (ADR 0099
+    /// §7): the durable `closing` fact this host's `close` writes, and the
+    /// four-step cursor a finalizer — or a redriven turn's
+    /// `resume_closing_groups` — advances.
+    pub fn group_closing(&self) -> Arc<dyn StoreEffectGroupClosing> {
+        Arc::clone(&self.inner).into_group_closing()
+    }
 }
 
 impl SqliteRuntimeEffectController {
@@ -555,9 +598,11 @@ impl SqliteRuntimeEffectController {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
             inner: open_effect_replay_driver(
                 path,
+                &binding_path,
                 StoreBacking::File,
                 options,
                 clock,
@@ -565,12 +610,7 @@ impl SqliteRuntimeEffectController {
             )
             .await?,
             scope,
-            turn_control_binding_id: Arc::from(format!(
-                "sqlite:{}",
-                std::fs::canonicalize(path)
-                    .unwrap_or_else(|_| path.to_path_buf())
-                    .display()
-            )),
+            turn_control_binding_id: Arc::from(format!("sqlite:{}", binding_path.display())),
         })
     }
 
@@ -638,6 +678,7 @@ fn validate_effect_host_path(path: &Path) -> tokio_rusqlite::Result<()> {
 
 async fn open_effect_replay_driver(
     path: &Path,
+    binding_path: &Path,
     backing: StoreBacking,
     options: SqliteEffectReplayOptions,
     clock: Arc<dyn lash_core::Clock>,
@@ -665,6 +706,7 @@ async fn open_effect_replay_driver(
         signing_secret,
         CompletionKeys::Issued,
         registry,
+        settlement_notify::SettlementNotifierKey::for_file(binding_path),
     )))
 }
 
@@ -695,6 +737,7 @@ async fn open_effect_replay_memory_driver(
         signing_secret,
         CompletionKeys::Unsupported,
         Arc::new(RegistryAttachment::default()),
+        settlement_notify::SettlementNotifierKey::for_memory(),
     )))
 }
 
@@ -705,6 +748,7 @@ fn build_effect_replay_driver(
     signing_secret: Vec<u8>,
     completion_keys: CompletionKeys,
     registry: Arc<RegistryAttachment>,
+    settlement_key: settlement_notify::SettlementNotifierKey,
 ) -> SqliteEffectReplay {
     let await_events = sqlite_await_events(
         conn.clone(),
@@ -718,10 +762,12 @@ fn build_effect_replay_driver(
             conn,
             clock: Arc::clone(&clock),
             registry,
+            settlement_key,
         },
         await_events,
         clock,
         options.lease_timings,
+        options.drain_budget,
     )
 }
 
@@ -739,6 +785,10 @@ pub struct SqliteEffectReplayRowStore {
     clock: Arc<dyn lash_core::Clock>,
     /// The bound process registry whose file holds process-scope fences.
     registry: Arc<RegistryAttachment>,
+    /// This store's identity in the process-wide settlement-notifier registry:
+    /// the canonical database path for a file journal, so two hosts over one
+    /// file wake each other's parked settlement readers.
+    settlement_key: settlement_notify::SettlementNotifierKey,
 }
 
 impl SqliteEffectReplayRowStore {
@@ -747,6 +797,13 @@ impl SqliteEffectReplayRowStore {
             .ensure_attached(&self.conn)
             .await
             .map_err(effect_sqlite_error)
+    }
+
+    /// Wake every waiter parked on `group_key`'s next settlement — this
+    /// host's own awaiter or another host's over the same file. Called after
+    /// a rank write's commit has landed.
+    fn notify_group_settled(&self, group_key: &str) {
+        settlement_notify::notify_group_settled(&self.settlement_key, group_key);
     }
 }
 

@@ -358,12 +358,11 @@ pub struct RemoteRetryDecision {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteNormalizedError {
     pub class: String,
+    /// The attempt's namespaced failure code (`<namespace>:<spelling>`).
+    /// Pre-cutover rows carried `provider_code`/`adapter_code`/`refusal_code`
+    /// columns instead; they decode with `code: None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_code: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapter_code: Option<lash_sansio::TurnFailureCode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refusal_code: Option<lash_sansio::TurnFailureCode>,
+    pub code: Option<lash_sansio::FailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

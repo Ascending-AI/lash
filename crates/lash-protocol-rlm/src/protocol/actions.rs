@@ -25,7 +25,7 @@ pub(crate) fn runtime_error_actions(
     vec![
         DriverAction::Emit(make_error_event(
             category,
-            Some(code),
+            Some(code.into()),
             error.clone(),
             Some(error),
         )),

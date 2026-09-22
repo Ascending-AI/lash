@@ -461,90 +461,93 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
             (tombstoned, session_heads)
         };
-        {
+        // Settlement authority is decided here, under the commit's write
+        // lock, and returns as shared plans; the plans' ordered writes drive
+        // the staged mutations below (FIG-1065).
+        let queued_work_plans = {
             let queued = self.queued_work.lock_recover();
-            for completed in &commit.completed_queue_claims {
-                if let Some((row_id, current)) = turn_input::settlement_mismatch(
-                    &queued,
-                    &completed.batch_ids,
-                    &completed.session_id,
-                    |entry| {
-                        (
-                            entry.batch.session_id.as_str(),
-                            entry.batch.batch_id.as_str(),
-                        )
-                    },
-                    |entry| {
-                        entry.batch.session_id == completed.session_id
-                            && entry
-                                .claim
-                                .owned_by(&completed.claim_id, &completed.lease_token)
-                            && completed.batch_ids.contains(&entry.batch.batch_id)
-                    },
-                ) {
-                    return Err(crate::store::StoreError::QueuedWorkClaimSuperseded {
-                        session_id: completed.session_id.clone(),
-                        claim_id: completed.claim_id.clone(),
-                        row_id: row_id.map(|id| id.as_str().to_string().into_boxed_str()),
-                        superseding_claim_id: current
-                            .and_then(|entry| entry.claim.id())
-                            .map(String::into_boxed_str),
-                        superseding_session_lease_generation: current
-                            .and_then(|entry| entry.claim.diagnostic_generation().map(Box::new)),
-                    });
-                }
-            }
-        }
-        {
+            commit
+                .completed_queue_claims
+                .iter()
+                .map(|completed| {
+                    let rows =
+                        completed
+                            .batch_ids
+                            .iter()
+                            .map(|batch_id| {
+                                let entry = queued.iter().find(|entry| {
+                                    entry.batch.session_id == completed.session_id
+                                        && entry.batch.batch_id == *batch_id
+                                });
+                                crate::store::claim_plan::QueuedWorkSettlementRow {
+                                    batch_id: batch_id.clone(),
+                                    claim: entry.map(|entry| {
+                                        crate::store::claim_plan::QueuedWorkSettlementRowClaim {
+                                            claim_id: entry.claim.id(),
+                                            claim_token: entry.claim.token(),
+                                            claim_session_lease_generation: entry
+                                                .claim
+                                                .diagnostic_generation()
+                                                .unwrap_or(0),
+                                        }
+                                    }),
+                                    consumed_wake: entry.and_then(|entry| {
+                                        entry.batch.items.iter().find_map(|item| {
+                                            match &item.payload {
+                                            crate::QueuedWorkPayload::ProcessWake { wake } => Some(
+                                                crate::store::claim_plan::ConsumedProcessWake {
+                                                    source_key: None,
+                                                    process_id: wake.process_id.clone(),
+                                                    sequence: wake.sequence,
+                                                },
+                                            ),
+                                            _ => None,
+                                        }
+                                        })
+                                    }),
+                                }
+                            })
+                            .collect();
+                    crate::store::claim_plan::plan_queued_work_settlement(completed, rows)
+                        .into_result()
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let turn_input_plans = {
             let pending = self.pending_turn_inputs.lock_recover();
-            for completed in &commit.completed_turn_input_claims {
-                if let Some((row_id, current)) = turn_input::settlement_mismatch(
-                    &pending,
-                    &completed.input_ids,
-                    &completed.session_id,
-                    |entry| {
-                        (
-                            entry.input.session_id.as_str(),
-                            entry.input.input_id.as_str(),
-                        )
-                    },
-                    |entry| turn_input::settlement_matches(entry, completed),
-                ) {
-                    return Err(match completed.claim.as_ref() {
-                        Some(claim) => crate::store::StoreError::TurnInputClaimSuperseded {
-                            session_id: completed.session_id.clone(),
-                            claim_id: claim.claim_id.clone(),
-                            row_id: row_id.map(|id| id.as_str().to_string().into_boxed_str()),
-                            superseding_claim_id: current
-                                .and_then(|entry| entry.claim.id())
-                                .map(String::into_boxed_str),
-                            superseding_session_lease_generation: current.and_then(|entry| {
-                                entry.claim.diagnostic_generation().map(Box::new)
-                            }),
-                        },
-                        None => crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded {
-                            session_id: completed.session_id.clone(),
-                            input_id: row_id.cloned().unwrap_or_else(|| {
-                                crate::InputId::new(
-                                    completed
-                                        .input_ids
-                                        .iter()
-                                        .map(crate::InputId::as_str)
-                                        .collect::<Vec<_>>()
-                                        .join(","),
-                                )
-                            }),
-                            observed_state: current.map(|entry| {
-                                entry.input.state.as_str().to_string().into_boxed_str()
-                            }),
-                            superseding_claim_id: current
-                                .and_then(|entry| entry.claim.id())
-                                .map(String::into_boxed_str),
-                        },
-                    });
-                }
-            }
-        }
+            commit
+                .completed_turn_input_claims
+                .iter()
+                .map(|completed| {
+                    let rows = completed
+                        .input_ids
+                        .iter()
+                        .map(|input_id| {
+                            let entry = pending.iter().find(|entry| {
+                                entry.input.session_id == completed.session_id
+                                    && entry.input.input_id == *input_id
+                            });
+                            crate::store::claim_plan::TurnInputSettlementRow {
+                                input_id: input_id.clone(),
+                                facts: entry.map(|entry| {
+                                    crate::store::claim_plan::TurnInputSettlementRowFacts {
+                                        claim_id: entry.claim.id(),
+                                        claim_token: entry.claim.token(),
+                                        claim_session_lease_generation: entry
+                                            .claim
+                                            .diagnostic_generation()
+                                            .unwrap_or(0),
+                                        state: entry.input.state.as_str().to_string(),
+                                    }
+                                }),
+                            }
+                        })
+                        .collect();
+                    crate::store::claim_plan::plan_turn_input_settlement(completed, rows)
+                        .into_result()
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
         let manifest = hydrated_checkpoint.manifest()?;
         let checkpoint_bytes = rmp_serde::to_vec_named(&manifest).map_err(|error| {
             crate::store::StoreError::RecordEncodingFailed {
@@ -562,44 +565,60 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let mut queued = self.queued_work.lock_recover().clone();
             let mut fences = self.wake_redelivery_fences.lock_recover().clone();
             let mut next_seq = *self.queued_work_next_seq.lock_recover();
-            for completed in &commit.completed_queue_claims {
-                for entry in queued.iter().filter(|entry| {
-                    entry.batch.session_id == completed.session_id
-                        && entry
-                            .claim
-                            .owned_by(&completed.claim_id, &completed.lease_token)
-                        && completed.batch_ids.contains(&entry.batch.batch_id)
-                }) {
-                    if let Some((process_id, sequence)) =
-                        entry
-                            .batch
-                            .items
-                            .iter()
-                            .find_map(|item| match &item.payload {
-                                crate::QueuedWorkPayload::ProcessWake { wake } => {
-                                    Some((wake.process_id.clone(), wake.sequence))
-                                }
-                                _ => None,
-                            })
-                    {
-                        fences
-                            .entry((
-                                entry.batch.session_id.clone().to_string(),
-                                process_id.to_string(),
-                            ))
-                            .and_modify(|allocation_floor| {
-                                *allocation_floor = (*allocation_floor).max(sequence);
-                            })
-                            .or_insert(sequence);
+            for settlement_plan in &queued_work_plans {
+                for write in settlement_plan.writes() {
+                    match write {
+                        crate::store::claim_plan::QueuedWorkSettlementWrite::FenceWakeRedelivery { batch_id, wake } => {
+                            // The redelivery fence must land before the
+                            // settled batch is removed (FIG-1065): enqueue
+                            // consults this floor while the removal is still
+                            // part of the same staged state. Raise it only
+                            // while the staged row still carries this claim —
+                            // the same predicate the removal below applies —
+                            // so an abandon interleaving between observation
+                            // and staging skips fence and removal together.
+                            let row_still_held = queued.iter().any(|entry| {
+                                entry.batch.session_id == *settlement_plan.session_id()
+                                    && entry.batch.batch_id == *batch_id
+                                    && entry.claim.owned_by(
+                                        settlement_plan.claim_id(),
+                                        settlement_plan.lease_token(),
+                                    )
+                            });
+                            if row_still_held {
+                                fences
+                                    .entry((
+                                        settlement_plan.session_id().to_string(),
+                                        wake.process_id.to_string(),
+                                    ))
+                                    .and_modify(|allocation_floor| {
+                                        *allocation_floor = (*allocation_floor).max(wake.sequence);
+                                    })
+                                    .or_insert(wake.sequence);
+                            }
+                        }
+                        crate::store::claim_plan::QueuedWorkSettlementWrite::SettleClaimedBatch { batch_id } => {
+                            // The claim predicate is the write's own backstop,
+                            // not the decision (the plan already decided), and
+                            // it fails closed the same way the SQL backends'
+                            // rows-affected backstop does: a write that matched
+                            // no staged row means the staged state and the
+                            // verdict disagree.
+                            let predicate = |entry: &InMemoryQueuedBatch| {
+                                entry.batch.session_id == *settlement_plan.session_id()
+                                    && entry.batch.batch_id == *batch_id
+                                    && entry.claim.owned_by(
+                                        settlement_plan.claim_id(),
+                                        settlement_plan.lease_token(),
+                                    )
+                            };
+                            if !queued.iter().any(&predicate) {
+                                return Err(settlement_plan.superseded_error(batch_id));
+                            }
+                            queued.retain(|entry| !predicate(entry));
+                        }
                     }
                 }
-                queued.retain(|entry| {
-                    !(entry.batch.session_id == completed.session_id
-                        && entry
-                            .claim
-                            .owned_by(&completed.claim_id, &completed.lease_token)
-                        && completed.batch_ids.contains(&entry.batch.batch_id))
-                });
             }
             let enqueued = commit
                 .enqueued_queue_batches
@@ -626,12 +645,30 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let mut pending = self.pending_turn_inputs.lock_recover().clone();
             let mut requests = self.turn_cancel_requests.lock_recover().clone();
             let mut outcome = crate::TurnCancelInputOutcome::default();
-            for completed in &commit.completed_turn_input_claims {
-                for entry in pending.iter_mut() {
-                    if turn_input::settlement_matches(entry, completed) {
-                        entry.input.state =
-                            crate::TurnInputState::Completed(entry.input.state.ingress());
-                        entry.clear_claim();
+            for (completed, settlement_plan) in commit
+                .completed_turn_input_claims
+                .iter()
+                .zip(&turn_input_plans)
+            {
+                for step in settlement_plan.steps() {
+                    // `settlement_matches` remains the write's own backstop
+                    // predicate; the plan already decided eligibility
+                    // (FIG-1065), and a step that matched no staged row means
+                    // the staged state and the verdict disagree — fail closed
+                    // the way the SQL backends' rows-affected backstop does.
+                    let mut applied = false;
+                    for entry in pending.iter_mut() {
+                        if entry.input.input_id == step.input_id
+                            && turn_input::settlement_matches(entry, completed)
+                        {
+                            entry.input.state =
+                                crate::TurnInputState::Completed(entry.input.state.ingress());
+                            entry.clear_claim();
+                            applied = true;
+                        }
+                    }
+                    if !applied {
+                        return Err(settlement_plan.superseded_error(step));
                     }
                 }
             }

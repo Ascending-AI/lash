@@ -213,9 +213,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                         }),
                         error: Some(lash::remote::llm::RemoteNormalizedError {
                             class: "cancelled".to_string(),
-                            provider_code: Some("request_cancelled".to_string()),
-                            adapter_code: None,
-                            refusal_code: None,
+                            code: Some(lash::provider::FailureCode::provider("request_cancelled")),
                             http_status: Some(499),
                             provider_request_id: Some("request-1".to_string()),
                             retry_after_ms: Some(25),
@@ -255,9 +253,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                         retry_decision: None,
                         error: Some(lash::remote::llm::RemoteNormalizedError {
                             class: "stream".to_string(),
-                            provider_code: Some("eof".to_string()),
-                            adapter_code: None,
-                            refusal_code: None,
+                            code: Some(lash::provider::FailureCode::provider("eof")),
                             http_status: None,
                             provider_request_id: None,
                             retry_after_ms: None,
@@ -289,7 +285,10 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
     let aborted_position = aborted.protocol_position;
     assert_eq!(aborted_position, RemoteProtocolPosition::ResponseObserved);
     let error = aborted.error.as_ref().expect("aborted error facts");
-    assert_eq!(error.provider_code.as_deref(), Some("request_cancelled"));
+    assert_eq!(
+        error.code.as_ref().map(|code| code.namespaced()),
+        Some("provider:request_cancelled".to_string())
+    );
     assert_eq!(error.http_status, Some(499));
     assert_eq!(error.provider_request_id.as_deref(), Some("request-1"));
     assert_eq!(error.retry_after_ms, Some(25));

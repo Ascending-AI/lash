@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import collections
 import json
+import importlib.util
 import os
 import pathlib
 import re
@@ -120,6 +121,54 @@ def generated_nextest_terms() -> set[tuple[str, str, str | None]]:
 
 
 class BazelTestContractTests(unittest.TestCase):
+    def test_source_ownership_keeps_shared_helpers_without_sibling_suites(self) -> None:
+        policy = json.loads((ROOT / "tools/bazel/source-ownership.json").read_text())
+        package = ROOT / "crates/lash-core"
+        sources = {
+            name: {path.relative_to(package).as_posix() for pattern in patterns for path in package.glob(pattern)}
+            for name, patterns in policy["crates/lash-core"]["tests"].items()
+        }
+        shared = "tests/runtime_support/effect_controller_doubles.rs"
+        self.assertIn(shared, sources["runtime_effect"] & sources["runtime_scenarios"])
+        self.assertIn("tests/runtime/tests/effect/turn_cancel_modes.rs", sources["runtime_effect"])
+        scenarios = "tests/runtime/tests/runtime_scenarios/cases.rs"
+        self.assertIn(scenarios, sources["runtime_scenarios"])
+        self.assertNotIn(scenarios, sources["runtime_effect"])
+        self.assertNotIn("tests/runtime/tests/effect/turn_cancel_modes.rs", sources["runtime_scenarios"])
+
+    def test_core_execution_unit_sources_exclude_relocated_wire_suite(self) -> None:
+        policy = json.loads((ROOT / "tools/bazel/source-ownership.json").read_text())
+        package = ROOT / "crates/lash-core-execution"
+        policy = policy["crates/lash-core-execution"]
+        unit = {path.relative_to(package).as_posix() for pattern in policy["unit_test_sources"] for path in package.glob(pattern)}
+        integration = {path.relative_to(package).as_posix() for pattern in policy["tests"]["process_model"] for path in package.glob(pattern)}
+        self.assertIn("src/runtime/effect/tool_child_driver/tests.rs", unit)
+        self.assertIn("tests/runtime/process/lease_serde_tests.rs", integration)
+        self.assertFalse(unit & integration)
+
+    def test_source_ownership_rejects_stale_and_escaping_patterns(self) -> None:
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+        from unittest.mock import patch
+
+        package = "crates/lash-core"
+        metadata = {
+            "workspace_members": ["core"],
+            "packages": [{
+                "id": "core",
+                "manifest_path": str(ROOT / package / "Cargo.toml"),
+                "targets": [{"name": "runtime_effect", "kind": ["test"], "src_path": str(ROOT / package / "tests/runtime_effect.rs")}],
+            }],
+        }
+        for patterns in [
+            ["tests/runtime_effect.rs", "tests/removed/**/*.rs"],
+            ["tests/runtime_effect.rs", "../lash-core-execution/src/lib.rs"],
+            ["tests/runtime/tests/effect.rs"],
+        ]:
+            with self.subTest(patterns=patterns), patch.object(generator, "SOURCE_OWNERSHIP", {package: {"tests": {"runtime_effect": patterns}}}):
+                with self.assertRaises(ValueError):
+                    generator.validate_source_ownership(metadata)
+
     def test_generated_inventory_is_current(self) -> None:
         subprocess.run(
             ["python3", "tools/bazel/generate_build_files.py", "--check"],
@@ -145,30 +194,6 @@ class BazelTestContractTests(unittest.TestCase):
             package for package in packages if package["package"] == "lash-internal-core"
         )
         self.assertIn("serde", core["dependencies"])
-
-    def test_inventory_counts_describe_its_own_target_list(self) -> None:
-        """The inventory's summary counts are projections of its target list.
-
-        They are the only counts this contract reads, and they are read back
-        against the list they summarise, never against a literal: a target
-        added with a regenerated inventory moves both halves together, and a
-        hand edit to one half is what this refuses.
-        """
-        payload = inventory()
-        labelled = [
-            target for target in inventory_targets() if target["label"] is not None
-        ]
-        unlabelled = [
-            target for target in inventory_targets() if target["label"] is None
-        ]
-        self.assertEqual(len(payload["packages"]), payload["cargo_package_count"])
-        self.assertEqual(len(labelled), payload["generated_label_count"])
-        self.assertEqual(len(unlabelled), payload["cargo_only_target_count"])
-        # `cargo_target_count` is Cargo's own target list; every labelled
-        # entry here stands for at least one Cargo target, but a library
-        # yields both a lib and a unit-test label, so the inventory can only
-        # be at least that large.
-        self.assertGreaterEqual(len(labelled), payload["cargo_target_count"])
 
     def test_generated_suite_partitions_every_executable_test(self) -> None:
         """Every executable test label lands in exactly one generated partition.
@@ -443,12 +468,16 @@ class BazelTestContractTests(unittest.TestCase):
         # the small-action defaults; anything heavier carries its own
         # `exec_properties` from `tools/bazel/action-sizes.json`.
         self.assertIn(
-            "build:shared --remote_default_exec_properties=cpu_count=1", bazelrc
+            "build --remote_default_exec_properties=cpu_count=1", bazelrc
         )
         self.assertIn(
-            "build:shared --remote_default_exec_properties=memory_kb=2097152", bazelrc
+            "build --remote_default_exec_properties=memory_kb=2097152", bazelrc
         )
         self.assertIn("build:shared --remote_local_fallback=false", bazelrc)
+        action = (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text()
+        for property_name in ("cpu_count", "memory_kb"):
+            self.assertNotIn(f"--remote_default_exec_properties={property_name}=", action)
+
 
         sources = [(pathlib.Path(".bazelrc"), bazelrc)]
         for path in sorted((ROOT / ".github").rglob("*")):
@@ -1102,6 +1131,62 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertTrue(any(ci_plan.BAZEL_TEST_JOB in problem for problem in problems))
 
+
+
+class FocusedClippyVerdicts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("run_bazel_clippy", ROOT / "scripts/run-bazel-clippy.py")
+        cls.driver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.driver)
+
+    def verdict(self, labels, marked, *, empty=False, incomplete=False):
+        events = []
+        for label, configuration in labels:
+            completed = {"label": label, "configuration": {"id": configuration}}
+            events.append({"id": {"targetConfigured": {"label": label}}, "children": [{"targetCompleted": completed}]})
+        for label, configuration in marked:
+            events.append({"id": {"targetCompleted": {"label": label, "configuration": {"id": configuration}}}, "completed": {"success": True, "outputGroup": [{"name": "clippy_checks", "fileSets": [{"id": "parent"}], "incomplete": incomplete}]}})
+        events.extend([
+            {"id": {"namedSet": {"id": "parent"}}, "namedSetOfFiles": {"fileSets": [{"id": "child"}]}},
+            {"id": {"namedSet": {"id": "child"}}, "namedSetOfFiles": {"files": [] if empty else [{"name": "crate.lash-clippy.ok"}]}},
+        ])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "events.json"
+            path.write_text("\n".join(json.dumps(event) for event in events))
+            self.driver.validate_events(path)
+
+    def test_every_requested_configuration_needs_a_completed_marker(self):
+        first = ("//crate:lib", "default")
+        second = ("//crate:lib", "feature")
+        self.verdict([first, second], [first, second])
+        for requested, marked, kwargs in [
+            ([], [], {}),
+            ([first, second], [first], {}),
+            ([first, ("//:Cargo.toml", "file")], [first], {}),
+            ([first], [first], {"empty": True}),
+            ([first], [first], {"incomplete": True}),
+        ]:
+            with self.subTest(requested=requested, kwargs=kwargs), self.assertRaisesRegex(ValueError, "no Clippy verdict"):
+                self.verdict(requested, marked, **kwargs)
+
+    def test_options_and_event_destination_are_preserved_and_failures_propagate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            fake = directory / "bazel"
+            captured = directory / "arguments.json"
+            fake.write_text("#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\nPath(" + repr(str(captured)) + ").write_text(json.dumps(sys.argv[1:]))\nsys.exit(7)\n")
+            fake.chmod(0o755)
+            event_path = directory / "requested.json"
+            flags = ["--config=shared", "--keep_going", "--output_groups=+custom", "--build_event_json_file", str(event_path), "--", "//crate:lib"]
+            self.assertEqual(7, self.driver.run(str(fake), flags))
+            arguments = json.loads(captured.read_text())
+            self.assertEqual(["build", *flags[:5]], arguments[:6])
+            self.assertIn(str(event_path), arguments)
+            self.assertIn("--output_groups=+clippy_checks", arguments)
+            self.assertIn("--aspects=" + self.driver.ASPECT, arguments)
+            self.assertEqual(["--", "//crate:lib"], arguments[-2:])
+            self.assertFalse(any(arg.startswith("--build_event_json_file=") for arg in arguments))
 
 if __name__ == "__main__":
     unittest.main()

@@ -821,6 +821,7 @@ async fn world(path: &Path) -> Arc<SqliteEffectHost> {
             SqliteEffectReplayOptions {
                 lease_timings: LeaseTimings::new(LEASE, LEASE / 3)
                     .expect("a lease at least three renew intervals wide"),
+                drain_budget: Default::default(),
             },
         )
         .await

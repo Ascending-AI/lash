@@ -75,15 +75,42 @@ pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<Intrinsic
     })
 }
 
-/// `main`-rooted execution paths, keyed by [`AstPath`]. `LabelAnnotated` is
-/// transparent to the lashlang path vocabulary — the annotation is the step —
-/// so its inner node maps to the same `LashlangAstPath` its parent does.
-pub(super) fn lashlang_execution_paths(program: &Program) -> FxHashMap<AstPath, LashlangAstPath> {
-    let mut paths = FxHashMap::default();
-    let mut ast_path = AstPath::main(Vec::new());
-    let mut path = Vec::new();
-    collect_lashlang_execution_paths(&program.main, &mut ast_path, &mut path, &mut paths);
-    paths
+/// Recovers the authored parts of a lowered TypeScript `for..of` loop.
+///
+/// The lowerer compiles `for (const item of source)` as a generated binding
+/// over `Lash.ArrayFromIterable(source)`, followed by an assignment from that
+/// binding to `item`. The projector and compiler path table use this one
+/// recognizer so they assign the same structural paths to authored body nodes.
+#[doc(hidden)]
+pub fn lowered_for_of_parts<'a>(
+    binding: &str,
+    iterable: &'a Expr,
+    body: &'a Expr,
+) -> Option<(&'a str, &'a Expr, &'a [Expr])> {
+    if !binding.starts_with("__typescript_") {
+        return None;
+    }
+    let Expr::BuiltinCall { name, args } = iterable else {
+        return None;
+    };
+    let [Expr::String(selector), source] = args.as_slice() else {
+        return None;
+    };
+    if name.as_str() != "__typescript_stdlib" || selector.as_str() != "Lash.ArrayFromIterable" {
+        return None;
+    }
+    let Expr::Block(statements) = body else {
+        return None;
+    };
+    let [Expr::Assign { target, expr }, rest @ ..] = statements.as_slice() else {
+        return None;
+    };
+    if !target.is_simple()
+        || !matches!(expr.as_ref(), Expr::Variable(name) if name.as_str() == binding)
+    {
+        return None;
+    }
+    Some((target.root.as_str(), source, rest))
 }
 
 /// `program.spans` keyed the way the compiler looks them up. Declaration
@@ -95,28 +122,6 @@ pub(crate) fn expression_source_spans(program: &Program) -> FxHashMap<AstPath, S
         .iter()
         .map(|(path, span)| (path.clone(), *span))
         .collect()
-}
-
-fn collect_lashlang_execution_paths(
-    expr: &Expr,
-    ast_path: &mut AstPath,
-    path: &mut Vec<u32>,
-    paths: &mut FxHashMap<AstPath, LashlangAstPath>,
-) {
-    paths.insert(ast_path.clone(), LashlangAstPath::from_indices(path));
-    if let Expr::LabelAnnotated { expr, .. } = expr {
-        ast_path.steps.push(0);
-        collect_lashlang_execution_paths(expr, ast_path, path, paths);
-        ast_path.steps.pop();
-        return;
-    }
-    for (index, child) in expr.children().enumerate() {
-        ast_path.steps.push(index as u32);
-        path.push(index as u32);
-        collect_lashlang_execution_paths(child, ast_path, path, paths);
-        path.pop();
-        ast_path.steps.pop();
-    }
 }
 
 pub fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, str>)> {

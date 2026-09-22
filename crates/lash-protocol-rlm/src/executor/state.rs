@@ -77,7 +77,11 @@ const TRIGGER_RESOLUTION_FIELDS: &[&str] = &[
 const RESOLUTION_FIELDS: &[&str] = &["kind", "definition", "source_id", "execution_binding"];
 
 /// `lash_sansio::ToolDefinition`.
-const TOOL_DEFINITION_FIELDS: &[&str] = &[
+const TOOL_DEFINITION_FIELDS: &[&str] = &["manifest", "contract"];
+
+/// `lash_sansio::ToolManifest`.
+const TOOL_MANIFEST_FIELDS: &[&str] = &[
+    "inline",
     "id",
     "name",
     "description",
@@ -86,6 +90,11 @@ const TOOL_DEFINITION_FIELDS: &[&str] = &[
     "bindings",
     "argument_projection",
     "retry_policy",
+];
+
+/// `lash_sansio::ToolContract`. The skipped `identity` and `compact_cache`
+/// fields never serialize, so they do not appear here.
+const TOOL_CONTRACT_FIELDS: &[&str] = &[
     "input_schema",
     "output_schema",
     "output_contract",
@@ -132,10 +141,6 @@ fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
             details: "legacy JSON envelope is not a canonical typed root".to_string(),
         });
     }
-    // ToolDefinition flattens ToolManifest and ToolContract. Its field order is
-    // therefore the sole accepted non-fixed-point ordering exception until
-    // FIG-1210 removes that public wire-shape constraint. Dynamic maps and JSON
-    // objects below it remain strictly sorted and unique.
     validate_canonical_messagepack_structure(
         data,
         "root",
@@ -255,6 +260,8 @@ enum RootNode {
     TriggerProcessParams,
     TriggerProcessParam,
     Definition,
+    Manifest,
+    Contract,
     SchemaContract,
     Projection,
     Overrides,
@@ -297,12 +304,14 @@ impl RootNode {
             (TriggerProcessParam, Some("ty")) => TriggerTypeExpr,
             (Resolution, Some("definition")) => Definition,
             (Resolution, Some("execution_binding")) => Json,
-            (Definition, Some("bindings")) => Json,
-            (Definition, Some("input_schema" | "output_schema")) => SchemaContract,
-            (Definition, Some("compact_contract")) => CompactContract,
-            (Definition, Some("retry_policy")) => RetryPolicy,
-            (Definition, Some("output_contract")) => OutputContract,
-            (Definition, Some("argument_projection")) => ArgumentProjection,
+            (Definition, Some("manifest")) => Manifest,
+            (Definition, Some("contract")) => Contract,
+            (Manifest, Some("bindings")) => Json,
+            (Manifest, Some("compact_contract")) => CompactContract,
+            (Manifest, Some("retry_policy")) => RetryPolicy,
+            (Manifest, Some("argument_projection")) => ArgumentProjection,
+            (Contract, Some("input_schema" | "output_schema")) => SchemaContract,
+            (Contract, Some("output_contract")) => OutputContract,
             (SchemaContract, Some("canonical")) => Json,
             (SchemaContract, Some("projection")) => Projection,
             (Projection, Some("overrides")) => Overrides,
@@ -345,15 +354,16 @@ fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
         TriggerProcess => CanonicalMapOrder::Declared(&["kind", "params", "output"]),
         TriggerProcessParam => CanonicalMapOrder::Declared(&["name", "ty"]),
         TriggerProcessParams => CanonicalMapOrder::Sorted,
-        Definition => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
-        SchemaContract => CanonicalMapOrder::Fields(SCHEMA_CONTRACT_FIELDS),
-        Projection => CanonicalMapOrder::Fields(SCHEMA_PROJECTION_FIELDS),
-        Override => CanonicalMapOrder::Fields(SCHEMA_OVERRIDE_FIELDS),
-        CompactContract => CanonicalMapOrder::Fields(COMPACT_CONTRACT_FIELDS),
-        RetryPolicy => CanonicalMapOrder::Fields(RETRY_POLICY_FIELDS),
-        OutputContract => CanonicalMapOrder::Fields(OUTPUT_CONTRACT_FIELDS),
-        ArgumentProjection => CanonicalMapOrder::Fields(ARGUMENT_PROJECTION_FIELDS),
-        // FIG-1210: serde flatten prevents declaration ordering for tool fields.
+        Definition => CanonicalMapOrder::Declared(TOOL_DEFINITION_FIELDS),
+        Manifest => CanonicalMapOrder::Declared(TOOL_MANIFEST_FIELDS),
+        Contract => CanonicalMapOrder::Declared(TOOL_CONTRACT_FIELDS),
+        SchemaContract => CanonicalMapOrder::Declared(SCHEMA_CONTRACT_FIELDS),
+        Projection => CanonicalMapOrder::Declared(SCHEMA_PROJECTION_FIELDS),
+        Override => CanonicalMapOrder::Declared(SCHEMA_OVERRIDE_FIELDS),
+        CompactContract => CanonicalMapOrder::Declared(COMPACT_CONTRACT_FIELDS),
+        RetryPolicy => CanonicalMapOrder::Declared(RETRY_POLICY_FIELDS),
+        OutputContract => CanonicalMapOrder::Declared(OUTPUT_CONTRACT_FIELDS),
+        ArgumentProjection => CanonicalMapOrder::Declared(ARGUMENT_PROJECTION_FIELDS),
         Overrides | Other => CanonicalMapOrder::Unordered,
     }
 }

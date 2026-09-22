@@ -152,6 +152,7 @@ impl EffectGroupDispatch {
         let mut addresses = BTreeMap::new();
         let mut calls = Vec::with_capacity(children.len());
         for (position, envelope) in children.into_iter().enumerate() {
+            let replay_key = shape.replay_key(position)?.to_string();
             let call = ctx
                 .workflow_client::<EffectGroupDispatchClient>(request.group_key.clone())
                 .child(Json(EffectGroupChildRequest {
@@ -160,7 +161,8 @@ impl EffectGroupDispatch {
                     position,
                     envelope,
                 }))
-                .idempotency_key(shape.replay_key(position)?)
+                .idempotency_key(replay_key.clone())
+                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .call();
             let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
             let Json(recorded) = ctx
@@ -262,6 +264,21 @@ impl EffectGroupDispatch {
             .await?;
         let admission = match first {
             EffectGroupAdmissionResponse::Admitted => EffectGroupAdmissionResponse::Admitted,
+            EffectGroupAdmissionResponse::AttachExpired => {
+                // §8: the index retains a different invocation id for this
+                // position — the original's retention expired and the
+                // idempotency-keyed dispatch minted this successor. The child
+                // settles with the typed failure rather than running under an
+                // identity the group never recorded.
+                return record_child_settlement(
+                    &ctx,
+                    &request,
+                    EffectGroupChildRunOutcome::Completed {
+                        outcome: Err(attach_expired_error(&request)),
+                    },
+                )
+                .await;
+            }
             EffectGroupAdmissionResponse::Refused | EffectGroupAdmissionResponse::Retired => {
                 return Ok(Json(()));
             }
@@ -271,6 +288,7 @@ impl EffectGroupDispatch {
                     &request.group_key,
                     EffectGroupWaitKind::Admit(request.position),
                 )?;
+                let replay_key = key.key_id.clone();
                 let address = RestateDurableWaitAddress::for_key(&key);
                 let Json(_) = ctx
                     .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
@@ -281,6 +299,7 @@ impl EffectGroupDispatch {
                         }
                         .into(),
                     ))
+                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                     .call()
                     .await?;
                 // ADMIT is notification only. Authorization always comes from
@@ -295,6 +314,16 @@ impl EffectGroupDispatch {
         };
         match admission {
             EffectGroupAdmissionResponse::Admitted => {}
+            EffectGroupAdmissionResponse::AttachExpired => {
+                return record_child_settlement(
+                    &ctx,
+                    &request,
+                    EffectGroupChildRunOutcome::Completed {
+                        outcome: Err(attach_expired_error(&request)),
+                    },
+                )
+                .await;
+            }
             EffectGroupAdmissionResponse::Refused | EffectGroupAdmissionResponse::Retired => {
                 return Ok(Json(()));
             }
@@ -313,14 +342,16 @@ impl EffectGroupDispatch {
         // `group_key` column — never from a caller's assertion. A revoked
         // scope index refuses the record, and a child whose scope is gone
         // settles nowhere.
+        let child_replay_key = request.envelope.invocation.replay_key().to_string();
         let Json(membership_admitted) = ctx
             .object_client::<LashDurableWaitIndexClient>(durable_wait_index_key_for_scope(
                 request.envelope.invocation.execution_scope(),
             ))
             .record_group_child(Json(RestateDurableWaitGroupChildRequest {
-                replay_key: request.envelope.invocation.replay_key().to_string(),
+                replay_key: child_replay_key.clone(),
                 group_key: request.group_key.clone(),
             }))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), child_replay_key)
             .call()
             .await?;
         if !membership_admitted {
@@ -539,6 +570,7 @@ impl EffectGroupDispatch {
             )
         })) {
             let key = group_wait_key(&cleanup.wait_scope, &group_key, kind)?;
+            let replay_key = key.key_id.clone();
             let address = RestateDurableWaitAddress::for_key(&key);
             let Json(()) = ctx
                 .object_client::<LashDurableWaitIndexClient>(durable_wait_index_object_key(
@@ -548,6 +580,7 @@ impl EffectGroupDispatch {
                     key,
                     resolution: wait_resolution(resolution)?,
                 }))
+                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .call()
                 .await?;
         }
@@ -572,6 +605,23 @@ impl EffectGroupDispatch {
             .into()),
         }
     }
+}
+
+/// The §8 typed failure: this invocation is a successor minted under the
+/// idempotency key after the retained child invocation's retention expired —
+/// it never runs, and its settlement records the refusal so the opener's
+/// rank wait resolves instead of stranding.
+fn attach_expired_error(request: &EffectGroupChildRequest) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RuntimeEffectGroupChildAttachExpired,
+        format!(
+            "effect group {} child {} attached an invocation id the index does not \
+             retain; the retained invocation's retention expired, so the child \
+             settles with this failure rather than re-running under a fresh \
+             identity (ADR 0099 §8)",
+            request.group_key, request.position
+        ),
+    )
 }
 
 /// Records one child's terminal in the index, writing its payload first when
@@ -642,6 +692,7 @@ async fn record_child_settlement(
             &request.group_key,
             EffectGroupWaitKind::Drained(position),
         )?;
+        let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
         let Json(_) = ctx
             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
@@ -652,6 +703,7 @@ async fn record_child_settlement(
                 }
                 .into(),
             ))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
             .await?;
     }
@@ -711,5 +763,52 @@ async fn record_child_settlement(
             request.group_key, request.position
         ))
         .into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> EffectGroupChildRequest {
+        EffectGroupChildRequest {
+            group_key: "group-1".to_owned(),
+            shape: EffectGroupShape {
+                wake: lash_core::GroupWakePolicy::All,
+                loser_disposition: LoserPolicy::RunToCompletion,
+                replay_keys: vec!["child-0".to_owned()],
+                wait_scope: ExecutionScope::runtime_operation("group"),
+                membership: vec!["{}".to_owned()],
+            },
+            position: 0,
+            envelope: RuntimeEffectEnvelope::new(
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(
+                        ExecutionScope::runtime_operation("group"),
+                        "group-1:child:0",
+                    )
+                    .expect("valid child address"),
+                    lash_core::RuntimeAttribution::none(),
+                    "effect",
+                ),
+                lash_core::RuntimeEffectCommand::LanguageRuntimeValue {
+                    operation: "child".to_owned(),
+                },
+            ),
+        }
+    }
+
+    /// The §8 typed failure is terminal and names the group and position the
+    /// stranded rank wait needs: distinct from an ordinary refusal so the
+    /// opener reads "the retained invocation expired", not "disallowed".
+    #[test]
+    fn attach_expired_error_is_the_typed_attach_expiry() {
+        let error = attach_expired_error(&request());
+        assert_eq!(
+            error.code,
+            RuntimeErrorCode::RuntimeEffectGroupChildAttachExpired
+        );
+        let message = error.to_string();
+        assert!(message.contains("group-1"), "{message}");
     }
 }

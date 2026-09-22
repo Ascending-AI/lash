@@ -100,6 +100,11 @@ must_cover = [
   "TraceAttemptUsageDisposition",
 ]
 
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/workflow.rs"]
+symbols = ["WorkflowExecutionSite"]
+
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility
 # boundary: it reaches an existing file on its next open, and a file that already
@@ -164,6 +169,20 @@ paths = [
 ]
 symbols = ["EFFECT_SCHEMA", "AWAIT_EVENT_TABLES", "SCOPE_RETIREMENT_TABLE"]
 elide = "sql_idempotent_index"
+
+# The durable lifecycle JSON the `runtime_effect_group.lifecycle` column
+# carries (ADR 0099 section 7, FIG-3410): `{"type":"live"}`,
+# `{"type":"closing","disposition":..,"finalized":0..3}`,
+# `{"type":"settled","disposition":..}`. Both SQL stores decode the same
+# vocabulary, so the one guard covers both schemas.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/effect/group_journal.rs"]
+symbols = [
+    "EffectGroupLifecycle",
+    "EffectGroupLifecyclePhase",
+    "FinalizationStep",
+]
 
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
@@ -842,6 +861,43 @@ kind = "rust_items"
 paths = ["crates/lash-sansio/src/llm/capability.rs"]
 symbols = ["ModelCapability", "InstructionRole"]
 
+# Restricted resident-tool authority serializes `Vec<ToolDefinition>` through
+# `SessionToolAccessWire` inside the head's config column. The wire carrier and
+# the definition's whole serialized closure are named here because the closure
+# lives in tool_contract.rs/schema_contract.rs, which this surface's other
+# guards do not sweep. `rust_items` projects attributes too, so a
+# `serde(flatten)` reintroduction on any of them trips this surface.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/session_identity.rs"]
+symbols = [
+  "SessionToolAccess",
+  "SessionResidentToolAccess",
+  "SessionToolAccessWire",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lash-sansio/src/tool_contract.rs",
+  "crates/lash-sansio/src/schema_contract.rs",
+]
+symbols = [
+  "ToolDefinition",
+  "ToolManifest",
+  "ToolContract",
+  "ToolId",
+  "CompactToolContract",
+  "ToolActivation",
+  "ToolRetryPolicy",
+  "ToolOutputContract",
+  "ToolArgumentProjectionPolicy",
+  "SchemaContract",
+  "SchemaProjectionPolicy",
+  "SchemaProjectionOverride",
+  "ProjectionMode",
+]
+
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/session_graph.rs"
@@ -1034,6 +1090,39 @@ must_cover = ["RlmSnapshotRoot", "RlmDriverState", "DeferredTriggerResolutionRec
 kind = "rust_items"
 paths = ["crates/lash-rlm-types/src/lib.rs"]
 symbols = ["ProjectionRef"]
+
+# `DeferredResolutionRecord.resolutions` carries `Resolution::Resolved` ->
+# `ToolGrant.definition` into the snapshot, and `link_key` carries
+# `EffectAddress`; both declarations live outside the serde-shape sweep above.
+# The definition and the link key's serialized closures are named here so a
+# declaration edit demands the bump. `rust_items` projects attributes too, so
+# a `serde(flatten)` reintroduction on any of them trips this surface.
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lash-sansio/src/tool_contract.rs",
+  "crates/lash-sansio/src/schema_contract.rs",
+  "crates/lash-sansio/src/effect_identity.rs",
+  "crates/lash-sansio/src/causal.rs",
+]
+symbols = [
+  "ToolDefinition",
+  "ToolManifest",
+  "ToolContract",
+  "ToolId",
+  "CompactToolContract",
+  "ToolActivation",
+  "ToolRetryPolicy",
+  "ToolOutputContract",
+  "ToolArgumentProjectionPolicy",
+  "SchemaContract",
+  "SchemaProjectionPolicy",
+  "SchemaProjectionOverride",
+  "ProjectionMode",
+  "EffectAddress",
+  "ExecutionScope",
+  "CausalRef",
+]
 
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"
@@ -1286,13 +1375,51 @@ kind = "rust_items"
 paths = ["crates/lash-lashlang-runtime/src/process.rs"]
 symbols = ["LashlangSegmentState"]
 
-# FIG-3460 owns the runtime-side identity cutover. Until it lands, guard the
-# current runtime mint so a preimage edit cannot ship without moving the
-# parked-segment fence whose occurrence counters use those ids.
+# Runtime observations persist owner-relative node paths in occurrence-counter
+# keys. Any owner, path-assignment, or mint change therefore changes both the
+# graph identity contract and the parked-segment handover contract.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lashlang/src/tracking.rs"]
-symbols = ["node_id"]
+paths = ["crates/lashlang/src/workflow_graph.rs"]
+symbols = ["workflow_node_id"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lashlang/src/workflow_graph/execution_sites.rs",
+  "crates/lashlang/src/workflow_graph/ownership.rs",
+  "crates/lashlang/src/tracking.rs",
+]
+symbols = [
+  "from_indices",
+  "indices",
+  "path_for_ast",
+  "for_main",
+  "visible_expression",
+  "ast_root",
+  "ownership_map",
+  "into_ownership_map",
+  "main_workflow_projection",
+  "process_workflow_projection",
+  "workflow_projection",
+  "process_execution_body_path",
+  "push_child_index",
+  "collect_workflow_block_paths",
+  "collect_workflow_statement_paths",
+  "collect_workflow_node_paths",
+  "map_workflow_node_subtree",
+  "workflow_block_wrapper_inner",
+  "authored_workflow_statement",
+  "is_lowered_member_assignment",
+  "execution_sites",
+  "collect_execution_sites",
+  "push_execution_site_descriptor",
+  "collect_child_execution_sites",
+  "workflow_owner",
+  "node_site",
+  "branch_site",
+  "branch_edge_id",
+]
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -1360,9 +1487,9 @@ kind = "rust_items"
 paths = ["crates/lashlang/src/ast_string.rs"]
 symbols = ["AstString"]
 
-# The document's value types stay in lashlang. Its identity preimages live in
-# the TypeScript projector and rendering helper, so guard the functions that
-# build those bytes rather than the GraphProjector field list.
+# The document's value types and shared node mint stay in lashlang. Its source
+# identity preimages and node-mint call site live in the TypeScript projector
+# and rendering helper, so guard the functions that build those bytes.
 [[surface.guard]]
 kind = "rust_items"
 paths = [
@@ -1377,6 +1504,54 @@ symbols = [
   "edge",
   "hex_digest",
 ]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/workflow_graph.rs"]
+symbols = ["workflow_node_id"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lashlang/src/workflow_graph/execution_sites.rs",
+  "crates/lashlang/src/workflow_graph/ownership.rs",
+  "crates/lashlang/src/tracking.rs",
+]
+symbols = [
+  "from_indices",
+  "indices",
+  "path_for_ast",
+  "for_main",
+  "visible_expression",
+  "ast_root",
+  "ownership_map",
+  "into_ownership_map",
+  "main_workflow_projection",
+  "process_workflow_projection",
+  "workflow_projection",
+  "process_execution_body_path",
+  "push_child_index",
+  "collect_workflow_block_paths",
+  "collect_workflow_statement_paths",
+  "collect_workflow_node_paths",
+  "map_workflow_node_subtree",
+  "workflow_block_wrapper_inner",
+  "authored_workflow_statement",
+  "is_lowered_member_assignment",
+  "execution_sites",
+  "collect_execution_sites",
+  "push_execution_site_descriptor",
+  "collect_child_execution_sites",
+  "workflow_owner",
+  "node_site",
+  "branch_site",
+  "branch_edge_id",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/workflow.rs"]
+symbols = ["WorkflowExecutionSite"]
 
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"

@@ -736,7 +736,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             };
             assert_eq!(
                 operation,
-                "deferred_tool_resolution:v1:[\"timer.Schedule\",\"triggers.register\"]"
+                "deferred_tool_resolution:v2:[\"timer.Schedule\",\"triggers.register\"]"
             );
             let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[1].command else {
                 panic!("expected trigger effect")

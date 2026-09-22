@@ -452,7 +452,7 @@ impl GoogleStreamState {
         .map_err(|error| {
             LlmTransportError::new(format!("Google stream {error}"))
                 .with_kind(ProviderFailureKind::Stream)
-                .with_adapter_code(TurnFailureCode::from_wire(error.code()))
+                .with_lash_code(TurnFailureCode::from_wire(error.code()))
         })?;
         let new_usage = GoogleOAuthProvider::usage_from_event(&event);
         if new_usage.input_tokens > 0

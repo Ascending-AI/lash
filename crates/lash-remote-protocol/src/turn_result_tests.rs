@@ -200,27 +200,27 @@ fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
     let cases = [
         (
             RemoteTurnFailureKind::LlmProvider,
-            RemoteTurnFailureCode::ContextOverflow,
+            RemoteFailureCode::lash(lash_sansio::TurnFailureCode::ContextOverflow),
             "llm_provider",
-            "context_overflow",
+            "lash:context_overflow",
         ),
         (
             RemoteTurnFailureKind::LlmProvider,
-            RemoteTurnFailureCode::ContentFilter,
+            RemoteFailureCode::lash(lash_sansio::TurnFailureCode::ContentFilter),
             "llm_provider",
-            "content_filter",
+            "lash:content_filter",
         ),
         (
             RemoteTurnFailureKind::Runtime,
-            RemoteTurnFailureCode::SessionGraphScope,
+            RemoteFailureCode::lash(lash_sansio::TurnFailureCode::SessionGraphScope),
             "runtime",
-            "session_graph_scope",
+            "lash:session_graph_scope",
         ),
         (
             RemoteTurnFailureKind::TokenUsageAccounting,
-            RemoteTurnFailureCode::TokenUsageOverflow,
+            RemoteFailureCode::lash(lash_sansio::TurnFailureCode::TokenUsageOverflow),
             "token_usage_accounting",
-            "token_usage_overflow",
+            "lash:token_usage_overflow",
         ),
     ];
     for (kind, code, kind_wire, code_wire) in cases {
@@ -256,10 +256,7 @@ fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
         decoded.kind,
         RemoteTurnFailureKind::Unknown("a_kind_from_a_newer_peer".to_string())
     );
-    assert_eq!(
-        decoded.code,
-        Some(RemoteTurnFailureCode::Other("429".to_string()))
-    );
+    assert_eq!(decoded.code, Some(RemoteFailureCode::provider("429")));
     assert_eq!(
         serde_json::to_value(&decoded).expect("re-encode foreign issue")["kind"],
         serde_json::json!("a_kind_from_a_newer_peer")

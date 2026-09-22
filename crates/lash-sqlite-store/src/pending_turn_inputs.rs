@@ -41,19 +41,6 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) claim_session_lease_generation: u64,
 }
 
-impl PendingTurnInputRow {
-    /// The claim columns the shared claimability verdict consults.
-    ///
-    /// Exposed as one value rather than two fields so a call site cannot pass
-    /// a generation that belongs to a different row's token.
-    pub(crate) fn claim_facts(&self) -> lash_core::store_backend_support::WorkRowClaimFacts<'_> {
-        lash_core::store_backend_support::WorkRowClaimFacts {
-            claim_token: self.claim_token.as_deref(),
-            claim_session_lease_generation: self.claim_session_lease_generation,
-        }
-    }
-}
-
 pub(crate) fn pending_turn_input_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<PendingTurnInputRow> {
@@ -184,38 +171,4 @@ pub(crate) fn pending_turn_input_claim_diagnostics_from_row(
                 .map(|_| row.claim_session_lease_generation),
             claim_fencing_token: row.claim_fencing_token,
         })
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct TurnInputClaimLease {
-    pub(crate) claim_id: String,
-    pub(crate) lease_token: String,
-    pub(crate) fencing_token: u64,
-    pub(crate) session_lease_generation: u64,
-}
-
-impl TurnInputClaimLease {
-    pub(crate) fn derive(
-        head: &PendingTurnInputRow,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        now_epoch_ms: u64,
-        session_lease_generation: u64,
-    ) -> Result<Self, StoreError> {
-        let lease = lash_core::store::queued_work::WorkClaimLease::derive(
-            lash_core::store::queued_work::ClaimIdDialect::TurnInput,
-            head.enqueue_seq,
-            head.claim_fencing_token,
-            session_id,
-            owner,
-            now_epoch_ms,
-            session_lease_generation,
-        )?;
-        Ok(Self {
-            claim_id: lease.claim_id,
-            lease_token: lease.lease_token,
-            fencing_token: lease.fencing_token,
-            session_lease_generation: lease.session_lease_generation,
-        })
-    }
 }

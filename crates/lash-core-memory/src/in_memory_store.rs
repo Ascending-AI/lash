@@ -42,7 +42,7 @@ mod claim_hold;
 mod turn_cancel_closure;
 mod turn_input;
 mod warnings;
-use claim_hold::{ClaimHold, InMemoryClaimMint, InMemoryClaimRow, mint_in_memory_claim};
+use claim_hold::ClaimHold;
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
@@ -56,26 +56,6 @@ pub struct InMemoryQueuedBatch {
 pub struct InMemoryPendingTurnInput {
     input: crate::PendingTurnInput,
     claim: ClaimHold,
-}
-
-impl InMemoryClaimRow for InMemoryQueuedBatch {
-    fn claim(&self) -> &ClaimHold {
-        &self.claim
-    }
-
-    fn claim_mut(&mut self) -> &mut ClaimHold {
-        &mut self.claim
-    }
-}
-
-impl InMemoryClaimRow for InMemoryPendingTurnInput {
-    fn claim(&self) -> &ClaimHold {
-        &self.claim
-    }
-
-    fn claim_mut(&mut self) -> &mut ClaimHold {
-        &mut self.claim
-    }
 }
 
 #[derive(Clone)]
@@ -676,41 +656,71 @@ impl InMemorySessionStore {
                 }
             }
         };
-        let enqueue_seq = queued[selected_indices[0]].batch.enqueue_seq;
-        let minted = mint_in_memory_claim(
-            queued,
-            InMemoryClaimMint {
-                selected_indices: &selected_indices,
-                enqueue_seq,
-                dialect: crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
-                fencing_label: "queued_work_claim_fencing_token",
-                session_id,
-                owner,
-                generation,
-                now,
-            },
-        )?;
-        let batches = selected_indices
+        let observations = selected_indices
             .iter()
-            .map(|&index| queued[index].batch.clone())
-            .collect();
-        Ok(crate::QueuedWorkClaimOutcome::Claimed(
-            crate::QueuedWorkClaim {
-                session_id: SessionId::from(session_id.to_string()),
-                claim_id: minted.claim_id,
-                owner: owner.clone(),
-                lease_token: minted.lease_token,
-                fencing_token: minted.fencing_token,
-                session_lease_generation: generation,
-                data: crate::QueuedWorkClaimData {
-                    batches,
-                    abandon_restore_claim_id: minted.abandon_restore_claim_id,
-                    abandon_restore_claim_token: minted
-                        .abandon_restore_claim_token
-                        .map(String::into_boxed_str),
-                },
-            },
-        ))
+            .map(|&index| {
+                let entry = &queued[index];
+                crate::store::claim_plan::QueuedWorkClaimRow {
+                    candidate: crate::store::queued_work::ClaimCandidate::from_batch(
+                        &entry.batch,
+                        entry.claim.fencing_token,
+                        entry.claim.id(),
+                        entry.claim.token(),
+                    ),
+                    batch: entry.batch.clone(),
+                    claim_token: entry.claim.token(),
+                    claim_session_lease_generation: entry
+                        .claim
+                        .diagnostic_generation()
+                        .unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>();
+        let validation_span = observations
+            .iter()
+            .map(|row| row.candidate.clone())
+            .collect::<Vec<_>>();
+        let plan = match crate::store::claim_plan::plan_queued_work_claim(
+            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+            session_id,
+            owner,
+            generation,
+            now,
+            observations,
+            &validation_span,
+        )? {
+            // Empty means the claim reports nothing. Defer — a selected row
+            // already held by this generation — is unrepresentable here: the
+            // scan filtered on `claimable_by(generation)`. It maps to
+            // `ClaimRaceLost`, the same refusal the SQL backends' rolled-back
+            // claim transaction reports for the same decision (FIG-1065).
+            crate::store::claim_plan::ClaimPlanDecision::Empty => {
+                return Ok(crate::QueuedWorkClaimOutcome::Refused(
+                    crate::QueuedWorkClaimRefusal::Empty,
+                ));
+            }
+            crate::store::claim_plan::ClaimPlanDecision::Defer => {
+                return Ok(crate::QueuedWorkClaimOutcome::Refused(
+                    crate::QueuedWorkClaimRefusal::ClaimRaceLost,
+                ));
+            }
+            crate::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        };
+        // Assemble the claim record before mutating: it is the plan's only
+        // remaining fallible step, and this path writes the live rows
+        // directly rather than a staged copy.
+        let writes = plan.writes().to_vec();
+        let claim = plan.into_claim()?;
+        for (&index, write) in selected_indices.iter().zip(&writes) {
+            queued[index].claim.acquire(
+                claim.claim_id.clone(),
+                claim.lease_token.clone(),
+                owner.clone(),
+                generation,
+                write.next_claim_fencing_token,
+            );
+        }
+        Ok(crate::QueuedWorkClaimOutcome::Claimed(claim))
     }
 
     fn claim_pending_turn_inputs_in_memory(
@@ -812,46 +822,57 @@ impl InMemorySessionStore {
             .map(|(index, _)| index)
             .take(max_inputs)
             .collect::<Vec<_>>();
-        let Some(first_index) = selected_indices.first().copied() else {
-            return Ok(None);
+        let observations = selected_indices
+            .iter()
+            .map(|&index| {
+                let entry = &pending[index];
+                crate::store::claim_plan::TurnInputClaimRow {
+                    input: entry.input.clone(),
+                    enqueue_seq: entry.input.enqueue_seq,
+                    claim_fencing_token: entry.claim.fencing_token,
+                    claim_token: entry.claim.token(),
+                    claim_session_lease_generation: entry
+                        .claim
+                        .diagnostic_generation()
+                        .unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>();
+        let plan = match crate::store::claim_plan::plan_turn_input_claim(
+            crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
+            session_id,
+            owner,
+            generation,
+            now,
+            mode,
+            observations,
+        )? {
+            // Empty means the claim reports nothing. Defer — a selected row
+            // already held by this generation — is unrepresentable here: the
+            // scan filtered on `claimable_by(generation)` (FIG-1065).
+            crate::store::claim_plan::ClaimPlanDecision::Empty
+            | crate::store::claim_plan::ClaimPlanDecision::Defer => return Ok(None),
+            crate::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
         };
-        let enqueue_seq = pending[first_index].input.enqueue_seq;
-        let minted = mint_in_memory_claim(
-            pending,
-            InMemoryClaimMint {
-                selected_indices: &selected_indices,
-                enqueue_seq,
-                dialect: crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
-                fencing_label: "turn_input_claim_fencing_token",
-                session_id,
-                owner,
-                generation,
-                now,
-            },
-        )?;
-        let mut inputs = Vec::new();
-        for index in selected_indices {
+        let state_after_claim = plan.state_after_claim();
+        for (&index, write) in selected_indices.iter().zip(plan.writes()) {
             let entry = &mut pending[index];
-            if matches!(mode, crate::TurnInputClaimMode::ActiveTurn { .. })
+            entry.claim.acquire(
+                plan.claim_id().to_string(),
+                plan.lease_token().to_string(),
+                owner.clone(),
+                generation,
+                write.next_claim_fencing_token,
+            );
+            // The durable row transitions with the claim; the plan's claim
+            // record already carries the transitioned inputs (FIG-1065).
+            if state_after_claim == crate::TurnInputStateKind::Accepted
                 && let Some(accepted) = entry.input.state.accepted()
             {
                 entry.input.state = accepted;
             }
-            inputs.push(entry.input.clone());
         }
-        Ok(Some(crate::TurnInputClaim {
-            session_id: SessionId::from(session_id.to_string()),
-            claim_id: minted.claim_id,
-            owner: owner.clone(),
-            lease_token: minted.lease_token,
-            fencing_token: minted.fencing_token,
-            session_lease_generation: generation,
-            data: crate::TurnInputClaimData {
-                mode,
-                inputs,
-                applications: Vec::new(),
-            },
-        }))
+        Ok(Some(plan.into_claim()))
     }
 
     fn checkpoint_work_pending_in_memory(

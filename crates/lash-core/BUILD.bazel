@@ -28,6 +28,10 @@ lash_rust_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -134,6 +138,14 @@ lash_rust_integration_test(
         "perf-witness",
         "testing",
     ],
+    srcs_patterns = [
+        "tests/runtime_effect.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/effect.rs",
+        "tests/runtime/tests/effect/**/*.rs",
+        "tests/runtime/tests/effect_direct_llm.rs",
+        "tests/runtime/tests/effect_response_hook.rs",
+    ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
     extra_data = [
@@ -163,6 +175,16 @@ lash_rust_integration_test(
         "perf-witness",
         "testing",
     ],
+    srcs_patterns = [
+        "tests/runtime_lifecycle.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/attachment_continuation.rs",
+        "tests/runtime/tests/child_sessions.rs",
+        "tests/runtime/tests/persistence.rs",
+        "tests/runtime/tests/plugin_lifecycle.rs",
+        "tests/runtime/tests/tool_restore_report.rs",
+        "tests/runtime/tests/tool_surface_lifecycle.rs",
+    ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
     library = ":lash-core",
@@ -188,6 +210,22 @@ lash_rust_integration_test(
         "otel-trace",
         "perf-witness",
         "testing",
+    ],
+    srcs_patterns = [
+        "tests/runtime_observability.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/assembler.rs",
+        "tests/runtime/tests/core_contracts.rs",
+        "tests/runtime/tests/language_runtime_value.rs",
+        "tests/runtime/tests/projection.rs",
+        "tests/runtime/tests/replay_mismatch.rs",
+        "tests/runtime/tests/replay_origin.rs",
+        "tests/runtime/tests/session_freshness.rs",
+        "tests/runtime/tests/session_lease_observability.rs",
+        "tests/runtime/tests/stream_accumulator.rs",
+        "tests/runtime/tests/stream_evidence.rs",
+        "tests/runtime/tests/tracing.rs",
+        "tests/runtime/tests/usage.rs",
     ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
@@ -215,6 +253,14 @@ lash_rust_integration_test(
         "otel-trace",
         "perf-witness",
         "testing",
+    ],
+    srcs_patterns = [
+        "tests/runtime_scenarios.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/attempt_atomicity.rs",
+        "tests/runtime/tests/attempt_atomicity/**/*.rs",
+        "tests/runtime/tests/runtime_scenarios.rs",
+        "tests/runtime/tests/runtime_scenarios/**/*.rs",
     ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
@@ -248,6 +294,14 @@ lash_rust_integration_test(
         "otel-trace",
         "perf-witness",
         "testing",
+    ],
+    srcs_patterns = [
+        "tests/runtime_turns.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/turns.rs",
+        "tests/runtime/tests/turns/**/*.rs",
+        "tests/runtime/tests/commit_placement.rs",
+        "tests/runtime/tests/turn_cancel_modes.rs",
     ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
@@ -323,6 +377,11 @@ filegroup(
 filegroup(
     name = "durable_read_fixture_source",
     srcs = ["tests/support/durable_read_fixture.rs"],
+)
+
+filegroup(
+    name = "durable_read_predecessor_fixtures",
+    srcs = glob(["tests/fixtures/durable-read-predecessors/**"]),
 )
 
 filegroup(
@@ -445,6 +504,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -470,6 +533,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -495,6 +562,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -521,6 +592,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -546,6 +621,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -571,6 +650,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -597,6 +680,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -623,6 +710,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -646,6 +737,10 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "Cargo.toml",
+        "clippy.toml",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
@@ -795,7 +890,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_effect.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/effect.rs", "tests/runtime/tests/effect/**/*.rs", "tests/runtime/tests/effect_direct_llm.rs", "tests/runtime/tests/effect_response_hook.rs"],
     tags = [
         "feature-lane",
         "manual",
@@ -827,7 +922,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_effect.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/effect.rs", "tests/runtime/tests/effect/**/*.rs", "tests/runtime/tests/effect_direct_llm.rs", "tests/runtime/tests/effect_response_hook.rs"],
     tags = [
         "feature-lane",
         "manual",
@@ -857,7 +952,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_lifecycle.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/attachment_continuation.rs", "tests/runtime/tests/child_sessions.rs", "tests/runtime/tests/persistence.rs", "tests/runtime/tests/plugin_lifecycle.rs", "tests/runtime/tests/tool_restore_report.rs", "tests/runtime/tests/tool_surface_lifecycle.rs"],
     tags = [
         "feature-lane",
         "manual",
@@ -886,7 +981,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_lifecycle.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/attachment_continuation.rs", "tests/runtime/tests/child_sessions.rs", "tests/runtime/tests/persistence.rs", "tests/runtime/tests/plugin_lifecycle.rs", "tests/runtime/tests/tool_restore_report.rs", "tests/runtime/tests/tool_surface_lifecycle.rs"],
     tags = [
         "feature-lane",
         "manual",
@@ -916,7 +1011,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/core_contracts.rs", "tests/runtime/tests/language_runtime_value.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/replay_mismatch.rs", "tests/runtime/tests/replay_origin.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/session_lease_observability.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/stream_evidence.rs", "tests/runtime/tests/tracing.rs", "tests/runtime/tests/usage.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
@@ -946,7 +1041,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/core_contracts.rs", "tests/runtime/tests/language_runtime_value.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/replay_mismatch.rs", "tests/runtime/tests/replay_origin.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/session_lease_observability.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/stream_evidence.rs", "tests/runtime/tests/tracing.rs", "tests/runtime/tests/usage.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
@@ -984,7 +1079,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_scenarios.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/attempt_atomicity.rs", "tests/runtime/tests/attempt_atomicity/**/*.rs", "tests/runtime/tests/runtime_scenarios.rs", "tests/runtime/tests/runtime_scenarios/**/*.rs"],
     tags = [
         "feature-lane",
         "manual",
@@ -1020,7 +1115,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_scenarios.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/attempt_atomicity.rs", "tests/runtime/tests/attempt_atomicity/**/*.rs", "tests/runtime/tests/runtime_scenarios.rs", "tests/runtime/tests/runtime_scenarios/**/*.rs"],
     tags = [
         "feature-lane",
         "manual",
@@ -1050,7 +1145,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_turns.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/turns.rs", "tests/runtime/tests/turns/**/*.rs", "tests/runtime/tests/commit_placement.rs", "tests/runtime/tests/turn_cancel_modes.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
@@ -1080,7 +1175,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    srcs_patterns = ["tests/runtime_turns.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/turns.rs", "tests/runtime/tests/turns/**/*.rs", "tests/runtime/tests/commit_placement.rs", "tests/runtime/tests/turn_cancel_modes.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",

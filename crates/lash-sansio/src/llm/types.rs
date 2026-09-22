@@ -1686,15 +1686,12 @@ pub enum ProtocolPosition {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NormalizedError {
     pub class: String,
-    /// A code the provider emitted on the wire — provider vocabulary only.
+    /// The failure code, namespaced by who authored the spelling: `lash:` for
+    /// workspace-authored codes, `provider:` for provider wire vocabulary,
+    /// and a host's own namespace for host-authored codes. Rows written
+    /// before the namespaced `code` field decode with `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_code: Option<String>,
-    /// A code the Lash adapter or transport authored.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapter_code: Option<crate::session_model::TurnFailureCode>,
-    /// A code Lash charge-safety or retry policy authored while refusing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refusal_code: Option<crate::session_model::TurnFailureCode>,
+    pub code: Option<crate::session_model::FailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

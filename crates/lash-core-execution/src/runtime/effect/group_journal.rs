@@ -60,6 +60,8 @@
 //! children in one transaction means no partially-retired group ever exists for
 //! rank to be computed over.
 
+use serde::{Deserialize, Serialize};
+
 use super::effect_replay_driver::{EffectRowState, EffectTerminal};
 use super::group::{GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 use crate::SessionId;
@@ -93,6 +95,11 @@ pub struct EffectGroupRecord {
     /// envelopes — the write-time expectation, named distinctly from the
     /// actual cardinality `COUNT(membership rows)` answers.
     pub expected_children: usize,
+    /// The lifecycle the group's `lifecycle` column holds (ADR 0099 §7):
+    /// `live` while children may claim, `closing` once close is durably
+    /// recorded, `settled` once finalization finished. Decode failures surface
+    /// as corrupt-row errors; the column is never defaulted on read.
+    pub lifecycle: EffectGroupLifecycle,
     /// The open instant, for the row's `created_at_ms`.
     pub created_at_ms: u64,
 }
@@ -135,7 +142,159 @@ impl EffectGroupRecord {
             wake: group.wake(),
             loser_disposition: group.loser_disposition(),
             expected_children: group.children().len(),
+            lifecycle: EffectGroupLifecycle::Live,
             created_at_ms,
+        }
+    }
+
+    /// The disposition now in force: the lifecycle's recorded closing
+    /// disposition once close has committed one, else the declared column.
+    ///
+    /// Once `closing` is durable this — not `loser_disposition` — is the
+    /// authority a drain pass or a reopen must apply, because the close's
+    /// `resolve_close` output is what the row committed to and the declared
+    /// column is only what the opener asked for.
+    #[must_use]
+    pub fn effective_loser_disposition(&self) -> LoserPolicy {
+        self.lifecycle
+            .closing_disposition()
+            .unwrap_or(self.loser_disposition)
+    }
+}
+
+/// How far the four-step close has run, recorded on the group's `closing`
+/// lifecycle (ADR 0099 §7).
+///
+/// The cursor counts *completed* steps in finalization order: `0` — none yet,
+/// `1` — obligations drained (every accepted child ranked), `2` — outcome and
+/// accounting committed, `3` — parent end recorded. Completing the fourth
+/// step (retiring the group's live retention) is what turns the lifecycle
+/// `settled`, so the durable range is `0..=3`.
+///
+/// The cursor is what makes the sequence resumable: a finalizer restarted
+/// after a crash skips every step the cursor already records, and each step
+/// is idempotent so a crash between the step and its recording re-runs the
+/// step without harm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FinalizationStep(u8);
+
+impl FinalizationStep {
+    /// The cursor a freshly closed group opens with: no step has completed.
+    pub const NONE: Self = Self(0);
+
+    /// The largest cursor the column may hold.
+    pub const LAST: u8 = 3;
+
+    /// A recorded cursor value, or `None` above [`LAST`](Self::LAST).
+    #[must_use]
+    pub fn new(value: u8) -> Option<Self> {
+        (value <= Self::LAST).then_some(Self(value))
+    }
+
+    /// The number of completed steps this cursor records.
+    #[must_use]
+    pub fn completed(self) -> u8 {
+        self.0
+    }
+
+    /// The cursor one step past this one, or `None` at [`LAST`](Self::LAST).
+    #[must_use]
+    pub fn next(self) -> Option<Self> {
+        Self::new(self.0 + 1)
+    }
+}
+
+/// The lifecycle phase tag a group row's `lifecycle` column currently holds —
+/// the `type` field of the encoded [`EffectGroupLifecycle`]. The CAS guards
+/// and phase-filtered reads match on this string, so it is spelled once here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EffectGroupLifecyclePhase {
+    /// Accepted and running; new children may claim.
+    Live,
+    /// Close is durably recorded; admission is refused and finalization is in
+    /// progress.
+    Closing,
+    /// Finalization finished; the row awaits group retirement.
+    Settled,
+}
+
+impl EffectGroupLifecyclePhase {
+    /// The persisted `type` value.
+    #[must_use]
+    pub fn column(self) -> &'static str {
+        match self {
+            Self::Live => "live",
+            Self::Closing => "closing",
+            Self::Settled => "settled",
+        }
+    }
+}
+
+/// The durable lifecycle of a recorded effect group (ADR 0099 §7, FIG-3410).
+///
+/// This is the JSON the `lifecycle` column carries: `{"type":"live"}`,
+/// `{"type":"closing","disposition":..,"finalized":0..3}`, or
+/// `{"type":"settled","disposition":..}`. `disposition` encodes through
+/// [`LoserPolicy`]'s serde strings, the same values its own column uses.
+///
+/// `Closing` is the fact §7 requires to be durable *before* any cancel
+/// decision is issued: the group's authority has stopped admitting, and the
+/// recorded `disposition` is the effective one — `resolve_close` output at
+/// the moment closing was written — so a reopened caller narrows nothing.
+/// A column value that does not decode is a corrupt row, never defaulted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EffectGroupLifecycle {
+    /// The group is live.
+    Live,
+    /// Closing was durably recorded; `finalized` counts completed steps.
+    Closing {
+        /// The effective loser disposition the close committed to.
+        disposition: LoserPolicy,
+        /// Steps of the four-step finalization completed so far.
+        finalized: FinalizationStep,
+    },
+    /// Finalization completed; the row awaits group-level retirement.
+    Settled {
+        /// The effective loser disposition the group closed under.
+        disposition: LoserPolicy,
+    },
+}
+
+impl EffectGroupLifecycle {
+    /// `Closing` with the cursor at `0`.
+    #[must_use]
+    pub fn closing(disposition: LoserPolicy) -> Self {
+        Self::Closing {
+            disposition,
+            finalized: FinalizationStep::NONE,
+        }
+    }
+
+    /// `Settled` under the given effective disposition.
+    #[must_use]
+    pub fn settled(disposition: LoserPolicy) -> Self {
+        Self::Settled { disposition }
+    }
+
+    /// The phase tag the encoded form carries.
+    #[must_use]
+    pub fn phase(&self) -> EffectGroupLifecyclePhase {
+        match self {
+            Self::Live => EffectGroupLifecyclePhase::Live,
+            Self::Closing { .. } => EffectGroupLifecyclePhase::Closing,
+            Self::Settled { .. } => EffectGroupLifecyclePhase::Settled,
+        }
+    }
+
+    /// The effective disposition once closing committed one, else `None` for
+    /// `Live` (whose declared disposition lives on the record's own column).
+    #[must_use]
+    pub fn closing_disposition(&self) -> Option<LoserPolicy> {
+        match self {
+            Self::Closing { disposition, .. } | Self::Settled { disposition } => Some(*disposition),
+            Self::Live => None,
         }
     }
 }

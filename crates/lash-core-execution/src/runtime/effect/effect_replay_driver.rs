@@ -91,6 +91,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::{RuntimeError, RuntimeErrorCode};
@@ -112,8 +113,8 @@ pub use super::group_journal::{
     AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectCommitState,
     EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
     EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupColumn,
-    EffectGroupRecord, GroupChildFinalCommit, StoredChildArbitration, StoredGroupSettlement,
-    UnsettledGroupChild,
+    EffectGroupLifecycle, EffectGroupLifecyclePhase, EffectGroupRecord, FinalizationStep,
+    GroupChildFinalCommit, StoredChildArbitration, StoredGroupSettlement, UnsettledGroupChild,
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
@@ -1162,6 +1163,25 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         rank: usize,
     ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError>;
 
+    /// The settlement notifier for `group_key`: one shared `Arc<Notify>` per
+    /// (store, group) that every committed rank write —
+    /// [`discharge_child`](Self::discharge_child),
+    /// [`decide_cancel`](Self::decide_cancel), and a grouped
+    /// [`finalize`](Self::finalize) — wakes after its commit lands, and that a
+    /// peer driver over the same database wakes the same way.
+    ///
+    /// The caller enables [`Notify::notified`] *before* its journal read and
+    /// parks on it afterwards, so a settlement committed between the read and
+    /// the park is caught rather than slept through. Acquiring the notifier is
+    /// async so a backend whose wake-up rides an external subscription
+    /// (PostgreSQL `LISTEN`) can await the subscription's installation before
+    /// the caller's first read — the ordering the same guarantee needs across
+    /// processes.
+    async fn settlement_notifier(
+        &self,
+        group_key: &str,
+    ) -> Result<Arc<Notify>, RuntimeEffectControllerError>;
+
     /// The exact complement of [`read_group_settlement`](Self::read_group_settlement):
     /// that read filters `settlement_seq IS NOT NULL`, this one
     /// `settlement_seq IS NULL`. Both predicates over one table, so a child is
@@ -1176,6 +1196,39 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         &self,
         group_key: &str,
     ) -> Result<Vec<UnsettledGroupChild>, RuntimeEffectControllerError>;
+
+    /// Advance the group's durable lifecycle if it currently holds one of
+    /// `from` phases, in a single guarded write (ADR 0099 §7).
+    ///
+    /// This is the close/finalization CAS: close writes `Closing` before any
+    /// `decide_cancel`, each finalization step advances the recorded cursor,
+    /// and step 4 turns `closing` into `settled`. Returns the lifecycle now
+    /// durable on the row — `to` on a hit, the existing value on a guard miss —
+    /// so a caller distinguishes "I wrote this" from "someone else moved it"
+    /// without a second round-trip. An unknown `group_key` is an error: the
+    /// group row must exist.
+    async fn transition_group_lifecycle(
+        &self,
+        group_key: &str,
+        from: &[EffectGroupLifecyclePhase],
+        to: &EffectGroupLifecycle,
+    ) -> Result<EffectGroupLifecycle, RuntimeEffectControllerError>;
+
+    /// Every group recorded under `scope_id` whose lifecycle is `closing` —
+    /// the resumable finalization set a redriven opener drains
+    /// (ADR 0099 §7, `resume_closing_groups`).
+    async fn read_closing_groups(
+        &self,
+        scope_id: &str,
+    ) -> Result<Vec<EffectGroupRecord>, RuntimeEffectControllerError>;
+
+    /// `(group_key, lifecycle)` for every group owned by `session_id` whose
+    /// lifecycle is not `settled` — the pins a session deletion must refuse
+    /// before it deletes anything (ADR 0099 §7).
+    async fn read_session_group_lifecycle_pins(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, EffectGroupLifecycle)>, RuntimeEffectControllerError>;
 
     /// Extend the lease by `lease_ttl_ms`, guarded by `fence`.
     ///
@@ -1328,6 +1381,9 @@ pub struct StoreEffectReplayDriver<P, A> {
     lease_counter: AtomicU64,
     replay_mode: AtomicBool,
     lease_timings: LeaseTimings,
+    /// The bound step 1 of group finalization waits on a cancel-decided
+    /// child's attempt body after its decision commits (ADR 0099 §7).
+    drain_budget: super::group::EffectGroupDrainBudget,
     /// The groups this driver has open, and the host-owned task set their
     /// children run on. Process-local by design: every durable fact about a
     /// group lives in the journal, and this map holds only what a process that
@@ -1399,6 +1455,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         await_events: AwaitEventCoordinator<A>,
         clock: Arc<dyn crate::Clock>,
         lease_timings: LeaseTimings,
+        drain_budget: super::group::EffectGroupDrainBudget,
     ) -> Self {
         let sequence = EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
         let owner_id = format!(
@@ -1414,6 +1471,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             lease_counter: AtomicU64::new(1),
             replay_mode: AtomicBool::new(false),
             lease_timings,
+            drain_budget,
             groups: groups::DurableEffectGroups::default(),
             group_executors: OnceLock::new(),
             tool_children: OnceLock::new(),
@@ -2322,6 +2380,7 @@ fn sleep_spec(envelope: &RuntimeEffectEnvelope) -> Option<SleepSpec> {
     }
 }
 
+mod closing;
 mod drain;
 mod groups;
 

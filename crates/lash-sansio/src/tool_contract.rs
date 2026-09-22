@@ -553,14 +553,14 @@ impl ToolContract {
 
 /// Static authoring helper for tools.
 ///
-/// Composes the runtime [`ToolManifest`] and [`ToolContract`] projections. Both
-/// are `#[serde(flatten)]`ed so the serialized JSON shape stays flat (and wire/
-/// persistence compatible); the two structs have disjoint field names.
+/// Composes the runtime [`ToolManifest`] and [`ToolContract`] projections. They
+/// serialize under the explicit `manifest` and `contract` keys: the definition
+/// is reachable from the persisted RLM execution-state envelope, whose
+/// canonical-encoding invariant bans `#[serde(flatten)]` because a flattened
+/// subtree has no declaration order a structural pre-pass can validate.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolDefinition {
-    #[serde(flatten)]
     pub manifest: ToolManifest,
-    #[serde(flatten)]
     pub contract: ToolContract,
 }
 

@@ -443,8 +443,7 @@ impl Snapshot {
     /// Encodes this snapshot as canonical, named-field MessagePack.
     ///
     /// Every byte sequence emitted here decodes and re-encodes identically.
-    /// Accepted foreign wires have the same fixed-point property. The outer
-    /// RLM envelope documents its single field-order exception separately.
+    /// Accepted foreign wires have the same fixed-point property.
     ///
     /// Snapshot equality does not imply byte equality for `-0.0` and `+0.0`:
     /// they compare equal under `PartialEq`, but preserve their distinct bits.

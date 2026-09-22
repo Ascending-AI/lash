@@ -156,6 +156,14 @@ lash_store_sql::statements! {
         /// 2026-09-20).
         select_injected_lease_epoch_ms =
             "SELECT NULLIF(current_setting('lash.test_lease_epoch_ms', true), '')";
+
+        /// Publish `?1`'s channel notification inside the caller's
+        /// transaction — the effect-group settlement wake rides the rank
+        /// write's commit, so a notified waiter can never observe the wake
+        /// ahead of the settlement it announces. The `LISTEN` half is issued
+        /// through `sqlx::postgres::PgListener`, which takes the channel by
+        /// parameter and holds no literal of its own.
+        notify_channel = "SELECT pg_notify(?1, '')";
     }
 }
 

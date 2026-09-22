@@ -36,17 +36,15 @@ impl GraphProjector<'_> {
         // for it at all (FIG-3118). The literal's `main` path still decides
         // the lifted *name*, which is what keeps one container distinct from
         // another.
-        let (wrapper_path, authored) = match crate::lower::process_run_body_path_of(&literal.body) {
-            Some((relative, body)) => (relative, body),
-            None => (Vec::new(), literal.body.as_ref()),
-        };
         // Facts are keyed by the literal's position in `main`, where the
         // linker lowered it: the body is the literal's child 0, and the
         // wrapper path descends from there.
-        let mut facts_base = lashlang::AstPath::main(path.to_vec()).child(0);
-        facts_base.steps.extend(wrapper_path.iter().copied());
+        let ownership = lashlang::process_workflow_projection(
+            &literal.body,
+            lashlang::AstPath::main(path.to_vec()).child(0),
+        );
         WorkflowProcess {
-            id: self.node_id(&owner, &[], "process"),
+            id: self.node_id(&owner, &[]),
             name: name.clone(),
             display_name: name,
             description: None,
@@ -54,7 +52,13 @@ impl GraphProjector<'_> {
             params: literal.params.clone(),
             signals: Vec::new(),
             return_ty: None,
-            body: self.project_block(authored, &owner, &wrapper_path, &facts_base, &mut versions),
+            body: self.project_block(
+                ownership.visible_expression(),
+                &owner,
+                ownership.ast_root(),
+                ownership.ownership_map(),
+                &mut versions,
+            ),
         }
     }
 }

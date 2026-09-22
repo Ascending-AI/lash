@@ -230,7 +230,12 @@ pub use usage_activity::*;
 // beneath a cancel-decided group child. A window-84 peer refuses the unknown
 // reason tag when decoding a turn report that carries it, so peers must adopt
 // 85.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 87;
+// Window 88: FIG-3435 replaces `RemoteNormalizedError`'s three
+// `provider_code`/`adapter_code`/`refusal_code` columns with one namespaced
+// `code` (`<namespace>:<spelling>`). A window-87 peer drops `code` on decode
+// and a window-88 peer reads the retired columns as `code: None`, so peers
+// must adopt 88.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 88;
 
 /// One versioned remote-protocol message.
 ///

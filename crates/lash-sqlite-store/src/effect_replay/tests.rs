@@ -14,8 +14,9 @@ use lash_core::{
 use lash_core::facade_support::effect_replay_driver::{
     AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectClaimObservation,
     EffectCommitState, EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
-    EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupRecord,
-    EffectLeaseFence, EffectTerminal, MintingEffectRef,
+    EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupLifecycle,
+    EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence, EffectTerminal,
+    MintingEffectRef,
 };
 
 #[test]
@@ -47,6 +48,7 @@ async fn row_store() -> SqliteEffectReplayRowStore {
         conn,
         clock: Arc::new(lash_core::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
+        settlement_key: super::settlement_notify::SettlementNotifierKey::for_memory(),
     }
 }
 
@@ -145,6 +147,7 @@ fn group_record() -> EffectGroupRecord {
         wake: lash_core::GroupWakePolicy::All,
         loser_disposition: lash_core::LoserPolicy::RunToCompletion,
         expected_children: 2,
+        lifecycle: EffectGroupLifecycle::Live,
         created_at_ms: 1_000,
     }
 }
@@ -671,6 +674,19 @@ async fn retirement_removes_a_group_and_its_children_together() {
         .expect("finalize the first child");
     discharge(&store, "k1").await;
 
+    // Session retirement refuses while the group is live (ADR 0099 §7);
+    // settle the lifecycle first so the delete is the thing under test.
+    store
+        .transition_group_lifecycle(
+            GROUP,
+            &[EffectGroupLifecyclePhase::Live],
+            &EffectGroupLifecycle::Settled {
+                disposition: lash_core::LoserPolicy::RunToCompletion,
+            },
+        )
+        .await
+        .expect("settle the group lifecycle");
+
     let removed = store
         .retire_journal(&lash_core::EffectJournalRetirement::Session {
             session_id: SessionId::from("s1"),
@@ -920,6 +936,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
     let options = SqliteEffectReplayOptions {
         lease_timings: LeaseTimings::from_ttl(std::time::Duration::from_millis(300))
             .expect("lease timings"),
+        drain_budget: Default::default(),
     };
     let predecessor = SqliteRuntimeEffectController::open_with_options_and_clock(
         &path,
@@ -969,6 +986,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
         vec![0; 32],
         CompletionKeys::Issued,
         std::sync::Arc::new(crate::scope_fence::RegistryAttachment::default()),
+        super::settlement_notify::SettlementNotifierKey::for_file(&path),
     );
     let pause = injector.pause(SqliteFaultPoint::AfterBegin);
     let completing = tokio::spawn(async move {
@@ -1031,6 +1049,9 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
             conn,
             clock: clock.clone(),
             registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
+            settlement_key: super::settlement_notify::SettlementNotifierKey::for_file(
+                &dir.path().join("effects.db"),
+            ),
         });
         let mut request = claim("queued-write", "owner");
         request.lease_ttl_ms = 300;
@@ -1323,6 +1344,7 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
             .expect("open the staging connection"),
         clock: Arc::new(lash_core::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
+        settlement_key: super::settlement_notify::SettlementNotifierKey::for_file(&path),
     };
     store
         .open_group(&group_record(), &membership())

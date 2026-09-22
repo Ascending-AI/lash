@@ -90,6 +90,15 @@ const LAPSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const DECLINING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-95-a596c2237/postgres-expected.json",
 ];
+const ABATING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-99-eeeedf38a/postgres-expected.json",
+];
+const FLEETING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-100-failure-code-predecessor/postgres-expected.json",
+];
+const EXPIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-101-f2a4770bd/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -234,7 +243,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 114);
+    assert_eq!(PostgresStorage::schema_version(), 115);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -623,6 +632,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .await
     .expect("refresh refusal fixture head schema without changing its checkpoint");
     upgrade_prior_fixture_checkpoint_manifests(&pool).await;
+    upgrade_prior_fixture_graph_node_bodies(&pool).await;
     pool.close().await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -697,6 +707,45 @@ async fn upgrade_prior_fixture_checkpoint_manifests(pool: &sqlx::PgPool) {
             .await
             .expect("retarget fixture checkpoint root");
         }
+    }
+}
+
+// Author-time body restamp: the refusal fixture's node payloads carry no
+// error vocabulary, so each body decodes under the current node-body
+// generation once its stamp moves; decoding here is the proof, not a hope.
+async fn upgrade_prior_fixture_graph_node_bodies(pool: &sqlx::PgPool) {
+    use lash_core::session_graph::{SESSION_NODE_BODY_SCHEMA_VERSION, SessionNodeRecord};
+    let rows: Vec<(String, Option<String>, String)> =
+        sqlx::query_as("SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes")
+            .fetch_all(pool)
+            .await
+            .expect("read refusal fixture graph nodes");
+    for (node_id, parent_node_id, node_json) in rows {
+        let mut value: serde_json::Value =
+            serde_json::from_str(&node_json).expect("parse refusal fixture node body");
+        if value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(u64::from(SESSION_NODE_BODY_SCHEMA_VERSION))
+        {
+            continue;
+        }
+        value["schema_version"] = SESSION_NODE_BODY_SCHEMA_VERSION.into();
+        let record = SessionNodeRecord::decode_storage_body(
+            node_id.clone(),
+            parent_node_id,
+            &value.to_string(),
+        )
+        .expect("refusal fixture node payload must decode under the current generation");
+        let restamped = record
+            .encode_storage_body()
+            .expect("re-encode refusal fixture node body");
+        sqlx::query("UPDATE lash_graph_nodes SET node_json = $1 WHERE node_id = $2")
+            .bind(&restamped)
+            .bind(&node_id)
+            .execute(pool)
+            .await
+            .expect("restamp refusal fixture node body");
     }
 }
 

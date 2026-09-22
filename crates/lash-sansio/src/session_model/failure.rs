@@ -14,6 +14,11 @@
 //! spelling they were given, so nothing is lost when a vocabulary this
 //! workspace does not own — a provider's error code, a plugin's abort code, a
 //! `RuntimeErrorCode` spelling, or a newer build's arm — crosses the boundary.
+//!
+//! [`FailureCode`] is the namespaced code carried on the envelope and in the
+//! attempt journal: an opaque `{namespace, spelling}` pair where `lash` is
+//! reserved for workspace-authored codes and provider, host, and plugin
+//! vocabularies live in their own namespaces, never reinterpreted into Lash's.
 
 /// Where a turn failure came from.
 ///
@@ -264,6 +269,12 @@ pub enum TurnFailureCode {
     /// A code from a vocabulary this type does not own, retained verbatim:
     /// provider and transport error codes, plugin abort codes, kernel
     /// `RuntimeErrorCode` spellings, and arms authored by a newer build.
+    ///
+    /// `Other` is a decode product, not a constructor: outside this crate it
+    /// can only be produced by [`TurnFailureCode::from_wire`], so
+    /// [`FailureCode::lash`] is reachable for arbitrary spellings only
+    /// through a spelling decode — never by direct construction.
+    #[non_exhaustive]
     Other(String),
 }
 
@@ -453,67 +464,353 @@ impl TurnFailureCode {
             other => Self::Other(other.to_string()),
         }
     }
+
+    /// Every named arm — all but [`Self::Other`] — in `as_str` table order,
+    /// for cross-vocabulary collision tests in the durable kernel. The
+    /// completeness assertion in this module's tests keeps the list pinned
+    /// to the `as_str`/`from_wire` tables.
+    #[doc(hidden)]
+    pub const ALL_NAMED: &[Self] = &[
+        Self::Stop,
+        Self::ToolUse,
+        Self::OutputLimit,
+        Self::ContextOverflow,
+        Self::ContentFilter,
+        Self::ProviderError,
+        Self::Cancelled,
+        Self::UnknownTerminalReason,
+        Self::UnsupportedEffort,
+        Self::EffortNotConfigurable,
+        Self::EffortRequired,
+        Self::MalformedCapability,
+        Self::EmptyResponse,
+        Self::NativeToolCallNotAllowed,
+        Self::InvalidDriverState,
+        Self::InvalidTurnOptions,
+        Self::BeforeLlmCallFailed,
+        Self::AttachmentResolutionFailed,
+        Self::PluginAssistantStream,
+        Self::ProviderPanicked,
+        Self::ProviderReplayOriginConflict,
+        Self::StreamEvidenceBeforeResponseStart,
+        Self::StreamEvidenceIdentityConflict,
+        Self::UnsafeRetryAfterOutputStarted,
+        Self::UnsafeRetryAfterResponseObserved,
+        Self::UnsafeRetryWithoutTransportClassification,
+        Self::UnsafeRetryAfterTerminalObserved,
+        Self::ChargeSafetyGuaranteeRequired,
+        Self::ChargeSafetyUnsafeRetryLimitExceeded,
+        Self::ChargeSafetyDuplicateCostLimitExceeded,
+        Self::RetryAfterExceedsCap,
+        Self::ChargeSafetyRetryDenied,
+        Self::InvalidStructuredOutput,
+        Self::BodyReadFailed,
+        Self::TokenUsageOverflow,
+        Self::ReconfigureFailed,
+        Self::SessionGraphScope,
+        Self::MissingDone,
+        Self::AssistantOutputRecoveredFromState,
+        Self::InvalidTurnInput,
+        Self::AgentFrameSwitchLimit,
+        Self::ProtocolRestoreSession,
+        Self::LifecycleHookFailed,
+        Self::InvalidProviderEndpoint,
+        Self::UnsupportedAttachmentCapability,
+        Self::AttachmentSourceNotEncodable,
+        Self::StoredAttachmentNotResolved,
+        Self::ProviderFileMediaTypeRequired,
+        Self::UnsupportedReasoningRetention,
+        Self::ReasoningEncodingUnrepresentable,
+        Self::InvalidToolCallInputJson,
+        Self::CredentialInvalidGrant,
+        Self::CredentialRefreshTransient,
+        Self::CredentialRefreshFailed,
+        Self::Timeout,
+        Self::TaskJoinFailed,
+        Self::SseEventTooLarge,
+        Self::SseResponseTooLarge,
+        Self::StreamEndedBeforeTerminalResponse,
+        Self::StreamEndedBeforeMessageStop,
+        Self::StreamEndedBeforeFinishReason,
+        Self::EmptyStream,
+        Self::ResponsesResumeNotStreaming,
+        Self::ResponsesResumeEventMissingSequence,
+        Self::WebsocketConnect,
+        Self::WebsocketConnectTimeout,
+        Self::WebsocketSend,
+        Self::WebsocketIdleTimeout,
+        Self::WebsocketReceive,
+        Self::WebsocketProtocol,
+        Self::WebsocketClosedBeforeCompleted,
+    ];
+}
+
+/// Who authored a [`FailureCode`] spelling.
+///
+/// A namespace names the vocabulary a code's spelling belongs to:
+/// [`Namespace::LASH`] is reserved for codes this workspace mints,
+/// [`Namespace::PROVIDER`] carries codes a provider emitted on the wire, and a
+/// host or plugin names its own. Lash never interprets a spelling whose
+/// namespace it does not own.
+///
+/// Host-minted namespaces are validated: they start with a lowercase ASCII
+/// letter, continue with lowercase ASCII letters, digits, `_`, `.` or `-`,
+/// and are at most 63 bytes. Namespaces decoded from the wire are kept
+/// verbatim — decode never errors, and an unvalidated foreign namespace is
+/// retained rather than rewritten.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Namespace(std::borrow::Cow<'static, str>);
+
+/// Why a proposed host namespace was rejected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidNamespace {
+    name: String,
+    reason: &'static str,
+}
+
+impl std::fmt::Display for InvalidNamespace {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "invalid failure-code namespace `{}`: {}",
+            self.name, self.reason
+        )
+    }
+}
+
+impl std::error::Error for InvalidNamespace {}
+
+impl Namespace {
+    /// The namespace reserved for codes this workspace authors.
+    pub const LASH: Self = Self(std::borrow::Cow::Borrowed("lash"));
+    /// The namespace for codes a provider emitted on the wire.
+    pub const PROVIDER: Self = Self(std::borrow::Cow::Borrowed("provider"));
+
+    /// The namespace [`FailureCode::from_foreign_wire`] gives a foreign
+    /// spelling that cannot keep its own: bare spellings and spellings
+    /// claiming a reserved namespace land here with their claim preserved
+    /// verbatim, so nothing a foreign author sends can mint Lash or provider
+    /// vocabulary.
+    pub const FOREIGN: Self = Self(std::borrow::Cow::Borrowed("foreign"));
+
+    /// A host-owned namespace.
+    ///
+    /// `lash` and `provider` are reserved by construction: a host names its
+    /// own vocabulary so its codes can never be mistaken for platform- or
+    /// provider-authored ones. The retired `adapter`/`refusal` namespaces are
+    /// equally reserved — a trusted legacy decode still interprets them as
+    /// Lash-authored, so a host may not mint under them. `name` must start
+    /// with a lowercase ASCII letter, contain only lowercase ASCII letters,
+    /// digits, `_`, `.` and `-`, and be at most 63 bytes.
+    pub fn host(name: impl Into<String>) -> Result<Self, InvalidNamespace> {
+        let name = name.into();
+        let reason = if Self::from_wire(&name).is_reserved() {
+            Some("`lash`, `provider`, `adapter` and `refusal` are reserved namespaces")
+        } else if name.is_empty()
+            || name.len() > 63
+            || !name
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_lowercase())
+            || !name.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-'
+            })
+        {
+            Some(
+                "must start with a lowercase letter, contain only lowercase letters, digits, `_`, `.` or `-`, and be at most 63 bytes",
+            )
+        } else {
+            None
+        };
+        match reason {
+            Some(reason) => Err(InvalidNamespace { name, reason }),
+            None => Ok(Self(std::borrow::Cow::Owned(name))),
+        }
+    }
+
+    /// The namespace an on-the-wire code carried, kept verbatim whether or
+    /// not it satisfies [`Namespace::host`] validation.
+    fn from_wire(name: &str) -> Self {
+        match name {
+            "lash" => Self::LASH,
+            "provider" => Self::PROVIDER,
+            _ => Self(std::borrow::Cow::Owned(name.to_string())),
+        }
+    }
+
+    /// The namespace's wire spelling.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether the namespace belongs to vocabulary this workspace authored:
+    /// `lash` plus the retired `adapter`/`refusal` namespaces pre-cutover
+    /// rows still carry.
+    fn is_lash_vocabulary(&self) -> bool {
+        matches!(self.as_str(), "lash" | "adapter" | "refusal")
+    }
+
+    /// Whether the namespace is one no foreign author may mint: the
+    /// workspace's `lash` vocabulary (including retired spellings) and the
+    /// `provider` wire namespace.
+    fn is_reserved(&self) -> bool {
+        self.is_lash_vocabulary() || self.as_str() == "provider"
+    }
+}
+
+impl std::fmt::Display for Namespace {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
 }
 
 /// A failure code namespaced by who authored the spelling.
 ///
-/// `code` fields that used to mix provider-emitted slugs, adapter-authored
-/// diagnostics, and Lash charge-safety refusals in one bare string now carry
-/// the namespace with the spelling, so a reader never has to guess which
-/// vocabulary a value belongs to — or mistake a numeric provider slug for an
-/// HTTP status. Serializes as `"<namespace>:<spelling>"`; a bare legacy
-/// spelling decodes as `Adapter` when it names a [`TurnFailureCode`] arm and
-/// as `Provider` otherwise.
+/// An opaque `{namespace, spelling}` pair: `lash` is reserved for codes this
+/// workspace mints through [`FailureCode::lash`], `provider` carries codes a
+/// provider emitted on the wire, and hosts and plugins carry their own
+/// namespaces via [`FailureCode::foreign`]. Lash never interprets a spelling
+/// whose namespace it does not own.
+///
+/// Serializes as `"<namespace>:<spelling>"`. Decode is split by trust:
+/// [`FailureCode::from_wire`] is the trusted decode for rows Lash itself
+/// journaled (a pre-cutover namespaced value keeps both halves verbatim, and
+/// a bare spelling decodes as a lash code when it parses as a
+/// [`TurnFailureCode`] arm and as a provider code otherwise);
+/// [`FailureCode::from_foreign_wire`] is the ingress decode for spellings a
+/// foreign author delivered, and never grants a reserved namespace.
+///
+/// The pair sits behind one box so `Option<FailureCode>` stays pointer-sized
+/// on the hot `Result<_, LlmTransportError>` path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum FailureCode {
-    /// A code the provider emitted on the wire — an open vocabulary this
-    /// workspace does not own.
-    Provider(String),
-    /// A code the Lash adapter or transport authored while normalizing or
-    /// driving the provider exchange.
-    Adapter(TurnFailureCode),
-    /// A code Lash charge-safety or retry policy authored while refusing the
-    Refusal(TurnFailureCode),
+pub struct FailureCode(Box<FailureCodePair>);
+
+/// The pair a [`FailureCode`] boxes: who authored the spelling, and the
+/// spelling itself.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct FailureCodePair {
+    namespace: Namespace,
+    spelling: String,
 }
 
 impl FailureCode {
-    /// The namespace that owns this code's spelling.
-    pub fn namespace(&self) -> &'static str {
-        match self {
-            Self::Provider(_) => "provider",
-            Self::Adapter(_) => "adapter",
-            Self::Refusal(_) => "refusal",
+    /// A code this workspace authored — the only way to mint a `lash` code.
+    ///
+    /// `code` is typed vocabulary: the named arms are workspace spellings,
+    /// and [`TurnFailureCode::Other`] is `#[non_exhaustive]`, so the only
+    /// `Other` values a caller can hold came from a spelling decode. Foreign
+    /// spellings belong to [`FailureCode::foreign`] or, at an ingress
+    /// boundary, [`FailureCode::from_foreign_wire`].
+    pub fn lash(code: TurnFailureCode) -> Self {
+        Self(Box::new(FailureCodePair {
+            namespace: Namespace::LASH,
+            spelling: code.as_str().to_string(),
+        }))
+    }
+
+    /// A code a provider emitted on the wire.
+    pub fn provider(spelling: impl Into<String>) -> Self {
+        Self::pair(Namespace::PROVIDER, spelling)
+    }
+
+    /// A code in a caller-owned namespace — how hosts and plugins carry their
+    /// own vocabulary without Lash reinterpreting the spelling.
+    ///
+    /// Reserved namespaces are refused: `lash` (and its retired
+    /// `adapter`/`refusal` spellings) comes from [`FailureCode::lash`] and
+    /// `provider` wire codes from [`FailureCode::provider`].
+    pub fn foreign(
+        namespace: Namespace,
+        spelling: impl Into<String>,
+    ) -> Result<Self, InvalidNamespace> {
+        if namespace.is_reserved() {
+            return Err(InvalidNamespace {
+                name: namespace.as_str().to_string(),
+                reason: "`lash`, `provider`, `adapter` and `refusal` are reserved namespaces",
+            });
         }
+        Ok(Self::pair(namespace, spelling))
+    }
+
+    /// The pair a constructor mints once namespace ownership is settled.
+    fn pair(namespace: Namespace, spelling: impl Into<String>) -> Self {
+        Self(Box::new(FailureCodePair {
+            namespace,
+            spelling: spelling.into(),
+        }))
+    }
+
+    /// The namespace that owns this code's spelling.
+    pub fn namespace(&self) -> &Namespace {
+        &self.0.namespace
     }
 
     /// The spelling within its namespace.
     pub fn spelling(&self) -> &str {
-        match self {
-            Self::Provider(code) => code,
-            Self::Adapter(code) | Self::Refusal(code) => code.as_str(),
-        }
+        &self.0.spelling
     }
 
     /// `"<namespace>:<spelling>"` — the host-facing render.
     pub fn namespaced(&self) -> String {
-        format!("{}:{}", self.namespace(), self.spelling())
+        format!("{}:{}", self.0.namespace.as_str(), self.0.spelling)
     }
 
-    /// Decode a namespaced or legacy bare spelling.
+    /// The [`TurnFailureCode`] this code carries, when it carries one.
+    ///
+    /// Parses only when the spelling lives in vocabulary this workspace owns:
+    /// `lash`, plus the retired `adapter`/`refusal` namespaces pre-cutover
+    /// durable rows still carry. A spelling in any other namespace returns
+    /// `None` — it is never reinterpreted into a Lash code.
+    pub fn turn_code(&self) -> Option<TurnFailureCode> {
+        self.0
+            .namespace
+            .is_lash_vocabulary()
+            .then(|| TurnFailureCode::from_wire(&self.0.spelling))
+    }
+
+    /// Decode a wire spelling: `"<namespace>:<spelling>"`, split at the first
+    /// colon with the remainder kept verbatim.
+    ///
+    /// This is the trusted decode — for rows Lash itself journaled and for
+    /// serde of those durable records. Decode never errors. A namespaced
+    /// value keeps both halves verbatim — an unrecognized namespace is
+    /// retained, not rewritten into a Lash one. A bare (pre-cutover)
+    /// spelling decodes as a lash code when it parses as a
+    /// [`TurnFailureCode`] arm and as a provider code otherwise.
+    ///
+    /// For spellings a foreign author delivered, use
+    /// [`FailureCode::from_foreign_wire`] instead — it never grants a
+    /// reserved namespace.
     pub fn from_wire(spelling: &str) -> Self {
         match spelling.split_once(':') {
-            Some(("provider", code)) => Self::Provider(code.to_string()),
-            Some(("adapter", code)) => Self::Adapter(TurnFailureCode::from_wire(code)),
-            Some(("refusal", code)) => Self::Refusal(TurnFailureCode::from_wire(code)),
-            _ => match TurnFailureCode::from_wire(spelling) {
-                // A legacy bare spelling: workspace-authored spellings decode
-                // as their authored namespace, foreign spellings as provider
-                // codes.
-                TurnFailureCode::Other(_) => Self::Provider(spelling.to_string()),
-                code if code.is_refusal() => Self::Refusal(code),
-                code => Self::Adapter(code),
+            Some((namespace, spelling)) => Self::pair(Namespace::from_wire(namespace), spelling),
+            None => match TurnFailureCode::from_wire(spelling) {
+                TurnFailureCode::Other(_) => Self::provider(spelling),
+                code => Self::lash(code),
             },
         }
+    }
+
+    /// Decode a wire spelling a foreign author delivered — a host, a plugin,
+    /// or an await-event resolver. Unlike [`FailureCode::from_wire`], this
+    /// never grants reserved namespace ownership: a value claiming `lash`,
+    /// `provider`, `adapter`, or `refusal` lands in the [`Namespace::FOREIGN`]
+    /// namespace with its claim preserved verbatim, and so does a bare
+    /// spelling with no namespace of its own. Every other namespaced value
+    /// keeps both halves verbatim.
+    pub fn from_foreign_wire(spelling: &str) -> Self {
+        match spelling.split_once(':') {
+            Some((namespace, rest)) if !Namespace::from_wire(namespace).is_reserved() => {
+                Self::pair(Namespace::from_wire(namespace), rest)
+            }
+            _ => Self::pair(Namespace::FOREIGN, spelling),
+        }
+    }
+}
+
+impl From<TurnFailureCode> for FailureCode {
+    fn from(code: TurnFailureCode) -> Self {
+        Self::lash(code)
     }
 }
 
@@ -613,6 +910,14 @@ macro_rules! string_wire_serde {
 string_wire_serde!(TurnFailureKind, "a turn-failure kind");
 string_wire_serde!(TurnFailureCode, "a turn-failure code");
 
+impl From<crate::llm::types::LlmTerminalReason> for FailureCode {
+    /// A completed call's terminal reason as a `lash`-namespaced failure
+    /// code, via its [`TurnFailureCode`] arm.
+    fn from(reason: crate::llm::types::LlmTerminalReason) -> Self {
+        Self::lash(TurnFailureCode::from(reason))
+    }
+}
+
 impl From<crate::llm::types::LlmTerminalReason> for TurnFailureCode {
     /// A completed call's terminal reason as a failure code. The reason also
     /// rides the envelope's typed `terminal_reason` field; this keeps the
@@ -634,7 +939,7 @@ impl From<crate::llm::types::LlmTerminalReason> for TurnFailureCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{FailureCode, TurnFailureCode, TurnFailureKind};
+    use super::{FailureCode, Namespace, TurnFailureCode, TurnFailureKind};
 
     /// Every arm's spelling survives a round trip through the wire form, so a
     /// typed arm never silently degrades into an open arm.
@@ -755,27 +1060,36 @@ mod tests {
         assert_eq!(code.as_str(), "session_execution_lease_lost");
     }
 
-    /// Namespaced failure codes round-trip, and legacy bare spellings decode
-    /// into the namespace that authored them.
+    /// Namespaced failure codes round-trip; decode never errors and never
+    /// lands a foreign spelling in `lash`.
     #[test]
-    fn failure_code_namespaces_round_trip_and_decode_legacy_bare_spellings() {
-        let cases = [
+    fn failure_code_decode_table() {
+        // Namespaced values keep both halves verbatim and round-trip through
+        // `to_string` and serde.
+        let namespaced = [
+            ("lash:timeout", "lash", "timeout"),
             (
-                FailureCode::Provider("insufficient_quota".to_string()),
                 "provider:insufficient_quota",
+                "provider",
+                "insufficient_quota",
             ),
+            ("adapter:timeout", "adapter", "timeout"),
             (
-                FailureCode::Adapter(TurnFailureCode::Timeout),
-                "adapter:timeout",
-            ),
-            (
-                FailureCode::Refusal(TurnFailureCode::UnsafeRetryAfterOutputStarted),
                 "refusal:unsafe_retry_after_output_started",
+                "refusal",
+                "unsafe_retry_after_output_started",
             ),
+            ("agent_workbench:spend_cap", "agent_workbench", "spend_cap"),
+            // The remainder after the first colon is the spelling, verbatim.
+            ("plugin:hook:failed", "plugin", "hook:failed"),
+            ("provider:", "provider", ""),
+            (":dangling", "", "dangling"),
         ];
-        for (code, namespaced) in cases {
-            assert_eq!(code.to_string(), namespaced);
-            assert_eq!(FailureCode::from_wire(namespaced), code);
+        for (wire, namespace, spelling) in namespaced {
+            let code = FailureCode::from_wire(wire);
+            assert_eq!(code.namespace().as_str(), namespace, "{wire}");
+            assert_eq!(code.spelling(), spelling, "{wire}");
+            assert_eq!(code.to_string(), wire, "{wire}");
             let json = serde_json::to_string(&code).expect("serialize");
             assert_eq!(
                 serde_json::from_str::<FailureCode>(&json).expect("deserialize"),
@@ -783,17 +1097,141 @@ mod tests {
             );
         }
 
+        // A bare spelling is the pre-cutover form: a known Lash arm decodes as
+        // lash vocabulary, anything else stays foreign under `provider`.
+        let bare = [
+            ("timeout", "lash", Some(TurnFailureCode::Timeout)),
+            (
+                "unsafe_retry_after_output_started",
+                "lash",
+                Some(TurnFailureCode::UnsafeRetryAfterOutputStarted),
+            ),
+            ("insufficient_quota", "provider", None),
+            ("429", "provider", None),
+            ("", "provider", None),
+        ];
+        for (wire, namespace, turn_code) in bare {
+            let code = FailureCode::from_wire(wire);
+            assert_eq!(code.namespace().as_str(), namespace, "{wire}");
+            assert_eq!(code.turn_code(), turn_code, "{wire}");
+        }
+
+        // A foreign spelling never lands in `lash`, and `turn_code` never
+        // parses outside the workspace's own namespaces — including a
+        // spelling that collides with a Lash arm.
+        let foreign = FailureCode::from_wire("host:timeout");
+        assert_eq!(foreign.turn_code(), None);
+        let pre_cutover = FailureCode::from_wire("adapter:timeout");
+        assert_eq!(pre_cutover.turn_code(), Some(TurnFailureCode::Timeout));
+    }
+
+    #[test]
+    fn lash_codes_mint_only_through_turn_failure_code() {
+        let code = FailureCode::lash(TurnFailureCode::Timeout);
+        assert_eq!(code.namespace(), &Namespace::LASH);
+        assert_eq!(code.to_string(), "lash:timeout");
+        assert_eq!(code.turn_code(), Some(TurnFailureCode::Timeout));
+
+        let host = Namespace::host("agent_workbench").expect("valid host namespace");
+        let code = FailureCode::foreign(host.clone(), "spend_cap").expect("foreign namespace");
+        assert_eq!(code.namespace(), &host);
+        assert_eq!(code.to_string(), "agent_workbench:spend_cap");
+        assert_eq!(code.turn_code(), None);
+    }
+
+    /// Foreign ingress never grants a reserved namespace: values claiming
+    /// `lash`/`provider`/`adapter`/`refusal` and bare spellings land in the
+    /// `foreign` namespace with their claim preserved, while a genuine
+    /// foreign pair keeps both halves.
+    #[test]
+    fn foreign_wire_decode_never_grants_a_reserved_namespace() {
+        let cases = [
+            ("lash:timeout", "foreign", "lash:timeout"),
+            ("adapter:timeout", "foreign", "adapter:timeout"),
+            (
+                "refusal:unsafe_retry_after_output_started",
+                "foreign",
+                "refusal:unsafe_retry_after_output_started",
+            ),
+            (
+                "provider:insufficient_quota",
+                "foreign",
+                "provider:insufficient_quota",
+            ),
+            ("timeout", "foreign", "timeout"),
+            ("agent_workbench:spend_cap", "agent_workbench", "spend_cap"),
+            ("plugin:hook:failed", "plugin", "hook:failed"),
+        ];
+        for (wire, namespace, spelling) in cases {
+            let code = FailureCode::from_foreign_wire(wire);
+            assert_eq!(code.namespace().as_str(), namespace, "{wire}");
+            assert_eq!(code.spelling(), spelling, "{wire}");
+            assert_eq!(code.to_string(), format!("{namespace}:{spelling}"));
+            assert_eq!(code.turn_code(), None, "{wire}");
+        }
+    }
+
+    /// `FailureCode::foreign` refuses every namespace a foreign author may
+    /// not mint, so host code cannot forge Lash or provider vocabulary.
+    #[test]
+    fn foreign_construction_rejects_reserved_namespaces() {
+        for reserved in ["lash", "provider", "adapter", "refusal"] {
+            let namespace = Namespace::from_wire(reserved);
+            assert!(
+                FailureCode::foreign(namespace, "timeout").is_err(),
+                "{reserved} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn all_named_covers_every_named_arm() {
         assert_eq!(
-            FailureCode::from_wire("timeout"),
-            FailureCode::Adapter(TurnFailureCode::Timeout)
+            TurnFailureCode::ALL_NAMED.len(),
+            71,
+            "a new named arm must be added to ALL_NAMED"
         );
-        assert_eq!(
-            FailureCode::from_wire("unsafe_retry_after_output_started"),
-            FailureCode::Refusal(TurnFailureCode::UnsafeRetryAfterOutputStarted)
-        );
-        assert_eq!(
-            FailureCode::from_wire("insufficient_quota"),
-            FailureCode::Provider("insufficient_quota".to_string())
-        );
+        for code in TurnFailureCode::ALL_NAMED {
+            assert!(!matches!(code, TurnFailureCode::Other(_)), "{code:?}");
+            assert_eq!(
+                &TurnFailureCode::from_wire(code.as_str()),
+                code,
+                "every named arm must round-trip through from_wire"
+            );
+        }
+    }
+
+    #[test]
+    fn host_namespace_rejects_reserved_and_malformed_names() {
+        for reserved in ["lash", "provider", "adapter", "refusal"] {
+            assert!(
+                Namespace::host(reserved).is_err(),
+                "{reserved} must be rejected"
+            );
+        }
+        for malformed in [
+            "",
+            "Lash",
+            "9lives",
+            "ns:colon",
+            "with space",
+            "-lead",
+            ".lead",
+            "still_valid_but_too_long_namespace_name_that_exceeds_the_limit_x",
+        ] {
+            assert!(
+                Namespace::host(malformed).is_err(),
+                "{malformed} must be rejected"
+            );
+        }
+        for valid in [
+            "agent_workbench",
+            "figments",
+            "acme-2",
+            "host.name",
+            "still_valid_but_exactly_long_enough_namespace_name_at_the_limit",
+        ] {
+            assert!(Namespace::host(valid).is_ok(), "{valid} must be accepted");
+        }
     }
 }

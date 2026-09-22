@@ -252,37 +252,3 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
         }
     }
 }
-
-#[derive(Clone, Debug)]
-pub(crate) struct TurnInputClaimLease {
-    pub(crate) claim_id: String,
-    pub(crate) lease_token: String,
-    pub(crate) fencing_token: u64,
-    pub(crate) session_lease_generation: u64,
-}
-
-impl TurnInputClaimLease {
-    pub(crate) fn derive(
-        head: &PendingTurnInputRow,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        now_epoch_ms: u64,
-        session_lease_generation: u64,
-    ) -> Result<Self, StoreError> {
-        let lease = lash_core::store::queued_work::WorkClaimLease::derive(
-            lash_core::store::queued_work::ClaimIdDialect::TurnInput,
-            head.enqueue_seq,
-            head.claim_fencing_token,
-            session_id,
-            owner,
-            now_epoch_ms,
-            session_lease_generation,
-        )?;
-        Ok(Self {
-            claim_id: lease.claim_id,
-            lease_token: lease.lease_token,
-            fencing_token: lease.fencing_token,
-            session_lease_generation: lease.session_lease_generation,
-        })
-    }
-}

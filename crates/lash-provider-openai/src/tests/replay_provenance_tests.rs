@@ -88,7 +88,7 @@ async fn raw_provider_complete_rejects_endpoint_userinfo_before_transport() {
         .expect_err("userinfo-bearing routes must fail closed");
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:invalid_provider_endpoint".to_string())
+        Some("lash:invalid_provider_endpoint".to_string())
     );
     assert_eq!(error.kind, ProviderFailureKind::Validation);
     assert!(!error.is_retryable());

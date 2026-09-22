@@ -4,8 +4,10 @@ WORKSPACE_COMPILE_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:effect_model__test",
     "//crates/lash-core-execution:lash-core-execution",
     "//crates/lash-core-execution:lash-core-execution__unit_test",
+    "//crates/lash-core-execution:process_model__test",
     "//crates/lash-core-ids:lash-core-ids",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm",
@@ -210,8 +212,10 @@ WORKSPACE_CLIPPY_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:effect_model__test",
     "//crates/lash-core-execution:lash-core-execution",
     "//crates/lash-core-execution:lash-core-execution__unit_test",
+    "//crates/lash-core-execution:process_model__test",
     "//crates/lash-core-ids:lash-core-ids",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm",
@@ -509,7 +513,9 @@ WORKSPACE_RUST_SOURCE_TARGETS = [
 WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:effect_model__test",
     "//crates/lash-core-execution:lash-core-execution__unit_test",
+    "//crates/lash-core-execution:process_model__test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
@@ -622,7 +628,7 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
 WORKSPACE_TEST_SUITE_LABELS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
-    "//crates/lash-core-execution:lash-core-execution__unit_test",
+    "//crates/lash-core-execution:test_batch",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
@@ -683,7 +689,7 @@ WORKSPACE_TEST_SUITE_LABELS = [
 WORKSPACE_DEV_SUITE_LABELS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
-    "//crates/lash-core-execution:lash-core-execution__unit_test",
+    "//crates/lash-core-execution:test_batch",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
@@ -754,7 +760,9 @@ WORKSPACE_TAIL_SUITE_LABELS = [
 WORKSPACE_DEV_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:effect_model__test",
     "//crates/lash-core-execution:lash-core-execution__unit_test",
+    "//crates/lash-core-execution:process_model__test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
@@ -889,7 +897,9 @@ WORKSPACE_CARGO_TEST_TARGETS = [
 WORKSPACE_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:effect_model__test",
     "//crates/lash-core-execution:lash-core-execution__unit_test",
+    "//crates/lash-core-execution:process_model__test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
@@ -1018,6 +1028,11 @@ WORKSPACE_TEST_TARGETS = [
 ]
 
 WORKSPACE_TEST_BATCHES = {
+    "//crates/lash-core-execution:test_batch": [
+        "//crates/lash-core-execution:effect_model__test",
+        "//crates/lash-core-execution:lash-core-execution__unit_test",
+        "//crates/lash-core-execution:process_model__test",
+    ],
     "//crates/lash-core:test_batch": [
         "//crates/lash-core:integration_boundary__test",
         "//crates/lash-core:lash-core__unit_test",

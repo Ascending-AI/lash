@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v13",
+  "$id": "https://lash.dev/schemas/workflow-graph/v14",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -1771,7 +1771,7 @@
       "type": "string"
     },
     "WorkflowExecutionSite": {
-      "description": "Stable source-level location carried by runtime sites for workflow-graph joins.",
+      "description": "Stable source-level location of one runtime site under a workflow node.",
       "properties": {
         "kind": {
           "type": "string"
@@ -2514,7 +2514,7 @@
     },
     "schema_version": {
       "enum": [
-        13
+        14
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2532,6 +2532,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 13,
+  "x-lash-schema-version": 14,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

@@ -59,6 +59,7 @@ case "$operation" in
       exit 2
     fi
     python3 tools/bazel/generate_build_files.py
+    python3 scripts/check_runtime_off_graph.py --sync
     "$bazel" mod deps --lockfile_mode=update >/dev/null
     ;;
   clean)
@@ -95,7 +96,7 @@ case "$operation" in
     if (($# == 0)); then
       set -- //:workspace_clippy
     fi
-    "$bazel" build "--config=$config" "$@"
+    python3 scripts/run-bazel-clippy.py "$bazel" "--config=$config" "$@"
     ;;
   doc)
     python3 tools/bazel/generate_build_files.py --check

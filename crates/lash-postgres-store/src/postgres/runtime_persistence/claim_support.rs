@@ -68,28 +68,29 @@ pub(super) async fn postgres_refusal_for_empty_scan(
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    if let Some(head_row) = head_rows.into_iter().next() {
-        let head_row = queued_batch_row(head_row)?;
-        let head_batch = queued_work_batch_from_row(tx, head_row.clone()).await?;
-        let head_candidates = vec![claim_candidate_from_row(&head_row, &head_batch)];
-        let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
-        return Ok(TurnWorkEmptyScanDiagnostic::from(head_prefix));
-    }
-    let deferred_row_pending: bool =
-        sqlx::query_scalar(sql.queued_batches_postgres.exists_deferred.sql())
+    let head_candidates = match head_rows.into_iter().next() {
+        Some(head_row) => {
+            let head_row = queued_batch_row(head_row)?;
+            let head_batch = queued_work_batch_from_row(tx, head_row.clone()).await?;
+            vec![claim_candidate_from_row(&head_row, &head_batch)]
+        }
+        None => Vec::new(),
+    };
+    let deferred_row_pending = head_candidates.is_empty()
+        && sqlx::query_scalar::<_, bool>(sql.queued_batches_postgres.exists_deferred.sql())
             .bind(session_id.as_str())
             .bind(now as i64)
             .bind(sql_session_lease_generation(generation)?)
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-    Ok(TurnWorkEmptyScanDiagnostic::Refused {
-        reason: if deferred_row_pending {
-            QueuedWorkClaimRefusal::NotYetAvailable
-        } else {
-            QueuedWorkClaimRefusal::Empty
-        },
-    })
+    lash_core::store::claim_plan::classify_empty_claim_scan(
+        &head_candidates,
+        deferred_row_pending,
+        boundary,
+        policy,
+        now,
+    )
 }
 
 // Exact selection passes its full validation span: validate every fencing
@@ -105,80 +106,84 @@ pub(super) async fn claim_queued_work_rows_postgres(
     selected_batches: Vec<QueuedWorkBatch>,
     candidates: &[ClaimCandidate],
 ) -> Result<ClaimTransactionOutcome<Option<QueuedWorkClaim>>, StoreError> {
-    if selected_batches.is_empty() {
-        return Ok(ClaimTransactionOutcome::Commit(None));
+    if selected_rows.len() != selected_batches.len() || selected_rows.len() > candidates.len() {
+        return Err(StoreError::Backend(format!(
+            "queued-work claim observed {} rows, {} batches, {} candidates",
+            selected_rows.len(),
+            selected_batches.len(),
+            candidates.len(),
+        )));
     }
-    let lease =
-        WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation)?;
-    let sql_fencing_tokens = sql_claim_fencing_tokens(
-        "queued_work_claim_fencing_token",
-        candidates
-            .iter()
-            .map(|candidate| candidate.claim_fencing_token),
-    )?;
-    for ((row, batch), sql_fencing_token) in selected_rows
+    let observations = selected_rows
         .iter()
-        .zip(selected_batches.iter())
-        .zip(sql_fencing_tokens.iter().copied())
-    {
-        debug_assert_eq!(row.batch_id.as_str(), &*batch.batch_id);
-        // The candidate row was selected `FOR UPDATE SKIP LOCKED`, so it is
-        // locked to this transaction. The shared verdict decides; the read-side
-        // copy of this predicate stays because it is also the candidate scan's
-        // `ORDER BY … LIMIT` filter.
-        if !lash_core::store_backend_support::queued_work_batch_claimability(
-            row.claim_facts(),
-            generation,
-        )
-        .is_claimable()
-        {
+        .zip(selected_batches)
+        .enumerate()
+        .map(|(index, (row, batch))| {
+            debug_assert_eq!(row.batch_id.as_str(), &*batch.batch_id);
+            lash_core::store::claim_plan::QueuedWorkClaimRow {
+                candidate: candidates[index].clone(),
+                batch,
+                claim_token: row.claim_token.clone(),
+                claim_session_lease_generation: row.claim_session_lease_generation,
+            }
+        })
+        .collect::<Vec<_>>();
+    let plan = match lash_core::store::claim_plan::plan_queued_work_claim(
+        lash_core::store::queued_work::ClaimIdDialect::QueuedWork,
+        session_id,
+        owner,
+        generation,
+        now,
+        observations,
+        candidates,
+    )? {
+        // Empty commits and Defer rolls back: the claim transaction carries
+        // the same meaning the hand-written loop did (FIG-1065).
+        lash_core::store::claim_plan::ClaimPlanDecision::Empty => {
+            return Ok(ClaimTransactionOutcome::Commit(None));
+        }
+        lash_core::store::claim_plan::ClaimPlanDecision::Defer => {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
+        lash_core::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+    };
+    for write in plan.writes() {
         let changed = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .claim
                 .sql(),
         )
-        .bind(session_id.as_str())
-        .bind(row.batch_id.as_str())
-        .bind(&lease.claim_id)
-        .bind(&lease.lease_token)
+        .bind(plan.session_id().as_str())
+        .bind(write.batch_id.as_str())
+        .bind(plan.claim_id())
+        .bind(plan.lease_token())
         .bind(sql_session_lease_generation(
-            lease.session_lease_generation,
+            plan.session_lease_generation(),
         )?)
-        .bind(sql_fencing_token)
+        .bind(sql_counter_value(
+            "queued_work_claim_fencing_token",
+            write.next_claim_fencing_token,
+        )?)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
         // Backstop: the generation predicate stays on the write, but the
-        // verdict above already authorized it over the locked row. A
+        // plan's verdict already authorized it over the locked row. A
         // disagreement is recorded as evidence and then fails closed exactly as
         // this site always did — the claim transaction rolls back and no claim
         // is reported.
         if !lash_core::store_backend_support::fenced_write_applied(
             lash_core::store_backend_support::FencedWrite::QueuedWorkClaimAcquisition,
             crate::POSTGRES_BACKEND,
-            row.batch_id.as_str(),
+            write.batch_id.as_str(),
             changed,
         ) {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
     }
-    Ok(ClaimTransactionOutcome::Commit(Some(QueuedWorkClaim {
-        session_id: SessionId::from(session_id.to_string()),
-        claim_id: lease.claim_id,
-        owner: owner.clone(),
-        lease_token: lease.lease_token,
-        fencing_token: lease.fencing_token,
-        session_lease_generation: lease.session_lease_generation,
-        data: lash_core::store_backend_support::queued_work_claim_data(
-            selected_batches,
-            candidates[0].prior_claim_id.clone(),
-            candidates[0].prior_claim_token.clone(),
-        )?,
-    })))
+    Ok(ClaimTransactionOutcome::Commit(Some(plan.into_claim()?)))
 }
 
 pub(super) async fn scan_queued_work_candidates_postgres(
@@ -777,85 +782,77 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
     selected: Vec<(PendingTurnInputRow, lash_core::PendingTurnInput)>,
 ) -> Result<ClaimTransactionOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
     let generation = session_execution_lease.fencing_token;
-    let Some((head, _)) = selected.first() else {
-        return Ok(ClaimTransactionOutcome::Commit(None));
-    };
-    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation)?;
-    let sql_fencing_tokens = sql_claim_fencing_tokens(
-        "turn_input_claim_fencing_token",
-        selected.iter().map(|(row, _)| row.claim_fencing_token),
-    )?;
-    let state_after_claim = match &mode {
-        lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputStateKind::Accepted,
-        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputStateKind::DeferredNextTurn,
-    };
-    let mut inputs = Vec::new();
-    for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
-        // The candidate row was selected `FOR UPDATE SKIP LOCKED`, so it is
-        // locked to this transaction. The shared verdict decides; the
-        // read-side copy of this predicate stays because it is also the
-        // `ORDER BY … LIMIT` filter.
-        if !lash_core::store_backend_support::turn_input_claimability(row.claim_facts(), generation)
-            .is_claimable()
-        {
+    let observations = selected
+        .into_iter()
+        .map(
+            |(row, input)| lash_core::store::claim_plan::TurnInputClaimRow {
+                input,
+                enqueue_seq: row.enqueue_seq,
+                claim_fencing_token: row.claim_fencing_token,
+                claim_token: row.claim_facts().claim_token.map(str::to_string),
+                claim_session_lease_generation: row.claim_session_lease_generation(),
+            },
+        )
+        .collect();
+    let plan = match lash_core::store::claim_plan::plan_turn_input_claim(
+        lash_core::store::queued_work::ClaimIdDialect::TurnInput,
+        session_id,
+        owner,
+        generation,
+        now,
+        mode,
+        observations,
+    )? {
+        // Empty commits and Defer rolls back: the claim transaction carries
+        // the same meaning the hand-written loop did (FIG-1065).
+        lash_core::store::claim_plan::ClaimPlanDecision::Empty => {
+            return Ok(ClaimTransactionOutcome::Commit(None));
+        }
+        lash_core::store::claim_plan::ClaimPlanDecision::Defer => {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
+        lash_core::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+    };
+    for write in plan.writes() {
         let changed = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .claim
                 .sql(),
         )
-        .bind(session_id.as_str())
-        .bind(row.input_id.as_str())
-        .bind(state_after_claim.as_str())
-        .bind(&lease.claim_id)
+        .bind(plan.session_id().as_str())
+        .bind(write.input_id.as_str())
+        .bind(plan.state_after_claim().as_str())
+        .bind(plan.claim_id())
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)
-        .bind(&lease.lease_token)
+        .bind(plan.lease_token())
         .bind(sql_session_lease_generation(
-            lease.session_lease_generation,
+            plan.session_lease_generation(),
         )?)
-        .bind(sql_fencing_token)
+        .bind(sql_counter_value(
+            "turn_input_claim_fencing_token",
+            write.next_claim_fencing_token,
+        )?)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
         // Backstop: the generation predicate stays on the write, but the
-        // verdict above already authorized it over the locked row. A
+        // plan's verdict already authorized it over the locked row. A
         // disagreement is recorded as evidence and then fails closed exactly
         // as this site always did — the whole claim transaction rolls back and
         // no claim is reported.
         if !lash_core::store_backend_support::fenced_write_applied(
             lash_core::store_backend_support::FencedWrite::TurnInputClaimAcquisition,
             crate::POSTGRES_BACKEND,
-            row.input_id.as_str(),
+            write.input_id.as_str(),
             changed,
         ) {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
-        if state_after_claim == lash_core::TurnInputStateKind::Accepted
-            && let Some(accepted) = input.state.accepted()
-        {
-            input.state = accepted;
-        }
-        inputs.push(input);
     }
-    Ok(ClaimTransactionOutcome::Commit(Some(
-        lash_core::TurnInputClaim {
-            session_id: SessionId::from(session_id.to_string()),
-            claim_id: lease.claim_id,
-            owner: owner.clone(),
-            lease_token: lease.lease_token,
-            fencing_token: lease.fencing_token,
-            session_lease_generation: lease.session_lease_generation,
-            data: lash_core::runtime::TurnInputClaimData {
-                mode,
-                inputs,
-                applications: Vec::new(),
-            },
-        },
-    )))
+    Ok(ClaimTransactionOutcome::Commit(Some(plan.into_claim())))
 }
 
 pub(super) async fn claim_pending_turn_inputs_postgres(

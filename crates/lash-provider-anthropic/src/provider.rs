@@ -57,7 +57,7 @@ impl Provider for AnthropicProvider {
         minting_route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
-                .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
         if let Some(downstream) = req.stream_events.take() {
             let stream_route = minting_route.clone();
@@ -241,7 +241,7 @@ impl Provider for AnthropicProvider {
             return Err(
                 LlmTransportError::new("Anthropic stream ended before message_stop")
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_adapter_code(TurnFailureCode::StreamEndedBeforeMessageStop)
+                    .with_lash_code(TurnFailureCode::StreamEndedBeforeMessageStop)
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_partial_response(partial),
             );
@@ -280,7 +280,7 @@ fn replay_origin_conflict_error(
 ) -> LlmTransportError {
     LlmTransportError::new(conflict.to_string())
         .with_kind(ProviderFailureKind::Validation)
-        .with_adapter_code(TurnFailureCode::ProviderReplayOriginConflict)
+        .with_lash_code(TurnFailureCode::ProviderReplayOriginConflict)
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 

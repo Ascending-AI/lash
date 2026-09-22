@@ -426,7 +426,10 @@ try {
             .get("cause")
             .expect("Lashlang bridge preserves typed tool failure fields");
         assert_eq!(typed_failure.get("class"), Some(&json!("execution")));
-        assert_eq!(typed_failure.get("code"), Some(&json!("approval_denied")));
+        assert_eq!(
+            typed_failure.get("code"),
+            Some(&json!("agent_workbench:approval_denied"))
+        );
         assert_eq!(typed_failure.get("source"), Some(&json!("tool")));
         assert_eq!(typed_failure["retry"]["type"], "never");
     });
@@ -658,7 +661,7 @@ try {
             assert_eq!(value["ok"], false);
             assert_eq!(value["error"], error.message);
             assert_eq!(value["cause"]["class"], "execution");
-            assert_eq!(value["cause"]["code"], error.code);
+            assert_eq!(value["cause"]["code"], error.code.namespaced());
             assert_eq!(value["cause"]["source"], "tool");
             assert_eq!(value["cause"]["retry"]["type"], "never");
         }

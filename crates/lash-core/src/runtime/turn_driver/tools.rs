@@ -264,6 +264,7 @@ impl RuntimeTurnDriver<'_> {
             batch,
             invocation,
             std::collections::HashMap::new(),
+            std::sync::Arc::new(std::collections::HashMap::new()),
         ))
         .await?;
         drop(context);

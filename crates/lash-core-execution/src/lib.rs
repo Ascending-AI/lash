@@ -743,12 +743,13 @@ pub use runtime::{
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy,
-    DrainedChild, EffectAddress, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, ExecutionScope,
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupDrainReport,
-    GroupExecutors, GroupSettlement, GroupWakePolicy, HandleId, InMemoryProcessExecutionEnvStore,
-    InputItem, LedgerUsageDisposition, LlmRequestSpec, LoserPolicy, NativeProcessWork,
-    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, OnParentEnd,
+    DrainedChild, EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership,
+    EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
+    ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
+    GroupDrainReport, GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization,
+    GroupSettlement, GroupWakePolicy, HandleId, InMemoryProcessExecutionEnvStore, InputItem,
+    LedgerUsageDisposition, LlmRequestSpec, LoserPolicy, NativeProcessWork, NativeSubstrateConfig,
+    NativeSubstrateConfigError, NoQueuedWork, OnParentEnd, OpenerFinalizationSteps,
     PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
     PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope, ParentScopeStorageError, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
@@ -795,23 +796,24 @@ pub use runtime::{
     ScopeBoundController, ScopedEffectController, SegmentHandover, SegmentProgress,
     SessionDrainOutcome, SessionId, SessionListFilter, SessionRelationKind, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
-    StoreEffectGroupDrain, StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
-    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
-    TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
-    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    TurnControlParticipation, TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
-    WorkerSweepPolicy, effect_groups_unsupported, ensure_process_lease_schema_version,
+    StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization, TokenLedgerEntry,
+    ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelOriginHint, TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
+    TurnControlBindingIdError, TurnControlParticipation, TurnEvent, TurnFailureEvidence,
+    TurnFailurePartialOutput, TurnFailureSettlement, TurnInput, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
+    TurnInputState, UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
+    WorkerSlotSupplier, WorkerSweepPolicy, effect_groups_unsupported,
+    ensure_process_lease_schema_version,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -888,10 +890,18 @@ pub use tool_provider::{
 
 #[doc(hidden)]
 pub mod core_internal {
-    pub const PLUGIN_RUNTIME_HOST_SOURCE: &str = include_str!("plugin/runtime_host.rs");
-    pub const TOOL_DISPATCH_CONTEXT_SOURCE: &str = include_str!("tool_dispatch/context.rs");
-    pub const TOOL_PROVIDER_SOURCE: &str = include_str!("tool_provider.rs");
     pub use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
     pub use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
+    pub fn attach_process_invocation_correlation(
+        turn_context: &mut crate::TurnContext,
+        process_id: &crate::ProcessId,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) {
+        crate::session::attach_process_invocation_correlation(turn_context, process_id, authority);
+    }
+
+    pub fn clear_process_invocation_correlation(turn_context: &mut crate::TurnContext) {
+        crate::session::clear_process_invocation_correlation(turn_context);
+    }
 }

@@ -71,9 +71,10 @@
 //!   disposition it applies is the one journaled on the group row at open. That
 //!   is why the disposition is durable: the drain never invents one.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
 use lash_sansio::sync::{MutexExt, RwLockExt};
 use tokio::sync::Notify;
@@ -86,6 +87,7 @@ use crate::runtime::effect::group::{
     RuntimeEffectGroup, await_cancelled_error, closed_group_error, exhausted_group_error,
     fence_reopen,
 };
+use crate::runtime::effect::group_closing::GroupOnlyFinalization;
 
 impl EffectGroupRecordAccessor for EffectGroupRecord {
     fn group_key(&self) -> &str {
@@ -104,16 +106,6 @@ impl EffectGroupRecordAccessor for EffectGroupRecord {
         self.loser_disposition
     }
 }
-
-/// How long a caller parked on rank `n` waits before re-reading the journal.
-///
-/// A settlement written by *another* process reaches this one only by being
-/// read, so the wait is a poll and not purely a notification. The in-process
-/// [`Notify`] shortens it to nothing for the common case where the settling
-/// child is one of this host's own tasks; the interval is what bounds the
-/// cross-process case. It matches [`BUSY_POLL`], the same trade-off the claim
-/// loop already makes for the same reason.
-const SETTLEMENT_POLL: Duration = BUSY_POLL;
 
 /// Every group this driver has open, keyed exactly as ADR 0065 keys them.
 ///
@@ -168,7 +160,11 @@ pub(super) struct DurableEffectGroups {
 }
 
 /// One group this process has open.
-struct OpenGroup {
+///
+/// `pub(super)` fields because the finalizer in [`super::closing`] reads the
+/// running set and the task-finished notify — the same visibility the drain
+/// already has through [`DurableEffectGroups`]' `pub(super)` helpers.
+pub(super) struct OpenGroup {
     /// The child identity at each position, in child order. The journal names
     /// a settled child by `replay_key`; the contract reports it by position,
     /// and this is the map between them — held rather than stored, because the
@@ -176,15 +172,16 @@ struct OpenGroup {
     /// envelope and its hash ride along because a `Cancel` close owes each
     /// undecided child a `decide_cancel`, and the decision's insert path binds
     /// the pair the claim would have written.
-    children: Vec<OpenGroupChild>,
+    pub(super) children: Vec<OpenGroupChild>,
     /// Fired by a close that resolves to [`LoserPolicy::Cancel`]. Children
     /// take child tokens, so cancelling the group cancels exactly the children
     /// this process is still running.
     cancel: CancellationToken,
-    state: Mutex<OpenGroupState>,
-    /// Woken when one of this process's children journals a settlement, so a
-    /// parked caller re-reads immediately instead of waiting out the poll.
-    settled: Notify,
+    pub(super) state: Mutex<OpenGroupState>,
+    /// Woken when one of this process's children journals a settlement — or
+    /// returns, since the two share the notify — so a parked caller re-reads
+    /// immediately and a finalizer's step-1 wait sees the finished task.
+    pub(super) settled: Notify,
     /// How many of this process's dispatched child tasks have not returned yet.
     ///
     /// Counted rather than asked of the journal, because the journal answers a
@@ -196,16 +193,25 @@ struct OpenGroup {
     outstanding: AtomicUsize,
 }
 
-struct OpenGroupState {
-    /// The disposition in force. Starts at the group's *declared* disposition
-    /// and only ever narrows, so a second close cannot widen what a first one
-    /// tightened.
-    effective: LoserPolicy,
-    closed: bool,
+pub(super) struct OpenGroupState {
+    /// Released by the caller's close; a reopen clears it. Pure caller
+    /// interest: the durable disposition the group closes under lives on the
+    /// row's `lifecycle`, not here (ADR 0099 §7).
+    pub(super) closed: bool,
+    /// Replay keys of children this process dispatched and has not finished —
+    /// the set finalization step 1 waits on: a `RunToCompletion` member of it
+    /// is a protected obligation this host owes, a cancel-decided one is
+    /// waited on only up to its drain budget.
+    pub(super) running: HashSet<String>,
+    /// Replay key → the instant its cancel decision committed, recorded where
+    /// `decide_cancel` answered `Decided` or `AlreadyDecided`. The drain
+    /// budget is measured from this instant, per §7: the decision is the
+    /// durable fact and what the budget bounds is waiting on the body.
+    pub(super) decided_at: HashMap<String, Instant>,
 }
 
 /// One child's durable identity as this process holds it.
-struct OpenGroupChild {
+pub(super) struct OpenGroupChild {
     replay_key: String,
     /// The canonical envelope `capture` builds over the accepted envelope —
     /// the wire form the child's claim row records, and what a `decide_cancel`
@@ -216,7 +222,7 @@ struct OpenGroupChild {
 }
 
 impl DurableEffectGroups {
-    fn get(&self, group_key: &str) -> Option<Arc<OpenGroup>> {
+    pub(super) fn get(&self, group_key: &str) -> Option<Arc<OpenGroup>> {
         self.open.read_recover().get(group_key).cloned()
     }
 
@@ -464,10 +470,34 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 },
             )
             .collect::<Vec<_>>();
-        let dispatched = executors
+        // A reopen dispatches by the durable lifecycle's answer, not the
+        // caller's. `closing` under `Cancel` dispatches nothing — every
+        // undecided child is owed a `decide_cancel`, which finalization step 1
+        // issues — and `settled` dispatches nothing because its obligations are
+        // discharged and it exists only to serve ranks. `closing` under
+        // `RunToCompletion` still dispatches: those accepted children are the
+        // protected obligations a recovery is entitled to keep driving.
+        let executors = match persisted.lifecycle {
+            EffectGroupLifecycle::Live
+            | EffectGroupLifecycle::Closing {
+                disposition: LoserPolicy::RunToCompletion,
+                ..
+            } => executors,
+            EffectGroupLifecycle::Closing { .. } | EffectGroupLifecycle::Settled { .. } => {
+                (0..executors.len()).map(|_| None).collect()
+            }
+        };
+        // The replay keys this process is about to spawn, registered in
+        // `running` *before* any task exists so a fast-finishing child cannot
+        // remove a key that was never inserted.
+        let running: HashSet<String> = group
+            .children()
             .iter()
-            .filter(|executor| executor.is_some())
-            .count();
+            .zip(executors.iter())
+            .filter(|(_, executor)| executor.is_some())
+            .map(|(child, _)| child.invocation.replay_key().to_string())
+            .collect();
+        let dispatched = running.len();
         let state = {
             let mut open = self.groups.open.write_recover();
             if let Some(existing) = open.get(group.group_key()) {
@@ -483,8 +513,9 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 children,
                 cancel: CancellationToken::new(),
                 state: Mutex::new(OpenGroupState {
-                    effective: persisted.loser_disposition,
                     closed: false,
+                    running,
+                    decided_at: HashMap::new(),
                 }),
                 settled: Notify::new(),
             });
@@ -623,6 +654,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             let group_key = Arc::clone(&group_key);
             let scope = scope.clone();
             let cancel = state.cancel.child_token();
+            let replay_key = child.invocation.replay_key().to_string();
             crate::task::spawn(async move {
                 // The result is discarded here on purpose: a child's outcome is
                 // reported to its caller through the journal, by rank, and this
@@ -636,7 +668,9 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     None,
                 ))
                 .await;
-                driver.group_child_finished(&group_key, &state).await;
+                driver
+                    .group_child_finished(&group_key, &replay_key, &state)
+                    .await;
             });
         }
     }
@@ -651,9 +685,21 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     /// child tasks must have returned, *and* the journal must hold no unsettled
     /// child of the group — a sibling being run by another process is a reason
     /// to keep serving this caller its settlements.
-    async fn group_child_finished(&self, group_key: &str, state: &Arc<OpenGroup>) {
-        state.settled.notify_waiters();
+    async fn group_child_finished(
+        &self,
+        group_key: &str,
+        replay_key: &str,
+        state: &Arc<OpenGroup>,
+    ) {
+        {
+            // Removed before the notify so a finalizer woken by it reads the
+            // task as finished rather than still running.
+            let mut inner = state.state.lock_recover();
+            inner.running.remove(replay_key);
+            inner.decided_at.remove(replay_key);
+        }
         state.outstanding.fetch_sub(1, Ordering::AcqRel);
+        state.settled.notify_waiters();
         self.reap_if_complete(group_key, state).await;
     }
 
@@ -671,7 +717,11 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
 
     /// Retire the process-local state of a group that is closed to its caller
     /// and has nothing left to settle.
-    async fn reap_if_complete(&self, group_key: &str, state: &Arc<OpenGroup>) {
+    ///
+    /// `pub(super)` because finalization step 4 (`super::closing`) reaps
+    /// through this same guard — a reopen that renewed interest since the
+    /// settle was recorded must keep the entry it is serving.
+    pub(super) async fn reap_if_complete(&self, group_key: &str, state: &Arc<OpenGroup>) {
         let closed = state.state.lock_recover().closed;
         if !closed || state.outstanding.load(Ordering::Acquire) != 0 {
             return;
@@ -709,15 +759,26 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         if handle.is_exhausted() {
             return Err(exhausted_group_error(handle));
         }
+        // The store's notifier — shared with every driver over this database —
+        // is what turns a settlement committed by *another* host into a wake
+        // here; `state.settled` still answers for the process-local signals a
+        // commit does not produce (a child task finishing, the group closing).
+        let settlement_notify = self
+            .row_store
+            .settlement_notifier(handle.group_key())
+            .await?;
         loop {
-            let notified = state.settled.notified();
+            let notified = settlement_notify.notified();
             tokio::pin!(notified);
+            let settled = state.settled.notified();
+            tokio::pin!(settled);
             // Enabled *before* the journal read, so a sibling that settles
             // between the read and the park is caught by this future rather
             // than slept through: `Notify::notified()` only starts listening
             // when it is first polled, and `notify_waiters` wakes listeners,
             // not arrivals.
             notified.as_mut().enable();
+            settled.as_mut().enable();
             let closed = state.state.lock_recover().closed;
             if closed {
                 return Err(closed_group_error(handle.group_key()));
@@ -737,7 +798,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     return Err(await_cancelled_error(handle.group_key(), rank));
                 }
                 () = &mut notified => {}
-                () = self.clock.sleep(SETTLEMENT_POLL) => {}
+                () = &mut settled => {}
             }
         }
     }
@@ -770,13 +831,34 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     ),
                 )
             })?;
-        let outcome = match stored.state {
+        let outcome = self.decode_group_terminal(group_key, &stored)?;
+        Ok(GroupSettlement {
+            position,
+            sequence: stored.sequence,
+            outcome,
+        })
+    }
+
+    /// Decode the recorded terminal of a settled group row — the shared half
+    /// of [`decode_settlement`](Self::decode_settlement) and
+    /// [`read_recorded_group_settlement`](Self::read_recorded_group_settlement),
+    /// which differ only in whether the caller needs the declared position.
+    fn decode_group_terminal(
+        &self,
+        group_key: &str,
+        stored: &StoredGroupSettlement,
+    ) -> Result<
+        Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+        RuntimeEffectControllerError,
+    > {
+        let vocabulary = self.vocabulary();
+        let outcome = match &stored.state {
             EffectRowState::Settled(EffectTerminal::Completed { outcome_json }) => {
-                Ok(serde_json::from_str::<RuntimeEffectOutcome>(&outcome_json)
+                Ok(serde_json::from_str::<RuntimeEffectOutcome>(outcome_json)
                     .map_err(|err| vocabulary.decode_error(err))?)
             }
             EffectRowState::Settled(EffectTerminal::Failed { error_json }) => Err(
-                serde_json::from_str::<RuntimeEffectControllerError>(&error_json)
+                serde_json::from_str::<RuntimeEffectControllerError>(error_json)
                     .map_err(|err| vocabulary.decode_error(err))?,
             ),
             EffectRowState::Corrupt(defect) => {
@@ -800,22 +882,55 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 ));
             }
         };
-        Ok(GroupSettlement {
-            position,
-            sequence: stored.sequence,
-            outcome,
-        })
+        Ok(outcome)
     }
 
-    /// Release the caller's interest in the group, applying the disposition the
-    /// close resolves to.
+    /// Read the group's settlement at `rank` without touching any caller
+    /// cursor (ADR 0099 §8): the incorporation prefix record reads the journal
+    /// through this seam, so it names the settled child by its replay key and
+    /// needs no position map — an opener that never opened the group
+    /// in-process still incorporates the recorded prefix.
+    pub async fn read_recorded_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
+    {
+        let rank = usize::try_from(rank).map_err(|_| {
+            self.vocabulary().error(
+                EffectReplayFailure::CorruptRow,
+                format!("durable effect group {group_key} was asked for rank {rank}, which no journal can hold"),
+            )
+        })?;
+        let Some(stored) = self
+            .row_store
+            .read_group_settlement(group_key, rank)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let outcome = self.decode_group_terminal(group_key, &stored)?;
+        Ok(Some(crate::runtime::effect::RankedGroupSettlement {
+            sequence: stored.sequence,
+            child_replay_key: stored.replay_key,
+            outcome,
+        }))
+    }
+
+    /// Release the caller's interest in the group, recording the close durably
+    /// first (ADR 0099 §7).
     ///
-    /// Idempotent: a group this process is not running — because it was already
-    /// completed and retired, or because the closing frame is a replay in a
-    /// fresh process — closes successfully, since there is nothing left here for
-    /// a disposition to decide and the declared one is journaled for the drain.
+    /// **The lifecycle write precedes everything else.** Before any admission
+    /// stops and before any cancel decision is issued, the group row's
+    /// `lifecycle` column CASes to
+    /// `closing` with the effective disposition — `resolve_close` over the
+    /// disposition the row already committed, so a second close narrows further
+    /// or repeats, never widens. That ordering is the whole durability
+    /// argument: a process that dies in the close window leaves the fact
+    /// recorded, and a redriven turn's `resume_closing_groups` finishes what
+    /// the window interrupted.
     ///
-    /// Under [`LoserPolicy::Cancel`] the close journals the cancel decision
+    /// Under [`LoserPolicy::Cancel`] the close then journals the cancel decision
     /// for every child that has not already committed a final record — the
     /// durable half of the disposition (ADR 0099 §4). The cancelled terminal
     /// and its rank are written through the membership row's decision CAS, so
@@ -823,10 +938,18 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     /// here is then stopped by the in-process token and refused at its own
     /// finalize with `CancelDecided`, and a child no process is running is
     /// settled identically — the decision does not wait on a live claimant.
-    /// Children of this group that this process does not run — because they
-    /// belong to a reopen on another host or this process died between open
-    /// and close — are the drain's (FIG-1536), which decides the same rows
-    /// from the retained membership.
+    ///
+    /// `close` returns without waiting on finalization: releasing caller
+    /// interest and finishing the group's obligations are different steps
+    /// (§4/§7's split), so the finalizer runs on a host-owned task over
+    /// [`GroupOnlyFinalization`](crate::runtime::effect::GroupOnlyFinalization)
+    /// — a consumer close owes no opener steps; the turn or process exit that
+    /// owns the opener (FIG-3397) supplies the real ones.
+    ///
+    /// Idempotent: a group this process is not running — because it was already
+    /// completed and retired, or because the closing frame is a replay in a
+    /// fresh process — closes successfully, since the CAS is a no-op on a
+    /// settled row and there is nothing left here for a disposition to decide.
     ///
     /// An unwired host refuses here too, with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
@@ -834,46 +957,110 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     /// the capability flag and `Ok(())` to a close is the incoherence the flag's
     /// law forbids.
     pub async fn close_effect_group(
-        &self,
+        self: &Arc<Self>,
         handle: &EffectGroupHandle,
         requested: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.group_executors()?;
-        let Some(state) = self.groups.get(handle.group_key()) else {
+        let group_key = handle.group_key();
+        let Some(record) = self.row_store.read_group(group_key).await? else {
+            // A group the journal does not hold was never opened or is already
+            // retired; either way there is nothing left to release.
             return Ok(());
         };
-        let cancelled = {
-            let mut inner = state.state.lock_recover();
-            // Resolved against the disposition in force rather than the declared
-            // one, so narrowing is cumulative: a group closed as `Cancel` cannot
-            // be widened back by a second close either.
-            let effective = LoserPolicy::resolve_close(inner.effective, requested)?;
-            inner.effective = effective;
-            inner.closed = true;
-            matches!(effective, LoserPolicy::Cancel)
+        let recorded = record
+            .lifecycle
+            .closing_disposition()
+            .unwrap_or(record.loser_disposition);
+        let effective = LoserPolicy::resolve_close(recorded, requested)?;
+        let closing = match record.lifecycle {
+            EffectGroupLifecycle::Settled { .. } => return Ok(()),
+            EffectGroupLifecycle::Live => EffectGroupLifecycle::closing(effective),
+            EffectGroupLifecycle::Closing { finalized, .. } => EffectGroupLifecycle::Closing {
+                disposition: effective,
+                finalized,
+            },
         };
-        if cancelled {
-            let group_key = handle.group_key();
-            for (position, child) in state.children.iter().enumerate() {
-                // Position order is also settlement-rank order among children
-                // decided by the same close, which is the only ordering the
-                // contract promises losers.
-                let error_json = serde_json::to_string(&child_cancelled_error(group_key, position))
-                    .map_err(|err| self.vocabulary().encode_error(err))?;
-                self.row_store
-                    .decide_cancel(&EffectCancelRequest {
-                        group_key: group_key.to_string(),
-                        replay_key: child.replay_key.clone(),
-                        terminal: EffectTerminal::Failed { error_json },
-                        envelope_json: child.envelope_json.clone(),
-                        envelope_hash: child.envelope_hash.clone(),
-                    })
-                    .await?;
+        let lifecycle = self
+            .row_store
+            .transition_group_lifecycle(
+                group_key,
+                &[
+                    EffectGroupLifecyclePhase::Live,
+                    EffectGroupLifecyclePhase::Closing,
+                ],
+                &closing,
+            )
+            .await?;
+        let EffectGroupLifecycle::Closing {
+            disposition: effective,
+            ..
+        } = lifecycle
+        else {
+            // The CAS answered `settled`: a racing finalizer finished first.
+            return Ok(());
+        };
+
+        let cancelled = matches!(effective, LoserPolicy::Cancel);
+        if let Some(state) = self.groups.get(group_key) {
+            state.state.lock_recover().closed = true;
+            if cancelled {
+                for (position, child) in state.children.iter().enumerate() {
+                    // Position order is also settlement-rank order among children
+                    // decided by the same close, which is the only ordering the
+                    // contract promises losers.
+                    let error_json =
+                        serde_json::to_string(&child_cancelled_error(group_key, position))
+                            .map_err(|err| self.vocabulary().encode_error(err))?;
+                    self.row_store
+                        .decide_cancel(&EffectCancelRequest {
+                            group_key: group_key.to_string(),
+                            replay_key: child.replay_key.clone(),
+                            terminal: EffectTerminal::Failed { error_json },
+                            envelope_json: child.envelope_json.clone(),
+                            envelope_hash: child.envelope_hash.clone(),
+                        })
+                        .await?;
+                    // The drain budget is measured from the decision, not the
+                    // close: the decision is the durable fact and what the
+                    // budget bounds is waiting on the body that follows it.
+                    let mut inner = state.state.lock_recover();
+                    if inner.running.contains(&child.replay_key) {
+                        inner
+                            .decided_at
+                            .entry(child.replay_key.clone())
+                            .or_insert_with(Instant::now);
+                    }
+                }
+                state.cancel.cancel();
             }
-            state.cancel.cancel();
+            state.settled.notify_waiters();
+            self.reap_if_complete(group_key, &state).await;
         }
-        state.settled.notify_waiters();
-        self.reap_if_complete(handle.group_key(), &state).await;
+
+        // Releasing caller interest never waits on finalization — but the
+        // finalizer is this host's to drive, spawned here so a `close` that
+        // returns cannot leave the recorded `closing` unworked. An erroring
+        // finalizer leaves `closing` recorded and discoverable; a `Pending`
+        // report means an obligation is owed elsewhere and a resume retries.
+        let driver = Arc::clone(self);
+        let key = group_key.to_string();
+        crate::task::spawn(async move {
+            match driver
+                .finalize_group_record(&key, &GroupOnlyFinalization)
+                .await
+            {
+                Ok(report) => {
+                    tracing::debug!(group_key = %key, ?report, "group finalization report")
+                }
+                Err(error) => tracing::warn!(
+                    group_key = %key,
+                    %error,
+                    "group finalization failed; `closing` remains recorded for a \
+                     resume to retry"
+                ),
+            }
+        });
         Ok(())
     }
 }

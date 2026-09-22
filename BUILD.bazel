@@ -1,3 +1,4 @@
+load("//tools/bazel:schema_checks.bzl", "schema_check", "schema_documents")
 load("//tools/bazel:clippy.bzl", "lash_rust_clippy")
 load(
     "//tools/bazel:feature_lanes.bzl",
@@ -27,7 +28,7 @@ exports_files([
 
 filegroup(
     name = "workflow_graph_schema",
-    srcs = ["schemas/host/workflow-graph/v13.schema.json"],
+    srcs = ["schemas/host/workflow-graph/v14.schema.json"],
     testonly = True,
     visibility = ["//visibility:public"],
 )
@@ -212,4 +213,45 @@ filegroup(
     name = "workspace_test_inventory",
     srcs = WORKSPACE_TEST_TARGETS,
     testonly = True,
+)
+
+# Python belongs to the fingerprinted executor image, like bash in the UI
+# fixture runner. Generator binaries use the same target configuration as
+# workspace_compile; checking documents does not trigger another Cargo graph.
+schema_documents(
+    name = "host_schema_documents",
+    generator = "//crates/lashlang:workflow_schema_generator__bin",
+    script = "scripts/generate-workflow-schemas.py",
+)
+
+schema_check(
+    name = "host_schema_check",
+    documents = ":host_schema_documents",
+    checked = glob(["schemas/host/*/*.schema.json"]),
+    script = "scripts/generate-workflow-schemas.py",
+)
+
+schema_documents(
+    name = "example_schema_documents",
+    generator = "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
+    script = "//examples/workflow-graph-roundtrip:scripts/generate-contract-schema.py",
+)
+
+schema_check(
+    name = "example_schema_check",
+    documents = ":example_schema_documents",
+    checked = [
+        "//examples/workflow-graph-roundtrip:frontend/src/generated/error-response.schema.json",
+        "//examples/workflow-graph-roundtrip:frontend/src/generated/workflow-document.schema.json",
+    ],
+    script = "//examples/workflow-graph-roundtrip:scripts/generate-contract-schema.py",
+)
+
+filegroup(
+    name = "schema_checks",
+    srcs = [":host_schema_check", ":example_schema_check"],
+)
+alias(
+    name = "runtime_off",
+    actual = "@runtime_off_crates//:lash-runtime",
 )

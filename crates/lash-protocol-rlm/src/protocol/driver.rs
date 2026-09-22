@@ -354,7 +354,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         {
             actions.push(DriverAction::Emit(make_error_event(
                 TurnFailureKind::LlmProvider,
-                Some(TurnFailureCode::EmptyResponse),
+                Some(TurnFailureCode::EmptyResponse.into()),
                 "Model returned no assistant text.",
                 None,
             )));

@@ -9,6 +9,93 @@ use opentelemetry::trace::noop::NoopTracerProvider;
 use super::*;
 use crate::{TraceEvent, TraceLlmRequest, TraceRecord};
 
+fn attribute_value<'a>(attrs: &'a [KeyValue], key: &str) -> &'a OtelValue {
+    attrs
+        .iter()
+        .find(|attribute| attribute.key.as_str() == key)
+        .map(|attribute| &attribute.value)
+        .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
+}
+
+#[test]
+fn correlation_fields_are_exported_as_otel_attributes() {
+    let identity = crate::TraceLanguageExecutionIdentity {
+        scope: crate::TraceRuntimeScope::new("session-1"),
+        subject: crate::TraceRuntimeSubject::Process {
+            process_id: ProcessId::from("process-1"),
+        },
+        source_identity: "source-1".to_string(),
+        module_ref: "module-1".to_string(),
+        entry_kind: "process".to_string(),
+        entry_ref: Some("component:0".to_string()),
+        entry_name: "main".to_string(),
+        restate_invocation_id: Some("invocation-1".to_string()),
+    };
+    let language_record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: crate::TraceLanguageExecution {
+                event_key: "process:process-1:node:node-1:1:started".to_string(),
+                identity,
+                payload: crate::TraceLanguageExecutionPayload::NodeStarted {
+                    node_id: "node-1".to_string(),
+                    node_kind: "resource_operation".to_string(),
+                    label: "tool".to_string(),
+                    occurrence: 1,
+                    call_id: Some("call-1".to_string()),
+                },
+            },
+        },
+    );
+    let language_attrs = event_attributes(&language_record, &OtelTraceOptions::default());
+    assert_eq!(
+        attribute_value(&language_attrs, "lash.language_execution.source_identity"),
+        &OtelValue::String("source-1".into())
+    );
+    assert_eq!(
+        attribute_value(
+            &language_attrs,
+            "lash.language_execution.restate_invocation_id"
+        ),
+        &OtelValue::String("invocation-1".into())
+    );
+    assert_eq!(
+        attribute_value(&language_attrs, "lash.language_execution.call_id"),
+        &OtelValue::String("call-1".into())
+    );
+
+    for event in [
+        TraceEvent::ToolCallStarted {
+            call_id: Some("call-1".to_string()),
+            name: "search".to_string(),
+            args: serde_json::json!({}),
+            issuing_node_id: Some("node-1".to_string()),
+        },
+        TraceEvent::ToolCallCompleted {
+            call_id: Some("call-1".to_string()),
+            name: "search".to_string(),
+            args: serde_json::json!({}),
+            output: crate::TraceToolCallOutput {
+                outcome: crate::TraceToolCallOutcome::Success(serde_json::json!({})),
+                control: None,
+            },
+            duration_ms: 1,
+            issuing_node_id: Some("node-1".to_string()),
+            attempts: None,
+        },
+    ] {
+        let attrs = event_attributes(
+            &TraceRecord::new(TraceContext::default(), event),
+            &OtelTraceOptions::default(),
+        );
+        assert_eq!(
+            attribute_value(&attrs, "lash.tool.issuing_node_id"),
+            &OtelValue::String("node-1".into())
+        );
+    }
+}
+
 #[test]
 fn typed_exec_diagnostics_preserve_the_otel_span_family() {
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
@@ -220,7 +307,9 @@ fn otel_sink_accepts_turn_and_llm_lifecycle() {
                 message: "boom".to_string(),
                 retryable: false,
                 terminal_reason: None,
+                failure_kind: None,
                 code: Some("test".to_string()),
+                code_namespace: None,
                 raw: None,
             },
             stream_summary: None,
@@ -239,6 +328,82 @@ fn otel_sink_accepts_turn_and_llm_lifecycle() {
     .unwrap();
 
     assert!(sink.active.lock_recover().is_empty());
+}
+
+/// FIG-3435: OTel `error.type` carries the failure kind, not the terminal
+/// reason — a timeout exports `timeout` even though its terminal reason is
+/// `provider_error`, and an unknown kind demotes to `_OTHER`. The
+/// `lash.error.code` attribute carries the code's spelling alone.
+#[test]
+fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
+
+    let exporter = InMemorySpanExporter::default();
+    let provider = SdkTracerProvider::builder()
+        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+        .build();
+    let sink = OtelTraceSink::new(provider.tracer("test"));
+    let context = TraceContext::default().for_session("session-1");
+
+    sink.append(&TraceRecord::new(
+        context.clone(),
+        TraceEvent::LlmCallFailed {
+            error: crate::TraceError {
+                message: "timed out".to_string(),
+                retryable: true,
+                terminal_reason: Some("provider_error".to_string()),
+                failure_kind: Some("timeout".to_string()),
+                code: Some("insufficient_quota".to_string()),
+                code_namespace: Some("provider".to_string()),
+                raw: None,
+            },
+            stream_summary: None,
+            attempts: None,
+        },
+    ))
+    .unwrap();
+    sink.append(&TraceRecord::new(
+        context,
+        TraceEvent::LlmCallFailed {
+            error: crate::TraceError {
+                message: "no kind".to_string(),
+                retryable: false,
+                terminal_reason: Some("provider_error".to_string()),
+                failure_kind: None,
+                code: None,
+                code_namespace: None,
+                raw: None,
+            },
+            stream_summary: None,
+            attempts: None,
+        },
+    ))
+    .unwrap();
+
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 2);
+    let attribute = |span: &opentelemetry_sdk::trace::SpanData, key: &str| {
+        span.attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| kv.value.clone())
+            .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
+    };
+    assert_eq!(
+        attribute(&spans[0], "error.type"),
+        OtelValue::String("timeout".into()),
+        "a timeout must export its kind, not the provider_error terminal reason"
+    );
+    assert_eq!(
+        attribute(&spans[0], "lash.error.code"),
+        OtelValue::String("insufficient_quota".into()),
+        "the code attribute carries the spelling alone, not provider:insufficient_quota"
+    );
+    assert_eq!(
+        attribute(&spans[1], "error.type"),
+        OtelValue::String("_OTHER".into()),
+        "an absent failure kind demotes to _OTHER"
+    );
 }
 
 #[test]
@@ -261,10 +426,12 @@ fn failed_language_execution_yields_error_span() {
         subject: TraceRuntimeSubject::Process {
             process_id: ProcessId::from("p1".to_string()),
         },
+        source_identity: "source".to_string(),
         module_ref: "module".to_string(),
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
+        restate_invocation_id: None,
     };
 
     // 1. Failed node execution
@@ -280,6 +447,7 @@ fn failed_language_execution_yields_error_span() {
                     node_kind: "resource_operation".to_string(),
                     label: "eval".to_string(),
                     occurrence: 1,
+                    call_id: None,
                     error: "syntax error".to_string(),
                 },
             },

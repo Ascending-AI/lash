@@ -63,6 +63,16 @@ pub enum EffectControllerTaskRequest {
         disposition: LoserPolicy,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
     },
+    ReadGroupSettlement {
+        group_key: String,
+        rank: u64,
+        response: oneshot::Sender<
+            Result<
+                Option<crate::runtime::effect::RankedGroupSettlement>,
+                RuntimeEffectControllerError,
+            >,
+        >,
+    },
     CommitGroupChildFinal {
         commit: crate::runtime::effect::group_journal::GroupChildFinalCommit,
         response: oneshot::Sender<
@@ -171,6 +181,13 @@ impl EffectControllerTaskRequest {
                 response,
             } => Box::pin(async move {
                 let _ = response.send(controller.close_effect_group(handle, disposition).await);
+            }),
+            Self::ReadGroupSettlement {
+                group_key,
+                rank,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.read_group_settlement(&group_key, rank).await);
             }),
             Self::CommitGroupChildFinal { commit, response } => Box::pin(async move {
                 let _ = response.send(controller.commit_group_child_final(commit).await);
@@ -553,6 +570,33 @@ impl RuntimeEffectController for EffectTaskController {
             RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "group-close controller response was dropped",
+            )
+        })?
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
+    {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::ReadGroupSettlement {
+                group_key: group_key.to_string(),
+                rank,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "group-settlement-read controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "group-settlement-read controller response was dropped",
             )
         })?
     }

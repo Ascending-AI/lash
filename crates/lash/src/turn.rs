@@ -21,6 +21,8 @@ use lash_core::facade_support::{
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
 /// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
 /// envelopes. A host branches on these instead of matching the display string.
+/// The namespaced [`FailureCode`](crate::provider::FailureCode) on `code`
+/// fields lives in [`crate::provider`].
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
 pub(crate) mod queued_drain;
@@ -792,7 +794,7 @@ impl SelectedQueuedTurnBuilder {
         self
     }
 
-    /// By default Lash uses the first batch ID, or a fresh identity for an empty selection.
+    /// By default persistence admits a fresh identity or resumes the matching pending run.
     ///
     /// Mutually exclusive with [`Self::turn_id`]. See
     /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.

@@ -1269,3 +1269,57 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
         1
     );
 }
+
+// FIG-1282: two concurrent admissions on one unbound handle race to bind it.
+// The loser's SessionBindingMismatch must arrive without its session being
+// durably created — rejection precedes creation, atomically (the
+// SessionCommitStore contract), so the binding decision runs inside the
+// admission's write transaction.
+#[tokio::test]
+async fn concurrent_admission_loser_leaves_no_metadata() {
+    let dir = tempfile::tempdir().expect("admission race tempdir");
+    let path = dir.path().join("admission-race.db");
+    let store = Arc::new(Store::open(&path).await.expect("open unbound store"));
+
+    let first_id = SessionId::from("admission-race-a");
+    let second_id = SessionId::from("admission-race-b");
+    let first_binding = lash_core::SessionBinding::root(first_id.clone());
+    let second_binding = lash_core::SessionBinding::root(second_id.clone());
+    let (first, second) = tokio::join!(
+        store.admit_and_bind_session(&first_binding),
+        store.admit_and_bind_session(&second_binding),
+    );
+
+    let rejected_id = match (first, second) {
+        (Ok(lash_core::SessionAdmission::Created), Err(error)) => {
+            assert!(
+                matches!(error, StoreError::SessionBindingMismatch { .. }),
+                "the losing admission must report SessionBindingMismatch, got {error:?}"
+            );
+            second_id
+        }
+        (Err(error), Ok(lash_core::SessionAdmission::Created)) => {
+            assert!(
+                matches!(error, StoreError::SessionBindingMismatch { .. }),
+                "the losing admission must report SessionBindingMismatch, got {error:?}"
+            );
+            first_id
+        }
+        (first, second) => panic!(
+            "concurrent admissions must yield one Created and one SessionBindingMismatch, \
+             got {first:?} and {second:?}"
+        ),
+    };
+
+    let rejected = Store::open_bound_readonly(&path, &rejected_id)
+        .await
+        .expect("open rejected session read-only");
+    assert!(
+        rejected
+            .load_session_meta()
+            .await
+            .expect("read rejected session metadata")
+            .is_none(),
+        "a refused admission must leave no durable session metadata"
+    );
+}

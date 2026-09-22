@@ -139,7 +139,7 @@ impl CodexProvider {
         );
         err.http_status = Some(status);
         err.code
-            .get_or_insert(FailureCode::Adapter(TurnFailureCode::BodyReadFailed));
+            .get_or_insert(FailureCode::lash(TurnFailureCode::BodyReadFailed));
         err
     }
 
@@ -282,7 +282,7 @@ impl CodexProvider {
                 LlmTransportError::new(format!("Codex WebSocket send failed: {error}"))
                     .with_request_body(request_body.clone())
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                    .with_adapter_code(TurnFailureCode::WebsocketSend),
+                    .with_lash_code(TurnFailureCode::WebsocketSend),
                 events_seen,
                 &state,
             ));
@@ -317,7 +317,7 @@ impl CodexProvider {
                             .with_kind(ProviderFailureKind::Timeout)
                             .with_request_body(request_body.clone())
                             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                            .with_adapter_code(TurnFailureCode::WebsocketIdleTimeout),
+                            .with_lash_code(TurnFailureCode::WebsocketIdleTimeout),
                         events_seen,
                         &state,
                     ));
@@ -332,7 +332,7 @@ impl CodexProvider {
                         LlmTransportError::new(format!("Codex WebSocket receive failed: {error}"))
                             .with_request_body(request_body.clone())
                             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                            .with_adapter_code(TurnFailureCode::WebsocketReceive),
+                            .with_lash_code(TurnFailureCode::WebsocketReceive),
                         events_seen,
                         &state,
                     ));
@@ -348,7 +348,7 @@ impl CodexProvider {
                                 "Codex WebSocket binary frame was not UTF-8: {error}"
                             ))
                             .with_request_body(request_body.clone())
-                            .with_adapter_code(TurnFailureCode::WebsocketProtocol),
+                            .with_lash_code(TurnFailureCode::WebsocketProtocol),
                             events_seen,
                             &state,
                         ));
@@ -444,7 +444,7 @@ impl CodexProvider {
                     .with_request_body(request_body)
                     .with_kind(ProviderFailureKind::Stream)
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                    .with_adapter_code(TurnFailureCode::WebsocketClosedBeforeCompleted)
+                    .with_lash_code(TurnFailureCode::WebsocketClosedBeforeCompleted)
                     .with_partial_response(partial),
                 events_seen,
                 &state,
@@ -542,7 +542,7 @@ fn codex_replay_origin_conflict(
         );
     }
     error.kind = ProviderFailureKind::Validation;
-    error.code = Some(FailureCode::Adapter(
+    error.code = Some(FailureCode::lash(
         TurnFailureCode::ProviderReplayOriginConflict,
     ));
     error.retry_verdict = TransportRetryVerdict::Forbidden;
@@ -634,7 +634,7 @@ impl Provider for CodexProvider {
         route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
-                .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
         if let Some(downstream) = req.stream_events.take() {
             let stream_route = route.clone();
@@ -1128,7 +1128,7 @@ impl Provider for CodexProvider {
                     "Codex stream ended before a terminal response event",
                 )
                 .with_kind(ProviderFailureKind::Stream)
-                .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
+                .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                 .with_output_started(output_started)
                 .with_partial_response(partial));
@@ -1147,7 +1147,7 @@ impl Provider for CodexProvider {
                         .unwrap_or_else(|| ", missing content-type".to_string())
                 ))
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                .with_adapter_code(TurnFailureCode::EmptyStream));
+                .with_lash_code(TurnFailureCode::EmptyStream));
             }
 
             seal_open_blocks(&mut state);

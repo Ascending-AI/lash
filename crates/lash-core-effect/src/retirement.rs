@@ -151,18 +151,35 @@ impl EffectJournalRetirement {
     }
 }
 
+/// The resolver's failure code decodes through
+/// [`FailureCode::from_foreign_wire`]: external ingress never grants a
+/// reserved namespace, so a payload claiming `lash:timeout` or a bare
+/// `timeout` lands in `foreign` instead of minting Lash vocabulary.
+fn deserialize_foreign_code<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<lash_sansio::FailureCode, D::Error> {
+    let spelling = <String as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(lash_sansio::FailureCode::from_foreign_wire(&spelling))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalCompletionError {
-    pub code: String,
+    /// The host's namespaced failure code (`<namespace>:<spelling>`): the
+    /// resolver names its own vocabulary and Lash never reinterprets the
+    /// spelling. Deserialization runs the foreign-ingress decode, so a value
+    /// claiming a reserved namespace or carrying no namespace lands in
+    /// `foreign` rather than acquiring Lash ownership.
+    #[serde(deserialize_with = "deserialize_foreign_code")]
+    pub code: lash_sansio::FailureCode,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
 }
 
 impl ExternalCompletionError {
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn new(code: lash_sansio::FailureCode, message: impl Into<String>) -> Self {
         Self {
-            code: code.into(),
+            code,
             message: message.into(),
             raw: None,
         }
@@ -184,4 +201,60 @@ pub enum ResolveOutcome {
     Accepted,
     AlreadyResolved { terminal: Resolution },
     UnknownOrRevoked,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExternalCompletionError, Resolution};
+
+    /// FIG-3435: the resolver's code decodes through foreign ingress — a
+    /// payload claiming `lash`, `provider`, or a retired alias, and any bare
+    /// spelling, lands in `foreign` with its claim preserved rather than
+    /// acquiring Lash or provider ownership.
+    #[test]
+    fn external_completion_deserialize_never_grants_a_reserved_namespace() {
+        let cases = [
+            ("lash:timeout", "foreign", "lash:timeout"),
+            ("adapter:timeout", "foreign", "adapter:timeout"),
+            (
+                "provider:insufficient_quota",
+                "foreign",
+                "provider:insufficient_quota",
+            ),
+            ("timeout", "foreign", "timeout"),
+            ("agent_workbench:spend_cap", "agent_workbench", "spend_cap"),
+        ];
+        for (wire, namespace, spelling) in cases {
+            let resolution: Resolution = serde_json::from_value(serde_json::json!({
+                "status": "err",
+                "payload": { "code": wire, "message": "rejected" }
+            }))
+            .expect("decode resolution");
+            let Resolution::Err(error) = resolution else {
+                panic!("expected an error resolution for {wire}");
+            };
+            assert_eq!(error.code.namespace().as_str(), namespace, "{wire}");
+            assert_eq!(error.code.spelling(), spelling, "{wire}");
+            assert_eq!(error.code.turn_code(), None, "{wire}");
+        }
+    }
+
+    /// A genuine foreign pair round-trips through serde with both halves
+    /// verbatim — the foreign decode is stable across journaled re-reads.
+    #[test]
+    fn external_completion_foreign_pair_round_trips() {
+        let error = ExternalCompletionError::new(
+            lash_sansio::FailureCode::foreign(
+                lash_sansio::Namespace::host("agent_workbench").expect("valid namespace"),
+                "approval_denied",
+            )
+            .expect("foreign namespace"),
+            "denied",
+        );
+        let json = serde_json::to_value(&error).expect("serialize");
+        assert_eq!(
+            serde_json::from_value::<ExternalCompletionError>(json).expect("deserialize"),
+            error
+        );
+    }
 }

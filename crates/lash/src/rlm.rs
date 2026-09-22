@@ -2,6 +2,9 @@ use crate::support::{EmbedError, ProtocolTurnOptions, Result, SessionError, Turn
 use lash_core::facade_support::ProtocolTurnOptionsFacadeOps;
 
 #[cfg(feature = "rlm")]
+pub use lash_lashlang_runtime::LanguageTraceHost;
+
+#[cfg(feature = "rlm")]
 pub trait RlmTurnBuilderExt: Sized {
     /// Requires the RLM turn to finish through the finish tool.
     fn require_finish(self) -> Result<Self>;

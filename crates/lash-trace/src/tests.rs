@@ -88,6 +88,7 @@ fn tool_start_and_frame_switch_records_are_jsonl_shaped() {
             call_id: Some("call-1".to_string()),
             name: "read_file".to_string(),
             args: serde_json::json!({"path": "README.md"}),
+            issuing_node_id: None,
         },
     );
     let completed = TraceRecord::new(
@@ -121,10 +122,12 @@ fn language_execution_records_are_jsonl_shaped() {
         subject: TraceRuntimeSubject::Process {
             process_id: ProcessId::from("p1".to_string()),
         },
+        source_identity: "source".to_string(),
         module_ref: "module".to_string(),
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
+        restate_invocation_id: None,
     };
     let event = TraceLanguageExecution {
         event_key: "process:p1:node:n1:1:started".to_string(),
@@ -134,6 +137,7 @@ fn language_execution_records_are_jsonl_shaped() {
             node_kind: "resource_operation".to_string(),
             label: "read_file".to_string(),
             occurrence: 1,
+            call_id: None,
         },
     };
     let record = TraceRecord::new(
@@ -149,6 +153,7 @@ fn language_execution_records_are_jsonl_shaped() {
     assert_eq!(json["language"], "lashlang");
     assert_eq!(json["event"]["kind"], "node_started");
     assert_eq!(json["event"]["event_key"], "process:p1:node:n1:1:started");
+    assert_eq!(json["event"]["identity"]["source_identity"], "source");
 
     let round_trip =
         serde_json::from_value::<TraceRecord>(json).expect("deserialize language execution");
@@ -184,6 +189,7 @@ fn tool_completion_serializes_typed_failure_output() {
                 control: None,
             },
             duration_ms: 3,
+            issuing_node_id: None,
             attempts: None,
         },
     );
@@ -211,6 +217,7 @@ fn event_kind_matches_serialized_type_tag() {
             call_id: None,
             name: "read_file".to_string(),
             args: Value::Null,
+            issuing_node_id: None,
         },
         TraceEvent::Custom {
             name: "x".to_string(),
@@ -236,6 +243,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 control: None,
             },
             duration_ms: 1,
+            issuing_node_id: None,
             attempts: None,
         }
     }
@@ -250,10 +258,12 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                     subject: TraceRuntimeSubject::Process {
                         process_id: ProcessId::from("p1".to_string()),
                     },
+                    source_identity: "source".to_string(),
                     module_ref: "m".to_string(),
                     entry_kind: "p".to_string(),
                     entry_ref: None,
                     entry_name: "main".to_string(),
+                    restate_invocation_id: None,
                 },
                 payload,
             },
@@ -268,7 +278,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                     message: "failed".to_string(),
                     retryable: false,
                     terminal_reason: None,
+                    failure_kind: None,
                     code: None,
+                    code_namespace: None,
                     raw: None,
                 },
                 stream_summary: None,
@@ -326,6 +338,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 node_kind: "op".to_string(),
                 label: "node".to_string(),
                 occurrence: 1,
+                call_id: None,
                 error: "failed".to_string(),
             }),
         ),
@@ -396,6 +409,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 node_kind: "op".to_string(),
                 label: "node".to_string(),
                 occurrence: 1,
+                call_id: None,
             }),
         ),
         (

@@ -1006,11 +1006,12 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
         .iter()
         .find(|issue| {
             issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-                        .as_str()
-                        .to_string(),
-                ))
+                == Some(
+                    lash_core::TurnFailureCode::from_wire(
+                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
+                    )
+                    .into(),
+                )
         })
         .unwrap_or_else(|| {
             panic!(
@@ -1385,11 +1386,12 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
         .iter()
         .find(|issue| {
             issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-                        .as_str()
-                        .to_string(),
-                ))
+                == Some(
+                    lash_core::TurnFailureCode::from_wire(
+                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
+                    )
+                    .into(),
+                )
         })
         .unwrap_or_else(|| {
             panic!(
@@ -1646,11 +1648,12 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
         .iter()
         .find(|issue| {
             issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-                        .as_str()
-                        .to_string(),
-                ))
+                == Some(
+                    lash_core::TurnFailureCode::from_wire(
+                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
+                    )
+                    .into(),
+                )
         })
         .expect("the committed frame reports the follow-on lease loss");
     assert_eq!(issue.retryable, Some(false));

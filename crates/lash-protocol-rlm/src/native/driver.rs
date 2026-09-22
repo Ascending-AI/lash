@@ -118,7 +118,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         if matches!(action, super::tool::NativeAction::ProseOnly) && prose.trim().is_empty() {
             actions.push(DriverAction::Emit(make_error_event(
                 TurnFailureKind::LlmProvider,
-                Some(TurnFailureCode::EmptyResponse),
+                Some(TurnFailureCode::EmptyResponse.into()),
                 "Model returned no assistant text.",
                 None,
             )));

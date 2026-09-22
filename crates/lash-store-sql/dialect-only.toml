@@ -144,22 +144,6 @@ connection with no registry bound from guessing.
 """
 
 [[cross_family]]
-statement = "wake_redelivery_fence.insert_from_claimed_batch"
-owner = "crates/lash-sqlite-store/src/process_registry/sql.rs"
-touches = ["queued_work_batches", "queued_work_items"]
-reason = """
-SQLite raises a process's wake-redelivery fence out of the settling batch that
-woke it, in one statement, under the write lock the commit already holds: the
-wake identity is inside the batch's first item, and reading it separately would
-open a window between the read and the fence. The fence is the process family's
-table and the batch is the turn-ingress family's, so the process family owns
-the statement and reads across. PostgreSQL has to take the wake source's
-advisory lock between the two, so it reads the batch's source key and head
-payload through the turn-ingress family's own statements and writes the fence
-on its own.
-"""
-
-[[cross_family]]
 statement = "session_core.delete_process_session_rows"
 owner = "crates/lash-postgres-store/src/postgres/session_sql.rs"
 touches = [
@@ -1964,21 +1948,14 @@ The monotonic maximum is MAX over `excluded` on SQLite and GREATEST over
 
 [[dialect_only]]
 statement = "wake_redelivery_fence.upsert_max"
-backends = ["postgres"]
-kind = "operation exists on one backend only"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
 reason = """
-PostgreSQL's commit path has already decoded the wakes it is settling and binds
-their values. SQLite derives the same floors from the queued rows it is
-committing, in one statement, which is the entry below.
-"""
-
-[[dialect_only]]
-statement = "wake_redelivery_fence.insert_from_claimed_batch"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-The SQLite counterpart of wake_redelivery_fence.upsert_max: the floors are read
-out of the claimed batch's queued rows with json_extract rather than bound.
+The monotonic maximum is MAX over `excluded` on SQLite and GREATEST over
+`EXCLUDED` on PostgreSQL. Since FIG-1065 both backends decode the wakes they
+are settling and bind the floor values; the earlier SQLite-only counterpart
+`insert_from_claimed_batch`, which derived the floors from the claimed batch's
+queued rows with json_extract, is gone.
 """
 
 # session-core family
@@ -3550,13 +3527,30 @@ kind = "operation exists on one backend only"
 reason = "The read half of the same fork as turn_ingress.record_wake_fence_from_claim."
 
 [[dialect_only]]
-statement = "turn_ingress.select_claimed_batch_head_payload"
-backends = ["postgres"]
-kind = "operation exists on one backend only"
-reason = "The other read half of the same fork as turn_ingress.record_wake_fence_from_claim."
-
-[[dialect_only]]
 statement = "effect_replay.release_uncommitted_derivation"
 kind = "server clock"
 backends = ["sqlite", "postgres"]
 reason = "SQLite samples its host clock after writer admission and binds the timestamp; PostgreSQL samples transaction_timestamp in the fenced update."
+
+[[dialect_only]]
+statement = "effect_group.transition_lifecycle"
+backends = ["sqlite", "postgres"]
+kind = "JSON operator"
+reason = """
+The lifecycle CAS guards on the phase tag inside the JSON column: SQLite reads
+it with `json_extract(lifecycle, '$.type')` over `json_each` and binds the
+phase list as a JSON array; PostgreSQL reads the JSONB column with
+`lifecycle->>'type'` and binds the phase list as a text array for `= ANY`.
+"""
+
+[[dialect_only]]
+statement = "effect_group.select_closing_by_scope"
+backends = ["sqlite", "postgres"]
+kind = "JSON operator"
+reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."
+
+[[dialect_only]]
+statement = "effect_group.select_session_pins"
+backends = ["sqlite", "postgres"]
+kind = "JSON operator"
+reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."

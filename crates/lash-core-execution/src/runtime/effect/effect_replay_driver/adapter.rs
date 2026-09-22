@@ -262,6 +262,15 @@ impl<T: StoreReplayHost> EffectHost for T {
         )?))
     }
 
+    /// The §7 closing/finalization seam, over this host's own driver so a
+    /// `close` this host serves and a `resume_closing_groups` a redriven turn
+    /// calls advance the same row under the same owner identity.
+    fn effect_group_closing(
+        &self,
+    ) -> Option<Arc<dyn crate::runtime::effect::StoreEffectGroupClosing>> {
+        Some(Arc::clone(self.replay_driver()).into_group_closing())
+    }
+
     /// One implementation for both SQL tiers, because both reach their group
     /// seam through the same shared replay driver.
     fn install_tool_child_host(
@@ -433,6 +442,19 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
                 .close_effect_group(&handle, disposition),
         )
         .await
+    }
+
+    /// The cursorless rank read the §6 incorporation record needs, delegated to
+    /// the same driver the group's settlements are journaled on.
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
+    {
+        self.replay_driver()
+            .read_recorded_group_settlement(group_key, rank)
+            .await
     }
 
     /// The §4 boundary commit, forwarded to the same driver the child's claim

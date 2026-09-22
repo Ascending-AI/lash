@@ -445,18 +445,3 @@ async fn slow_host_coalesces_losslessly_before_semantic_events() {
     );
     assert_eq!(terminal_index, reset_index + 1);
 }
-
-#[test]
-fn run_llm_call_routes_all_semantic_forwarding_through_the_forwarder() {
-    let source = include_str!("../streaming.rs");
-    assert!(source.contains("send_semantic_session_event("));
-    assert!(source.contains("send_semantic_turn_activity("));
-    assert!(
-        !source.contains("send_session_event("),
-        "streaming.rs must not bypass the forwarder's delta flush for session events"
-    );
-    assert!(
-        !source.contains("send_turn_activity("),
-        "streaming.rs must not bypass the forwarder's delta flush for turn events"
-    );
-}

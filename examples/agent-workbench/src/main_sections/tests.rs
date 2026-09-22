@@ -181,6 +181,7 @@ fn test_graph(
         graph_key: graph_key.to_string(),
         scope: TraceRuntimeScope::new(session_id),
         subject,
+        source_identity: format!("{graph_key}:source"),
         module_ref: format!("{graph_key}:module"),
         entry_kind: "main".to_string(),
         entry_ref: None,
@@ -196,10 +197,12 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
     let identity = TraceLanguageExecutionIdentity {
         scope: graph.scope.clone(),
         subject: graph.subject.clone(),
+        source_identity: graph.source_identity.clone(),
         module_ref: graph.module_ref.clone(),
         entry_kind: graph.entry_kind.clone(),
         entry_ref: graph.entry_ref.clone(),
         entry_name: graph.entry_name.clone(),
+        restate_invocation_id: None,
     };
     let context = TraceContext {
         session_id: graph.scope.session_id.clone(),
@@ -307,10 +310,12 @@ fn lashlang_graph_store_builds_graph_state() {
         subject: TraceRuntimeSubject::Process {
             process_id: ProcessId::from("p1"),
         },
+        source_identity: "source-1".to_string(),
         module_ref: "m1".to_string(),
         entry_kind: "process".to_string(),
         entry_ref: Some("r1:0".to_string()),
         entry_name: "main".to_string(),
+        restate_invocation_id: None,
     };
     let append = |event: TraceLanguageExecution| {
         store
@@ -331,6 +336,7 @@ fn lashlang_graph_store_builds_graph_state() {
             execution_map: TraceLanguageExecutionMap {
                 nodes: vec![TraceLanguageExecutionMapNode {
                     id: "branch".to_string(),
+                    site: lashlang::WorkflowExecutionSite::new("main", [0], "branch", "if"),
                     kind: "branch".to_string(),
                     label: "if".to_string(),
                     label_metadata: None,

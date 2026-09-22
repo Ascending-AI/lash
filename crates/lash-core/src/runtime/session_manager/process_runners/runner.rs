@@ -61,10 +61,14 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 turn_input,
                 ..
             } => {
+                let execution_write_authority = execution_context
+                    .execution_write_authority
+                    .expect("process worker installs execution write authority");
                 let output = Box::pin(self.run_process_session_turn(
                     registration,
                     *create_request.clone(),
                     *turn_input.clone(),
+                    execution_write_authority,
                     scoped_effect_controller,
                     cancellation,
                 ))

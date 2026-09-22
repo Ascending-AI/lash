@@ -14,7 +14,9 @@ repos:
   - repo: builtin
     hooks:
       - id: trailing-whitespace
+        exclude: '^tools/bazel/patches/.*\.patch$'
       - id: end-of-file-fixer
+        exclude: '^tools/bazel/patches/.*\.patch$'
       - id: check-yaml
       - id: check-json
 
@@ -50,7 +52,7 @@ repos:
       - id: file-size-budget
         name: production file-size budget
         language: system
-        entry: bash scripts/check-production-file-size.sh
+        entry: python3 scripts/check-production-file-size.py
         files: '\.rs$'
         pass_filenames: false
 
@@ -106,6 +108,15 @@ repos:
         language: system
         entry: python3 scripts/check_conformance_law_registration.py
         files: '^(crates/lash-conformance/src/(?:macros\.rs|conformance/[^/]*\.rs|conformance/runtime_persistence/[^/]+\.rs)|scripts/(?:test_)?check_conformance_law_registration\.py)$'
+        pass_filenames: false
+
+      # ADR 0056 forbids serde(flatten) on types reachable from persisted
+      # checkpoint components; this names the inventory the check sweeps.
+      - id: checkpoint-component-flatten
+        name: Checkpoint-component flatten boundary
+        language: system
+        entry: python3 scripts/check_checkpoint_component_flatten.py
+        files: '^(crates/lash-core-store/src/(?:store/checkpoint|tool_state|plugin_state|session_graph)\.rs|crates/lash-protocol-rlm/src/(?:executor/state|projection/bindings)\.rs|crates/lash-lashlang-runtime/src/deferred(?:_triggers)?\.rs|crates/lash-sansio/src/(?:tool_contract|schema_contract|effect_identity|causal)\.rs|scripts/(?:test_)?check_checkpoint_component_flatten\.py)$'
         pass_filenames: false
 
       # The recreation E2E's fixtures are projections of SCHEMA_MIGRATIONS. A

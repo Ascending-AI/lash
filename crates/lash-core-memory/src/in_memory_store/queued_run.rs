@@ -1,4 +1,8 @@
 use super::*;
+use crate::store::claim_plan::{
+    ClaimPlanDecision, QueuedWorkClaimRow, TurnInputClaimRow, plan_queued_work_claim,
+    plan_turn_input_claim,
+};
 
 impl InMemorySessionStore {
     pub(super) fn assign_checkpoint_members(
@@ -58,38 +62,74 @@ impl InMemorySessionStore {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let groups = run_claim_groups(rows, &indices, fence.fencing_token);
+        let groups = run_claim_groups(&indices, fence.fencing_token, |index| &rows[index].claim);
         let mut claims = Vec::with_capacity(groups.len());
         for indices in groups {
-            let minted = reclaim_run_claim(
-                rows,
-                InMemoryClaimMint {
-                    selected_indices: &indices,
-                    enqueue_seq: rows[indices[0]].input.enqueue_seq,
-                    dialect: crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
-                    fencing_label: "turn_input_claim_fencing_token",
-                    session_id: &fence.session_id,
+            let held = held_run_claim(&indices, fence, owner, |index| &rows[index].claim)?;
+            let claim = if let Some(held) = held {
+                crate::TurnInputClaim {
+                    session_id: fence.session_id.clone(),
+                    claim_id: held.claim_id,
+                    owner: owner.clone(),
+                    lease_token: held.lease_token,
+                    fencing_token: held.fencing_token,
+                    session_lease_generation: fence.fencing_token,
+                    data: lash_core_store::turn_input_vocabulary::TurnInputClaimData {
+                        mode: crate::TurnInputClaimMode::NextTurn,
+                        inputs: indices
+                            .iter()
+                            .map(|&index| rows[index].input.clone())
+                            .collect(),
+                        applications: Vec::new(),
+                    },
+                }
+            } else {
+                let observations = indices
+                    .iter()
+                    .map(|&index| {
+                        let row = &rows[index];
+                        TurnInputClaimRow {
+                            input: row.input.clone(),
+                            enqueue_seq: row.input.enqueue_seq,
+                            claim_fencing_token: row.claim.fencing_token,
+                            claim_token: row.claim.token(),
+                            claim_session_lease_generation: row
+                                .claim
+                                .diagnostic_generation()
+                                .unwrap_or(0),
+                        }
+                    })
+                    .collect();
+                let plan = match plan_turn_input_claim(
+                    crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
+                    &fence.session_id,
                     owner,
-                    generation: fence.fencing_token,
+                    fence.fencing_token,
                     now,
-                },
-            )?;
-            claims.push(crate::TurnInputClaim {
-                session_id: fence.session_id.clone(),
-                claim_id: minted.claim_id,
-                owner: owner.clone(),
-                lease_token: minted.lease_token,
-                fencing_token: minted.fencing_token,
-                session_lease_generation: fence.fencing_token,
-                data: crate::TurnInputClaimData {
-                    mode: crate::TurnInputClaimMode::NextTurn,
-                    inputs: indices
-                        .iter()
-                        .map(|index| rows[*index].input.clone())
-                        .collect(),
-                    applications: Vec::new(),
-                },
-            });
+                    crate::TurnInputClaimMode::NextTurn,
+                    observations,
+                )? {
+                    ClaimPlanDecision::Complete(plan) => plan,
+                    ClaimPlanDecision::Empty | ClaimPlanDecision::Defer => {
+                        return Err(crate::StoreError::QueuedRunConflict {
+                            session_id: fence.session_id.clone(),
+                        });
+                    }
+                };
+                let writes = plan.writes().to_vec();
+                let claim = plan.into_claim();
+                for (&index, write) in indices.iter().zip(writes) {
+                    rows[index].claim.acquire(
+                        claim.claim_id.clone(),
+                        claim.lease_token.clone(),
+                        owner.clone(),
+                        fence.fencing_token,
+                        write.next_claim_fencing_token,
+                    );
+                }
+                claim
+            };
+            claims.push(claim);
         }
         Ok(claims)
     }
@@ -117,96 +157,143 @@ impl InMemorySessionStore {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let groups = run_claim_groups(rows, &indices, fence.fencing_token);
+        let groups = run_claim_groups(&indices, fence.fencing_token, |index| &rows[index].claim);
         let mut claims = Vec::with_capacity(groups.len());
         for indices in groups {
-            let minted = reclaim_run_claim(
-                rows,
-                InMemoryClaimMint {
-                    selected_indices: &indices,
-                    enqueue_seq: rows[indices[0]].batch.enqueue_seq,
-                    dialect: crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
-                    fencing_label: "queued_work_claim_fencing_token",
-                    session_id: &fence.session_id,
+            let held = held_run_claim(&indices, fence, owner, |index| &rows[index].claim)?;
+            let claim = if let Some(held) = held {
+                crate::QueuedWorkClaim {
+                    session_id: fence.session_id.clone(),
+                    claim_id: held.claim_id,
+                    owner: owner.clone(),
+                    lease_token: held.lease_token,
+                    fencing_token: held.fencing_token,
+                    session_lease_generation: fence.fencing_token,
+                    data: crate::store_backend_support::queued_work_claim_data(
+                        indices
+                            .iter()
+                            .map(|&index| rows[index].batch.clone())
+                            .collect(),
+                        None,
+                        None,
+                    )?,
+                }
+            } else {
+                let candidates: Vec<_> = indices
+                    .iter()
+                    .map(|&index| {
+                        let row = &rows[index];
+                        crate::store::queued_work::ClaimCandidate::from_batch(
+                            &row.batch,
+                            row.claim.fencing_token,
+                            row.claim.id(),
+                            row.claim.token(),
+                        )
+                    })
+                    .collect();
+                let observations = indices
+                    .iter()
+                    .zip(&candidates)
+                    .map(|(&index, candidate)| {
+                        let row = &rows[index];
+                        QueuedWorkClaimRow {
+                            candidate: candidate.clone(),
+                            batch: row.batch.clone(),
+                            claim_token: row.claim.token(),
+                            claim_session_lease_generation: row
+                                .claim
+                                .diagnostic_generation()
+                                .unwrap_or(0),
+                        }
+                    })
+                    .collect();
+                let plan = match plan_queued_work_claim(
+                    crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+                    &fence.session_id,
                     owner,
-                    generation: fence.fencing_token,
+                    fence.fencing_token,
                     now,
-                },
-            )?;
-            claims.push(crate::QueuedWorkClaim {
-                session_id: fence.session_id.clone(),
-                claim_id: minted.claim_id,
-                owner: owner.clone(),
-                lease_token: minted.lease_token,
-                fencing_token: minted.fencing_token,
-                session_lease_generation: fence.fencing_token,
-                data: crate::QueuedWorkClaimData {
-                    batches: indices
-                        .iter()
-                        .map(|index| rows[*index].batch.clone())
-                        .collect(),
-                    abandon_restore_claim_id: minted.abandon_restore_claim_id,
-                    abandon_restore_claim_token: minted
-                        .abandon_restore_claim_token
-                        .map(String::into_boxed_str),
-                },
-            });
+                    observations,
+                    &candidates,
+                )? {
+                    ClaimPlanDecision::Complete(plan) => plan,
+                    ClaimPlanDecision::Empty | ClaimPlanDecision::Defer => {
+                        return Err(crate::StoreError::QueuedRunConflict {
+                            session_id: fence.session_id.clone(),
+                        });
+                    }
+                };
+                let writes = plan.writes().to_vec();
+                let claim = plan.into_claim()?;
+                for (&index, write) in indices.iter().zip(writes) {
+                    rows[index].claim.acquire(
+                        claim.claim_id.clone(),
+                        claim.lease_token.clone(),
+                        owner.clone(),
+                        fence.fencing_token,
+                        write.next_claim_fencing_token,
+                    );
+                }
+                claim
+            };
+            claims.push(claim);
         }
         Ok(claims)
     }
 }
 
-fn reclaim_run_claim<R: InMemoryClaimRow>(
-    rows: &mut [R],
-    mint: InMemoryClaimMint<'_>,
-) -> Result<super::claim_hold::MintedInMemoryClaim, crate::StoreError> {
-    let first = rows[mint.selected_indices[0]].claim();
-    if first.live_under(Some(mint.generation)) {
-        let conflict = || crate::StoreError::QueuedRunConflict {
-            session_id: mint.session_id.clone(),
-        };
+struct HeldRunClaim {
+    claim_id: String,
+    lease_token: String,
+    fencing_token: u64,
+}
+
+fn held_run_claim<'a>(
+    indices: &[usize],
+    fence: &crate::SessionExecutionLeaseAuthority,
+    owner: &crate::LeaseOwnerIdentity,
+    claim: impl Fn(usize) -> &'a ClaimHold,
+) -> Result<Option<HeldRunClaim>, crate::StoreError> {
+    let first = claim(indices[0]);
+    let conflict = || crate::StoreError::QueuedRunConflict {
+        session_id: fence.session_id.clone(),
+    };
+    if first.live_under(Some(fence.fencing_token)) {
         let claim_id = first.id().ok_or_else(conflict)?;
         let lease_token = first.token().ok_or_else(conflict)?;
-        if first.owner().as_ref() != Some(mint.owner)
-            || !mint.selected_indices.iter().all(|&index| {
-                let held = rows[index].claim();
-                held.live_under(Some(mint.generation))
-                    && held.owner().as_ref() == Some(mint.owner)
-                    && held.owned_by(&claim_id, &lease_token)
-            })
-        {
+        if !indices.iter().all(|&index| {
+            let held = claim(index);
+            held.live_under(Some(fence.fencing_token))
+                && held.owner().as_ref() == Some(owner)
+                && held.owned_by(&claim_id, &lease_token)
+        }) {
             return Err(conflict());
         }
-        return Ok(super::claim_hold::MintedInMemoryClaim {
+        return Ok(Some(HeldRunClaim {
             claim_id,
             lease_token,
             fencing_token: first.fencing_token,
-            abandon_restore_claim_id: None,
-            abandon_restore_claim_token: None,
-        });
+        }));
     }
-    if mint
-        .selected_indices
+    if indices
         .iter()
-        .any(|&index| rows[index].claim().live_under(Some(mint.generation)))
+        .any(|&index| claim(index).live_under(Some(fence.fencing_token)))
     {
-        return Err(crate::StoreError::QueuedRunConflict {
-            session_id: mint.session_id.clone(),
-        });
+        return Err(conflict());
     }
-    mint_in_memory_claim(rows, mint)
+    Ok(None)
 }
 
-fn run_claim_groups<R: InMemoryClaimRow>(
-    rows: &[R],
+fn run_claim_groups<'a>(
     indices: &[usize],
     generation: u64,
+    held: impl Fn(usize) -> &'a ClaimHold,
 ) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for &index in indices {
-        let claim = rows[index].claim();
+        let claim = held(index);
         let same = groups.last().is_some_and(|group| {
-            let prior = rows[group[0]].claim();
+            let prior = held(group[0]);
             match (
                 prior.live_under(Some(generation)),
                 claim.live_under(Some(generation)),

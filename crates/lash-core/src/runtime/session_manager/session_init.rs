@@ -61,6 +61,18 @@ pub(in crate::runtime::session_manager) struct InitializedSessionTurn {
     pub turn: AssembledTurn,
 }
 
+/// Inputs for initializing a process-owned child session and running its
+/// first turn.
+pub(in crate::runtime::session_manager) struct ProcessSessionTurnInit<'a> {
+    pub create_request: crate::SessionCreateRequest,
+    pub process_id: &'a crate::ProcessId,
+    pub turn_id: TurnId,
+    pub turn_input: crate::TurnInput,
+    pub execution_write_authority: &'a crate::ProcessExecutionWriteAuthority,
+    pub scoped_effect_controller: crate::ScopedEffectController<'a>,
+    pub cancellation: CancellationToken,
+}
+
 pub(in crate::runtime::session_manager) async fn resolve_session_init(
     current: &CurrentSessionCapability,
     mut request: SessionCreateRequest,
@@ -692,13 +704,17 @@ impl RuntimeSessionServices {
     /// instead of writing a `Cancelled` terminal over an unsettled child.
     pub(in crate::runtime::session_manager) async fn initialize_session_and_run_turn(
         &self,
-        create_request: crate::SessionCreateRequest,
-        process_id: &crate::ProcessId,
-        turn_id: TurnId,
-        turn_input: crate::TurnInput,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
-        cancellation: CancellationToken,
+        request: ProcessSessionTurnInit<'_>,
     ) -> Result<InitializedSessionTurn, SessionTurnInitError> {
+        let ProcessSessionTurnInit {
+            create_request,
+            process_id,
+            turn_id,
+            turn_input,
+            execution_write_authority,
+            scoped_effect_controller,
+            cancellation,
+        } = request;
         let requested_session_id = create_request.session_id.clone();
         if cancellation.is_cancelled() {
             self.settle_cancelled_process_child_inputs(
@@ -769,6 +785,7 @@ impl RuntimeSessionServices {
             &turn_id,
             turn_input,
             process_id,
+            execution_write_authority,
             scoped_effect_controller,
         )
         .map_err(|source| SessionTurnInitError::Request {
@@ -1087,6 +1104,7 @@ fn validated_process_turn_input<'run>(
     turn_id: &TurnId,
     mut input: crate::TurnInput,
     process_id: &crate::ProcessId,
+    execution_write_authority: &crate::ProcessExecutionWriteAuthority,
     scoped_effect_controller: crate::ScopedEffectController<'run>,
 ) -> Result<(crate::TurnInput, crate::ScopedEffectController<'run>), crate::PluginError> {
     let required_scope = crate::ExecutionScope::process(process_id);
@@ -1107,6 +1125,11 @@ fn validated_process_turn_input<'run>(
             "input trace_turn_id `{input_turn_id}` does not match turn id `{turn_id}`"
         )));
     }
+    lash_core_execution::core_internal::attach_process_invocation_correlation(
+        &mut input.turn_context,
+        process_id,
+        execution_write_authority,
+    );
     input.trace_turn_id = Some(turn_id.clone());
     Ok((input, scoped_effect_controller))
 }
@@ -1225,6 +1248,8 @@ pub fn take_spawned_child_runtimes()
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn contained_child_turn_panic_is_loud_in_test_builds() {
         let previous = crate::panic_containment::set_loud(true);
@@ -1233,5 +1258,42 @@ mod tests {
         });
         crate::panic_containment::set_loud(previous);
         assert!(panic.is_err());
+    }
+
+    #[test]
+    fn process_turn_validation_attaches_invocation_correlation() {
+        let process_id = crate::ProcessId::from("process:subagent:call");
+        let authority = crate::ProcessExecutionWriteAuthority::invocation(
+            process_id.clone(),
+            "invocation:subagent:call",
+        )
+        .bind_attempt(2);
+        let controller = crate::NativeRuntimeEffectController::default();
+        let scoped_effect_controller = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::AdmittedScope::process(crate::ProcessRef::new(
+                process_id.clone(),
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            )),
+        )
+        .expect("process scope");
+
+        let (input, _) = validated_process_turn_input(
+            &crate::TurnId::from(process_id.as_str()),
+            crate::TurnInput::text("run child"),
+            &process_id,
+            &authority,
+            scoped_effect_controller,
+        )
+        .expect("valid process-backed child turn input");
+
+        assert_eq!(
+            crate::testing::TestExecutionContextBuilder::new()
+                .turn_context(input.turn_context)
+                .build()
+                .into_runtime()
+                .restate_invocation_id(),
+            Some("invocation:subagent:call")
+        );
     }
 }

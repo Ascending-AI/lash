@@ -123,7 +123,10 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
             ProviderFailureKind::Unknown | ProviderFailureKind::Http
         ) || failure.terminal_reason
             != LlmTerminalReason::ProviderError
-            || matches!(failure.code, Some(FailureCode::Provider(_)))
+            || failure
+                .code
+                .as_ref()
+                .is_some_and(|code| code.namespace() != &Namespace::LASH)
             || retry_verdict_classified;
         if let Some(status) = failure.http_status {
             let generic_kind = matches!(

@@ -199,7 +199,7 @@ impl Store {
             conn,
             turn_cancellation_authority: Some(authority),
             turn_cancel_closure_owner,
-            session_id: OnceLock::new(),
+            session_id: Arc::new(OnceLock::new()),
             clock,
             #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
@@ -222,7 +222,7 @@ impl Store {
             conn,
             turn_cancellation_authority: None,
             turn_cancel_closure_owner: None,
-            session_id: OnceLock::new(),
+            session_id: Arc::new(OnceLock::new()),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
@@ -333,7 +333,7 @@ impl Store {
             conn,
             turn_cancellation_authority: Some(authority),
             turn_cancel_closure_owner: None,
-            session_id: OnceLock::new(),
+            session_id: Arc::new(OnceLock::new()),
             clock,
             #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),

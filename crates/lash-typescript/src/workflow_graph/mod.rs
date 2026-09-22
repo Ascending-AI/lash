@@ -37,7 +37,6 @@ mod render_helpers;
 use render_helpers::*;
 mod printer;
 
-use crate::lower::process_run_body_path;
 pub use editable_text::{
     TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
     parse_typescript_process_statement,
@@ -318,11 +317,15 @@ impl<'a> GraphProjector<'a> {
             ));
         }
         let mut versions = VersionState::default();
-        let main = self.project_block(
+        let ownership = lashlang::WorkflowProjection::for_main(
             &self.program.main,
+            lashlang::AstPath::main(Vec::new()),
+        );
+        let main = self.project_block(
+            ownership.visible_expression(),
             "main",
-            &[],
-            &lashlang::AstPath::main(Vec::new()),
+            ownership.ast_root(),
+            ownership.ownership_map(),
             &mut versions,
         );
         WorkflowGraph {
@@ -358,8 +361,12 @@ impl<'a> GraphProjector<'a> {
         for param in &process.params {
             versions.seed(param.name.as_str());
         }
+        let ownership = lashlang::process_workflow_projection(
+            &process.body,
+            lashlang::AstPath::declaration(declaration_index, Vec::new()),
+        );
         WorkflowProcess {
-            id: self.node_id(&owner, &[], "process"),
+            id: self.node_id(&owner, &[]),
             name: process.name.to_string(),
             display_name,
             description,
@@ -372,36 +379,25 @@ impl<'a> GraphProjector<'a> {
             // authored, so that is what the graph shows — addressed by the
             // wrapper's own AST path so node identity and execution-site
             // correlation stay keyed on the real path (FIG-3033).
-            body: match process_run_body_path(process) {
-                Some((path, body)) => self.project_block(
-                    body,
-                    &owner,
-                    &path,
-                    &lashlang::AstPath::declaration(declaration_index, path.clone()),
-                    &mut versions,
-                ),
-                None => self.project_block(
-                    &process.body,
-                    &owner,
-                    &[],
-                    &lashlang::AstPath::declaration(declaration_index, Vec::new()),
-                    &mut versions,
-                ),
-            },
+            body: self.project_block(
+                ownership.visible_expression(),
+                &owner,
+                ownership.ast_root(),
+                ownership.ownership_map(),
+                &mut versions,
+            ),
         }
     }
 
-    /// `facts_base` is the [`lashlang::AstPath`] of `expr` itself: `base_path`
-    /// carries the owner-relative steps that node identity and spans are
-    /// keyed on, while `facts_base` carries the rooted path the linker's fact
-    /// tables are keyed on. The two stay in lockstep — every step pushed onto
-    /// `base_path` is pushed onto `facts_base` too.
+    /// `facts_base` is the [`lashlang::AstPath`] of `expr` itself. The shared
+    /// ownership map resolves that rooted AST path to its owner-relative node
+    /// path.
     fn project_block(
         &self,
         expr: &Expr,
         owner: &str,
-        base_path: &[u32],
         facts_base: &lashlang::AstPath,
+        ownership: &lashlang::WorkflowOwnership,
         versions: &mut VersionState,
     ) -> WorkflowSubgraph {
         // The lowerer wraps every authored statement block as
@@ -411,11 +407,9 @@ impl<'a> GraphProjector<'a> {
         // identity and execution-site correlation are both keyed on — and
         // drops the trailing completion value.
         let mut expr = expr;
-        let mut base_path = base_path.to_vec();
         let mut facts_base = facts_base.clone();
         let mut unwrapped = false;
         while let Some(inner) = printer::block_wrapper_inner(expr) {
-            base_path = lashlang::child_path(&base_path, 0);
             facts_base = facts_base.child(0);
             expr = inner;
             unwrapped = true;
@@ -434,8 +428,8 @@ impl<'a> GraphProjector<'a> {
             expressions,
             owner,
             &facts_base,
-            &base_path,
             indexed.then_some(0),
+            ownership,
             versions,
         )
     }
@@ -449,18 +443,16 @@ impl<'a> GraphProjector<'a> {
         expressions: &[Expr],
         owner: &str,
         facts_base: &lashlang::AstPath,
-        base_path: &[u32],
         start: Option<usize>,
+        ownership: &lashlang::WorkflowOwnership,
         versions: &mut VersionState,
     ) -> WorkflowSubgraph {
         let mut subgraph = WorkflowSubgraph::default();
         let mut previous_effect: Option<WorkflowNodeId> = None;
         for (index, expression) in expressions.iter().enumerate() {
-            let mut path = base_path.to_vec();
             let mut facts_path = facts_base.clone();
             if let Some(start) = start {
                 let step = (start + index) as u32;
-                path.push(step);
                 facts_path = facts_path.child(step);
             }
             let source_path = facts_path.clone();
@@ -473,16 +465,15 @@ impl<'a> GraphProjector<'a> {
                     std::ptr::from_ref(expression),
                 )
             {
-                path = lashlang::child_path(&path, 0);
                 facts_path = facts_path.child(0);
                 expression = statement;
             }
             let node = self.project_node(
                 expression,
                 owner,
-                &path,
                 &facts_path,
                 &source_path,
+                ownership,
                 versions,
             );
             add_dependency_edges(&mut subgraph.edges, &node, expression, versions);
@@ -508,9 +499,9 @@ impl<'a> GraphProjector<'a> {
         &self,
         expression: &Expr,
         owner: &str,
-        path: &[u32],
         facts_path: &lashlang::AstPath,
         source_path: &lashlang::AstPath,
+        ownership: &lashlang::WorkflowOwnership,
         versions: &mut VersionState,
     ) -> WorkflowNode {
         let (label, expression) = peel_label(expression);
@@ -519,11 +510,15 @@ impl<'a> GraphProjector<'a> {
         } else {
             facts_path.clone()
         };
+        let Some(path) = ownership.path_for_ast(&facts_path) else {
+            panic!("projected expression must have workflow ownership");
+        };
+        let path = path.indices();
         let source_span = self.spans.get(source_path).copied();
         let available_variables: Vec<String> = versions.known.iter().cloned().collect();
         let (kind, derived_name, outputs) =
-            self.project_kind(expression, owner, path, &facts_path, versions);
-        let id = self.node_id(owner, path, kind_tag(&kind));
+            self.project_kind(expression, owner, path, &facts_path, ownership, versions);
+        let id = self.node_id(owner, path);
         let (name, description, name_source) = match label {
             Some(label) => (
                 label.title.to_string(),
@@ -532,7 +527,8 @@ impl<'a> GraphProjector<'a> {
             ),
             None => (derived_name, None, WorkflowNodeNameSource::Derived),
         };
-        let execution_sites = lashlang::execution_sites(expression, owner, path, label);
+        let execution_sites =
+            lashlang::execution_sites(expression, owner, &facts_path, ownership, label);
         let type_facets = lashlang::projected_node_type_facets(
             self.analysis,
             &facts_path,
@@ -561,6 +557,7 @@ impl<'a> GraphProjector<'a> {
         owner: &str,
         path: &[u32],
         facts_path: &lashlang::AstPath,
+        ownership: &lashlang::WorkflowOwnership,
         versions: &mut VersionState,
     ) -> (WorkflowNodeKind, String, Vec<VariableVersion>) {
         if let Some((target, value)) = printer::assignment_sugar(expression) {
@@ -585,6 +582,13 @@ impl<'a> GraphProjector<'a> {
         };
         if let Expr::Assign { target, expr } = expression
             && (!target.is_simple() || versions.is_known(target.root.as_str()))
+            && !matches!(
+                expr.as_ref(),
+                Expr::If { .. }
+                    | Expr::For { .. }
+                    | Expr::While { .. }
+                    | Expr::ListComprehension { .. }
+            )
         {
             return (
                 WorkflowNodeKind::StateUpdate {
@@ -606,15 +610,15 @@ impl<'a> GraphProjector<'a> {
                 let then_graph = self.project_block(
                     then_block,
                     owner,
-                    &lashlang::child_path(&value_path, 1),
                     &value_facts_path.child(1),
+                    ownership,
                     &mut then_versions,
                 );
                 let else_graph = self.project_block(
                     else_block,
                     owner,
-                    &lashlang::child_path(&value_path, 2),
                     &value_facts_path.child(2),
+                    ownership,
                     &mut else_versions,
                 );
                 let mut outputs = assignment_output(binding.as_ref(), versions);
@@ -649,21 +653,9 @@ impl<'a> GraphProjector<'a> {
                 // the element into the authored binding `x`. The node shows the
                 // authored loop; the AST path still addresses the real body.
                 let sugar = printer::for_of_sugar(loop_binding.as_str(), iterable, body);
-                let (loop_binding, iterable, body_base, body_start, rest) = match sugar {
-                    Some((authored, source, rest)) => (
-                        authored,
-                        source,
-                        lashlang::child_path(&value_path, 1),
-                        1,
-                        Some(rest),
-                    ),
-                    None => (
-                        loop_binding.as_str(),
-                        iterable.as_ref(),
-                        lashlang::child_path(&value_path, 1),
-                        0,
-                        None,
-                    ),
+                let (loop_binding, iterable, body_start, rest) = match sugar {
+                    Some((authored, source, rest)) => (authored, source, 1, Some(rest)),
+                    None => (loop_binding.as_str(), iterable.as_ref(), 0, None),
                 };
                 let mut body_versions = versions.clone();
                 body_versions.shadow(loop_binding);
@@ -672,23 +664,23 @@ impl<'a> GraphProjector<'a> {
                     None => self.project_block(
                         body,
                         owner,
-                        &body_base,
                         &body_facts_base,
+                        ownership,
                         &mut body_versions,
                     ),
                     Some([single]) if matches!(single, Expr::Block(_)) => self.project_block(
                         single,
                         owner,
-                        &lashlang::child_path(&body_base, body_start),
                         &body_facts_base.child(body_start),
+                        ownership,
                         &mut body_versions,
                     ),
                     Some(rest) => self.project_statements(
                         rest,
                         owner,
                         &body_facts_base,
-                        &body_base,
                         Some(body_start as usize),
+                        ownership,
                         &mut body_versions,
                     ),
                 };
@@ -708,8 +700,8 @@ impl<'a> GraphProjector<'a> {
                 let body_graph = self.project_block(
                     body,
                     owner,
-                    &lashlang::child_path(&value_path, 1),
                     &value_facts_path.child(1),
+                    ownership,
                     &mut body_versions,
                 );
                 let outputs = loop_outputs(body, None, versions);
@@ -732,8 +724,8 @@ impl<'a> GraphProjector<'a> {
                 let element_graph = self.project_block(
                     element,
                     owner,
-                    &lashlang::child_path(&value_path, clauses.len() as u32),
                     &value_facts_path.child(clauses.len() as u32),
+                    ownership,
                     &mut element_versions,
                 );
                 let outputs = assignment_output(binding.as_ref(), versions);
@@ -840,20 +832,8 @@ impl<'a> GraphProjector<'a> {
         }
     }
 
-    fn node_id(&self, owner: &str, path: &[u32], kind: &str) -> WorkflowNodeId {
-        let path = if path.is_empty() {
-            "root".to_string()
-        } else {
-            path.iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(".")
-        };
-        let material = format!("{}\0{owner}\0{path}\0{kind}", self.source_identity);
-        WorkflowNodeId::new(format!(
-            "{kind}:{}",
-            &hex_digest("lash-workflow-node/v2", material.as_bytes())[..24]
-        ))
+    fn node_id(&self, owner: &str, path: &[u32]) -> WorkflowNodeId {
+        lashlang::workflow_node_id(owner, path)
     }
 }
 
@@ -1594,7 +1574,6 @@ fn assignment_output(
     versions: &mut VersionState,
 ) -> Vec<VariableVersion> {
     binding
-        .filter(|target| target.is_simple())
         .map(|target| vec![versions.allocate(target.root.as_str())])
         .unwrap_or_default()
 }

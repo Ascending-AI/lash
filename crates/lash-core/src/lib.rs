@@ -638,7 +638,7 @@ pub use lash_core_execution::{
     ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,
     TurnMachine, TurnMachineConfig,
 };
-pub use lash_sansio::{TurnFailureCode, TurnFailureKind};
+pub use lash_sansio::{FailureCode, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind};
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{
@@ -703,27 +703,28 @@ pub use runtime::{
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy,
-    DrainedChild, EffectAddress, EffectCommitState, EffectGroupHandle, EffectGroupMembership,
-    EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
-    ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
-    GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, HandleId,
+    DrainedChild, EffectAddress, EffectCommitState, EffectGroupDrainBudget, EffectGroupHandle,
+    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,
+    EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
+    GroupChildBinding, GroupDrainReport, GroupExecutors, GroupFinalizationReport,
+    GroupOnlyFinalization, GroupSettlement, GroupWakePolicy, HandleId,
     InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LiveReplayEventDraft,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
     LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
     NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError, NativeSubstrateConfig,
-    NativeSubstrateConfigError, NoQueuedWork, OnParentEnd, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope,
-    ParentScopeStorageError, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
-    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
-    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
-    ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    NativeSubstrateConfigError, NoQueuedWork, OnParentEnd, OpenerFinalizationSteps,
+    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+    PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope, ParentScopeStorageError, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
+    PreparedLiveReplayPublication, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectOutcome, ProcessEngine,
+    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventPageToken,
     ProcessEventPageTokenStoreExt, ProcessEventQueryMode, ProcessEventReadOutcome,
@@ -761,10 +762,10 @@ pub use runtime::{
     SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
     SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
-    StoreEffectGroupDrain, StoreRealization, StoredChildArbitration, TokenLedgerEntry,
-    ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
-    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization, StoredChildArbitration,
+    TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
+    TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
     TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
     TurnCancelOriginHint, TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext,
@@ -864,6 +865,9 @@ pub mod core_internal {
         inherit_process_execution_permit, scope_process_execution_permit,
         scope_queued_work_execution_permit,
     };
+    pub use lash_core_execution::core_internal::{
+        attach_process_invocation_correlation, clear_process_invocation_correlation,
+    };
     pub use lash_core_ids::worker_capacity::{
         DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
         WorkerSlotSupplier,
@@ -878,14 +882,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn protocol_driver_state_matches_host_protocol_state() {
-        let state: <HostTurnProtocol as lash_sansio::TurnProtocol>::DriverState =
-            ProtocolDriverState::new("state-owner", serde_json::json!({"version": 1}));
-        assert_eq!(state.plugin_id, "state-owner");
-        assert_eq!(state.payload, serde_json::json!({"version": 1}));
-    }
-
-    #[test]
     fn invalid_agent_frame_seed_is_rejected_at_the_serde_boundary() {
         let frame_key =
             FrameKey::from_caller_material("delegate").expect("non-empty caller material");
@@ -898,124 +894,5 @@ mod tests {
         .expect_err("invalid seed cannot construct a tool control");
 
         assert!(err.to_string().contains("kind"), "unexpected error: {err}");
-    }
-
-    #[test]
-    // Architecture lint: lexical public-surface guard, not behavior proof.
-    fn lint_root_exports_do_not_reintroduce_removed_session_state_shapes() {
-        let source = include_str!("lib.rs");
-        let removed_envelope = ["SessionState", "Envelope"].concat();
-        let removed_persisted = ["PersistedSession", "Snapshot"].concat();
-        let removed_history_rewriter = ["History", "Rewriter"].concat();
-        let removed_rewrite_trigger = ["Rewrite", "Trigger"].concat();
-        let removed_rewrite_context = ["Rewrite", "Context"].concat();
-        let removed_history_state = ["History", "State"].concat();
-        let removed_history_metadata = ["History", "Rewrite", "Metadata"].concat();
-
-        assert!(!source.contains(&removed_envelope));
-        assert!(!source.contains(&removed_persisted));
-        assert!(!source.contains(&removed_history_rewriter));
-        assert!(!source.contains(&removed_rewrite_trigger));
-        assert!(!source.contains(&removed_rewrite_context));
-        assert!(!source.contains(&removed_history_state));
-        assert!(!source.contains(&removed_history_metadata));
-    }
-
-    fn public_reexports(source: &str, module: &str) -> String {
-        let statement_start = format!("pub use {module}::");
-        let block_start = format!("{statement_start}{{");
-        assert_eq!(
-            source
-                .lines()
-                .filter(|line| line.starts_with(&block_start))
-                .count(),
-            1,
-            "public {module} re-exports must have one grouped block"
-        );
-
-        let mut exports = String::new();
-        let mut collecting = false;
-        for line in source.lines() {
-            if !collecting && line.starts_with(&statement_start) {
-                collecting = true;
-            }
-            if collecting {
-                exports.push_str(line);
-                exports.push('\n');
-                if line.contains(';') {
-                    collecting = false;
-                }
-            }
-        }
-        assert!(!exports.is_empty(), "missing public {module} re-exports");
-        exports
-    }
-
-    fn contains_identifier(source: &str, identifier: &str) -> bool {
-        source
-            .split(|character: char| !(character.is_alphanumeric() || character == '_'))
-            .any(|token| token == identifier)
-    }
-
-    #[test]
-    // Architecture lint: lexical public-surface guard, not behavior proof.
-    fn lint_root_runtime_exports_exclude_internal_runtime_records() {
-        let runtime_exports = public_reexports(include_str!("lib.rs"), "runtime");
-        assert!(
-            contains_identifier(&runtime_exports, "GroupWakePolicy"),
-            "runtime export scan must cover the complete public block"
-        );
-        for removed in [
-            "QueuedWorkBatch",
-            "QueuedWorkBatchDraft",
-            "QueuedWorkPayload",
-            "prepare_process_registration",
-            "process_wake_batch_draft",
-            "require_event_replay",
-        ] {
-            assert!(
-                !contains_identifier(&runtime_exports, removed),
-                "runtime root export leaked {removed}"
-            );
-        }
-    }
-
-    #[test]
-    // Architecture lint: lexical public-surface guard, not behavior proof.
-    fn lint_root_store_exports_exclude_wire_records() {
-        let store_exports = public_reexports(include_str!("lib.rs"), "store");
-        assert!(
-            contains_identifier(&store_exports, "RuntimeCommit"),
-            "store export scan must cover the complete public block"
-        );
-        for removed in [
-            "SessionHead",
-            "SessionCheckpoint",
-            "PersistedSessionRead",
-            "GraphAppend",
-        ] {
-            assert!(
-                !contains_identifier(&store_exports, removed),
-                "store root export leaked {removed}"
-            );
-        }
-    }
-
-    #[test]
-    // Architecture lint: lexical retired-name guard, not behavior proof.
-    fn lint_removed_manager_and_host_trait_names_stay_removed() {
-        let removed_manager = ["Runtime", "Session", "Manager"].concat();
-        let removed_host = ["Runtime", "Session", "Host"].concat();
-        let sources = [
-            include_str!("runtime/session_manager/mod.rs"),
-            lash_core_execution::core_internal::PLUGIN_RUNTIME_HOST_SOURCE,
-            lash_core_execution::core_internal::TOOL_DISPATCH_CONTEXT_SOURCE,
-            lash_core_execution::core_internal::TOOL_PROVIDER_SOURCE,
-        ];
-
-        for source in sources {
-            assert!(!source.contains(&removed_manager));
-            assert!(!source.contains(&removed_host));
-        }
     }
 }

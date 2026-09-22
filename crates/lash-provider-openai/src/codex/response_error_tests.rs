@@ -6,6 +6,7 @@ use lash_core::provider::ProviderHandle;
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport,
 };
+use lash_sansio::FailureCode;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,7 +29,7 @@ impl LlmByteStream for TimeoutBodyStream {
         Err(LlmTransportError::response_read("injected body timeout")
             .with_kind(ProviderFailureKind::Timeout)
             .with_retry_verdict(TransportRetryVerdict::NotRetryable)
-            .with_provider_code("body_timeout"))
+            .with_code(FailureCode::provider("body_timeout")))
     }
 }
 
@@ -71,7 +72,10 @@ async fn codex_non_sse_body_read_failure_preserves_observed_response_evidence() 
     let recorded = attempt.error.as_ref().expect("failed attempt error");
     assert_eq!(recorded.http_status, Some(200));
     assert_eq!(recorded.class, ProviderFailureKind::Timeout.code());
-    assert_eq!(recorded.provider_code.as_deref(), Some("body_timeout"));
+    assert_eq!(
+        recorded.code.as_ref().map(|code| code.namespaced()),
+        Some("provider:body_timeout".to_string())
+    );
     assert_eq!(failure.error.http_status, Some(200));
     assert_eq!(failure.kind, ProviderFailureKind::Timeout);
     assert_eq!(failure.retry_verdict, TransportRetryVerdict::NotRetryable);

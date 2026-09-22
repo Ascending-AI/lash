@@ -303,6 +303,14 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
     }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
+    {
+        self.inner.read_group_settlement(group_key, rank).await
+    }
 
     async fn close_effect_group(
         &self,

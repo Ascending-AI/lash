@@ -396,6 +396,16 @@ pub enum RuntimeEffectCommand {
     ToolInvocation {
         request: Box<super::tool_child::ToolChildRequest>,
     },
+    /// Record the opener's incorporated settlement prefix of a durable effect
+    /// group (ADR 0099 §6): the journaled mapping from group identity to the
+    /// ranks the opener applied, written before an externally effective step
+    /// that reads those facts. Replay restores exactly the recorded ranks and
+    /// never a later one. `through_rank` is the prefix bound the opener chose
+    /// at record time; the outcome lists what was actually incorporated.
+    IncorporateGroupSettlements {
+        group_key: String,
+        through_rank: u64,
+    },
     Trigger {
         command: Box<crate::TriggerCommand>,
     },
@@ -457,6 +467,9 @@ impl RuntimeEffectCommand {
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
             Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
+            Self::IncorporateGroupSettlements { .. } => {
+                RuntimeEffectKind::IncorporateGroupSettlements
+            }
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
@@ -1062,6 +1075,13 @@ pub enum RuntimeEffectOutcome {
         /// produced a settled presentation.
         settlement: Box<ToolSettlement>,
     },
+    /// The group-settlement prefix an
+    /// [`IncorporateGroupSettlements`](RuntimeEffectCommand::IncorporateGroupSettlements)
+    /// command incorporated: the recorded mapping replay re-applies, rank by
+    /// rank, and nothing past it (ADR 0099 §6).
+    IncorporateGroupSettlements {
+        incorporated: Vec<super::group::IncorporatedGroupRank>,
+    },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
     },
@@ -1313,6 +1333,19 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Unpacks the recorded incorporation prefix of a durable effect group.
+    pub fn into_incorporate_group_settlements(
+        self,
+    ) -> Result<Vec<super::group::IncorporatedGroupRank>, RuntimeEffectControllerError> {
+        match self {
+            Self::IncorporateGroupSettlements { incorporated } => Ok(incorporated),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::IncorporateGroupSettlements,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_tool_batch_effect(
         self,
     ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
@@ -1461,6 +1494,9 @@ impl RuntimeEffectOutcome {
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
             Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
+            Self::IncorporateGroupSettlements { .. } => {
+                RuntimeEffectKind::IncorporateGroupSettlements
+            }
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
@@ -1472,6 +1508,12 @@ impl RuntimeEffectOutcome {
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
             Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
+    }
+}
+
+impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
+    fn from(invocation: RuntimeEffectInvocation) -> Self {
+        invocation.into_runtime_invocation()
     }
 }
 
@@ -1686,81 +1728,5 @@ mod rejection_tests {
             RuntimeEffectCommand::ToolBatch { batch: value },
             "runtime_effect_tool_batch_call_replay",
         );
-    }
-}
-
-#[cfg(test)]
-mod settlement_order_journal_tests {
-    use super::*;
-
-    /// A journal entry written before settlement order existed must be refused.
-    ///
-    /// This is the whole reason the field carries no serde default: an
-    /// aggregate that rejects with its first *settled* rejection cannot tell a
-    /// defaulted input order from a recorded one, so replaying an older entry
-    /// as input order would silently reintroduce the bug the order fixes.
-    #[test]
-    fn a_tool_batch_outcome_without_settlement_order_fails_closed() {
-        // The tag key is `type`, not `kind`: a payload keyed `kind` fails on the
-        // *tag* and would pass this test while proving nothing about the field.
-        let legacy = serde_json::json!({
-            "type": "tool_batch",
-            "launches": [],
-            "triggers": [],
-        });
-        let decoded = serde_json::from_value::<RuntimeEffectOutcome>(legacy);
-        let error = decoded.expect_err("an outcome without settlement order must not decode");
-        assert!(
-            error.to_string().contains("settlement_order"),
-            "the refusal must name the missing field, not the tag: {error}"
-        );
-    }
-
-    /// A current entry round-trips with its order intact.
-    #[test]
-    fn a_tool_batch_outcome_round_trips_its_settlement_order() {
-        let outcome = RuntimeEffectOutcome::ToolBatch {
-            launches: Vec::new(),
-            triggers: Vec::new(),
-            settlement_order: vec![2, 0, 1],
-        };
-        let encoded = serde_json::to_string(&outcome).expect("outcome encodes");
-        let decoded =
-            serde_json::from_str::<RuntimeEffectOutcome>(&encoded).expect("outcome decodes");
-        let RuntimeEffectOutcome::ToolBatch {
-            settlement_order, ..
-        } = decoded
-        else {
-            panic!("decoded the wrong outcome kind");
-        };
-        assert_eq!(settlement_order, vec![2, 0, 1]);
-    }
-
-    /// FIG-2362: a journal entry written before the exec-code failure was typed
-    /// journaled only the erased message string; it still decodes, under the
-    /// honest `erased` reason.
-    #[test]
-    fn a_legacy_erased_exec_code_failure_still_decodes() {
-        let legacy = serde_json::json!({
-            "type": "exec_code",
-            "result": { "Err": "code execution is not available in this session" },
-        });
-        let decoded = serde_json::from_value::<RuntimeEffectOutcome>(legacy)
-            .expect("legacy erased exec-code failure decodes");
-        let RuntimeEffectOutcome::ExecCode { result } = decoded else {
-            panic!("decoded the wrong outcome kind");
-        };
-        let failure = result.expect_err("the journaled failure survives");
-        assert_eq!(failure.reason, crate::ExecCodeFailureReason::Erased);
-        assert_eq!(
-            failure.message,
-            "code execution is not available in this session"
-        );
-    }
-}
-
-impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
-    fn from(invocation: RuntimeEffectInvocation) -> Self {
-        invocation.into_runtime_invocation()
     }
 }

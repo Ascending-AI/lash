@@ -9,6 +9,7 @@
 use lash_sansio::SessionId;
 pub(crate) mod context;
 mod group_commit;
+mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 mod scope_recording;
@@ -18,6 +19,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
+use lash_core::runtime::effect::RankedGroupSettlement;
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
     EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, PluginError,
@@ -68,6 +70,13 @@ pub struct RestateEffectControllerOptions {
     segment_duration_cap: Option<Duration>,
     segment_effect_budget: u64,
     journaled_effect_byte_budget: Option<u64>,
+    /// The §7 drain budget: on the SQL tiers it bounds how long group
+    /// finalization waits on a cancel-decided child's attempt body after its
+    /// decision commits. On Restate there is no such wait — the engine's own
+    /// cancellation already abandons a cancelled child's drive, so the bound
+    /// is vacuous here — but the option is held so the three tiers carry one
+    /// construction-level vocabulary (FIG-3410).
+    drain_budget: Duration,
 }
 
 impl Default for RestateEffectControllerOptions {
@@ -77,6 +86,7 @@ impl Default for RestateEffectControllerOptions {
             segment_duration_cap: None,
             segment_effect_budget: 10_000,
             journaled_effect_byte_budget: None,
+            drain_budget: lash_core::EffectGroupDrainBudget::DEFAULT.duration(),
         }
     }
 }
@@ -141,6 +151,19 @@ impl RestateEffectControllerOptions {
         self.journaled_effect_byte_budget = Some(bytes);
         self
     }
+
+    /// Set the group drain budget (ADR 0099 §7): the bound a group's
+    /// finalization waits on a cancel-decided child's attempt body after its
+    /// decision commits.
+    ///
+    /// On this tier the bound is **vacuous** and is held for cross-tier parity
+    /// only: engine cancellation abandons the cancelled child's drive itself,
+    /// so no host-side wait exists for it to bound. The value is journaled
+    /// nowhere and changing it never changes a committed obligation.
+    pub fn drain_budget(mut self, budget: lash_core::EffectGroupDrainBudget) -> Self {
+        self.drain_budget = budget.duration();
+        self
+    }
 }
 
 impl fmt::Debug for RestateEffectControllerOptions {
@@ -153,6 +176,7 @@ impl fmt::Debug for RestateEffectControllerOptions {
                 "journaled_effect_byte_budget",
                 &self.journaled_effect_byte_budget,
             )
+            .field("drain_budget", &self.drain_budget)
             .finish()
     }
 }
@@ -570,7 +594,7 @@ where
         }
         self.require_active_session(key.scope.session_id()).await?;
         self.context
-            .peek_event(RestateDurableWaitAddress::for_key(key))
+            .peek_event(RestateDurableWaitAddress::for_key(key), key.key_id.clone())
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -591,6 +615,7 @@ where
         }
         self.require_active_session(key.scope.session_id()).await?;
         let clock = lash_core::facade_support::SystemClock;
+        let replay_key = key.key_id.clone();
         let request = journaled_restate_durable_wait_request(&self.context, key, deadline, &clock)
             .await
             .map_err(|err| {
@@ -600,7 +625,7 @@ where
                 )
             })?;
         self.context
-            .await_event(request, cancel)
+            .await_event(request, replay_key, cancel)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -747,7 +772,11 @@ where
                 let request = ready_wait_request(&shape.wait_scope, &group_key)?;
                 let resolution = self
                     .context
-                    .await_effect_group_wait(request, tokio_util::sync::CancellationToken::new())
+                    .await_effect_group_wait(
+                        request,
+                        group_key.clone(),
+                        tokio_util::sync::CancellationToken::new(),
+                    )
                     .await
                     .map_err(|error| {
                         effect_group_engine_error(
@@ -818,7 +847,7 @@ where
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
             let Some(resolution) = self
                 .context
-                .await_effect_group_wait(request, cancel)
+                .await_effect_group_wait(request, handle.group_key().to_string(), cancel)
                 .await
                 .map_err(|error| {
                     effect_group_engine_error(
@@ -860,7 +889,7 @@ where
                 .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
         }
         let record = match read {
-            EffectGroupReadRankResponse::Settled { settlement } => settlement,
+            EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
             EffectGroupReadRankResponse::NotSettled => {
                 return Err(group_shape_error(format!(
                     "effect group {} rank {rank} remained unsettled after its notification",
@@ -916,6 +945,16 @@ where
         let settlement = settlement_from_payload(record, payload)?;
         handle.advance()?;
         Ok(settlement)
+    }
+
+    /// The cursorless rank read the §6 incorporation record needs (ADR 0099
+    /// §8); the body lives in [`group_read`] for the file-size budget.
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        group_read::read_group_settlement(&self.context, group_key, rank).await
     }
 
     async fn close_effect_group(
@@ -1238,9 +1277,15 @@ where
                         err.to_string(),
                     )
                 })?;
+                let replay_key = invocation.replay_key().to_string();
                 match self
                     .context
-                    .await_event_or_turn_cancel(request, turn_cancel, cancellation.clone())
+                    .await_event_or_turn_cancel(
+                        request,
+                        replay_key,
+                        turn_cancel,
+                        cancellation.clone(),
+                    )
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {
@@ -1594,6 +1639,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
+        | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
             RestateEffectExecution::JournaledRun {
                 envelope: RuntimeEffectEnvelope {

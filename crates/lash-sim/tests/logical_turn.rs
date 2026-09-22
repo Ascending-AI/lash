@@ -1147,3 +1147,86 @@ await control.continue_as({
         "the stopped turn must spend exactly the default no-progress budget"
     );
 }
+
+#[tokio::test]
+async fn terminal_checkpoint_withheld_claim_is_traced_once() {
+    let factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+    let trace = Arc::new(RecordingTraceSink::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let session_id = SessionId::from("logical-turn-withheld-trace");
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("logical-turn-withheld-trace")
+        .complete({
+            let factory = Arc::clone(&factory);
+            let calls = Arc::clone(&calls);
+            let session_id = session_id.clone();
+            move |_| {
+                let factory = Arc::clone(&factory);
+                let calls = Arc::clone(&calls);
+                let session_id = session_id.clone();
+                async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        let store = factory
+                            .open_existing_store_by_id(&session_id)
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        store
+                            .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+                                &session_id,
+                                lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                                lash_core::runtime::TurnWorkPayload::agent_frame_task(
+                                    lash_core::session_graph::frame_node_id(&session_id, "root"),
+                                    "work withheld at terminal checkpoint",
+                                    None,
+                                ),
+                            ))
+                            .await
+                            .unwrap();
+                    }
+                    Ok(text_response("physical turn finished"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .store_factory(factory)
+        .provider(provider)
+        .model(model())
+        .tools(Arc::new(NoTools))
+        .trace_sink(trace.clone())
+        .without_queued_work()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "withheld-trace-test",
+            "withheld-trace-test-boot",
+        ))
+        .unwrap();
+    let session = core.session(session_id.as_str()).open().await.unwrap();
+    session
+        .durable()
+        .enqueue(TurnInput::text("start the logical run"))
+        .send()
+        .await
+        .unwrap();
+    session
+        .queued_turn()
+        .run()
+        .await
+        .unwrap()
+        .expect("withheld drain runs");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "withheld work ran in its own physical turn"
+    );
+    let verdict = logical_turn_claims_settle_exactly_once(&trace.snapshot());
+    assert!(verdict.is_passed(), "{verdict:?}");
+}

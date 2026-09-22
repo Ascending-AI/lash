@@ -128,7 +128,7 @@ DELETE FROM main.runtime_effect_replay WHERE session_id = ?1
 DELETE FROM main.runtime_effect_replay WHERE scope_id = ?1
 === main | effect::group::GroupStatements | effect_group.select_by_key
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    expected_children, created_at_ms
+                    expected_children, lifecycle, created_at_ms
              FROM main.runtime_effect_group
              WHERE group_key = ?1
 === main | effect::group::GroupStatements | effect_group.bump_next_seq
@@ -255,6 +255,24 @@ INSERT INTO main.runtime_effect_group (
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING
+=== main | sqlite::GroupSqliteStatements | effect_group.transition_lifecycle
+UPDATE main.runtime_effect_group
+             SET lifecycle = ?2
+             WHERE group_key = ?1
+               AND json_extract(lifecycle, '$.type') IN (
+                   SELECT value FROM json_each(?3))
+             RETURNING lifecycle
+=== main | sqlite::GroupSqliteStatements | effect_group.select_closing_by_scope
+SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    expected_children, lifecycle, created_at_ms
+             FROM main.runtime_effect_group
+             WHERE scope_id = ?1
+               AND json_extract(lifecycle, '$.type') = 'closing'
+=== main | sqlite::GroupSqliteStatements | effect_group.select_session_pins
+SELECT group_key, lifecycle
+             FROM main.runtime_effect_group
+             WHERE session_id = ?1
+               AND json_extract(lifecycle, '$.type') != 'settled'
 === main | sqlite::ScopeRetirementSqliteStatements | effect_scope_retirement.insert_fence
 INSERT INTO main.effect_scope_retirements (
                  scope_id, retired_at_ms, artifact_cleanup_completed
@@ -425,7 +443,7 @@ DELETE FROM effect_journal.runtime_effect_replay WHERE session_id = ?1
 DELETE FROM effect_journal.runtime_effect_replay WHERE scope_id = ?1
 === effect_journal | effect::group::GroupStatements | effect_group.select_by_key
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    expected_children, created_at_ms
+                    expected_children, lifecycle, created_at_ms
              FROM effect_journal.runtime_effect_group
              WHERE group_key = ?1
 === effect_journal | effect::group::GroupStatements | effect_group.bump_next_seq
@@ -552,6 +570,24 @@ INSERT INTO effect_journal.runtime_effect_group (
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING
+=== effect_journal | sqlite::GroupSqliteStatements | effect_group.transition_lifecycle
+UPDATE effect_journal.runtime_effect_group
+             SET lifecycle = ?2
+             WHERE group_key = ?1
+               AND json_extract(lifecycle, '$.type') IN (
+                   SELECT value FROM json_each(?3))
+             RETURNING lifecycle
+=== effect_journal | sqlite::GroupSqliteStatements | effect_group.select_closing_by_scope
+SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    expected_children, lifecycle, created_at_ms
+             FROM effect_journal.runtime_effect_group
+             WHERE scope_id = ?1
+               AND json_extract(lifecycle, '$.type') = 'closing'
+=== effect_journal | sqlite::GroupSqliteStatements | effect_group.select_session_pins
+SELECT group_key, lifecycle
+             FROM effect_journal.runtime_effect_group
+             WHERE session_id = ?1
+               AND json_extract(lifecycle, '$.type') != 'settled'
 === effect_journal | sqlite::ScopeRetirementSqliteStatements | effect_scope_retirement.insert_fence
 INSERT INTO effect_journal.effect_scope_retirements (
                  scope_id, retired_at_ms, artifact_cleanup_completed
@@ -722,7 +758,7 @@ DELETE FROM process_registry.runtime_effect_replay WHERE session_id = ?1
 DELETE FROM process_registry.runtime_effect_replay WHERE scope_id = ?1
 === process_registry | effect::group::GroupStatements | effect_group.select_by_key
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    expected_children, created_at_ms
+                    expected_children, lifecycle, created_at_ms
              FROM process_registry.runtime_effect_group
              WHERE group_key = ?1
 === process_registry | effect::group::GroupStatements | effect_group.bump_next_seq
@@ -849,6 +885,24 @@ INSERT INTO process_registry.runtime_effect_group (
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING
+=== process_registry | sqlite::GroupSqliteStatements | effect_group.transition_lifecycle
+UPDATE process_registry.runtime_effect_group
+             SET lifecycle = ?2
+             WHERE group_key = ?1
+               AND json_extract(lifecycle, '$.type') IN (
+                   SELECT value FROM json_each(?3))
+             RETURNING lifecycle
+=== process_registry | sqlite::GroupSqliteStatements | effect_group.select_closing_by_scope
+SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    expected_children, lifecycle, created_at_ms
+             FROM process_registry.runtime_effect_group
+             WHERE scope_id = ?1
+               AND json_extract(lifecycle, '$.type') = 'closing'
+=== process_registry | sqlite::GroupSqliteStatements | effect_group.select_session_pins
+SELECT group_key, lifecycle
+             FROM process_registry.runtime_effect_group
+             WHERE session_id = ?1
+               AND json_extract(lifecycle, '$.type') != 'settled'
 === process_registry | sqlite::ScopeRetirementSqliteStatements | effect_scope_retirement.insert_fence
 INSERT INTO process_registry.effect_scope_retirements (
                  scope_id, retired_at_ms, artifact_cleanup_completed

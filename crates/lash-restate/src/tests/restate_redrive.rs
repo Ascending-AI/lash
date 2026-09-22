@@ -1,5 +1,90 @@
 use super::*;
 
+#[derive(Debug, Serialize, serde::Deserialize)]
+struct Fig3460ReplayHeaderInput {
+    index_key: String,
+    replay_key: String,
+}
+
+#[restate_sdk::workflow]
+trait Fig3460ReplayHeaderProbe {
+    async fn run(input: Json<Fig3460ReplayHeaderInput>) -> HandlerResult<Json<()>>;
+}
+
+struct Fig3460ReplayHeaderProbeImpl;
+
+impl Fig3460ReplayHeaderProbe for Fig3460ReplayHeaderProbeImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig3460ReplayHeaderInput>,
+    ) -> HandlerResult<Json<()>> {
+        RestateControllerContext::scope_effect_begin(
+            &ctx,
+            input.index_key.clone(),
+            input.replay_key.clone(),
+        )
+        .await?;
+        RestateControllerContext::scope_effect_end(
+            &ctx,
+            input.index_key.clone(),
+            input.replay_key.clone(),
+        )
+        .await?;
+        RestateControllerContext::scope_group_child_membership(
+            &ctx,
+            input.index_key,
+            input.replay_key,
+        )
+        .await?;
+        Ok(Json(()))
+    }
+}
+
+#[tokio::test]
+async fn fig3460_scope_index_calls_carry_their_replay_key_header() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig3460ReplayHeaderProbeImpl.serve())
+        .build();
+    let input = Fig3460ReplayHeaderInput {
+        index_key: "fig3460-index".to_string(),
+        replay_key: "test-replay".to_string(),
+    };
+    let output = invoke_endpoint_with_named_call_responses(
+        &endpoint,
+        "Fig3460ReplayHeaderProbe",
+        "run",
+        "fig3460-replay-header",
+        &input,
+        vec![
+            ("begin_effect".to_string(), serde_json::Value::Bool(true)),
+            ("end_effect".to_string(), serde_json::Value::Null),
+            (
+                "group_child_membership".to_string(),
+                serde_json::Value::Null,
+            ),
+        ],
+    )
+    .await
+    .expect("replay-header probe must complete");
+    let calls = restate_call_frames(&output).expect("decode scope-index calls");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["begin_effect", "end_effect", "group_child_membership"]
+    );
+    for call in calls {
+        assert_eq!(
+            call.headers,
+            vec![(LASH_REPLAY_KEY_HEADER.to_string(), input.replay_key.clone(),)],
+            "{} CallCommand must expose its exact replay key",
+            call.handler
+        );
+    }
+}
+
 #[tokio::test]
 async fn fig1128_deadline_wire_typed_refusal_and_no_deadline_shape() {
     let key = restate_await_event_key(
@@ -126,6 +211,9 @@ pub(super) async fn fig1128_deadline_wait_redrive_reuses_the_first_payload() {
         .build();
     let workflow_key = "fig1128-deadline-redrive";
     let input = Fig1128DeadlineRedriveInput;
+    let expected_replay_key = runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline")
+        .replay_key()
+        .to_owned();
 
     let first = invoke_endpoint_with_named_call_responses(
         &endpoint,
@@ -142,6 +230,11 @@ pub(super) async fn fig1128_deadline_wait_redrive_reuses_the_first_payload() {
         panic!("the first attempt must emit exactly one durable-wait call");
     };
     assert_eq!(first_wait.handler, "await_resolution");
+    assert_eq!(
+        first_wait.headers,
+        vec![(LASH_REPLAY_KEY_HEADER.to_string(), expected_replay_key)],
+        "the journaled CallCommand must carry the wait identity as its replay key"
+    );
 
     // A replacement process starts later and spends a different amount of
     // monotonic time building the same logical wait. The captured command is

@@ -1,0 +1,145 @@
+{
+  "crates/lash-core": {
+    "tests": {
+      "runtime_effect": [
+        "tests/runtime_effect.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/effect.rs",
+        "tests/runtime/tests/effect/**/*.rs",
+        "tests/runtime/tests/effect_direct_llm.rs",
+        "tests/runtime/tests/effect_response_hook.rs"
+      ],
+      "runtime_scenarios": [
+        "tests/runtime_scenarios.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/attempt_atomicity.rs",
+        "tests/runtime/tests/attempt_atomicity/**/*.rs",
+        "tests/runtime/tests/runtime_scenarios.rs",
+        "tests/runtime/tests/runtime_scenarios/**/*.rs"
+      ],
+      "runtime_lifecycle": [
+        "tests/runtime_lifecycle.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/attachment_continuation.rs",
+        "tests/runtime/tests/child_sessions.rs",
+        "tests/runtime/tests/persistence.rs",
+        "tests/runtime/tests/plugin_lifecycle.rs",
+        "tests/runtime/tests/tool_restore_report.rs",
+        "tests/runtime/tests/tool_surface_lifecycle.rs"
+      ],
+      "runtime_observability": [
+        "tests/runtime_observability.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/assembler.rs",
+        "tests/runtime/tests/core_contracts.rs",
+        "tests/runtime/tests/language_runtime_value.rs",
+        "tests/runtime/tests/projection.rs",
+        "tests/runtime/tests/replay_mismatch.rs",
+        "tests/runtime/tests/replay_origin.rs",
+        "tests/runtime/tests/session_freshness.rs",
+        "tests/runtime/tests/session_lease_observability.rs",
+        "tests/runtime/tests/stream_accumulator.rs",
+        "tests/runtime/tests/stream_evidence.rs",
+        "tests/runtime/tests/tracing.rs",
+        "tests/runtime/tests/usage.rs"
+      ],
+      "runtime_turns": [
+        "tests/runtime_turns.rs",
+        "tests/runtime_support/**/*.rs",
+        "tests/runtime/tests/turns.rs",
+        "tests/runtime/tests/turns/**/*.rs",
+        "tests/runtime/tests/commit_placement.rs",
+        "tests/runtime/tests/turn_cancel_modes.rs"
+      ]
+    },
+    "library_compile_data": [
+      "Cargo.toml",
+      "clippy.toml"
+    ]
+  },
+  "crates/lash-core-execution": {
+    "library_test_sources": [
+      "src/plugin/state/tests.rs",
+      "src/runtime/effect/effect_replay_driver/tests.rs",
+      "src/runtime/effect/executor/control/tests.rs",
+      "src/runtime/effect/live_openers/tests.rs",
+      "src/runtime/effect/tool_child_driver/tests.rs",
+      "src/runtime/effect/tool_settlement/tests.rs",
+      "src/runtime/native_substrate/awaiter/tests.rs",
+      "src/runtime/process/engine_resolve_tests.rs",
+      "src/runtime/process/model_filter_tests.rs",
+      "src/runtime/process/testing/atomic_execution_write_tests.rs",
+      "src/runtime/process/tests.rs",
+      "src/runtime/process/validation_tests.rs",
+      "src/runtime/turn_control/tests.rs",
+      "src/session/execution_context/tests.rs",
+      "src/session/fig790_tests.rs",
+      "src/session/settlement_incorporation_tests.rs",
+      "src/session/settlement_latency_tests.rs",
+      "src/session/tool_execution/turn_cancel_gate_tests.rs",
+      "src/tool_dispatch/tests.rs",
+      "src/tool_dispatch/tests/attachment_normalization.rs",
+      "src/tool_dispatch/tests/context_source.rs",
+      "src/tool_dispatch/tests/directives.rs",
+      "src/tool_dispatch/tests/granted_dispatch.rs",
+      "src/tool_dispatch/tests/intent_drain.rs",
+      "src/tool_dispatch/tests/intent_laws.rs",
+      "src/tool_dispatch/tests/internal_activation.rs",
+      "src/tool_dispatch/tests/orchestrating.rs",
+      "src/tool_dispatch/tests/pending_park_laws.rs",
+      "src/tool_dispatch/tests/protocol_version_refusal.rs",
+      "src/tool_dispatch/tests/rebind_checklist.rs",
+      "src/tool_dispatch/tests/retry_effect_controllers.rs",
+      "src/tool_dispatch/tests/retry_turn_cancel_gate.rs",
+      "src/tool_dispatch/tests/settlement_order.rs",
+      "src/tool_dispatch/tests/single_gate.rs",
+      "src/tool_registry/admission_tests.rs",
+      "src/tool_registry/pinning_tests.rs",
+      "src/tool_registry/tests.rs",
+      "src/tool_registry/tests/grant_support.rs",
+      "src/tool_registry/tests/restore_tests.rs",
+      "src/trace_feedback_tests.rs",
+      "src/triggers/router/tests.rs",
+      "src/triggers/tests.rs"
+    ],
+    "unit_test_sources": [
+      "src/lib.rs",
+      "src/**/*.rs"
+    ],
+    "tests": {
+      "process_model": [
+        "tests/process_model.rs",
+        "tests/runtime/process/lease_serde_tests.rs",
+        "tests/runtime/process/registry_transitions.rs"
+      ],
+      "effect_model": [
+        "tests/effect_model.rs",
+        "tests/runtime/effect/envelope.rs",
+        "tests/runtime/effect/group.rs",
+        "tests/runtime/effect/tool_child.rs"
+      ]
+    },
+    "library_compile_data": [
+      "Cargo.toml",
+      "clippy.toml"
+    ]
+  },
+  "crates/lashlang": {
+    "library_compile_data": [
+      "Cargo.toml"
+    ]
+  },
+  "crates/lash-postgres-store": {
+    "library_compile_data": [
+      "Cargo.toml",
+      "schema.sql",
+      "teardown.sql",
+      "schema-shape.txt"
+    ]
+  },
+  "crates/lash-sqlite-store": {
+    "library_compile_data": [
+      "Cargo.toml"
+    ]
+  }
+}

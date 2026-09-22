@@ -73,6 +73,16 @@ impl RuntimeEffectController for RecordingEffectController {
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
     }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
+    }
 
     async fn close_effect_group(
         &self,
@@ -121,9 +131,9 @@ impl RecordingEffectController {
                     .as_ref()
                     .and_then(|record| record.attempts.first())
                     .and_then(|attempt| attempt.error.as_ref())
-                    .and_then(|error| error.adapter_code.as_ref())
+                    .and_then(|error| error.code.as_ref())
                     .expect("typed provider attempt code")
-                    .as_str();
+                    .namespaced();
                 Some((
                     error.code.as_ref().map(|code| code.to_string()),
                     error.message.clone(),
@@ -504,7 +514,7 @@ async fn provider_panic_is_typed_and_non_retryable() {
 
     assert_eq!(
         failure.error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:provider_panicked".to_string())
+        Some("lash:provider_panicked".to_string())
     );
     assert_eq!(failure.error.message, "provider payload only");
     assert!(!failure.error.is_retryable());
@@ -532,7 +542,7 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
 
     assert_eq!(
         failure.error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:provider_panicked".to_string())
+        Some("lash:provider_panicked".to_string())
     );
     assert_eq!(failure.error.kind, lash_core::ProviderFailureKind::Unknown);
     assert!(!failure.error.is_retryable());
@@ -666,9 +676,9 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         attempt
             .error
             .as_ref()
-            .and_then(|error| error.adapter_code.as_ref())
-            .map(|code| code.as_str()),
-        Some("provider_panicked")
+            .and_then(|error| error.code.as_ref())
+            .map(|code| code.namespaced()),
+        Some("lash:provider_panicked".to_string())
     );
 
     // A second turn can acquire the same session lane immediately: the first

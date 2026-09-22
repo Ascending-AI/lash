@@ -201,6 +201,16 @@ impl RuntimeEffectController for SerialOnlyEffectController {
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
     }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
+    }
 
     async fn close_effect_group(
         &self,
@@ -1095,6 +1105,11 @@ impl RuntimeEffectController for RecordingEffectController {
             // and it still synthesizes nothing, which is what made the earlier
             // refusal right.
             command @ RuntimeEffectCommand::ToolInvocation { .. } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
+                    .await
+            }
+            command @ RuntimeEffectCommand::IncorporateGroupSettlements { .. } => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await

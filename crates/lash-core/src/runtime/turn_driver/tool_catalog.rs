@@ -317,7 +317,7 @@ impl RuntimeTurnDriver<'_> {
             Err(error) => {
                 return Err(Box::new(make_error_event(
                     crate::TurnFailureKind::LlmProvider,
-                    Some(error.category.failure_code()),
+                    Some(error.category.failure_code().into()),
                     error.message.clone(),
                     Some(error.message),
                 )));

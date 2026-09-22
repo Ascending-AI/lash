@@ -34,6 +34,10 @@ async fn world(database_url: String, spec: DrainWorldSpec) -> DrainWorld {
     let options = PostgresEffectReplayOptions {
         lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the suite asks for a ttl at least three renew intervals wide"),
+        drain_budget: spec
+            .drain_budget
+            .map(lash_core::EffectGroupDrainBudget::new)
+            .unwrap_or_default(),
     };
     let host = PostgresEffectHost::with_options(&storage, options);
     // `None` is a law's request for a host with no resolver at all, not a
@@ -65,6 +69,31 @@ lash_conformance::store_effect_group_drain_tests!({
         PostgresStorage::connect(&url)
             .await
             .expect("PostgreSQL drain-conformance reset storage")
+            .pool(),
+    )
+    .await;
+    let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {
+        let url = url.clone();
+        Box::pin(async move { world(url, spec).await })
+    });
+    (database_lock, make)
+});
+
+// The durable PostgreSQL tier answers the §7 durable-closing contract
+// (FIG-3410) — the same world factory, the closing seam beside the drain on
+// the same host.
+lash_conformance::store_effect_group_closing_tests!({
+    let Some(url) = database_url() else {
+        eprintln!(
+            "skipping Postgres durable-closing conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let database_lock = SharedDatabaseLock::acquire(&url).await;
+    reset(
+        PostgresStorage::connect(&url)
+            .await
+            .expect("PostgreSQL closing-conformance reset storage")
             .pool(),
     )
     .await;

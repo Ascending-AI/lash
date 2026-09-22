@@ -1,0 +1,207 @@
+use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
+
+use lash_trace::{
+    TraceLabelMetadata, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
+    TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
+};
+
+pub fn trace_lashlang_source_identity(artifact: &lashlang::ModuleArtifact) -> String {
+    lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir)
+        .source_identity
+}
+
+pub(super) fn trace_lashlang_process_map(
+    artifact: &lashlang::ModuleArtifact,
+    process_name: &str,
+) -> TraceLanguageExecutionMap {
+    let graph =
+        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
+    let Some(process) = graph.process(process_name) else {
+        return TraceLanguageExecutionMap::default();
+    };
+    trace_workflow_subgraph(&process.body)
+}
+
+pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecutionMap {
+    let graph =
+        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
+    trace_workflow_subgraph(&graph.main)
+}
+
+type TraceNodeKey = (String, String);
+
+fn trace_workflow_subgraph(graph: &lashlang::WorkflowSubgraph) -> TraceLanguageExecutionMap {
+    let mut nodes = BTreeMap::new();
+    let mut edges = Vec::new();
+    append_trace_workflow_subgraph(graph, &mut nodes, &mut edges);
+    let endpoint_ids = nodes
+        .keys()
+        .map(|(node_id, _)| node_id.clone())
+        .collect::<BTreeSet<_>>();
+    edges.retain(|edge| endpoint_ids.contains(&edge.from) && endpoint_ids.contains(&edge.to));
+    TraceLanguageExecutionMap {
+        nodes: nodes.into_values().collect(),
+        edges,
+    }
+}
+
+fn append_trace_workflow_subgraph(
+    graph: &lashlang::WorkflowSubgraph,
+    nodes: &mut BTreeMap<TraceNodeKey, TraceLanguageExecutionMapNode>,
+    edges: &mut Vec<TraceLanguageExecutionMapEdge>,
+) {
+    for node in &graph.nodes {
+        let label_metadata =
+            (node.name_source == lashlang::WorkflowNodeNameSource::Label).then(|| {
+                TraceLabelMetadata {
+                    title: node.name.clone(),
+                    description: node.description.clone(),
+                }
+            });
+        for site in &node.execution_sites {
+            let candidate = TraceLanguageExecutionMapNode {
+                id: node.id.to_string(),
+                site: site.clone(),
+                kind: site.kind.clone(),
+                label: site.label.clone(),
+                label_metadata: label_metadata.clone(),
+            };
+            let key = (candidate.id.clone(), candidate.kind.clone());
+            match nodes.entry(key) {
+                Entry::Vacant(entry) => {
+                    entry.insert(candidate);
+                }
+                // Several operations of one kind share one trace node. Retain
+                // the smallest full site descriptor so metadata is independent
+                // of projection traversal order.
+                Entry::Occupied(mut entry) if candidate.site < entry.get().site => {
+                    entry.insert(candidate);
+                }
+                Entry::Occupied(_) => {}
+            }
+        }
+        if let lashlang::WorkflowNodeKind::Container(container) = &node.kind {
+            for (_, child) in container.child_subgraphs() {
+                append_trace_workflow_subgraph(child, nodes, edges);
+            }
+        }
+    }
+    for edge in &graph.edges {
+        let label = match &edge.kind {
+            lashlang::WorkflowEdgeKind::Sequence => "sequence".to_string(),
+            lashlang::WorkflowEdgeKind::DataDependency { variable, version } => {
+                format!("{variable}@{version}")
+            }
+        };
+        edges.push(TraceLanguageExecutionMapEdge {
+            id: edge.id.clone(),
+            from: edge.from.to_string(),
+            to: edge.to.to_string(),
+            label,
+        });
+    }
+}
+
+pub(super) fn language_event_node_id(payload: &TraceLanguageExecutionPayload) -> Option<&str> {
+    match payload {
+        TraceLanguageExecutionPayload::NodeStarted { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeCompleted { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeFailed { node_id, .. }
+        | TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => Some(node_id),
+        TraceLanguageExecutionPayload::ChildStarted { parent_node_id, .. } => Some(parent_node_id),
+        TraceLanguageExecutionPayload::ExecutionStarted { .. }
+        | TraceLanguageExecutionPayload::ExecutionFinished { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lashlang::testing::ast_builders as b;
+    use lashlang::testing::harness::link_labeled;
+
+    fn call(operation: &str) -> lashlang::Expr {
+        b::module_call(
+            &["tools"],
+            operation,
+            vec![b::record(vec![("value", b::var("n"))])],
+        )
+    }
+
+    fn body() -> lashlang::Expr {
+        b::block(vec![
+            b::assign("n", b::num(1.0)),
+            b::finish(b::list(vec![call("echo"), call("err")])),
+        ])
+    }
+
+    fn assert_map_contract(map: &TraceLanguageExecutionMap, graph: &lashlang::WorkflowSubgraph) {
+        let keys = map
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.kind.as_str()))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(keys.len(), map.nodes.len(), "map keys are (node id, kind)");
+
+        let terminal = map
+            .nodes
+            .iter()
+            .find(|node| node.kind == "terminal")
+            .expect("terminal site");
+        let operation = map
+            .nodes
+            .iter()
+            .find(|node| node.id == terminal.id && node.kind == "resource_operation")
+            .expect("the same structural node retains its resource-operation kind");
+        assert_eq!(
+            operation.label, "echo",
+            "the smallest site label is canonical"
+        );
+        assert_eq!(operation.site.label, "echo");
+
+        let producer = graph
+            .nodes
+            .iter()
+            .find(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Data { .. }))
+            .expect("pure producer");
+        assert!(
+            graph.edges.iter().any(|edge| edge.from == producer.id),
+            "the source graph contains the producer dependency"
+        );
+        assert!(
+            map.nodes.iter().all(|node| node.id != producer.id.as_str()),
+            "pure producers have no execution site"
+        );
+        let endpoint_ids = map
+            .nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(map.edges.iter().all(|edge| {
+            endpoint_ids.contains(edge.from.as_str()) && endpoint_ids.contains(edge.to.as_str())
+        }));
+    }
+
+    #[test]
+    fn main_map_is_keyed_by_node_and_kind_and_closed_over_edges() {
+        let linked = link_labeled(b::program(match body() {
+            lashlang::Expr::Block(expressions) => expressions,
+            _ => unreachable!(),
+        }));
+        let graph = lash_typescript::workflow_graph::workflow_graph_from_program(linked.program());
+        let map = trace_lashlang_main_map(&linked.artifact);
+        assert_map_contract(&map, &graph.main);
+    }
+
+    #[test]
+    fn process_map_is_keyed_by_node_and_kind_and_closed_over_edges() {
+        let linked = link_labeled(b::module(
+            vec![b::process("worker", Vec::new(), body())],
+            Vec::new(),
+        ));
+        let graph = lash_typescript::workflow_graph::workflow_graph_from_program(linked.program());
+        let process = graph.process("worker").expect("worker graph");
+        let map = trace_lashlang_process_map(&linked.artifact, "worker");
+        assert_map_contract(&map, &process.body);
+    }
+}

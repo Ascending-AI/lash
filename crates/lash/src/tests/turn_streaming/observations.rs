@@ -691,7 +691,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         let issue = first.result.errors.first().expect("typed provider issue");
         assert_eq!(
             issue.code,
-            Some(crate::turn::TurnFailureCode::UnsafeRetryAfterOutputStarted)
+            Some(crate::turn::TurnFailureCode::UnsafeRetryAfterOutputStarted.into())
         );
         assert_eq!(issue.retryable, Some(false));
 

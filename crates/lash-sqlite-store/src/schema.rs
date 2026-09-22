@@ -1374,7 +1374,12 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// pre-31 journal is rejected at open and recreated rather than replayed
 /// under the old carrier shape.
 /// Generation 32 rejects journaled settlements/captures with the retired message body.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 32;
+/// Version 33 (FIG-3410) puts ADR 0099 §7's group lifecycle in service: the
+/// `lifecycle` column version 30 reserved now carries `closing` and `settled`
+/// values beside `live`. No DDL changes — a pre-33 build reads the column as
+/// always `live` and would permit the retries §7 forbids, so a pre-33 journal
+/// is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 33;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

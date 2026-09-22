@@ -1313,12 +1313,8 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             "the stray call is repaired and the next cell settles the turn"
         );
         assert!(
-            !turn
-                .result
-                .errors
-                .iter()
-                .any(|issue| issue.code
-                    == Some(crate::turn::TurnFailureCode::NativeToolCallNotAllowed)),
+            !turn.result.errors.iter().any(|issue| issue.code
+                == Some(crate::turn::TurnFailureCode::NativeToolCallNotAllowed.into())),
             "a repaired stray call records no terminal protocol issue: {:?}",
             turn.result.errors
         );

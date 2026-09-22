@@ -166,7 +166,11 @@ impl crate::ToolProvider for LatencyProbeTools {
         crate::task::spawn(async move {
             tokio::time::sleep(delay).await;
             let resolution = crate::Resolution::Err(crate::runtime::ExternalCompletionError::new(
-                "probe_failed",
+                crate::FailureCode::foreign(
+                    lash_sansio::Namespace::host("probe").expect("valid namespace"),
+                    "probe_failed",
+                )
+                .expect("a validated host namespace is foreign-mintable"),
                 format!("{name} rejected"),
             ));
             let _ = crate::AwaitEventResolver::resolve_await_event(
@@ -603,7 +607,11 @@ impl crate::ToolProvider for MixedBatchProbeTools {
             tokio::time::sleep(delay).await;
             let resolution = if fails {
                 crate::Resolution::Err(crate::runtime::ExternalCompletionError::new(
-                    "probe_failed",
+                    crate::FailureCode::foreign(
+                        lash_sansio::Namespace::host("probe").expect("valid namespace"),
+                        "probe_failed",
+                    )
+                    .expect("a validated host namespace is foreign-mintable"),
                     format!("{TOOL_LEAF} rejected"),
                 ))
             } else {
@@ -678,7 +686,11 @@ async fn mixed_batch(
             tokio::time::sleep(process.delay).await;
             let resolution = if process.fails {
                 crate::Resolution::Err(crate::runtime::ExternalCompletionError::new(
-                    "process_failed",
+                    crate::FailureCode::foreign(
+                        lash_sansio::Namespace::host("probe").expect("valid namespace"),
+                        "process_failed",
+                    )
+                    .expect("a validated host namespace is foreign-mintable"),
                     "the awaited process failed",
                 ))
             } else {

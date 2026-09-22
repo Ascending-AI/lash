@@ -10,7 +10,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{AdmittedScope, RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
-use super::super::group::{EffectGroupHandle, GroupSettlement, LoserPolicy, RuntimeEffectGroup};
+use super::super::group::{
+    EffectGroupHandle, GroupSettlement, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
+};
 use super::await_event_support::await_event_scope_not_retirable;
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
 use super::{TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation};
@@ -106,6 +108,21 @@ pub trait EffectHost: AwaitEventResolver {
             super::effect_groups_unsupported("durable group-child admission binding")
                 .into_runtime_error(),
         )
+    }
+
+    /// The durable closing/finalization seam over this host's group journal
+    /// (ADR 0099 §7, FIG-3410): the recorded `closing` fact a `close` writes
+    /// and the four-step cursor a finalizer advances.
+    ///
+    /// `None` on a tier that keeps no group row — Restate answers the same
+    /// lifecycle through its engine-side `EffectGroupIndex` `Closed`/`Retired`
+    /// states, which are the twin of this seam, so there is nothing to hand
+    /// out. The SQL hosts answer with the shared driver's closing object, and
+    /// the native controller answers with its in-memory twin.
+    fn effect_group_closing(
+        &self,
+    ) -> Option<Arc<dyn super::super::group_closing::StoreEffectGroupClosing>> {
+        None
     }
 
     /// Installs — or returns the already-installed — tool-child wiring for this
@@ -549,6 +566,28 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         handle: &mut EffectGroupHandle,
         cancel: CancellationToken,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError>;
+
+    /// Read the group's settlement at `rank` without advancing any caller
+    /// cursor (ADR 0099 §8): the recorded terminal and the child's durable
+    /// identity, or `None` when fewer than `rank` children have settled. The
+    /// incorporation prefix record reads the journal through this seam —
+    /// consumption order belongs to the handle, but an incorporated prefix is
+    /// an opener fact that must not move a cursor to read.
+    ///
+    /// The default refuses on the same grounds as
+    /// [`commit_group_child_final`](Self::commit_group_child_final): a
+    /// controller that cannot read back a group's recorded ranks cannot carry
+    /// the §6 incorporation record either.
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        let _ = (group_key, rank);
+        Err(super::effect_groups_unsupported(
+            "durable group settlement read",
+        ))
+    }
 
     /// Release the caller's interest in the group.
     ///

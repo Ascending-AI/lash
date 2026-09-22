@@ -18,7 +18,7 @@ remove a fork with `rm -rf`. After its change merges, remove it with `kiln rm
 lash <name>`.
 
 The implementer loop is `kiln test <label> --test_arg=<name>` while editing
-and `scripts/dev-test.sh` before calling a change done. Bare `kiln test` runs
+and `python3 scripts/dev-test.py` before calling a change done. Bare `kiln test` runs
 `//:dev_tests`, the developer suite; `kiln test //:workspace_tests` runs the
 PR partition CI runs. Implementer loops do not run Postgres,
 S3, or E2E (`scripts/ci/with-service.sh`, store recipes, Restate workers): CI
@@ -27,8 +27,42 @@ single-box database.
 
 ```sh
 . ./env.sh
-scripts/dev-test.sh
+python3 scripts/dev-test.py
 ```
+
+`python3 scripts/dev-test.py --dry-run` prints the changed paths, exact labels,
+base/head revisions, ordered commands and a checkout/config snapshot digest. `--dependents` selects reverse dependencies within the canonical developer partition;
+`just test-changed` uses this same planner. Live store environments are refused.
+Package selection substitutes complete batches once and excludes deferred/manual tests.
+Known Python test edits run their exact command from the CI repository-gate inventory;
+known validation-script families run their mapped test. Shared or unknown tooling
+runs repository gates and the Rust developer suite.
+The runner writes its plan and final receipt under Git's `lash-validation/`
+directory and serializes concurrent requests in one fork. Every request that selects Rust calls
+Bazel, including a request that waited for another run: only Bazel can validate
+ignored package data and external toolchain inputs before reusing cached actions.
+The snapshot covers Git-visible content, relevant environment variables, env.sh
+and .kiln.bazelrc; it is not the complete action-input digest. A changed snapshot
+at the end of execution makes the receipt stale. These receipts do not replace
+Bazel's cache or CI's required gates.
+
+`just floor` is an explicit broad tooling checkpoint, not the default per-edit
+command. It runs the dev/feature/clippy and schema checks together. `just bump-check`
+combines both Rust targets in one Bazel invocation while its script checks run
+beside it. A fork should have only one build request in flight; reuse its result
+or wait before starting another service command.
+
+Launcher shell self-tests require Bubblewrap. Each invocation mounts a private
+`/tmp` and `/run`, uses separate PID/network namespaces, and sees the checkout
+read-only. Production launchers retain their real global ownership locks;
+tests cannot address host PIDs, the host network or the `/run` Docker socket.
+Inherited Docker host/context overrides are removed; test commands still use
+fixtures and mock Docker. This is not containment for arbitrary hostile code.
+Install the `bubblewrap` package on a new host.
+
+Batch labels forward libtest arguments to every member. Explicit arguments print
+member output, including `--list`; a filter matching no tests across the batch
+fails explicitly. Use a direct member label to avoid starting unrelated binaries.
 
 The lower-level entry script remains available for graph analysis, sync, local
 executor reproduction, and focused Bazel labels.
@@ -39,7 +73,8 @@ executor reproduction, and focused Bazel labels.
 full compile proof, not Cargo's metadata-only mode). `test` without labels
 builds and executes `//:dev_tests`, the generated developer suite
 (`//:workspace_tests` minus the two dev-deferred binaries); explicit labels
-remain available for a focused edit loop. `clippy` builds a clippy aggregate,
+remain available for a focused edit loop. `clippy` lints the requested Rust
+labels or lint aggregates and defaults to `//:workspace_clippy`,
 `doc` renders the `rust_doc` targets into bazel-bin, `run` compiles a binary on
 the pool and starts it locally, and `fmt` is a local `cargo fmt`.
 
@@ -54,13 +89,16 @@ kiln build
 # binaries); `kiln test //:workspace_tests` runs the full PR partition.
 kiln test
 
-# Narrow //:dev_tests to the changed package directories. A shared input
+# Select each changed package from the canonical developer partition. A shared input
 # (manifest, lockfile, toolchain, tools/, scripts/) runs the whole suite.
 # Never starts Postgres, S3, or E2E.
-scripts/dev-test.sh
+python3 scripts/dev-test.py
 
 # Lint the `--workspace --all-targets` shape (one clippy action per target).
 kiln clippy
+
+# Lint one integration target with its existing features and crate configuration.
+kiln clippy //crates/lash-core-execution:process_model__test
 
 # Render the workspace API docs into bazel-bin.
 kiln doc
@@ -75,8 +113,8 @@ kiln test \
   //crates/lash-sqlite-store:integration__test
 ```
 
-Three `just` recipes compose those commands into the routine gates. `just
-floor` is the pre-push floor: the dev and feature-lane test and clippy
+Three `just` recipes compose explicit validation checkpoints. `just
+floor` is an opt-in broad tooling checkpoint: the dev and feature-lane test and clippy
 partitions, `kiln fmt -- --check`, `git diff --check`, the repository-script
 gates CI runs as `Test repository scripts`
 (`scripts/ci/repository-gates.sh` extracts the command list from
@@ -91,10 +129,9 @@ version-bump checks, `scripts/check-store-sql-ownership.py`, the lash-sim
 `schema_congruence__test` target, and the lash-core-store unit target that
 holds the runtime-error classification exhaustiveness test. `just
 test-changed [base]` diffs against `<base>` (default `origin/main`), maps the
-changed files to their Bazel packages, queries the test targets in the
-reverse dependencies of those packages within `//crates/...`, and runs them
-through `kiln test`, falling back to `//:dev_tests` when the query selects
-nothing.
+changed files to their Bazel packages, queries reverse dependencies within `//...`, intersects them with the canonical
+developer test inventory, and batches complete member sets once. Query failures
+fall back to `//:dev_tests`; a valid empty selection does not widen the scope.
 
 These build and test commands select the shared Kiln execution pool by default.
 `scripts/hermetic-build.sh --shared build` makes that choice explicit. It uses
@@ -131,14 +168,13 @@ The shared caches live where `.kiln.bazelrc` points them; Bazel action keys use
 declared repository-relative source, patch, data, runfiles, build environment,
 and rule inputs, so two Kiln forks can reuse the same results. Successful test
 results are cacheable (`--cache_test_results=yes`) and an input change produces
-a different test action key. Failed tests are never reused as successes. The
-executor tracks up to eight actions. Each action declares four CPUs and 4 GiB by
-default; its 16-CPU scheduling capacity admits up to four such actions at once.
-Bazel queues at most eight jobs, repository loading uses four threads,
-and each checkout's Bazel server has a 4 GiB heap ceiling. The Bazel server
-remains in the caller's cgroup; remote compilation runs inside the executor's
-`kiln-heavy.slice` budget. Keeping a Bazel server alive preserves its analysis
-cache.
+a different test action key. Failed tests are never reused as successes. Inherited actions request one CPU and 2 GiB in both local and CI builds.
+Generated targets retain the measured resource requests in
+`tools/bazel/action-sizes.json`, including the four-CPU test floor. Local
+clients submit at most 16 jobs; CI submits 32. These are in-flight action
+limits, not compiler thread counts. The scheduler admits work against each
+worker's advertised capacity. Keep a fork's Bazel server alive to preserve
+its analysis cache.
 
 The Kiln golden is maintained outside agent forks. Its refresh prewarms the
 shared action cache with the equivalent of:
@@ -292,7 +328,7 @@ recipes for these correctness contracts:
   additionally refuses a lane with no Bazel target, so the coverage plan and
   the lane graph cannot drift apart.
 
-  The limitation that survives is third-party: `crate.from_cargo` in
+  The general feature-lane limitation is third-party: `crate.from_cargo` in
   `MODULE.bazel` pins `@crates` from one `//:Cargo.toml` + `//:Cargo.lock`
   resolution, so a variant sets `crate_features` on first-party targets but
   links third-party crates at the workspace feature union. The union is a
@@ -304,6 +340,23 @@ recipes for these correctness contracts:
   `all_crate_deps()` reports only the workspace resolution. Untrusted pull
   requests keep the Cargo matrix exactly as it was, which is where a real
   third-party feature divergence would still surface.
+
+  The unconditional runtime OFF witness uses a separate `//:runtime_off`
+  graph. `runtime_off_workspace.py` flattens Cargo workspace inheritance into
+  generated manifests and links their source directories to the checkout.
+  Its single root depends on `lash-runtime` with default features disabled.
+  `runtime-off.Cargo.lock` records this resolution; `kiln sync` regenerates it
+  from the current workspace lock. The `runtime_off_crates` hub selects
+  `prune_unreachable` in the local rules_rs patch, so platform-inactive lock
+  packages cannot enable features on reachable dependencies. The ordinary
+  hub retains dormant dependencies needed by the feature-lane variants.
+
+  Trusted lint CI builds this target alongside Clippy and schemas, then
+  `check_runtime_off_graph.py` compares its actual Rust compiler features
+  and dependency edges with the package-only Cargo tree. The existing native
+  AWS-LC annotation replaces only `aws-lc-sys`'s Cargo build-script dependency
+  subtree. All remaining Rust units and edges must match. Untrusted CI keeps
+  `cargo check -p lash-runtime --lib --no-default-features --locked`.
 
   Cargo-required targets omitted from the resolved default graph are still
   recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`.
@@ -349,6 +402,13 @@ whose exemption is recorded as `clippy_exempt` in
 and that label exposes no `CrateInfo` for a clippy aspect to attach to. The
 `build.rs` compile behind it is a `rust_binary` of its own,
 `//crates/lash-protocol-rlm:build_script_`, and it is in the partition.
+
+Focused `kiln clippy` applies the same aspect as the aggregates. The driver
+requires a completed lint marker for every requested target and configuration;
+source files, unsupported rules, empty selections, and skipped lint outputs
+fail instead of reporting a successful compile as a lint verdict. Existing
+aggregate labels and Bazel options remain available. Use `kiln analyze` for
+analysis without a compiler verdict.
 
 `tools/bazel/clippy.bzl` wraps the upstream `rules_rust` clippy action for three
 reasons, all about matching Cargo's effective lint set rather than an
@@ -584,14 +644,20 @@ fork and golden refresh; it is gitignored and `.bazelrc` `try-import`s it. The
 CI values are `build-cache` environment secrets, masked on read and validated
 by `.github/actions/bazel-shared-cache`, which fails with the name of any empty
 one. The build-infra repository writes both sides; nothing here is edited by
-hand. `.bazelrc` keeps only what the pool is asked *for* — the four-CPU,
-4 GiB action shape, `--remote_local_fallback=false`, and the download and
+hand. `.bazelrc` keeps only what the pool is asked *for* — the common one-CPU,
+2 GiB fallback and explicit per-target resource requests, `--remote_local_fallback=false`, and the download and
 upload policy — and `scripts/test_bazel_test_contract.py` refuses an IP
 address, an instance name, a fingerprint, a certificate path or a home
 directory in `.bazelrc`, under `.github/`, or in `scripts/ci_plan.py`.
 
-`--jobs=32` counts in-flight remote actions rather than local cores, against
-the eight concurrent slots the pool advertises. `--remote_local_fallback=false`
+The local `--jobs=16` and CI `--jobs=32` limits count in-flight remote actions,
+not local cores. Resource defaults live in the unconditional `build` section
+of `.bazelrc`, so forks and CI use identical action keys for inherited requests.
+Sized targets keep their existing higher floors. Aligning CI's previous
+4 CPU/4 GiB fallback with the local 1 CPU/2 GiB fallback changes the keys of
+unannotated CI actions once; those actions can then reuse local results.
+
+`--remote_local_fallback=false`
 makes an unreachable pool a red job rather than a silent two-core compile,
 which is the intended trust posture. Service-backed tests are the one spawn
 that stays on the runner: `scripts/ci/store-tests.sh` adds `no-remote-exec` to
@@ -607,3 +673,111 @@ runs. Compare focused Bazel edit builds with Cargo's existing `cargo check`
 path as separate operations: Bazel `build` produces linkable
 artifacts, while Cargo `check` normally stops at metadata. Cargo release or
 judged timings are not comparable to this graph.
+
+
+## Schema checks in portable functional E2E
+
+The workflow-graph functional E2E job remains a Cargo-owned full-profile gate
+without pool credentials. Its integration recipe explicitly checks the example
+schemas through the portable generator before checking generated TypeScript,
+running Vitest, and building with Vite. This route requires a GitHub workflow
+dispatch; it does not turn a missing local Kiln installation into a Cargo fallback.
+Ordinary forks use the shared schema actions, and untrusted Lint retains its
+separate portable path for both host and example schemas.
+
+## Remote action diagnostics
+
+Use an explicit bundle and baseline when a compile unexpectedly repeats or a
+remote action is slow. The command submits through Kiln with the normal jobs
+and resource policy; it adds a JSON profile, compact execution log, gRPC log
+and invocation/source manifest. Bundles are private local artifacts and may
+contain command environment values: keep them outside the checkout and do not
+upload raw logs to CI artifacts.
+
+```sh
+python3 scripts/bazel-diagnose.py capture --output /tmp/lash-before test //crates/lash-sansio:lash-sansio__unit_test
+# Make the representative edit, then capture a separate bundle.
+python3 scripts/bazel-diagnose.py capture --output /tmp/lash-after --baseline /tmp/lash-before test //crates/lash-sansio:lash-sansio__unit_test
+python3 scripts/bazel-diagnose.py report /tmp/lash-after
+python3 scripts/bazel-diagnose.py compare /tmp/lash-before /tmp/lash-after
+```
+
+The first invocation downloads the checksum-pinned BuildBuddy CLI into the
+user cache. Its `print` and `explain` commands decode local files without a
+BuildBuddy service or credentials. It does not replace the Bazel executable.
+`build.log` receives live build output; `manifest.json` records exit status,
+interruptions, source-content identity and capture/analysis durations.
+`summary.json` joins action digests to real executed-action worker metadata;
+`explain.txt` identifies source, argument, environment and property changes.
+A cached result's worker is historical. Missing metadata, ambiguous retries,
+truncated captures and negative clock-skewed queue timestamps remain explicit.
+A successful build with incomplete diagnostics keeps its successful exit status
+and marks the diagnostics incomplete in the manifest.
+
+The source digest covers tracked and non-ignored untracked files, including
+executable bits and symlink destinations; ignored/generated inputs are described
+by the captured action log instead. The diagnostic manifest is an observation,
+not a reusable validation receipt. Capture is opt-in: remote logs add I/O and
+result decoding has its own measured duration. Compare like target/features,
+cache state and host load, and keep upload/queue time separate from execution.
+
+### Compile source ownership
+
+`tools/bazel/source-ownership.json` records reviewed source boundaries that the
+Cargo target list cannot express. A test entry names its crate root and all
+module/include source patterns it compiles, including shared helpers. Its
+patterns apply to both the default target and every feature-lane variant.
+Unlisted targets retain conservative package source inputs. Python interpreter
+bytecode caches and node_modules dependency trees are excluded from package input
+and runfiles globs so script execution or npm installation cannot invalidate Rust
+actions. Generated frontend assets remain declared where they are consumed. The generator
+rejects missing roots, stale patterns, unknown targets and paths outside the
+package; `kiln sync` writes the declarations into BUILD files.
+
+`library_test_sources` names individual external modules that are reachable
+only under `cfg(test)`. Normal and feature-variant libraries exclude these
+files from compilation inputs; the unit-test crate retains them. Do not put
+`cfg(feature = "testing")` fixtures here: libraries compile those fixtures.
+If a module becomes production-reachable, remove its test-only declaration in
+the same change. Rustc must still find every real compile input in a hermetic
+build, so a missing declaration fails compilation instead of silently hiding
+the dependency. Runtime source-scanning tests continue to declare their files
+through `extra_data`; compile ownership does not remove those witnesses.
+
+When narrowing a boundary, compare action inputs and run a controlled sibling
+edit and shared-helper edit. The sibling edit should compile only its owner;
+the shared edit should compile both. Count Rustc executions independently of
+test executions, since package source runfiles can still re-run source-reading
+tests without recompiling them.
+
+`unit_test_sources` can narrow a library's unit-test source patterns separately
+from its integration roots. Core-execution uses it to keep public model
+contracts out of the large unit-test compile. `tests/process_model.rs` owns
+58 lease-wire and registry-transition tests; `tests/effect_model.rs` owns
+35 effect-group, retained tool-child and journal-outcome tests. Their module
+trees retain the original unit-test names and assertions and call existing
+public APIs. Private runtime tests remain in the unit binary.
+
+Both Cargo discovery and generated Bazel partitions include these integration
+binaries. The `core-internal-features` lane also runs them with no default
+features, including no `testing` feature, against the production library.
+The lease-preimage and retained-tool-child mutation recipes select their
+integration targets as well as the unit tests.
+
+`library_compile_data` replaces the package-wide non-Rust glob for audited
+libraries, including their feature variants. Core, core-execution, Lashlang,
+PostgreSQL and SQLite declare their manifests, crate-local lint configuration
+where present, and embedded production assets. PostgreSQL retains `schema.sql`,
+`teardown.sql` and `schema-shape.txt`; test pins, regression files and predecessor
+fixtures no longer invalidate these production library actions. Cross-package
+`extra_compile_data` remains additive. Unlisted libraries retain the conservative
+glob, and tests retain their compile fixtures and runtime package files. Add new
+embedded assets to the owning library's declaration in the same change.
+The SQLite and PostgreSQL durable-read tests explicitly declare core's
+predecessor-fixture filegroup as runtime data, including their feature variants.
+
+All five relocated core runtime suites now declare their own Rust module trees
+and shared `runtime_support` helpers. The turns suite also owns its two
+`#[path]` modules outside the turns directory. Editing one suite still reruns
+other tests that scan its source at runtime, but does not recompile unrelated
+suite binaries.

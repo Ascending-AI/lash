@@ -91,7 +91,7 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::LanguageRuntimeValue {
-                operation: "deferred_tool_resolution:v1:[\"web.fetch\"]".to_string(),
+                operation: "deferred_tool_resolution:v2:[\"web.fetch\"]".to_string(),
             },
             // FIG-2910 intentionally consumes one Restate journal ordinal
             // before any dependent effect in a resource-bearing ExecCode body.
@@ -198,6 +198,7 @@ pub(super) struct RecordingContext {
     pub(super) process_attachments: Mutex<Vec<crate::process_attach::RestateProcessAttachRequest>>,
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
+    pub(super) awaited_replay_keys: Mutex<Vec<String>>,
     awaited_events: Mutex<HashMap<String, Resolution>>,
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
@@ -545,11 +546,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn await_event<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
+        self.awaited_replay_keys.lock_recover().push(replay_key);
         let context = Arc::clone(self);
         Box::pin(async move {
             let address = request.address();
@@ -616,6 +619,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn await_event_or_turn_cancel<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
@@ -626,6 +630,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             self,
             &self.turn_cancel_gate,
             request,
+            replay_key,
             turn_cancel,
             cancellation,
         )
@@ -634,6 +639,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn peek_event<'run>(
         &'run self,
         address: RestateDurableWaitAddress,
+        _replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -1814,6 +1820,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     fn await_event<'run>(
         &'run self,
         _request: RestateDurableWaitAwaitRequest,
+        _replay_key: String,
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
     where
@@ -1825,6 +1832,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     fn await_event_or_turn_cancel<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
@@ -1835,6 +1843,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
             self,
             &self.turn_cancel_gate,
             request,
+            replay_key,
             turn_cancel,
             cancellation,
         )
@@ -1843,6 +1852,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     fn peek_event<'run>(
         &'run self,
         _address: RestateDurableWaitAddress,
+        _replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -2185,17 +2195,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     fn await_event<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        self.events.await_event(request, cancellation)
+        self.events.await_event(request, replay_key, cancellation)
     }
 
     fn await_event_or_turn_cancel<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
@@ -2206,6 +2218,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             self,
             &self.events.turn_cancel_gate,
             request,
+            replay_key,
             turn_cancel,
             cancellation,
         )
@@ -2214,6 +2227,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     fn peek_event<'run>(
         &'run self,
         address: RestateDurableWaitAddress,
+        _replay_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,

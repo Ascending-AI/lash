@@ -8,6 +8,7 @@ pub use super::await_event_cold::*;
 pub use super::completion_routing::*;
 pub use super::direct_turn_acceptance::*;
 pub use super::durable_queued_drain_wait::*;
+pub use super::effect_group_closing::*;
 pub use super::effect_group_crash_matrix::*;
 pub use super::effect_group_drain::*;
 pub use super::effect_group_host::*;

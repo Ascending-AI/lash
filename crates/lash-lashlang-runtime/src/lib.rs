@@ -9,6 +9,8 @@ pub use error::{
 };
 mod host_identity;
 pub use host_identity::LashlangHostIdentities;
+mod language_trace_host;
+pub use language_trace_host::LanguageTraceHost;
 mod process_identity;
 pub use process_identity::deterministic_lashlang_process_id;
 mod trigger_commands;
@@ -1338,7 +1340,7 @@ pub use deferred_triggers::{
 pub use process::{
     LASHLANG_SEGMENT_STATE_VERSION, lashlang_process_event_types,
     lashlang_process_signal_event_types, lashlang_program_hash, lashlang_type_expr_schema,
-    trace_lashlang_main_map,
+    trace_lashlang_main_map, trace_lashlang_source_identity,
 };
 pub use typed_output::parse_output_schema;
 

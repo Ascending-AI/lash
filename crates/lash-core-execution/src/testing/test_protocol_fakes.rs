@@ -500,7 +500,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             if assistant_text.trim().is_empty() {
                 actions.push(DriverAction::Emit(make_error_event(
                     lash_sansio::session_model::TurnFailureKind::LlmProvider,
-                    Some(lash_sansio::session_model::TurnFailureCode::EmptyResponse),
+                    Some(lash_sansio::session_model::TurnFailureCode::EmptyResponse.into()),
                     "Model returned no assistant text or tool calls.",
                     None,
                 )));

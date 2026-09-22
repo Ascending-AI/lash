@@ -800,7 +800,14 @@ async fn exception_determinism_dump() -> Vec<u8> {
     let caught_continuation =
         exception_effect_checkpoint(&after_caught_failure, &ExceptionRecordingHost::default())
             .await;
-    assert!(caught_continuation.occurrence_counters.len() >= 2);
+    assert_eq!(
+        caught_continuation
+            .occurrence_counters
+            .values()
+            .sum::<u64>(),
+        2,
+        "the failed call and recovered call both advance the structural node's occurrence"
+    );
 
     serde_json::to_vec(&[try_continuation, finally_continuation, caught_continuation])
         .expect("determinism continuations encode")
@@ -834,7 +841,13 @@ fn independent_processes_dump_identical_exception_continuations() {
             .env("LASHLANG_EXCEPTION_DETERMINISM_PROBE", "1")
             .output()
             .expect("spawn exception determinism probe");
-        assert!(output.status.success());
+        assert!(
+            output.status.success(),
+            "exception determinism probe failed: status={:?}, stdout={}, stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         String::from_utf8(output.stdout)
             .expect("probe output is UTF-8")
             .lines()

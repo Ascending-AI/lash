@@ -15,6 +15,7 @@ impl RuntimeSessionServices {
         registration: crate::ProcessRegistration,
         mut create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<crate::ProcessAwaitOutput, crate::ProcessInfraError> {
@@ -31,14 +32,17 @@ impl RuntimeSessionServices {
         // Keep that execution authority through the child turn; session and
         // turn ids remain the turn's foreground routing and attribution.
         let child_turn_id = crate::TurnId::from(registration.id.as_str());
-        match Box::pin(self.initialize_session_and_run_turn(
-            create_request,
-            &registration.id,
-            child_turn_id,
-            turn_input,
-            scoped_effect_controller,
-            cancellation,
-        ))
+        match Box::pin(
+            self.initialize_session_and_run_turn(session_init::ProcessSessionTurnInit {
+                create_request,
+                process_id: &registration.id,
+                turn_id: child_turn_id,
+                turn_input,
+                execution_write_authority: &execution_write_authority,
+                scoped_effect_controller,
+                cancellation,
+            }),
+        )
         .await
         {
             Ok(run) => {
@@ -294,7 +298,7 @@ fn process_turn_failure_raw(
     if let Some(issue) = issue {
         raw.insert("kind".to_string(), issue.kind.as_str().into());
         if let Some(code) = issue.code.as_ref() {
-            raw.insert("code".to_string(), code.as_str().into());
+            raw.insert("code".to_string(), code.namespaced().into());
         }
         if let Some(retryable) = issue.retryable {
             raw.insert("retryable".to_string(), retryable.into());

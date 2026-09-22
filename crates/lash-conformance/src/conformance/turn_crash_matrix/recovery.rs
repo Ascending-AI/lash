@@ -1,4 +1,5 @@
 use super::*;
+use pretty_assertions::assert_eq;
 
 /// Crash one scripted turn at `entry`'s point, recover it with a successor
 /// turn under `pressure`, and assert the ruled durable end state.

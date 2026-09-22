@@ -2,7 +2,7 @@
 //! `lease_and_claims.rs`.
 //!
 //! It lives here because the parent sits on the 2500-line test budget
-//! `scripts/check-production-file-size.sh` enforces, and FIG-2266's explicit
+//! `scripts/check-production-file-size.py` enforces, and FIG-2266's explicit
 //! group methods pushed it over. A real module rather than an `include!`, so
 //! `cargo fmt` keeps walking it.
 
@@ -215,6 +215,16 @@ impl lash_core::RuntimeEffectController for AcceptanceWindowJournalController {
         cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.native.await_next_settlement(handle, cancel).await
+    }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
     }
 
     async fn close_effect_group(

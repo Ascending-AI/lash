@@ -85,6 +85,16 @@ impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.rejecting.await_next_settlement(handle, cancel).await
     }
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.rejecting.read_group_settlement(group_key, rank).await
+    }
 
     async fn close_effect_group(
         &self,

@@ -900,7 +900,7 @@ fn runtime_feedback_unresolved_attachment_errors_retain_message_index() {
             assert_eq!(error.kind, lash_core::ProviderFailureKind::Validation);
             assert_eq!(
                 error.code.as_ref().map(|code| code.to_string()),
-                Some("adapter:stored_attachment_not_resolved".to_string())
+                Some("lash:stored_attachment_not_resolved".to_string())
             );
             assert!(error.message.contains("message index 1"), "{error}");
         }

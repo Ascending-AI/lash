@@ -354,7 +354,14 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     // program projection is language-agnostic and does not round-trip through
     // canonical TypeScript.
     let graph = lash_typescript::workflow_graph::workflow_graph_from_program(&program);
+    let trace_graph =
+        lash_typescript::workflow_graph::workflow_graph_from_program(&output.artifact.canonical_ir);
     let trace_map = trace_lashlang_main_map(&output.artifact);
+    assert_eq!(
+        trace_lashlang_source_identity(&output.artifact),
+        trace_graph.source_identity,
+        "the trace integration must retain the projector's source identity"
+    );
 
     let container_kinds = graph
         .nodes()
@@ -382,12 +389,8 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
 
     let expected_nodes = graph
         .nodes()
-        .flat_map(|node| &node.execution_sites)
-        .map(|site| {
-            lashlang::runtime_execution_site_for_workflow_site(&output.artifact, site)
-                .expect("workflow execution site should exist in the compiled artifact")
-                .node_id
-        })
+        .filter(|node| !node.execution_sites.is_empty())
+        .map(|node| node.id.to_string())
         .collect::<std::collections::BTreeSet<_>>();
     let actual_nodes = trace_map
         .nodes
@@ -873,7 +876,7 @@ fn deterministic_process_id_reuses_replayed_start_site_and_args() {
         .expect("process id derives");
 
     assert_eq!(first, second);
-    assert!(first.starts_with("process:lashlang:v2:blake3:"));
+    assert!(first.starts_with("process:lashlang:v3:blake3:"));
 }
 
 #[test]

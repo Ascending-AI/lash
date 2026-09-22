@@ -18,6 +18,7 @@ pub struct TraceLashlangGraph {
     pub graph_key: String,
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
+    pub source_identity: String,
     pub module_ref: String,
     pub entry_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,12 +147,13 @@ struct TraceLashlangGraphAccumulator {
     graph_key: String,
     scope: TraceRuntimeScope,
     subject: TraceRuntimeSubject,
+    source_identity: String,
     module_ref: String,
     entry_kind: String,
     entry_ref: Option<String>,
     entry_name: String,
     status: LanguageExecutionStatus,
-    nodes: BTreeMap<String, TraceLashlangGraphNode>,
+    nodes: BTreeMap<(String, String), TraceLashlangGraphNode>,
     edges: BTreeMap<String, TraceLashlangGraphEdge>,
     children: Vec<TraceLashlangGraphChildLink>,
 }
@@ -211,6 +213,7 @@ impl TraceLashlangGraphAccumulator {
             graph_key: identity.graph_key(),
             scope: identity.scope.clone(),
             subject: identity.subject.clone(),
+            source_identity: identity.source_identity.clone(),
             module_ref: identity.module_ref.clone(),
             entry_kind: identity.entry_kind.clone(),
             entry_ref: identity.entry_ref.clone(),
@@ -227,6 +230,7 @@ impl TraceLashlangGraphAccumulator {
             graph_key: self.graph_key.clone(),
             scope: self.scope.clone(),
             subject: self.subject.clone(),
+            source_identity: self.source_identity.clone(),
             module_ref: self.module_ref.clone(),
             entry_kind: self.entry_kind.clone(),
             entry_ref: self.entry_ref.clone(),
@@ -259,6 +263,7 @@ fn reduce_lashlang_execution_event(
             node_kind,
             label,
             occurrence,
+            ..
         } => {
             let node = node_mut(
                 state,
@@ -279,6 +284,7 @@ fn reduce_lashlang_execution_event(
             node_kind,
             label,
             occurrence,
+            ..
         } => {
             let node = node_mut(
                 state,
@@ -303,6 +309,7 @@ fn reduce_lashlang_execution_event(
             label,
             occurrence,
             error,
+            ..
         } => {
             let node = node_mut(
                 state,
@@ -334,7 +341,10 @@ fn reduce_lashlang_execution_event(
             selected,
         } => {
             let graph = graph_mut(state, identity);
-            if let Some(node) = graph.nodes.get_mut(node_id) {
+            if let Some(node) = graph
+                .nodes
+                .get_mut(&(node_id.clone(), "branch".to_string()))
+            {
                 node.observation = zero_duration_completion(*occurrence, timestamp);
                 node.branch_selection = Some(*selected);
             }
@@ -371,14 +381,17 @@ fn seed_lashlang_graph(
 ) {
     graph.status = LanguageExecutionStatus::Running;
     for node in &execution_map.nodes {
-        graph.nodes.entry(node.id.clone()).or_insert_with(|| {
-            TraceLashlangGraphNode::unobserved(
-                node.id.clone(),
-                node.kind.clone(),
-                node.label.clone(),
-                node.label_metadata.clone(),
-            )
-        });
+        graph
+            .nodes
+            .entry((node.id.clone(), node.site.kind.clone()))
+            .or_insert_with(|| {
+                TraceLashlangGraphNode::unobserved(
+                    node.id.clone(),
+                    node.kind.clone(),
+                    node.label.clone(),
+                    node.label_metadata.clone(),
+                )
+            });
     }
     for edge in &execution_map.edges {
         graph
@@ -419,7 +432,7 @@ fn node_mut<'a>(
 ) -> &'a mut TraceLashlangGraphNode {
     graph_mut(state, identity.identity)
         .nodes
-        .entry(identity.node_id.to_string())
+        .entry((identity.node_id.to_string(), identity.node_kind.to_string()))
         .or_insert_with(|| {
             TraceLashlangGraphNode::unobserved(
                 identity.node_id,
@@ -495,10 +508,12 @@ mod tests {
                 .expect("valid trace test effect address"),
                 effect_id: "exec-1".to_string(),
             },
+            source_identity: "source-1".to_string(),
             module_ref: "module-1".to_string(),
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),
+            restate_invocation_id: None,
         }
     }
 
@@ -526,18 +541,36 @@ mod tests {
                     nodes: vec![
                         TraceLanguageExecutionMapNode {
                             id: "branch".to_string(),
+                            site: lash_sansio::WorkflowExecutionSite::new(
+                                "main",
+                                [0],
+                                "branch",
+                                "if ready",
+                            ),
                             kind: "branch".to_string(),
                             label: "if ready".to_string(),
                             label_metadata: None,
                         },
                         TraceLanguageExecutionMapNode {
                             id: "then".to_string(),
+                            site: lash_sansio::WorkflowExecutionSite::new(
+                                "main",
+                                [0, 1, 0],
+                                "call",
+                                "notify()",
+                            ),
                             kind: "call".to_string(),
                             label: "notify()".to_string(),
                             label_metadata: None,
                         },
                         TraceLanguageExecutionMapNode {
                             id: "else".to_string(),
+                            site: lash_sansio::WorkflowExecutionSite::new(
+                                "main",
+                                [0, 2, 0],
+                                "call",
+                                "skip()",
+                            ),
                             kind: "call".to_string(),
                             label: "skip()".to_string(),
                             label_metadata: None,
@@ -575,6 +608,7 @@ mod tests {
                 node_kind: "branch".to_string(),
                 label: "if ready".to_string(),
                 occurrence,
+                call_id: None,
             },
         }
     }
@@ -588,6 +622,7 @@ mod tests {
                 node_kind: "branch".to_string(),
                 label: "if ready".to_string(),
                 occurrence,
+                call_id: None,
             },
         }
     }
@@ -601,6 +636,7 @@ mod tests {
                 node_kind: "branch".to_string(),
                 label: "if ready".to_string(),
                 occurrence,
+                call_id: None,
                 error: error.to_string(),
             },
         }
@@ -622,6 +658,39 @@ mod tests {
             graph.edges[0].selection,
             TraceLashlangEdgeSelection::Unknown
         );
+    }
+
+    #[test]
+    fn graph_store_keeps_distinct_site_kinds_for_one_structural_node() {
+        let store = TraceLashlangGraphStore::default();
+        let mut event = started_event("start");
+        if let TraceLanguageExecutionPayload::ExecutionStarted { execution_map } =
+            &mut event.payload
+        {
+            execution_map.nodes.push(TraceLanguageExecutionMapNode {
+                id: "branch".to_string(),
+                site: lash_sansio::WorkflowExecutionSite::new(
+                    "main",
+                    [0],
+                    "resource_operation",
+                    "condition",
+                ),
+                kind: "resource_operation".to_string(),
+                label: "condition".to_string(),
+                label_metadata: None,
+            });
+        }
+
+        append_at(&store, event, 1_000);
+
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
+        let sites = graph
+            .nodes
+            .iter()
+            .filter(|node| node.id == "branch")
+            .map(|node| node.kind.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(sites, BTreeSet::from(["branch", "resource_operation"]));
     }
 
     /// A TypeScript session's executions reduce into the same projection.

@@ -45,13 +45,13 @@ fn responses_resume_url(
     let mut url = reqwest::Url::parse(base_url.trim_end_matches('/')).map_err(|error| {
         LlmTransportError::new(format!("Invalid OpenAI Responses resume URL: {error}"))
             .with_kind(ProviderFailureKind::Validation)
-            .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
+            .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
     })?;
     url.path_segments_mut()
         .map_err(|_| {
             LlmTransportError::new("OpenAI Responses resume URL cannot carry path segments")
                 .with_kind(ProviderFailureKind::Validation)
-                .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?
         .push("responses")
         .push(response_id);
@@ -243,7 +243,7 @@ pub(crate) async fn complete(
     origin_route.validate_endpoint().map_err(|error| {
         LlmTransportError::new(error.to_string())
             .with_kind(ProviderFailureKind::Validation)
-            .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
+            .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
     })?;
     let stream_events = req.stream_events.clone().map(|downstream| {
         let origin_route = origin_route.clone();
@@ -348,7 +348,7 @@ pub(crate) async fn complete(
         let mut parsed = reqwest::Url::parse(&creation_url).map_err(|error| {
             LlmTransportError::new(format!("Invalid OpenAI-compatible request URL: {error}"))
                 .with_kind(ProviderFailureKind::Validation)
-                .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
         parsed
             .query_pairs_mut()
@@ -514,7 +514,7 @@ pub(crate) async fn complete(
             http_summary,
             LlmTransportError::new("OpenAI Responses reattachment did not return an event stream")
                 .with_kind(ProviderFailureKind::Stream)
-                .with_adapter_code(TurnFailureCode::ResponsesResumeNotStreaming)
+                .with_lash_code(TurnFailureCode::ResponsesResumeNotStreaming)
                 .with_retry_verdict(TransportRetryVerdict::NotRetryable),
         ));
     }
@@ -576,7 +576,7 @@ pub(crate) async fn complete(
                     .map_err(|conflict| {
                         LlmTransportError::new(conflict.to_string())
                             .with_kind(ProviderFailureKind::Validation)
-                            .with_adapter_code(TurnFailureCode::ProviderReplayOriginConflict)
+                            .with_lash_code(TurnFailureCode::ProviderReplayOriginConflict)
                     })?;
             }
             if let (Some(partial), Some(provider_request_id)) = (
@@ -619,7 +619,7 @@ pub(crate) async fn complete(
         .map_err(|conflict| {
             LlmTransportError::new(conflict.to_string())
                 .with_kind(ProviderFailureKind::Validation)
-                .with_adapter_code(TurnFailureCode::ProviderReplayOriginConflict)
+                .with_lash_code(TurnFailureCode::ProviderReplayOriginConflict)
         })?;
     Ok(response)
 }
@@ -720,7 +720,7 @@ fn complete_buffered_responses(
             "OpenAI Responses stream ended before a terminal response event",
         )
         .with_kind(ProviderFailureKind::Stream)
-        .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
+        .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
         .with_output_started(output_started)
         .with_partial_response(partial));
@@ -875,7 +875,7 @@ fn complete_buffered_chat(
         state.final_response_raw = Some(text);
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
-            .with_adapter_code(TurnFailureCode::StreamEndedBeforeFinishReason)
+            .with_lash_code(TurnFailureCode::StreamEndedBeforeFinishReason)
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(chat_response_from_state(state, &url)));
     }
@@ -1055,7 +1055,7 @@ async fn drive_streaming_responses(
                         "OpenAI Responses resume event omitted sequence_number",
                     )
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_adapter_code(TurnFailureCode::ResponsesResumeEventMissingSequence)
+                    .with_lash_code(TurnFailureCode::ResponsesResumeEventMissingSequence)
                     .with_retry_verdict(TransportRetryVerdict::NotRetryable));
                 }
                 if sequence_number.is_some_and(|sequence| sequence <= resume_after) {
@@ -1144,7 +1144,7 @@ async fn drive_streaming_responses(
                 "OpenAI Responses stream ended before a terminal response event",
             )
             .with_kind(ProviderFailureKind::Stream)
-            .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
+            .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
         ));
     }
@@ -1266,7 +1266,7 @@ async fn drive_streaming_chat(
         seal_open_blocks(&mut state);
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
-            .with_adapter_code(TurnFailureCode::StreamEndedBeforeFinishReason)
+            .with_lash_code(TurnFailureCode::StreamEndedBeforeFinishReason)
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(chat_response_from_state(state, &url)));
     }

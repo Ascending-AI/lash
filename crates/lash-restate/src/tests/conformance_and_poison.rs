@@ -150,7 +150,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
             0 => Err(
                 LlmTransportError::new("conformance attachment ceiling elapsed")
                     .with_kind(lash_core::ProviderFailureKind::Timeout)
-                    .with_adapter_code(TurnFailureCode::Timeout)
+                    .with_lash_code(TurnFailureCode::Timeout)
                     .with_retry_verdict(
                         lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                     ),
