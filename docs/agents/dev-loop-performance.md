@@ -5,6 +5,9 @@ Measurements used Rust 1.98.1, Bazel 9.1.0 and the shared NativeLink pool,
 starting at Lash `ee9ef46ff62543681d58301c851cd55c214e493a`.
 Compiler-action counts establish invalidation behavior. Individual elapsed
 samples include shared-pool load and are not a predicted full-floor speedup.
+The reported build times are Bazel elapsed times. An overlapping local Cargo
+check affected part of the source-ownership measurement window, so those elapsed
+samples are not controlled throughput comparisons.
 
 ## Retained changes
 
@@ -20,8 +23,9 @@ samples include shared-pool load and are not a predicted full-floor speedup.
 The core test-only edit still costs a real large unit compilation. Its fresh
 green sample spent 71.2 seconds compiling the unit target. Source ownership
 removes an unnecessary library compile; it does not make that frontend cheap.
-The manifest excludes 43 audited external `cfg(test)` modules from production
-libraries while retaining testing-feature fixtures and all unit inputs.
+The initial manifest excluded 43 audited external `cfg(test)` modules from
+production libraries; 42 remain after relocating the lease suite. Testing-feature
+fixtures and all unit inputs remain covered.
 
 All four schema outputs were byte-identical across the old Cargo route, the
 Bazel route and checked-in artifacts. Obsolete and changed schema mutations
