@@ -6150,7 +6150,6 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "axum",
- "compact_str 0.9.1",
  "lash-runtime",
  "reqwest 0.13.4",
  "schemars 0.8.22",

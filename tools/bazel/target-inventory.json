@@ -20154,7 +20154,6 @@
       "dependencies": [
         "anyhow",
         "axum",
-        "compact_str",
         "lash-runtime",
         "reqwest",
         "schemars",
