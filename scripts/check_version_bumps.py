@@ -96,6 +96,13 @@ REGISTRATION_BASELINES = {
     "crates/lash-core-execution/src/tool_dispatch/context.rs:TOOL_CHILD_REBIND_VERSION": (
         "sha256:cba79f85602c06a7d319e64f4f0953f543b8aa7d83205a3eee235085e129391a"
     ),
+    # FIG-3420: ADR 0099 section 6 / ADR 0100 mint the journaled presentation
+    # record — the model-facing return plus the retained-artifact refs — as a
+    # new durable format carried on the `PresentToolResult` outcome. The
+    # constant has no merge-base value because the surface is new, not renamed.
+    "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs:TOOL_PRESENTATION_VERSION": (
+        "sha256:192ec036291f132d064121e24ff37547d980a99236d9f26262c9d7e9890a5286"
+    ),
     # FIG-3408: ADR 0099 section 3 mints the retained tool-child request and the
     # invocation-level tool command together, as one new durable format. The
     # constant has no merge-base value because the surface is new, not renamed.
