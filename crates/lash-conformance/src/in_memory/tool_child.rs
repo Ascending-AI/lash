@@ -38,3 +38,30 @@ crate::tool_child_invocation_tests!({
         },
     )
 });
+
+// The batch-group differential answers on the same substrate.
+crate::tool_batch_group_tests!({
+    let host: Arc<dyn crate::EffectHost> = Arc::new(
+        crate::NativeEffectHost::with_native_controller(Arc::new(
+            NativeRuntimeEffectController::default(),
+        ))
+        .allow_process_lifetime_completion_keys(),
+    );
+    (
+        (),
+        "native",
+        crate::ToolChildLawFixture {
+            make_world: Arc::new(move |_spec| {
+                let host = Arc::clone(&host);
+                Box::pin(async move { crate::ToolChildWorld { host, drain: None } })
+            }),
+            make_registry: Arc::new(|| {
+                Box::pin(async {
+                    Arc::new(crate::TestLocalProcessRegistry::default())
+                        as Arc<dyn crate::ProcessRegistry>
+                })
+            }),
+            deferrable_routing: crate::ToolChildDeferrableRouting::ProcessLifetime,
+        },
+    )
+});
