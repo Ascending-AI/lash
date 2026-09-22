@@ -1230,6 +1230,17 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         session_id: &str,
     ) -> Result<Vec<(String, EffectGroupLifecycle)>, RuntimeEffectControllerError>;
 
+    /// The `WhenQuiescent` retirement proof as a standalone read: `true` when
+    /// `scope` carries no `in_progress` effect row, no group still short of a
+    /// journaled child, and no unresolved promise. Unlike the gate inside
+    /// [`retire_journal`](Self::retire_journal) this read takes no scope lock —
+    /// the caller is deciding whether to write an end fact (FIG-3419), not
+    /// deleting the scope, so it needs the answer without the exclusion.
+    async fn scope_is_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeEffectControllerError>;
+
     /// Extend the lease by `lease_ttl_ms`, guarded by `fence`.
     ///
     /// Same guard as [`finalize`](EffectReplayRowStore::finalize); the new expiry is the

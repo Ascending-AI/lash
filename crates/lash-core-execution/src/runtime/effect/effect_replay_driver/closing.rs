@@ -110,6 +110,13 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreEff
         }
         Ok(reports)
     }
+
+    async fn scope_is_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.driver.row_store.scope_is_quiescent(scope).await
+    }
 }
 
 impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>

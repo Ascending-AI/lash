@@ -211,20 +211,12 @@ impl ParentScope {
     /// the admitted scope plus its pinned `ProcessRef` — and this is the only
     /// projection of that vocabulary into a `ParentScope`.
     ///
-    /// A `QueueDrain` opener is a durable owner in exactly §1's sense, but it
-    /// cannot yet parent a process: a drain has no end protocol, so there is
-    /// no moment a child's `OnParentEnd` could fire. Until FIG-3419 lands that
-    /// protocol, drain-owned children take `Host`.
+    /// A `QueueDrain` opener is a durable owner in exactly §1's sense, and
+    /// since FIG-3419 it has an end protocol — the drain-end epilogue writes
+    /// the receipt and the ledger row — so drain-owned children parent on it
+    /// like any other owner.
     pub fn from_owner(opener: &crate::EffectOpener) -> Self {
-        match opener {
-            crate::EffectOpener::Turn { .. } | crate::EffectOpener::Process { .. } => {
-                Self::Owned(opener.clone())
-            }
-            // A drain is the logical owner, but parenting on it needs the
-            // drain-end protocol FIG-3419 owns; until then its children attach
-            // to the host.
-            crate::EffectOpener::QueueDrain { .. } => Self::Host,
-        }
+        Self::Owned(opener.clone())
     }
 }
 

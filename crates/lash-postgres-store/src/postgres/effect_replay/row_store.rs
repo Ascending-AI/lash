@@ -907,6 +907,29 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .collect()
     }
 
+    async fn scope_is_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let scope_id = scope
+            .journal_identity()
+            .map_err(RuntimeEffectControllerError::from)?
+            .key()
+            .to_string();
+        let scope_json = serde_json::to_string(scope).map_err(|err| {
+            RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                format!("effect scope JSON encoding failed: {err}"),
+            )
+        })?;
+        let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
+        let quiescent = scope_is_quiescent(&mut tx, &scope_id, &scope_json)
+            .await
+            .map_err(effect_store_error)?;
+        tx.rollback().await.map_err(effect_store_error)?;
+        Ok(quiescent)
+    }
+
     async fn read_group_settlement(
         &self,
         group_key: &str,

@@ -400,12 +400,41 @@ rebind prior work. Where a retained pair must be validated — recovery — the
 check is `ProcessQuery::get_process_ref`, which answers the exact
 `(process_id, incarnation)` or refuses it as superseded.
 
-`QueueDrain` is a durable owner (ADR 0099 §1) but not yet a lifecycle parent: a
-drain has no end protocol, so there is no moment a child's `OnParentEnd` could
-fire. `from_owner` maps a drain opener to `Host` until FIG-3419 lands the
-drain-end protocol — the mapping is deliberate, and substituting the drain's
-first physical turn for "drain end" is not the fix. Explicit host
-administration may still select `Host` directly.
+`QueueDrain` is a durable owner (ADR 0099 §1) and, since FIG-3419 landed the
+drain-end protocol below, a lifecycle parent: `from_owner` maps a drain opener
+to its own `Owned` scope like any other owner. Rows written while the
+interim `Host` mapping was live are never reinterpreted — they stay
+host-managed. Explicit host administration may still select `Host` directly.
+
+### Amendment: a drain ends its children (FIG-3419) — Landed
+
+A queued-work drain is an owner, and an owner ends. The end fact is a receipt
+in the session store — `OperationId::new(ExecutionScope::queue_drain(session,
+drain_id), "final")` — committed by the drain epilogue
+(`turn_loop/drain_end.rs`) as a state-preserving `RuntimeCommit` under the
+still-held session execution lease, after `drive_logical_turn` returns
+successfully and before the lease is released. `drain_id` is the caller's
+idempotency identity: a retried drain under the same `drain_id` is the same
+owner, so receipt replay makes a repeated epilogue a no-op.
+
+The ordering is obligations → outcome commit → end receipt → ledger row: the
+epilogue first resumes every `closing` group under the drain scope
+(`resume_closing_groups`, ADR 0099 §7) and refuses to end while any report is
+`Pending` or the scope is not quiescent, then commits the receipt, then writes
+the `ParentScope::queue_drain` row via `record_parent_end`. The ledger row is
+the separate-store second write; a crash in the gap is closed by
+`redrive_missing_opener_parent_end_rows`, which confirms
+`drain_end_exists(drain_id)` before re-deriving the row — and a drain whose
+receipt is absent is interrupted, not ended, so its retry under the same
+`drain_id` ends it.
+
+What is not an end: the worker dying, an empty first poll (a drain that never
+owned children writes nothing — a nothing-to-do retry of a drained owner ends
+only when the registry already lists its children), an intermediate
+physical-turn commit inside the drain (one drain may run several; the owner
+end is its own write), and a failed `drive_logical_turn` (interrupted, not
+ended). The sweep then settles `OnParentEnd::Cancel` children with
+`ParentEnded`; `Abandon` children stay host-managed.
 
 The incarnation stays *beside* `ExecutionScope`, not inside it: the scope
 remains the claim address, the pin is the admission-time fact, and

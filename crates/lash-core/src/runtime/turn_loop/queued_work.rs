@@ -325,6 +325,17 @@ impl LashRuntime {
             );
         }
         if admission.terminal.is_some() {
+            // A retry of a settled run is how a drain that crashed after its
+            // terminal commit, before its end, reaches the epilogue again
+            // (FIG-3419): the persisted scope is the same owner. A `Failed`
+            // settlement is not an end, exactly as on the live path.
+            if !matches!(
+                admission.terminal,
+                Some(crate::store::QueuedRunTerminal::Failed { .. })
+            ) {
+                self.end_queue_drain(&admission.scope, &lease, &store, false)
+                    .await;
+            }
             lease
                 .release_if_live()
                 .await
@@ -505,6 +516,8 @@ impl LashRuntime {
                 )
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
+            self.end_queue_drain(&selection.admission.scope, &lease, &store, false)
+                .await;
             lease
                 .release_if_live()
                 .await
@@ -554,6 +567,12 @@ impl LashRuntime {
             result = Err(error);
         }
         self.queued_run = None;
+        if result.is_ok()
+            && let Some(held) = lease.as_ref()
+        {
+            self.end_queue_drain(&admission.scope, held, &store, true)
+                .await;
+        }
         let result = self
             .settle_session_execution_lease(lease.as_ref(), result)
             .await?;
