@@ -62,25 +62,19 @@ common --experimental_repository_downloader_retries=5
 # than here: a test action is a whole libtest binary running a tokio runtime and
 # a store, not a single rustc, so its measured compile-time CPU does not
 # describe it. `tools/bazel/generate_build_files.py` floors every test target's
-# `cpu_count` at 4 (`TEST_CPU_FLOOR`); libs, bins and build scripts stay exactly
-# as measured. At one core the suite's own threads contend for it and
+# `cpu_count` at 4 (`TEST_CPU_FLOOR`); other sized targets retain their
+# explicit resource floors. At one core the suite's own threads contend for it and
 # time-sensitive cases fail instead of merely running slowly: CI run
 # 34950810111 failed `//crates/lash-perf:lash-perf__unit_test` on a phase
 # assertion and timed out `//crates/lash-sim:stack_policy__test`, neither of
 # which is failing on main.
 #
-# These two lines are also the LOCAL defaults only. CI never passes
-# `--config=shared`: `.github/actions/bazel-shared-cache` composes its own flag
-# list and asks the pool for `cpu_count=4` / `memory_kb=4194304`. An emitted
-# `exec_properties` pair replaces both of those, so a row measured at one or
-# two cores lowers an action's cap on CI instead of leaving it alone. The
-# generator therefore floors every request it emits at CI's own default
-# (`CI_DEFAULT_CPU_COUNT`), and declares a higher floor by hand for the actions
-# that own the Bazel jobs' critical path (`CPU_FLOORS`): a saturated CPU-bound
-# compile can never raise itself through the measured table, because the
-# measured average cannot exceed the cap the sample ran under.
-build:shared --remote_default_exec_properties=cpu_count=1
-build:shared --remote_default_exec_properties=memory_kb=2097152
+# Local forks and CI inherit these same defaults, including toolchain and
+# dependency actions without explicit requests. Different defaults produce
+# different remote action keys. Sized targets retain their explicit CPU/memory
+# floors; only unannotated actions inherit this small-action policy.
+build --remote_default_exec_properties=cpu_count=1
+build --remote_default_exec_properties=memory_kb=2097152
 build:shared --remote_local_fallback=false
 # Only pool workers publish action results. A spawn that still runs locally
 # (no-remote-exec targets, service gates) is never uploaded, and the pool's

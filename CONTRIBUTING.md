@@ -35,7 +35,7 @@ fork="$(kiln fork lash my-change)"
 cd "$fork"
 . ./env.sh
 kiln test //crates/lash-core:lash-core__unit_test --test_arg=<name>   # while editing
-scripts/dev-test.sh   # before calling it done; never starts Postgres/S3/E2E
+python3 scripts/dev-test.py   # before calling it done; never starts Postgres/S3/E2E
 ```
 
 Source the fork's `env.sh` before **any** Cargo command. It selects the fork's
@@ -58,7 +58,7 @@ portable default-feature run.
 | --- | --- |
 | `kiln test` | `//:dev_tests`: the deterministic developer suite (95 labels); `//:workspace_tests` adds the two dev-deferred binaries for the PR partition. |
 | `scripts/ci/with-service.sh <pg14\|pg16\|pg18\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or MinIO suite, against a container this command starts and removes. |
-| `scripts/dev-test.sh` | `//:dev_tests` narrowed to the changed package directories (`:all` each); a shared input widens to the whole suite. Refuses live store URLs. |
+| `python3 scripts/dev-test.py` | `//:dev_tests` narrowed to the changed package directories (`:all` each); a shared input widens to the whole suite. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 
 `scripts/ci/with-service.sh` is the same wrapper the `Test Postgres store` and
@@ -85,7 +85,7 @@ Keep local validation proportional to the change:
 
 - Run cheap formatting and static checks relevant to the files you changed.
 - For behavior changes, run the narrowest regression that proves the changed
-  behavior. `scripts/dev-test.sh` runs the developer suite narrowed to the
+  behavior. `python3 scripts/dev-test.py` runs the developer suite narrowed to the
   changed package directories. `scripts/fast-test.sh` is an optional broader
   iteration aid when reverse-dependency coverage is useful; high-fan-out
   crates can still select a large part of the workspace. Neither starts

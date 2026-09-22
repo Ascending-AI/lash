@@ -35,25 +35,13 @@ DEFAULT_CPU_COUNT = 1
 # four cores; libs, bins and build scripts stay exactly as measured.
 TEST_CPU_FLOOR = 4
 TEST_SIZE_KINDS = ("test",)
-# CI never activates the `shared` config: `.github/actions/bazel-shared-cache`
-# composes its own flag list, and it asks the pool for more than this
-# repository's own defaults --- `--remote_default_exec_properties=cpu_count=4`
-# and `memory_kb=4194304`. An emitted `exec_properties` pair replaces BOTH
-# defaults for that action, so a row measured at one or two cores does not
-# "stay as measured" on CI: it LOWERS the cap below what an unsized target
-# already gets, and five targets plus the lash-core rlib were doing exactly
-# that. Every request this generator emits therefore floors at the CI default
-# --- on BOTH axes. The memory half used to floor only for a key named in
-# `CPU_FLOORS`, so every target sized through `TEST_CPU_FLOOR` or through a
-# measured row below 4 GiB shipped CI a 2 GiB cgroup while asking for four
-# cores: a floor that widened the cap and halved the memory of the very
-# actions it was widening, which is the failure this comment already forbade
-# for the declared floors (FIG-3310). Targets with no row at all are still
-# untouched and keep inheriting whichever default the invocation supplies, so
-# the small-action default that keeps a 200 ms genrule out of a
-# lash-core-sized slot still holds.
-CI_DEFAULT_CPU_COUNT = 4
-CI_DEFAULT_MEMORY_KB = 4194304
+# Sized targets retain the four-core / 4 GiB safety floor established for the
+# test partition and measured compile requests. These are explicit target
+# requirements, independent of the small-action defaults used by local and CI
+# invocations. An unsized target inherits that invocation's defaults; once a
+# target needs either resource above the default, emit both safety floors.
+SIZED_CPU_FLOOR = 4
+SIZED_MEMORY_FLOOR = 4194304
 # A measured average can never exceed the cap the sample ran under, so a
 # CPU-bound compile cannot argue its own way up the table:
 # `tools/bazel/action_sizes_from_log.py` divides observed CPU seconds by wall
@@ -126,12 +114,11 @@ def exec_properties(crate_name: str, kind: str) -> dict[str, str]:
     # inherits whatever the invocation supplies.
     if cpu_count <= DEFAULT_CPU_COUNT and memory_kb <= DEFAULT_MEMORY_KB:
         return {}
-    # What to emit is floored at CI's defaults on both axes, because the pair
-    # replaces both of them. A measured value above a floor is kept; a measured
-    # value below one would be a cap, not a size.
+    # Emitting either resource also preserves the sized-target safety floor
+    # for the other. These floors do not change with invocation defaults.
     return {
-        "cpu_count": str(max(cpu_count, CI_DEFAULT_CPU_COUNT)),
-        "memory_kb": str(max(memory_kb, CI_DEFAULT_MEMORY_KB)),
+        "cpu_count": str(max(cpu_count, SIZED_CPU_FLOOR)),
+        "memory_kb": str(max(memory_kb, SIZED_MEMORY_FLOOR)),
     }
 
 
@@ -149,6 +136,83 @@ def string_list(values: list[str], indent: int = 8) -> str:
         return "[]"
     spaces = " " * indent
     return "[\n" + "".join(f"{spaces}{quote(value)},\n" for value in values) + " " * (indent - 4) + "]"
+
+
+SOURCE_OWNERSHIP = json.loads((ROOT / "tools/bazel/source-ownership.json").read_text())
+INTEGRATION_SOURCE_PATTERNS = [
+    "src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"
+]
+
+
+def test_source_patterns(directory: str, target: str) -> list[str]:
+    return SOURCE_OWNERSHIP.get(directory, {}).get("tests", {}).get(
+        target, INTEGRATION_SOURCE_PATTERNS
+    )
+
+
+def library_test_sources_argument(directory: str) -> str:
+    sources = SOURCE_OWNERSHIP.get(directory, {}).get("library_test_sources", [])
+    return f"    test_srcs = {string_list(sources)},\n" if sources else ""
+
+
+def unit_test_sources_argument(directory: str) -> str:
+    patterns = SOURCE_OWNERSHIP.get(directory, {}).get("unit_test_sources", [])
+    return f"    srcs_patterns = {string_list(patterns)},\n" if patterns else ""
+
+
+def validate_source_ownership(metadata: dict) -> None:
+    members = set(metadata["workspace_members"])
+    packages = {
+        relative(package["manifest_path"]).removesuffix("/Cargo.toml"): package
+        for package in metadata["packages"]
+        if package["id"] in members
+    }
+    for directory, policy in SOURCE_OWNERSHIP.items():
+        if directory not in packages:
+            raise ValueError(f"source ownership names unknown package {directory}")
+        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources"}:
+            raise ValueError(f"unknown source ownership keys for {directory}")
+        package = packages[directory]
+        tests = {
+            target["name"]: target
+            for target in package["targets"]
+            if "test" in target["kind"]
+        }
+        for name, patterns in policy.get("tests", {}).items():
+            if name not in tests:
+                raise ValueError(f"source ownership names unknown test {directory}:{name}")
+            crate_root = relative(tests[name]["src_path"]).removeprefix(directory + "/")
+            if crate_root not in patterns:
+                raise ValueError(f"source ownership omits root {directory}/{crate_root}")
+        unit_patterns = policy.get("unit_test_sources", [])
+        if unit_patterns:
+            library = next(
+                (target for target in package["targets"] if "lib" in target["kind"]),
+                None,
+            )
+            if library is None or not library.get("test", False):
+                raise ValueError(f"unit-test ownership names no testable library: {directory}")
+            root = relative(library["src_path"]).removeprefix(directory + "/")
+            if root not in unit_patterns:
+                raise ValueError(f"unit-test ownership omits root {directory}/{root}")
+        groups = [
+            *policy.get("tests", {}).values(),
+            policy.get("library_test_sources", []),
+            unit_patterns,
+        ]
+        for patterns in groups:
+            for pattern in patterns:
+                if (
+                    not pattern.endswith(".rs")
+                    or pattern.startswith("/")
+                    or ".." in pathlib.PurePosixPath(pattern).parts
+                ):
+                    raise ValueError(f"invalid Rust source pattern {directory}/{pattern}")
+                if not any((ROOT / directory).glob(pattern)):
+                    raise ValueError(f"source pattern matches nothing: {directory}/{pattern}")
+        for source in policy.get("library_test_sources", []):
+            if "*" in source or not (ROOT / directory / source).is_file():
+                raise ValueError(f"test-only source must name a file: {directory}/{source}")
 
 
 def cargo_metadata() -> dict:
@@ -588,6 +652,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    crate_name = {quote(library['name'])},\n"
             f"    declared_features = {string_list(declared_features)},\n"
             + exec_properties_argument(library["name"], "lib")
+            + library_test_sources_argument(package_dir)
             + f"    extra_compile_data = {string_list(extra_compile_data)},\n"
             f"    manifest_dir = {quote(package_dir)},\n"
             f"    package_name = {quote(package['name'])},\n"
@@ -642,6 +707,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    crate_root = {quote(relative(library['src_path']).replace(package_dir + '/', ''))},\n"
                 f"    declared_features = {string_list(declared_features)},\n"
                 + exec_properties_argument(library["name"], "test")
+                + unit_test_sources_argument(package_dir)
                 + f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 + (
                     f"    extra_data = {string_list(unit_extra_data)},\n"
@@ -737,6 +803,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    crate_root = {quote(crate_root)},",
             f"    declared_features = {string_list(declared_features)},",
         ]
+        if kind == "test" and target["name"] in SOURCE_OWNERSHIP.get(package_dir, {}).get("tests", {}):
+            args.append(f"    srcs_patterns = {string_list(test_source_patterns(package_dir, target['name']))},")
         sized = exec_properties_argument(crate_name, size_kind)
         if sized:
             args.append(sized.rstrip("\n"))
@@ -956,6 +1024,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 
 
 def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
+    validate_source_ownership(metadata)
     features = package_features(metadata)
     outputs = {}
     inventory = []
@@ -1661,6 +1730,7 @@ class FeatureLaneGraph:
             f"    crate_name = {quote(library['name'])},\n"
             f"    declared_features = {string_list(sorted(package['features']))},\n"
             + exec_properties_argument(library["name"], "lib")
+            + library_test_sources_argument(directory)
             + f"    extra_compile_data = {string_list(library_compile_data(package_name) + feature_compile_data(package_name, features))},\n"
             f"    manifest_dir = {quote(directory)},\n"
             f"    package_name = {quote(package_name)},\n"
@@ -1779,6 +1849,7 @@ class FeatureLaneGraph:
                 f"    crate_root = {quote(root)},\n"
                 f"    declared_features = {string_list(sorted(package['features']))},\n"
                 + exec_properties_argument(library["name"], "test")
+                + unit_test_sources_argument(directory)
                 + f"    extra_compile_data = {string_list(compile_data)},\n"
                 + (
                     f"    extra_data = {string_list(unit_extra_data)},\n"
@@ -1870,7 +1941,7 @@ class FeatureLaneGraph:
             f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
             f"    manifest_dir = {quote(directory)},\n"
             f"    package_name = {quote(package_name)},\n"
-            f'    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],\n'
+            f"    srcs_patterns = {json.dumps(test_source_patterns(directory, target['name']))},\n"
             + (
                 f"    rustc_env = {json.dumps(rustc_env, sort_keys=True)},\n"
                 if rustc_env

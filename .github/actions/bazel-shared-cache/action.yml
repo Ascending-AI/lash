@@ -215,8 +215,6 @@ runs:
           echo "--tls_client_certificate=$RUNNER_TEMP/build-cache/client.crt"
           echo "--tls_client_key=$RUNNER_TEMP/build-cache/client.key"
           echo "--remote_default_exec_properties=kiln_executor_runtime=${POOL_RUNTIME}"
-          echo "--remote_default_exec_properties=cpu_count=4"
-          echo "--remote_default_exec_properties=memory_kb=4194304"
           echo "--remote_local_fallback=false"
           echo "--remote_download_outputs=toplevel"
           echo "--remote_timeout=600"

@@ -17,6 +17,8 @@ load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 _IGNORED_FILES = [
     "BUILD",
     "BUILD.bazel",
+    "**/__pycache__/**",
+    "**/node_modules/**",
 ]
 
 def _cargo_env(package_name, manifest_dir, version, extra = {}):
@@ -134,6 +136,7 @@ def lash_rust_library(
         version,
         build_script = None,
         exec_properties = {},
+        test_srcs = [],
         extra_compile_data = []):
     deps = all_crate_deps(normal = True)
     if build_script:
@@ -154,6 +157,7 @@ def lash_rust_library(
         rustc_flags = _cargo_check_cfg(declared_features),
         srcs = native.glob(
             ["src/**/*.rs", "shared/**/*.rs"],
+            exclude = test_srcs,
             allow_empty = True,
         ),
         version = version,
@@ -219,6 +223,7 @@ def lash_rust_unit_test(
         args = [],
         build_script = None,
         exec_properties = {},
+        srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
         extra_compile_data = [],
         extra_data = [],
         library = None,
@@ -250,7 +255,7 @@ def lash_rust_unit_test(
         rustc_flags = _cargo_check_cfg(declared_features),
         srcs = _crate_srcs(
             crate_root,
-            ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
+            srcs_patterns,
         ),
         tags = tags,
         timeout = timeout,
@@ -269,6 +274,7 @@ def lash_rust_integration_test(
         version,
         args = [],
         exec_properties = {},
+        srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
         library = None,
         library_crate_name = None,
         extra_compile_data = [],
@@ -298,7 +304,7 @@ def lash_rust_integration_test(
         rustc_flags = _cargo_check_cfg(declared_features),
         srcs = _crate_srcs(
             crate_root,
-            ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+            srcs_patterns,
         ),
         tags = tags,
         version = version,
@@ -372,6 +378,7 @@ def lash_rust_feature_library(
         version,
         build_script = None,
         exec_properties = {},
+        test_srcs = [],
         extra_compile_data = [],
         extra_deps = {},
         tags = [],
@@ -399,6 +406,7 @@ def lash_rust_feature_library(
         rustc_flags = _cargo_check_cfg(declared_features),
         srcs = native.glob(
             ["src/**/*.rs", "shared/**/*.rs"],
+            exclude = test_srcs,
             allow_empty = True,
         ),
         tags = tags,

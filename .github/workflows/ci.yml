@@ -440,13 +440,37 @@ jobs:
       # The self-tests are independent processes over a read-only checkout, so
       # they run concurrently; `scripts/ci/run-gate-commands.sh` holds each
       # one's output, prints a wall-time table and runs every command even
-      # after one fails. The launcher self-tests share a box-wide `flock -n`
-      # that refuses rather than waits, so `--serial` keeps them in one stream
-      # beside the pool. Slowest commands are listed first so the pool starts
-      # them first; the list is otherwise the serial list it replaces.
+      # after one fails. Launcher self-tests use private namespaces, so their
+      # lifecycle locks and disposable processes cannot affect another gate.
+      # Slowest commands are listed first so the pool starts them first.
+      - name: Install launcher test sandbox
+        run: |
+          if ! command -v bwrap >/dev/null 2>&1 || ! command -v apparmor_parser >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y bubblewrap apparmor
+          fi
+          # Ubuntu 24.04 restricts capabilities inside unprivileged user
+          # namespaces. Allow this runner's bwrap to configure its private
+          # loopback interface without changing the host-wide restriction.
+          sandbox_bin="$RUNNER_TEMP/lash-launcher-sandbox"
+          mkdir -p "$sandbox_bin"
+          install -m 0755 "$(command -v bwrap)" "$sandbox_bin/bwrap"
+          cat > "$sandbox_bin/apparmor.profile" <<PROFILE
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile lash-launcher-bwrap "$sandbox_bin/bwrap" flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+          sudo apparmor_parser --replace "$sandbox_bin/apparmor.profile"
+          echo "$sandbox_bin" >> "$GITHUB_PATH"
+          "$sandbox_bin/bwrap" --unshare-user --unshare-pid --unshare-net \
+            --unshare-ipc --unshare-uts --die-with-parent \
+            --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp /bin/true
+
       - name: Test repository scripts
         run: |
-          bash scripts/ci/run-gate-commands.sh --serial '^bash ' <<'GATES'
+          bash scripts/ci/run-gate-commands.sh --jobs 4 <<'GATES'
           bash scripts/test-agent-workbench-dev-reset.sh
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
@@ -455,9 +479,13 @@ jobs:
           python3 scripts/test_check_feature_coverage.py
           python3 scripts/test_fast_test.py
           python3 scripts/test_bazel_test_contract.py
+          python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/test_check_version_bumps.py
           python3 scripts/test_generate_workflow_schemas.py
+          python3 scripts/test_schema_validation.py
+          python3 scripts/test_dev_test.py
+          python3 scripts/test_launcher_test_sandbox.py
           python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_check_facade_only_examples.py
@@ -1375,12 +1403,22 @@ jobs:
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
-            //:workspace_clippy //:feature_lane_clippy
+            --profile="${RUNNER_TEMP}/bazel-lint-profile.json.gz" \
+            //:workspace_clippy //:feature_lane_clippy //:schema_checks
 
       - name: Remove client credentials
         if: always()
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+      - name: Upload compiler and schema action profile
+        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-lint-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Untrusted pull requests receive no cache credentials and keep exactly
       # the Cargo command that predates the Bazel branch above.
@@ -1401,19 +1439,6 @@ jobs:
         if: needs.plan.outputs.bazel_trusted != 'true'
         run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
 
-      # `cargo check --workspace --all-targets` never exercises the
-      # package-only `--no-default-features` resolution, and the repo-gates
-      # boundary leg is `cargo tree`-only: it proves the resolved graph, not
-      # that every referenced path exists at that feature set (FIG-3427:
-      # `lash_core::runtime::effect` is `pub(crate)` without `testing`, and a
-      # downstream `crate::runtime::effect::…` path broke only under this
-      # command). This is the `runtime-features` lane's OFF witness from
-      # scripts/feature-coverage.toml, run unconditionally because the
-      # feature-lanes job is dispatch-only and repo-gates skips Rust-only
-      # diffs.
-      - name: Check lash-runtime without default features
-        run: cargo check -p lash-runtime --lib --no-default-features --locked
-
       - name: Check Restate handler panic boundary
         run: python3 scripts/check-restate-handler-panics.py
 
@@ -1429,14 +1454,23 @@ jobs:
           python3 scripts/check-postgres-json-carrier-coverage.py
           python3 scripts/check-postgres-payload-shape-version.py
 
-      - name: Check host contract schema drift
-        run: python3 scripts/generate-workflow-schemas.py --check
-
       - name: Install workflow graph frontend dependencies
         run: npm --prefix examples/workflow-graph-roundtrip/frontend ci
 
-      - name: Check workflow graph frontend contract types
-        run: npm --prefix examples/workflow-graph-roundtrip/frontend run check:types
+      # `cargo check --workspace --all-targets` never exercises the
+      # package-only `--no-default-features` resolution, and the repo-gates
+      # boundary leg is `cargo tree`-only: it proves the resolved graph, not
+      # that every referenced path exists at that feature set (FIG-3427:
+      # `lash_core::runtime::effect` is `pub(crate)` without `testing`, and a
+      # downstream `crate::runtime::effect::…` path broke only under this
+      # command). This is the `runtime-features` lane's OFF witness from
+      # scripts/feature-coverage.toml, run unconditionally because the
+      # feature-lanes job is dispatch-only and repo-gates skips Rust-only
+      # diffs.
+      - name: Check feature and schema contracts
+        env:
+          BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+        run: bash scripts/ci/lint-contracts.sh
 
       # One owner per table across both SQL stores (FIG-3380): no stray
       # statement, no duplicate, no shadowed shared statement, and every

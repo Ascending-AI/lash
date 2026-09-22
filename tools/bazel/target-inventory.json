@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 147,
+  "cargo_target_count": 148,
   "feature_lane_units": [
     {
       "features": [],
@@ -17368,7 +17368,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 203,
+  "generated_label_count": 204,
   "packages": [
     {
       "declared_features": [
@@ -17522,11 +17522,20 @@
           "kind": "unit-test",
           "label": "//crates/lash-core-execution:lash-core-execution__unit_test",
           "tags": []
+        },
+        {
+          "cargo": "process_model",
+          "kind": "test",
+          "label": "//crates/lash-core-execution:process_model__test",
+          "tags": []
         }
       ],
       "test_batch": {
-        "label": null,
-        "members": []
+        "label": "//crates/lash-core-execution:test_batch",
+        "members": [
+          "//crates/lash-core-execution:lash-core-execution__unit_test",
+          "//crates/lash-core-execution:process_model__test"
+        ]
       }
     },
     {
