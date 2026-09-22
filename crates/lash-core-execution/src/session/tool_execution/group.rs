@@ -381,8 +381,14 @@ impl RuntimeExecutionContext<'_> {
                     settlement,
                 }) => {
                     let completed = self
-                        .apply_tool_child_settlement(&leaves[position], *outcome, *settlement)
-                        .await;
+                        .apply_tool_child_settlement(
+                            handle.group_key(),
+                            position,
+                            &leaves[position],
+                            *outcome,
+                            *settlement,
+                        )
+                        .await?;
                     settled[position] = Some(completed);
                 }
                 Ok(other) => {
@@ -418,35 +424,39 @@ impl RuntimeExecutionContext<'_> {
     /// FIG-3411 seam: applies one settled child's recorded facts to the
     /// opener's live state and returns the completed call.
     ///
-    /// This reproduces the opener-side bookkeeping `complete_tool_call`
-    /// performs for a batch leaf, with the ADR 0099 §6 difference that
-    /// presentation is taken verbatim from `settlement.model_return` — the
-    /// child's own recorded projection, run once inside the child — rather
-    /// than re-running the projector here. Trigger outcomes, checkpoint
-    /// messages, usage deltas, realized intent outcomes and started-process
-    /// possession are all incorporated from the record, not recomputed.
+    /// The once-only channels — possession, committed checkpoint messages,
+    /// trigger receipts, and usage deltas charged once per
+    /// `UsageDeltaIdentity` (ADR 0099 §6/§13) — go through
+    /// `incorporate_tool_settlement` under the child's
+    /// `SettlementSource::GroupRank` identity rather than being re-applied
+    /// here. Presentation is taken verbatim from `settlement.model_return` —
+    /// the child's own recorded projection, run once inside the child — rather
+    /// than re-running the projector. Realized intent outcomes and their
+    /// activity events ride the carried `ToolDispatchOutcome`.
     ///
-    /// Deliberately absent here, and owned by FIG-3411: the recorded
-    /// observation prefix (ADR 0099 §6), idempotent usage dedup (§13),
-    /// once-only message delivery, and cross-invocation carriage of the
-    /// settlement facts themselves (§8).
+    /// Deliberately absent here, and owned by FIG-3411 part 2: the recorded
+    /// observation prefix (ADR 0099 §6) and cross-invocation carriage of the
+    /// settlement facts themselves (§8). An incorporation refusal is an
+    /// infrastructure failure: the consumer turns it into the batch-level
+    /// failure, never a per-leaf tool rejection (§10 L3).
     pub(crate) async fn apply_tool_child_settlement(
         &self,
+        group_key: &str,
+        position: usize,
         leaf: &PreparedToolChildLeaf,
         outcome: ToolDispatchOutcome,
         settlement: crate::runtime::ToolSettlement,
-    ) -> CompletedProtocolToolCall {
+    ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
         let call_id = leaf.call.call.call_id.clone();
         let correlation_id = tool_activity_id(&call_id);
-        self.record_processes_started_by_intents(&outcome.intent_outcomes);
-        self.restore_started_process_ids(&settlement.possession);
-        self.restore_tool_trigger_outcomes(settlement.triggers);
-        self.dispatch
-            .checkpoint_messages
-            .enqueue(settlement.checkpoint_messages);
-        if let Some(ledger) = self.dispatch.direct_completions.usage_ledger() {
-            ledger.extend(settlement.usage);
-        }
+        self.incorporate_tool_settlement(
+            crate::session::SettlementSource::GroupRank {
+                group_key: group_key.to_string(),
+                rank: position as u64,
+                child_replay_key: format!("{group_key}:child:{position}"),
+            },
+            &settlement,
+        )?;
         for intent_outcome in &outcome.intent_outcomes {
             self.emit_turn_activity(
                 correlation_id.clone(),
@@ -466,7 +476,7 @@ impl RuntimeExecutionContext<'_> {
         };
         self.emit_tool_call_completed(&record, &outcome.attempts)
             .await;
-        CompletedProtocolToolCall {
+        Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
                 tool_name: outcome.record.tool,
@@ -478,7 +488,7 @@ impl RuntimeExecutionContext<'_> {
                 replay: leaf.call.call.replay.clone(),
             },
             record,
-        }
+        })
     }
 
     /// The standard-protocol driver's group entry point: opens one group over

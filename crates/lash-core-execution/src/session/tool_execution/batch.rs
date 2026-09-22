@@ -585,6 +585,8 @@ impl RuntimeExecutionContext<'_> {
                     attempts: Vec::new(),
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
+                    captures: Vec::new(),
+                    triggers: Vec::new(),
                 };
                 let completed = self
                     .complete_undispatched_tool_call(call.id, None, outcome)
