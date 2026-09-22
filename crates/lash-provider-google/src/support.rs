@@ -17,7 +17,7 @@ pub(crate) use lash_core::llm::types::{
     LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
     ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderReplayMeta,
     ProviderRouteIdentity, ReasoningRetentionValidationError, ResponseTextMeta,
-    StreamBlockIdentity,
+    StreamBlockIdentity, tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
     Provider, ProviderComponents, ProviderOptions, ReasoningDisableEncoding, ReasoningEncoding,
