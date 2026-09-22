@@ -1,5 +1,4 @@
 use super::*;
-use lash_core::llm::transport::ProviderFailureKind;
 
 pub(super) fn request_with_instructions(
     instructions: &str,
@@ -212,7 +211,11 @@ fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
 }
 
 #[test]
-fn malformed_tool_call_input_json_fails_the_anthropic_request() {
+fn malformed_tool_call_input_json_replays_as_raw_text_wrapper() {
+    // History may hold a tool call whose argument text never parsed (the
+    // standard protocol refuses it pre-dispatch but keeps the raw text).
+    // Replay must not fail the request: the shared rule wraps the verbatim
+    // text under `_raw` so the tool_use block still validates.
     let provider = AnthropicProvider::new("key");
     let req = request(vec![LlmMessage::new(
         LlmRole::Assistant,
@@ -224,14 +227,11 @@ fn malformed_tool_call_input_json_fails_the_anthropic_request() {
         }],
     )]);
 
-    let error = provider
+    let body = provider
         .build_request_body(&req)
-        .expect_err("malformed tool input must not become {}");
-    assert_eq!(error.kind, ProviderFailureKind::Validation);
-    assert_eq!(
-        error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:invalid_tool_call_input_json".to_string())
-    );
-    assert!(error.message.contains("lookup"));
-    assert_eq!(error.raw.as_deref().map(String::as_str), Some("{"));
+        .expect("malformed history replays, never fails the request");
+    let tool_use = body["messages"][0]["content"][0].clone();
+    assert_eq!(tool_use["type"], "tool_use");
+    assert_eq!(tool_use["name"], "lookup");
+    assert_eq!(tool_use["input"], json!({"_raw": "{"}));
 }

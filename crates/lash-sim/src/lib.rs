@@ -12,6 +12,8 @@ mod oracle_coverage_tests;
 mod recorded_reality;
 #[cfg(test)]
 mod request_snapshot;
+#[cfg(test)]
+mod tool_call_replay;
 
 pub mod artifacts;
 pub mod backend_contention;

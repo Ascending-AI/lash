@@ -30,6 +30,7 @@ use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest,
     LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
     ProviderReplayMeta, ResponsePhase, ResponseTextMeta, StreamBlockIdentity,
+    tool_call_input_replay_string,
 };
 use lash_core::{
     SchemaContract, TurnFailureCode, facade_support::ProviderSchemaCapabilities,

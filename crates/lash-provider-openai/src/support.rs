@@ -14,6 +14,7 @@ pub(crate) use lash_core::llm::types::{
     LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
     LlmStreamEvidence, LlmTerminalReason, LlmUsage, ProviderReasoningRetentionSupport,
     ProviderReplayMeta, ProviderRouteIdentity, ReasoningRetentionSelection, StreamBlockIdentity,
+    tool_call_input_replay_string,
 };
 pub(crate) use lash_core::{
     facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
