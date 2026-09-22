@@ -3,6 +3,8 @@ use lash_core::ProcessEventLogTestSupport as _;
 
 #[path = "lease_and_claims/acceptance_window.rs"]
 mod acceptance_window;
+#[path = "lease_and_claims/attempt_usage.rs"]
+mod attempt_usage;
 use acceptance_window::{AcceptanceWindowJournalController, LATE_TAB_INPUT};
 
 #[tokio::test]

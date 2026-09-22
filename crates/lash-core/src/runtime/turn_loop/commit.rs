@@ -351,6 +351,16 @@ impl LashRuntime {
                 &assembler.token_usage,
             );
         }
+        // The cumulative row above covers only counted responses. Every other
+        // attempt that reported usage — a billed failed attempt, or every
+        // attempt of a call that never completed — still gets its own delta.
+        session_manager::record_attempt_usage_shared(
+            &self.shared_token_ledger,
+            "turn",
+            &policy.model.id,
+            &assembler.llm_calls,
+            assembler.usage_counted_calls,
+        );
         // ADR 0031: an attempt the host aborted or that failed before the
         // provider's usage arrived was still billed. Write the hole as a typed
         // unreported row (even at zero usage) and remember the attempt so a
