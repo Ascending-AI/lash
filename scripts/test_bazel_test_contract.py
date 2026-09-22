@@ -135,6 +135,16 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertNotIn(scenarios, sources["runtime_effect"])
         self.assertNotIn("tests/runtime/tests/effect/turn_cancel_modes.rs", sources["runtime_scenarios"])
 
+    def test_core_execution_unit_sources_exclude_relocated_wire_suite(self) -> None:
+        policy = json.loads((ROOT / "tools/bazel/source-ownership.json").read_text())
+        package = ROOT / "crates/lash-core-execution"
+        policy = policy["crates/lash-core-execution"]
+        unit = {path.relative_to(package).as_posix() for pattern in policy["unit_test_sources"] for path in package.glob(pattern)}
+        integration = {path.relative_to(package).as_posix() for pattern in policy["tests"]["process_model"] for path in package.glob(pattern)}
+        self.assertIn("src/runtime/effect/tool_child_driver/tests.rs", unit)
+        self.assertIn("tests/runtime/process/lease_serde_tests.rs", integration)
+        self.assertFalse(unit & integration)
+
     def test_source_ownership_rejects_stale_and_escaping_patterns(self) -> None:
         sys.path.insert(0, str(ROOT / "tools/bazel"))
         import generate_build_files as generator

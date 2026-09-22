@@ -37,7 +37,6 @@ lash_rust_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -102,11 +101,55 @@ lash_rust_unit_test(
         "testing",
     ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    srcs_patterns = [
+        "src/lib.rs",
+        "src/**/*.rs",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-execution",
     package_name = "lash-internal-core-execution",
     tags = [],
     version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "process_model__test",
+    crate_features = [
+        "default",
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "process_model",
+    crate_root = "tests/process_model.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    srcs_patterns = [
+        "tests/process_model.rs",
+        "tests/runtime/process/lease_serde_tests.rs",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lash-core-execution",
+    library_crate_name = "lash_core_execution",
+    manifest_dir = "crates/lash-core-execution",
+    package_name = "lash-internal-core-execution",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":lash-core-execution__unit_test",
+        ":process_model__test",
+    ],
 )
 
 filegroup(
@@ -150,7 +193,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -220,7 +262,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -290,7 +331,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -361,7 +401,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -432,7 +471,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -502,7 +540,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -573,7 +610,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -645,7 +681,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",
@@ -713,7 +748,6 @@ lash_rust_feature_library(
         "src/runtime/effect/tool_settlement/tests.rs",
         "src/runtime/native_substrate/awaiter/tests.rs",
         "src/runtime/process/engine_resolve_tests.rs",
-        "src/runtime/process/lease_serde_tests.rs",
         "src/runtime/process/model_filter_tests.rs",
         "src/runtime/process/testing/atomic_execution_write_tests.rs",
         "src/runtime/process/tests.rs",

@@ -18,6 +18,7 @@ _IGNORED_FILES = [
     "BUILD",
     "BUILD.bazel",
     "**/__pycache__/**",
+    "**/node_modules/**",
 ]
 
 def _cargo_env(package_name, manifest_dir, version, extra = {}):
@@ -222,6 +223,7 @@ def lash_rust_unit_test(
         args = [],
         build_script = None,
         exec_properties = {},
+        srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
         extra_compile_data = [],
         extra_data = [],
         library = None,
@@ -253,7 +255,7 @@ def lash_rust_unit_test(
         rustc_flags = _cargo_check_cfg(declared_features),
         srcs = _crate_srcs(
             crate_root,
-            ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
+            srcs_patterns,
         ),
         tags = tags,
         timeout = timeout,

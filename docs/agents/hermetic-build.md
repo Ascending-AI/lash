@@ -693,8 +693,9 @@ Cargo target list cannot express. A test entry names its crate root and all
 module/include source patterns it compiles, including shared helpers. Its
 patterns apply to both the default target and every feature-lane variant.
 Unlisted targets retain conservative package source inputs. Python interpreter
-bytecode caches are excluded from package input and runfiles globs so executing
-a script cannot invalidate Rust actions. The generator
+bytecode caches and node_modules dependency trees are excluded from package input
+and runfiles globs so script execution or npm installation cannot invalidate Rust
+actions. Generated frontend assets remain declared where they are consumed. The generator
 rejects missing roots, stale patterns, unknown targets and paths outside the
 package; `kiln sync` writes the declarations into BUILD files.
 
@@ -713,3 +714,11 @@ edit and shared-helper edit. The sibling edit should compile only its owner;
 the shared edit should compile both. Count Rustc executions independently of
 test executions, since package source runfiles can still re-run source-reading
 tests without recompiling them.
+
+`unit_test_sources` can narrow a library's unit-test source patterns separately
+from its integration roots. Core-execution uses it to keep the relocated lease
+wire tests out of the large unit-test compile. Those 15 tests live in
+`tests/process_model.rs` and its module tree, use existing public runtime APIs,
+and retain their `runtime::process::lease_serde_tests::*` names. No testing
+feature or private export is added. Both Cargo discovery and generated Bazel
+partitions include the new binary.

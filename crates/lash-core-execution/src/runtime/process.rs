@@ -5,8 +5,6 @@ mod engine;
 mod events;
 pub(crate) mod identity_projection;
 mod lease_serde;
-#[cfg(test)]
-mod lease_serde_tests;
 mod materialization;
 pub(crate) mod model;
 #[cfg(test)]

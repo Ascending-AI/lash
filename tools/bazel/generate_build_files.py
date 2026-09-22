@@ -155,6 +155,11 @@ def library_test_sources_argument(directory: str) -> str:
     return f"    test_srcs = {string_list(sources)},\n" if sources else ""
 
 
+def unit_test_sources_argument(directory: str) -> str:
+    patterns = SOURCE_OWNERSHIP.get(directory, {}).get("unit_test_sources", [])
+    return f"    srcs_patterns = {string_list(patterns)},\n" if patterns else ""
+
+
 def validate_source_ownership(metadata: dict) -> None:
     members = set(metadata["workspace_members"])
     packages = {
@@ -165,7 +170,7 @@ def validate_source_ownership(metadata: dict) -> None:
     for directory, policy in SOURCE_OWNERSHIP.items():
         if directory not in packages:
             raise ValueError(f"source ownership names unknown package {directory}")
-        if policy.keys() - {"tests", "library_test_sources"}:
+        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources"}:
             raise ValueError(f"unknown source ownership keys for {directory}")
         package = packages[directory]
         tests = {
@@ -179,7 +184,22 @@ def validate_source_ownership(metadata: dict) -> None:
             crate_root = relative(tests[name]["src_path"]).removeprefix(directory + "/")
             if crate_root not in patterns:
                 raise ValueError(f"source ownership omits root {directory}/{crate_root}")
-        groups = [*policy.get("tests", {}).values(), policy.get("library_test_sources", [])]
+        unit_patterns = policy.get("unit_test_sources", [])
+        if unit_patterns:
+            library = next(
+                (target for target in package["targets"] if "lib" in target["kind"]),
+                None,
+            )
+            if library is None or not library.get("test", False):
+                raise ValueError(f"unit-test ownership names no testable library: {directory}")
+            root = relative(library["src_path"]).removeprefix(directory + "/")
+            if root not in unit_patterns:
+                raise ValueError(f"unit-test ownership omits root {directory}/{root}")
+        groups = [
+            *policy.get("tests", {}).values(),
+            policy.get("library_test_sources", []),
+            unit_patterns,
+        ]
         for patterns in groups:
             for pattern in patterns:
                 if (
@@ -687,6 +707,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    crate_root = {quote(relative(library['src_path']).replace(package_dir + '/', ''))},\n"
                 f"    declared_features = {string_list(declared_features)},\n"
                 + exec_properties_argument(library["name"], "test")
+                + unit_test_sources_argument(package_dir)
                 + f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 + (
                     f"    extra_data = {string_list(unit_extra_data)},\n"
@@ -1828,6 +1849,7 @@ class FeatureLaneGraph:
                 f"    crate_root = {quote(root)},\n"
                 f"    declared_features = {string_list(sorted(package['features']))},\n"
                 + exec_properties_argument(library["name"], "test")
+                + unit_test_sources_argument(directory)
                 + f"    extra_compile_data = {string_list(compile_data)},\n"
                 + (
                     f"    extra_data = {string_list(unit_extra_data)},\n"

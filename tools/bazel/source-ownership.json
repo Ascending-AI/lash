@@ -29,7 +29,6 @@
       "src/runtime/effect/tool_settlement/tests.rs",
       "src/runtime/native_substrate/awaiter/tests.rs",
       "src/runtime/process/engine_resolve_tests.rs",
-      "src/runtime/process/lease_serde_tests.rs",
       "src/runtime/process/model_filter_tests.rs",
       "src/runtime/process/testing/atomic_execution_write_tests.rs",
       "src/runtime/process/tests.rs",
@@ -64,6 +63,16 @@
       "src/trace_feedback_tests.rs",
       "src/triggers/router/tests.rs",
       "src/triggers/tests.rs"
-    ]
+    ],
+    "unit_test_sources": [
+      "src/lib.rs",
+      "src/**/*.rs"
+    ],
+    "tests": {
+      "process_model": [
+        "tests/process_model.rs",
+        "tests/runtime/process/lease_serde_tests.rs"
+      ]
+    }
   }
 }
