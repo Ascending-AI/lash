@@ -69,11 +69,13 @@ impl RuntimeSessionServices {
                     | session_init::SessionTurnInitError::CancelledAfterCreate { .. } => {
                         Ok(cancelled_session_turn_output())
                     }
-                    // A recorded request this build cannot initialize (a
-                    // predecessor `snapshot` start kept only for decode)
-                    // fails deterministically: no attempt can run it, so the
-                    // refusal is a terminal failure, not a recoverable
-                    // infrastructure error the substrate would retry forever.
+                    // A recorded request this deployment cannot initialize
+                    // (a predecessor `snapshot` start kept only for decode,
+                    // or a catalog that cannot resolve the recorded session
+                    // by id) fails deterministically: no attempt can run it,
+                    // so the refusal is a terminal failure, not a
+                    // recoverable infrastructure error the substrate would
+                    // retry forever.
                     session_init::SessionTurnInitError::Refused { source, .. } => {
                         Ok(crate::ProcessAwaitOutput::from_tool_output(
                             crate::ToolCallOutput::failure(crate::ToolFailure::tool(

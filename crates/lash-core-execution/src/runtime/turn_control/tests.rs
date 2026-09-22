@@ -91,10 +91,12 @@ impl crate::SessionStoreFactory for CatalogProbeFactory {
     async fn open_existing_store_by_id(
         &self,
         _session_id: &crate::SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         self.opens.fetch_add(1, Ordering::SeqCst);
         if self.fail_open {
-            return Err("catalog unavailable".to_string());
+            return Err(crate::StoreError::Backend(
+                "catalog unavailable".to_string(),
+            ));
         }
         Ok(Some(self.store.clone()))
     }

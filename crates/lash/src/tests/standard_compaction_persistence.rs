@@ -1745,7 +1745,8 @@ impl lash_core::SessionStoreFactory for FailArmedCommitFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
         self.inner.open_existing_store_by_id(session_id).await
     }
 

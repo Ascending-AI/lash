@@ -69,15 +69,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
+        lash_core::store::validate_session_id(session_id)?;
         let store = self.store_for(session_id.clone());
-        if store
-            .load_session_meta()
-            .await
-            .map_err(|err| err.to_string())?
-            .is_some()
-        {
+        if store.load_session_meta().await?.is_some() {
             Ok(Some(Arc::new(store)))
         } else {
             Ok(None)

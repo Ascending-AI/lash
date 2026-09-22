@@ -1021,7 +1021,8 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, lash::persistence::StoreError>
+    {
         Ok(
             lash::persistence::SessionStoreFactory::open_existing_store_by_id(
                 &self.inner,
@@ -1139,7 +1140,8 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, lash::persistence::StoreError>
+    {
         if self.absent_session_ids.lock_recover().contains(session_id) {
             return Ok(None);
         }

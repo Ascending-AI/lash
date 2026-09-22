@@ -533,13 +533,15 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
                 )) as Arc<dyn RuntimePersistence>
             }));
         }
-        self.open_existing_store_by_id(&request.session_id).await
+        self.open_existing_store_by_id(&request.session_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
         if let Some(inner) = &self.inner {
             let store = inner.open_existing_store_by_id(session_id).await?;
             return Ok(store.map(|store| {

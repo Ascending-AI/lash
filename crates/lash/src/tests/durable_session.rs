@@ -78,7 +78,8 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
         self.by_id_opens.fetch_add(1, Ordering::SeqCst);
         if self.open_delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(self.open_delay_ms)).await;
@@ -849,7 +850,7 @@ struct NoByIdLookupFactory {
     inner: lash_core::facade_support::InMemorySessionStoreFactory,
 }
 
-const NO_BY_ID_LOOKUP_REASON: &str = "this catalog resolves sessions only by create request";
+const NO_BY_ID_LOOKUP_OPERATION: &str = "SessionStoreFactory::open_existing_store_by_id";
 
 #[async_trait]
 impl lash_core::AttachmentRootSet for NoByIdLookupFactory {
@@ -893,8 +894,11 @@ impl SessionStoreFactory for NoByIdLookupFactory {
     async fn open_existing_store_by_id(
         &self,
         _session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
-        Err(NO_BY_ID_LOOKUP_REASON.to_string())
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: NO_BY_ID_LOOKUP_OPERATION,
+        })
     }
 
     async fn session_was_deleted(
@@ -948,7 +952,7 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
         } => {
             assert_eq!(session_id.as_str(), "no-by-id-seam");
             assert!(
-                message.contains(NO_BY_ID_LOOKUP_REASON),
+                message.contains(NO_BY_ID_LOOKUP_OPERATION),
                 "the error names the missing capability, got {message}"
             );
         }

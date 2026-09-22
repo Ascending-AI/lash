@@ -977,8 +977,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
+        lash_core::store::validate_session_id(session_id)?;
         let path = self.catalog_path();
         if !path.exists() {
             return Ok(None);
@@ -995,14 +995,9 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 self.fault_injector.clone(),
             )
             .await
-            .map_err(|err| err.to_string())?,
+            .map_err(|err| StoreError::Backend(err.to_string()))?,
         );
-        if store
-            .load_session_meta()
-            .await
-            .map_err(|err| err.to_string())?
-            .is_none()
-        {
+        if store.load_session_meta().await?.is_none() {
             return Ok(None);
         }
         Ok(Some(store as Arc<dyn RuntimePersistence>))
@@ -1012,11 +1007,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
-        let Some(store) = self
-            .open_existing_store_by_id(session_id)
-            .await
-            .map_err(StoreError::Backend)?
-        else {
+        let Some(store) = self.open_existing_store_by_id(session_id).await? else {
             return Ok(Vec::new());
         };
         store.pending_turn_cancel_closure_pins().await

@@ -281,7 +281,8 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, lash::persistence::StoreError>
+    {
         Ok(self
             .inner
             .open_existing_store_by_id(session_id)

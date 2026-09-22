@@ -48,7 +48,7 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         _session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         Ok(Some(self.store.clone()))
     }
 

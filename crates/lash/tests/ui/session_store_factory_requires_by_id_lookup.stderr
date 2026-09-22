@@ -4,4 +4,4 @@ error[E0046]: not all trait items implemented, missing: `open_existing_store_by_
 46 | impl SessionStoreFactory for SilentByIdFactory {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `open_existing_store_by_id` in implementation
    |
-   = help: implement the missing item: `fn open_existing_store_by_id<'life0: 'async_trait, 'life1: 'async_trait, 'async_trait>(&'life0 self, _: &'life1 SessionId) -> std::pin::Pin<Box<(dyn Future<Output = Result<Option<Arc<(dyn RuntimePersistence + 'static)>>, std::string::String>> + Send + 'async_trait)>> { todo!() }`
+   = help: implement the missing item: `fn open_existing_store_by_id<'life0: 'async_trait, 'life1: 'async_trait, 'async_trait>(&'life0 self, _: &'life1 SessionId) -> std::pin::Pin<Box<(dyn Future<Output = Result<Option<Arc<(dyn RuntimePersistence + 'static)>>, StoreError>> + Send + 'async_trait)>> { todo!() }`

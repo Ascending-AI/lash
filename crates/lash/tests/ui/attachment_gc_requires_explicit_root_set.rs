@@ -30,7 +30,7 @@ impl SessionStoreFactory for DelegatingFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
         self.inner.open_existing_store_by_id(session_id).await
     }
 
