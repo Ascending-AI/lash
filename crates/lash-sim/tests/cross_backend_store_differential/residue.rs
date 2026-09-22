@@ -16,6 +16,14 @@
 //!   choice can read as drift;
 //! * what crosses the backend boundary is the mutated-or-not verdict and the
 //!   set of logical tables that moved, which are backend-neutral.
+//!
+//! The durable effect-group tables — `runtime_effect_group`,
+//! `runtime_effect_group_child` and `runtime_effect_replay` — are not residue
+//! tables at all: their arbitration and rank columns are cross-backend
+//! comparable state, and the generated surface differential reads them on
+//! both SQL backends under [`SURFACE_DIFFERENTIAL_TABLES`]. The coverage test
+//! therefore checks them against the surface readers directly rather than
+//! taking an exemption's word for it.
 
 use super::*;
 
@@ -428,9 +436,6 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
     ("trigger_mutation_receipts", TRIGGERS),
     ("trigger_occurrences", TRIGGERS),
     ("trigger_subscriptions", TRIGGERS),
-    ("runtime_effect_group", EFFECTS),
-    ("runtime_effect_group_child", EFFECTS),
-    ("runtime_effect_replay", EFFECTS),
     ("effect_scope_retirements", EFFECTS),
     ("tool_intent_submissions", EFFECTS),
     ("artifact_owners", ARTIFACTS),
@@ -456,6 +461,41 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          registry suites (FIG-2995)",
     ),
 ];
+
+/// Durable tables the cross-backend surface differential — not this digest —
+/// owns. They were removed from [`RESIDUE_TABLE_EXCLUSIONS`] because an
+/// exclusion is a reason string the test cannot check; a table listed here
+/// passes the coverage test only while the surface readers actually read it.
+const SURFACE_DIFFERENTIAL_TABLES: &[&str] = &[
+    "runtime_effect_group",
+    "runtime_effect_group_child",
+    "runtime_effect_replay",
+];
+
+/// The generated-surface reader SQL, checked rather than trusted.
+const SURFACE_SQLITE_READS: &[&str] = &[
+    super::generated_surface::SQLITE_EFFECT_REPLAY_READ,
+    super::generated_surface::SQLITE_EFFECT_GROUP_READ,
+    super::generated_surface::SQLITE_EFFECT_GROUP_CHILD_READ,
+];
+const SURFACE_POSTGRES_READS: &[&str] = &[
+    super::generated_surface::POSTGRES_EFFECT_REPLAY_READ,
+    super::generated_surface::POSTGRES_EFFECT_GROUP_READ,
+    super::generated_surface::POSTGRES_EFFECT_GROUP_CHILD_READ,
+];
+
+/// True when `sql` selects `FROM <table>`: the name must be followed by a
+/// non-identifier character (or end of string), so `runtime_effect_group`
+/// cannot be satisfied by `FROM runtime_effect_group_child`.
+fn reads_table(sql: &str, table: &str) -> bool {
+    let needle = format!("FROM {table}");
+    sql.match_indices(&needle).any(|(index, _)| {
+        sql[index + needle.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
 
 /// Every `CREATE TABLE` name declared by the SQLite schema, deduplicated.
 fn declared_sqlite_tables() -> Vec<&'static str> {
@@ -507,14 +547,38 @@ fn residue_digest_covers_every_durable_table() {
             || SQLITE_RESIDUE_QUERIES
                 .iter()
                 .any(|(_, sql)| sql.contains(&format!(" {table} ")));
-        match (read, excluded) {
-            (true, None) => {}
-            (false, Some((_, reason))) => assert!(
+        let surface_read = SURFACE_DIFFERENTIAL_TABLES.contains(&table);
+        match (read, excluded, surface_read) {
+            (true, None, false) => {}
+            (false, Some((_, reason)), false) => assert!(
                 !reason.trim().is_empty(),
                 "the residue exclusion for `{table}` carries no reason"
             ),
-            (true, Some(_)) => stale.push(table),
-            (false, None) => missing.push(table),
+            (false, None, true) => {
+                // A surface-differential table earns its coverage only by
+                // being read on both SQL backends: the unprefixed name in
+                // the SQLite reader SQL, `lash_<name>` in the PostgreSQL
+                // reader SQL. Dropping a column or table from either reader
+                // turns the exclusion it replaced back into a failure here.
+                assert!(
+                    SURFACE_SQLITE_READS
+                        .iter()
+                        .any(|sql| reads_table(sql, table)),
+                    "surface-differential table `{table}` is not read by the \
+                     generated surface's SQLite journal reader",
+                );
+                assert!(
+                    SURFACE_POSTGRES_READS
+                        .iter()
+                        .any(|sql| reads_table(sql, &format!("lash_{table}"))),
+                    "surface-differential table `{table}` is not read by the \
+                     generated surface's PostgreSQL journal reader",
+                );
+            }
+            (true, Some(_), _) => stale.push(table),
+            (_, Some(_), true) => stale.push(table),
+            (false, None, false) => missing.push(table),
+            (true, None, true) => stale.push(table),
         }
     }
     assert!(
@@ -529,4 +593,29 @@ fn residue_digest_covers_every_durable_table() {
         "these tables are excluded but the digest now reads them; delete their exclusions: \
          {stale:?}"
     );
+}
+
+/// The coverage check must not let a prefix do a table's work: a reader over
+/// `runtime_effect_group_child` is not a reader over `runtime_effect_group`.
+#[test]
+fn surface_reader_coverage_matches_whole_table_names() {
+    let child_only = "SELECT group_key, position FROM runtime_effect_group_child ORDER BY 1";
+    assert!(!reads_table(child_only, "runtime_effect_group"));
+    assert!(reads_table(child_only, "runtime_effect_group_child"));
+    assert!(reads_table(
+        "SELECT 1 FROM runtime_effect_group",
+        "runtime_effect_group"
+    ));
+    assert!(reads_table(
+        "SELECT 1\n     FROM runtime_effect_group ORDER BY group_key",
+        "runtime_effect_group"
+    ));
+    assert!(!reads_table(
+        "SELECT 1 FROM runtime_effect_group_extra",
+        "runtime_effect_group"
+    ));
+    assert!(reads_table(
+        "SELECT 1 FROM lash_runtime_effect_group ORDER BY 1",
+        "lash_runtime_effect_group"
+    ));
 }

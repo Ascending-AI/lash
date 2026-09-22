@@ -635,17 +635,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                             )));
                         }
                         Some(EffectCommitState::CancelDecided) => {
-                            let commit_seq = commit_seq.ok_or_else(|| {
-                                sqlite_conversion_error(stored_data_corrupt(
-                                    "RuntimeEffectReplay",
-                                    format!(
-                                        "child `{}` of group {} is cancel-decided but \
-                                     carries no commit_seq; the column CHECK makes \
-                                     that unwritable",
-                                        request.replay_key, group_key
-                                    ),
-                                ))
-                            })?;
+                            // The schema CHECK forbids `commit_seq` on a
+                            // cancel-decided row; the rank the caller is owed
+                            // is the settlement rank the decision seated.
+                            let commit_seq =
+                                read_child_settlement_seq(tx, &group_key, &request.replay_key)?;
                             return Ok(TxOutcome::Commit(Ok(
                                 EffectGroupChildCommitOutcome::CancelDecided {
                                     group_key,

@@ -4,31 +4,44 @@ use lash_sansio::SessionId;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_conformance::{
     StoreContractHandles, StoreContractOp, StoreContractScenario, sample_store_contract_operations,
 };
 use lash_core::{
-    AdmittedScope, AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectAddress,
-    EffectHost, EffectJournalRetirement, ExecutionScope, MediaType, ProcessExecutionEnvRef,
-    ProcessIdentity, ProcessInput, ProcessOriginator, Resolution, RuntimeAttribution,
-    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
-    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
-    WakeDeliveryDisposition, facade_support::InMemoryAttachmentStore,
+    AdmittedScope, AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity,
+    CancellationToken, ChildDrainOutcome, EffectAddress, EffectGroupHandle, EffectHost,
+    EffectJournalRetirement, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
+    MediaType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessOriginator,
+    Resolution, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    SessionScope, StoreEffectGroupDrain, TestLocalProcessRegistry, TriggerCommand,
+    TriggerInputBinding, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft, WakeDeliveryDisposition,
+    facade_support::InMemoryAttachmentStore,
     facade_support::InMemoryTriggerStore,
+    facade_support::LeaseTimings,
+    facade_support::SystemClock,
+    facade_support::effect_replay_driver::{EffectGroupChildCommitOutcome, GroupChildFinalCommit},
 };
+use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions};
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
 use lash_sqlite_store::{
-    SqliteEffectHost, SqliteProcessRegistry, SqliteTriggerStore, Store as SqliteStore,
+    SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry, SqliteTriggerStore,
+    Store as SqliteStore,
 };
 
 const DEFAULT_CASES: usize = 4;
 const DEFAULT_SEED: u64 = 852;
-const OPS_PER_CASE: usize = 32;
+const OPS_PER_CASE: usize = 55;
 const SURFACE_SESSION: &str = "surface-session";
 const SURFACE_TURN: &str = "surface-turn";
+#[path = "generated_surface/groups.rs"]
+mod groups;
+use groups::*;
+
 const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "register",
     "first_start",
@@ -60,6 +73,16 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "tool_intent_batch",
     "await_resolve",
     "await_revoke_session",
+    "effect_group_open",
+    "effect_group_release",
+    "effect_group_release_both",
+    "effect_group_await",
+    "effect_group_close",
+    "effect_group_commit",
+    "effect_group_commit_both",
+    "effect_group_drain_blocked",
+    "effect_group_crash",
+    "effect_group_drain",
 ];
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -101,6 +124,75 @@ enum SurfaceOperation {
     RetireRuntimeOperation {
         key: u8,
     },
+    /// Open a durable effect group on a fresh per-group opener (one thread,
+    /// one runtime, one host), with `children` parked on release flags.
+    /// `cancel_losers` declares the group's loser disposition.
+    EffectGroupOpen {
+        group: u8,
+        children: u8,
+        cancel_losers: bool,
+    },
+    /// Flip one parked child's release flag. The child's own writes are
+    /// already fenced wherever a release lands, so the release waits for the
+    /// child's settlement to journal before returning — the generated prefix
+    /// stays deterministic.
+    EffectGroupRelease {
+        group: u8,
+        position: u8,
+    },
+    /// Flip two parked children's release flags together, then wait for both
+    /// settlements. Releasing one committed child alone is not a barrier it
+    /// can always pass: when it holds the higher `commit_seq`, its own drain
+    /// is gated on the lower rank discharging first, so a one-sided release
+    /// would park behind a sibling nobody released.
+    EffectGroupReleaseBoth {
+        group: u8,
+        a: u8,
+        b: u8,
+    },
+    /// Serve the next settlement rank on the group's open handle.
+    EffectGroupAwait {
+        group: u8,
+    },
+    /// Close the group under its declared loser disposition.
+    EffectGroupClose {
+        group: u8,
+    },
+    /// Commit one child's §4 boundary out from under its parked executor —
+    /// the committed-but-undrained durable state (`committed` + `in_progress`
+    /// + `drain_input`, no terminal) a crash before discharge leaves behind.
+    EffectGroupCommit {
+        group: u8,
+        position: u8,
+    },
+    /// Issue two children's §4 commits concurrently on the same opener.
+    /// Which position wins which `commit_seq` is a scheduler fact; the
+    /// recorded outcome is sorted by sequence, and a local law check requires
+    /// both commits to land on distinct consecutive positions.
+    EffectGroupCommitBoth {
+        group: u8,
+        a: u8,
+        b: u8,
+    },
+    /// Probe the durable §5 barrier for the child holding commit rank `rank`
+    /// (1-based into the group's sorted recorded `commit_seq` values). Keyed
+    /// by rank rather than position because the concurrent group assigns
+    /// ranks to positions nondeterministically.
+    EffectGroupDrainBlocked {
+        group: u8,
+        rank: u8,
+    },
+    /// Kill the group's opener: its runtime is shut down, its claims stop
+    /// renewing and lapse, and later opener-bound commands answer a fixed
+    /// "opener crashed" refusal.
+    EffectGroupCrash {
+        group: u8,
+    },
+    /// Run the successor host's drain over the group, polling while children
+    /// report `LeaseLive` or `Contested`, bounded by `GROUP_OP_BOUND`.
+    EffectGroupDrain {
+        group: u8,
+    },
 }
 
 impl SurfaceOperation {
@@ -140,64 +232,23 @@ impl SurfaceOperation {
             Self::AwaitRevokeSession => "await_revoke_session",
             Self::RuntimeOperationRecord { .. } => "runtime_operation_record",
             Self::RetireRuntimeOperation { .. } => "retire_runtime_operation",
+            Self::EffectGroupOpen { .. } => "effect_group_open",
+            Self::EffectGroupRelease { .. } => "effect_group_release",
+            Self::EffectGroupReleaseBoth { .. } => "effect_group_release_both",
+            Self::EffectGroupAwait { .. } => "effect_group_await",
+            Self::EffectGroupClose { .. } => "effect_group_close",
+            Self::EffectGroupCommit { .. } => "effect_group_commit",
+            Self::EffectGroupCommitBoth { .. } => "effect_group_commit_both",
+            Self::EffectGroupDrainBlocked { .. } => "effect_group_drain_blocked",
+            Self::EffectGroupCrash { .. } => "effect_group_crash",
+            Self::EffectGroupDrain { .. } => "effect_group_drain",
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-struct ProcessLeaseObservation {
-    process_id: ProcessId,
-    owner: serde_json::Value,
-    lease_token_present: bool,
-    fencing_token: u64,
-    claimed: bool,
-    ttl_ms: Option<u64>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-struct ProcessRows {
-    records: Vec<serde_json::Value>,
-    events: Vec<serde_json::Value>,
-    observers: Vec<(SessionId, ProcessId, u64)>,
-    leases: Vec<ProcessLeaseObservation>,
-    wake_deliveries: Vec<serde_json::Value>,
-    wake_allocation_floors: Vec<(SessionId, ProcessId, u64)>,
-    tombstones: Vec<serde_json::Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-struct TriggerRows {
-    subscriptions: Vec<serde_json::Value>,
-    mutation_receipts: Vec<serde_json::Value>,
-    occurrences: Vec<serde_json::Value>,
-    deliveries: Vec<serde_json::Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-struct SurfaceState {
-    processes: ProcessRows,
-    wake_redelivery_fences: Vec<(String, String, u64)>,
-    triggers: TriggerRows,
-    effect_journal: Option<Vec<serde_json::Value>>,
-    await_journal: Option<Vec<serde_json::Value>>,
-}
-
-enum SurfaceReader {
-    InMemory {
-        runtime: Arc<InMemorySessionStore>,
-        registry: Arc<TestLocalProcessRegistry>,
-        triggers: Arc<InMemoryTriggerStore>,
-    },
-    Sqlite {
-        runtime_path: PathBuf,
-        process_path: PathBuf,
-        trigger_path: PathBuf,
-        effect_path: PathBuf,
-    },
-    Postgres {
-        pool: PgPool,
-    },
-}
+#[path = "generated_surface/observation.rs"]
+mod observation;
+pub(super) use observation::*;
 
 struct SurfaceRunner {
     name: &'static str,
@@ -205,6 +256,11 @@ struct SurfaceRunner {
     process_registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
     effect_host: Arc<dyn EffectHost>,
+    /// `None` on the in-memory runner: it exercises no durable groups, and
+    /// its `book` alone keeps the fixed refusal strings identical.
+    groups: Option<GroupSurface>,
+    book: BTreeMap<u8, GroupBook>,
+    group_outcomes: Vec<serde_json::Value>,
     reader: SurfaceReader,
 }
 
@@ -401,7 +457,7 @@ fn surface_operation_id(key: u8) -> String {
 }
 
 fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
-    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 11);
+    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 33);
     let mut operations = vec![
         SurfaceOperation::TriggerRegister { key: 0 },
         SurfaceOperation::TriggerOccurrence { key: 0 },
@@ -420,6 +476,110 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
         }
         if index == 5 {
             operations.push(SurfaceOperation::TriggerDisable { key: 0 });
+        }
+        // Final lands before the cancel: child 0 commits and discharges at
+        // rank 1, then closing the group decides child 1's cancel at rank 2.
+        // Releasing it afterwards must journal nothing further.
+        if index == 7 {
+            operations.extend([
+                SurfaceOperation::EffectGroupOpen {
+                    group: 0,
+                    children: 2,
+                    cancel_losers: true,
+                },
+                SurfaceOperation::EffectGroupRelease {
+                    group: 0,
+                    position: 0,
+                },
+                SurfaceOperation::EffectGroupAwait { group: 0 },
+                SurfaceOperation::EffectGroupClose { group: 0 },
+                SurfaceOperation::EffectGroupRelease {
+                    group: 0,
+                    position: 1,
+                },
+            ]);
+        }
+        // Cancel is decided before the late final: closing under
+        // `LoserPolicy::Cancel` decides both parked children, and the §4
+        // commit that lands afterwards is refused.
+        if index == 10 {
+            operations.extend([
+                SurfaceOperation::EffectGroupOpen {
+                    group: 1,
+                    children: 2,
+                    cancel_losers: true,
+                },
+                SurfaceOperation::EffectGroupClose { group: 1 },
+                SurfaceOperation::EffectGroupCommit {
+                    group: 1,
+                    position: 0,
+                },
+            ]);
+        }
+        // Two finals race the §4 boundary concurrently: both commit, on
+        // distinct consecutive ranks; the durable barrier then blocks the
+        // higher rank until the lower has discharged.
+        if index == 13 {
+            operations.extend([
+                SurfaceOperation::EffectGroupOpen {
+                    group: UNORDERED_GROUP,
+                    children: 2,
+                    cancel_losers: false,
+                },
+                SurfaceOperation::EffectGroupCommitBoth {
+                    group: UNORDERED_GROUP,
+                    a: 0,
+                    b: 1,
+                },
+                SurfaceOperation::EffectGroupDrainBlocked {
+                    group: UNORDERED_GROUP,
+                    rank: 1,
+                },
+                SurfaceOperation::EffectGroupDrainBlocked {
+                    group: UNORDERED_GROUP,
+                    rank: 2,
+                },
+                SurfaceOperation::EffectGroupReleaseBoth {
+                    group: UNORDERED_GROUP,
+                    a: 0,
+                    b: 1,
+                },
+                SurfaceOperation::EffectGroupAwait {
+                    group: UNORDERED_GROUP,
+                },
+                SurfaceOperation::EffectGroupAwait {
+                    group: UNORDERED_GROUP,
+                },
+                SurfaceOperation::EffectGroupClose {
+                    group: UNORDERED_GROUP,
+                },
+            ]);
+        }
+        // Committed before discharge, then the opener dies: the successor's
+        // drain discharges child 0 from its recorded `drain_input` at the
+        // committed rank and executes child 1 beneath it.
+        if index == 16 {
+            operations.extend([
+                SurfaceOperation::EffectGroupOpen {
+                    group: 3,
+                    children: 2,
+                    cancel_losers: false,
+                },
+                SurfaceOperation::EffectGroupCommit {
+                    group: 3,
+                    position: 0,
+                },
+                SurfaceOperation::EffectGroupCrash { group: 3 },
+                SurfaceOperation::EffectGroupRelease {
+                    group: 3,
+                    position: 0,
+                },
+                SurfaceOperation::EffectGroupRelease {
+                    group: 3,
+                    position: 1,
+                },
+                SurfaceOperation::EffectGroupDrain { group: 3 },
+            ]);
         }
         if index == 14 {
             operations.push(SurfaceOperation::RetireRuntimeOperation { key: 0 });
@@ -844,896 +1004,386 @@ impl SurfaceRunner {
                 .await
                 .map(|_| ())
                 .map_err(|error| error.to_string()),
-        }
-    }
-
-    async fn observe(&self) -> SurfaceState {
-        self.reader.observe().await
-    }
-}
-
-impl SurfaceReader {
-    async fn observe(&self) -> SurfaceState {
-        match self {
-            Self::InMemory {
-                runtime,
-                registry,
-                triggers,
-            } => SurfaceState {
-                processes: process_rows_from_memory(registry).await,
-                wake_redelivery_fences: runtime.raw_wake_redelivery_fences_for_testing(),
-                triggers: trigger_rows_from_memory(triggers),
-                effect_journal: None,
-                await_journal: None,
-            },
-            Self::Sqlite {
-                runtime_path,
-                process_path,
-                trigger_path,
-                effect_path,
-            } => read_sqlite_surface(runtime_path, process_path, trigger_path, effect_path),
-            Self::Postgres { pool } => read_postgres_surface(pool).await,
-        }
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-async fn process_rows_from_memory(registry: &TestLocalProcessRegistry) -> ProcessRows {
-    let raw = registry.raw_state_for_testing().await;
-    ProcessRows {
-        records: raw
-            .records
-            .into_iter()
-            .map(|(record, change_seq)| {
-                normalized_json(serde_json::json!({"change_seq": change_seq, "record": record}))
-            })
-            .collect(),
-        events: raw
-            .events
-            .into_iter()
-            .map(|(process_id, event)| {
-                normalized_json(serde_json::json!({"process_id": process_id, "event": event}))
-            })
-            .collect(),
-        observers: raw.observers,
-        leases: raw
-            .leases
-            .into_iter()
-            .map(|lease| ProcessLeaseObservation {
-                process_id: lease.process_id,
-                lease_token_present: !lease.lease_token.is_empty(),
-                owner: if lease.lease_token.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::to_value(lease.owner).expect("encode process lease owner")
-                },
-                fencing_token: lease.fencing_token,
-                claimed: lease.claimed_at_epoch_ms != 0,
-                ttl_ms: (lease.claimed_at_epoch_ms != 0).then_some(
-                    lease
-                        .expires_at_epoch_ms
-                        .saturating_sub(lease.claimed_at_epoch_ms),
-                ),
-            })
-            .collect(),
-        wake_deliveries: raw
-            .wake_deliveries
-            .into_iter()
-            .map(normalized_memory_wake_delivery)
-            .collect(),
-        wake_allocation_floors: raw.wake_allocation_floors,
-        tombstones: raw
-            .tombstones
-            .into_iter()
-            .map(|row| normalized_json(serde_json::to_value(row).expect("encode tombstone")))
-            .collect(),
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn normalized_memory_wake_delivery(delivery: lash_core::WakeDelivery) -> serde_json::Value {
-    let state = delivery.state();
-    let claim_token = match &delivery.disposition {
-        WakeDeliveryDisposition::Enqueuing { claim_token } => Some(claim_token.clone()),
-        _ => None,
-    };
-    let discard_reason = delivery.disposition.discard_reason();
-    let mut value = serde_json::json!({
-        "delivery_id": delivery.delivery_id,
-        "wake": delivery.wake,
-        "state": state,
-        "attempts": delivery.attempts,
-        "first_attempt_ms": delivery.first_attempt_ms,
-        "next_attempt_at_ms": delivery.next_attempt_at_ms,
-        "expires_at_ms": delivery.expires_at_ms,
-        "discard_reason": discard_reason,
-    });
-    if let Some(claim_token) = claim_token {
-        value
-            .as_object_mut()
-            .expect("wake delivery projection is an object")
-            .insert("claim_token".to_string(), serde_json::json!(claim_token));
-    }
-    normalized_json(value)
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
-    let raw = store.raw_state_for_testing();
-    let mut incarnations = BTreeMap::new();
-    TriggerRows {
-        subscriptions: raw
-            .subscriptions
-            .into_iter()
-            .map(|row| {
-                normalized_trigger_json(serde_json::to_value(row).unwrap(), &mut incarnations)
-            })
-            .collect(),
-        mutation_receipts: raw
-            .mutation_receipts
-            .into_iter()
-            .map(
-                |(
-                    operation_id,
-                    owner_kind,
-                    owner_id,
-                    request_fingerprint,
-                    result,
-                    _created_at_ms,
-                )| {
-                    normalized_trigger_receipt_json(
-                        serde_json::json!({
-                            "operation_id": operation_id,
-                            "owner_kind": owner_kind,
-                            "owner_id": owner_id,
-                            "request_fingerprint": request_fingerprint,
-                            "result": result,
-                        }),
-                        &mut incarnations,
-                    )
-                },
-            )
-            .collect(),
-        occurrences: raw
-            .occurrences
-            .into_iter()
-            .map(|record| {
-                normalized_trigger_json(serde_json::json!({"record": record}), &mut incarnations)
-            })
-            .collect(),
-        deliveries: raw
-            .deliveries
-            .into_iter()
-            .map(
-                |(occurrence_id, subscription_id, process_id, _created_at_ms, snapshot)| {
-                    normalized_trigger_delivery_json(
-                        serde_json::json!({
-                            "occurrence_id": occurrence_id,
-                            "subscription_id": subscription_id,
-                            "process_id": process_id,
-                            "subscription_snapshot": snapshot,
-                        }),
-                        &mut incarnations,
-                    )
-                },
-            )
-            .collect(),
-    }
-}
-
-fn normalized_json(mut value: serde_json::Value) -> serde_json::Value {
-    normalize_json_fields(&mut value, None);
-    value
-}
-
-fn normalized_trigger_json(
-    mut value: serde_json::Value,
-    incarnations: &mut BTreeMap<String, String>,
-) -> serde_json::Value {
-    normalize_json_fields(&mut value, Some(incarnations));
-    value
-}
-
-fn normalized_trigger_receipt_json(
-    value: serde_json::Value,
-    incarnations: &mut BTreeMap<String, String>,
-) -> serde_json::Value {
-    normalized_trigger_json(value, incarnations)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn normalized_trigger_delivery_json(
-    mut value: serde_json::Value,
-    incarnations: &mut BTreeMap<String, String>,
-) -> serde_json::Value {
-    let fields = value
-        .as_object_mut()
-        .expect("trigger delivery observation must be an object");
-    let occurrence_id = fields
-        .get("occurrence_id")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery occurrence id");
-    let subscription_id = fields
-        .get("subscription_id")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery subscription id");
-    let process_id = fields
-        .get("process_id")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery process id");
-    let snapshot = fields
-        .get("subscription_snapshot")
-        .and_then(serde_json::Value::as_object)
-        .expect("trigger delivery subscription snapshot");
-    let incarnation = snapshot
-        .get("incarnation")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery subscription incarnation");
-    let revision = snapshot
-        .get("revision")
-        .and_then(serde_json::Value::as_u64)
-        .expect("trigger delivery subscription revision");
-    let expected_process_id = lash_core::facade_support::deterministic_delivery_process_id(
-        occurrence_id,
-        subscription_id,
-        incarnation,
-        revision,
-    )
-    .expect("derive trigger delivery process id");
-    let process_id_matches_derivation = process_id == expected_process_id;
-    fields.remove("process_id");
-    fields.insert(
-        "process_id_matches_derivation".to_string(),
-        serde_json::Value::Bool(process_id_matches_derivation),
-    );
-    normalized_trigger_json(value, incarnations)
-}
-
-fn normalize_json_fields(
-    value: &mut serde_json::Value,
-    mut incarnations: Option<&mut BTreeMap<String, String>>,
-) {
-    match value {
-        serde_json::Value::Array(values) => {
-            for value in values {
-                normalize_json_fields(value, incarnations.as_deref_mut());
+            SurfaceOperation::EffectGroupOpen {
+                group,
+                children,
+                cancel_losers,
+            } => self.group_open(*group, *children, *cancel_losers).await,
+            SurfaceOperation::EffectGroupRelease { group, position } => {
+                self.group_release(*group, *position).await
             }
+            SurfaceOperation::EffectGroupReleaseBoth { group, a, b } => {
+                self.group_release_both(*group, *a, *b).await
+            }
+            SurfaceOperation::EffectGroupAwait { group } => self.group_await(*group).await,
+            SurfaceOperation::EffectGroupClose { group } => self.group_close(*group).await,
+            SurfaceOperation::EffectGroupCommit { group, position } => {
+                self.group_commit(*group, *position).await
+            }
+            SurfaceOperation::EffectGroupCommitBoth { group, a, b } => {
+                self.group_commit_both(*group, *a, *b).await
+            }
+            SurfaceOperation::EffectGroupDrainBlocked { group, rank } => {
+                self.group_drain_blocked(*group, *rank).await
+            }
+            SurfaceOperation::EffectGroupCrash { group } => self.group_crash(*group).await,
+            SurfaceOperation::EffectGroupDrain { group } => self.group_drain(*group).await,
         }
-        serde_json::Value::Object(fields) => {
-            for (name, value) in fields {
-                match name.as_str() {
-                    "created_at_ms"
-                    | "updated_at_ms"
-                    | "occurred_at_ms"
-                    | "deleted_at_ms"
-                    | "pruned_at_ms"
-                    | "first_attempt_ms"
-                    | "next_attempt_at_ms"
-                    | "expires_at_ms"
-                    | "created_at_epoch_ms"
-                    | "updated_at_epoch_ms"
-                    | "claimed_at_epoch_ms"
-                    | "expires_at_epoch_ms"
-                    | "resolved_at_ms"
-                    | "lease_expires_at_ms"
-                    | "due_at_ms"
-                    | "occurred_at" => {
-                        if !value.is_null() {
-                            *value = serde_json::json!("normalized_timestamp");
-                        }
-                    }
-                    "claim_token" | "lease_token" | "lease_owner_id" => {
-                        *value = serde_json::Value::Bool(!value.is_null());
-                    }
-                    "incarnation" | "subscription_incarnation" => {
-                        if let (Some(raw), Some(map)) =
-                            (value.as_str(), incarnations.as_deref_mut())
-                        {
-                            let next = map.len();
-                            let alias = map
-                                .entry(raw.to_string())
-                                .or_insert_with(|| format!("incarnation-{next}"))
-                                .clone();
-                            *value = serde_json::Value::String(alias);
-                        }
-                    }
-                    _ => normalize_json_fields(value, incarnations.as_deref_mut()),
+    }
+
+    /// The shared refusal for every grouped op on a group that cannot take
+    /// it: missing groups and crashed openers answer the same fixed strings
+    /// on every backend, so minimized prefixes still agree.
+    fn group_gate(&mut self, group: u8, op: &'static str) -> Result<(), String> {
+        match self.book.get(&group) {
+            None => {
+                self.record_group(group, op, serde_json::json!({"error": "group_not_open"}));
+                Err(format!("effect group {group} is not open"))
+            }
+            Some(book) if book.crashed => {
+                self.record_group(group, op, serde_json::json!({"error": "opener_crashed"}));
+                Err(format!("effect group {group} opener crashed"))
+            }
+            Some(_) => Ok(()),
+        }
+    }
+
+    fn record_group(&mut self, group: u8, op: &'static str, mut outcome: serde_json::Value) {
+        if self.groups.is_none() {
+            return;
+        }
+        if let Some(fields) = outcome.as_object_mut() {
+            fields.insert("op".to_string(), serde_json::json!(op));
+            fields.insert("group".to_string(), serde_json::json!(group));
+        }
+        self.group_outcomes.push(outcome);
+    }
+
+    /// Send one command to the group's opener and record its reply. The
+    /// in-memory runner has no opener, so it answers `Ok` — the gate above
+    /// already filtered every refusal a backend would give.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the gate guarantees an opener's group is booked; a miss is a harness defect"
+    )]
+    async fn group_send(
+        &mut self,
+        group: u8,
+        op: &'static str,
+        command: GroupOpCommand,
+    ) -> Result<(), String> {
+        let Some(groups) = &mut self.groups else {
+            return Ok(());
+        };
+        let Some(opener) = groups.openers.get_mut(&group) else {
+            self.record_group(group, op, serde_json::json!({"error": "group_not_open"}));
+            return Err(format!("effect group {group} is not open"));
+        };
+        let reply = opener.send(command).await;
+        for (position, commit_seq) in reply.committed {
+            self.book
+                .get_mut(&group)
+                .expect("a group with an opener is booked")
+                .commit_seqs
+                .insert(position, commit_seq);
+        }
+        self.record_group(group, op, reply.outcome);
+        Ok(())
+    }
+
+    async fn group_open(
+        &mut self,
+        group: u8,
+        children: u8,
+        cancel_losers: bool,
+    ) -> Result<(), String> {
+        if self.book.get(&group).is_some_and(|book| book.crashed) {
+            self.record_group(
+                group,
+                "effect_group_open",
+                serde_json::json!({"error": "opener_crashed"}),
+            );
+            return Err(format!("effect group {group} opener crashed"));
+        }
+        if let Some(groups) = &mut self.groups
+            && !groups.openers.contains_key(&group)
+        {
+            let opener = GroupOpener::spawn(
+                groups.backend.clone(),
+                Arc::clone(&groups.executors),
+                group_key(group),
+                group_scope_id(),
+            )?;
+            groups.openers.insert(group, opener);
+        }
+        self.book.entry(group).or_insert(GroupBook {
+            crashed: false,
+            cancel_losers,
+            commit_seqs: BTreeMap::new(),
+        });
+        self.group_send(
+            group,
+            "effect_group_open",
+            GroupOpCommand::Open {
+                group: Box::new(surface_group(group, children, cancel_losers)),
+            },
+        )
+        .await?;
+        // The open returns before its children finish claiming; wait until
+        // every child's executor is entered so no claim write is in flight
+        // when the observation runs.
+        if let Some(groups) = &self.groups {
+            let executors = Arc::clone(&groups.executors);
+            let key = group_key(group);
+            for position in 0..children {
+                if !wait_group_child_started(&executors, &key, position).await {
+                    self.record_group(
+                        group,
+                        "effect_group_open",
+                        serde_json::json!({"error": "children_not_started"}),
+                    );
+                    return Err(format!("effect group {group} children never started"));
                 }
             }
         }
-        _ => {}
+        Ok(())
     }
-}
 
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn read_sqlite_surface(
-    runtime_path: &Path,
-    process_path: &Path,
-    trigger_path: &Path,
-    effect_path: &Path,
-) -> SurfaceState {
-    let runtime = rusqlite::Connection::open(runtime_path).expect("open SQLite runtime reader");
-    let process = rusqlite::Connection::open(process_path).expect("open SQLite process reader");
-    let trigger = rusqlite::Connection::open(trigger_path).expect("open SQLite trigger reader");
-    let effect = rusqlite::Connection::open(effect_path).expect("open SQLite effect reader");
-    let records = sqlite_simple_json_rows(
-        &process,
-        "SELECT record_json, change_seq FROM processes ORDER BY process_id",
-        |row| {
-            let record: String = row.get(0)?;
-            Ok(normalized_json(serde_json::json!({
-                "change_seq": row.get::<_, i64>(1)?,
-                "record": serde_json::from_str::<serde_json::Value>(&record).unwrap(),
-            })))
-        },
-    );
-    let events = sqlite_simple_json_rows(
-        &process,
-        "SELECT process_id, event_json FROM process_events ORDER BY process_id, sequence",
-        |row| {
-            let event: String = row.get(1)?;
-            Ok(normalized_json(serde_json::json!({
-                "process_id": row.get::<_, String>(0)?,
-                "event": serde_json::from_str::<serde_json::Value>(&event).unwrap(),
-            })))
-        },
-    );
-    let observers = {
-        let mut stmt = process
-            .prepare("SELECT session_id, process_id, process_incarnation FROM process_observers ORDER BY session_id, process_id, process_incarnation")
-            .unwrap();
-        stmt.query_map([], |row| {
-            Ok((
-                SessionId::from(row.get::<_, String>(0)?),
-                ProcessId::from(row.get::<_, String>(1)?),
-                u64::try_from(row.get::<_, i64>(2)?).expect("non-negative process incarnation"),
-            ))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-    };
-    let leases = {
-        let mut stmt = process
-            .prepare(
-                "SELECT process_id, lease_owner_id, lease_owner_incarnation_id,
-                    lease_token, lease_fencing_token, lease_claimed_at_ms,
-                    lease_expires_at_ms
-             FROM process_leases ORDER BY process_id",
-            )
-            .unwrap();
-        stmt.query_map([], |row| {
-            let owner_id: Option<String> = row.get(1)?;
-            let incarnation_id: Option<String> = row.get(2)?;
-            let claimed: i64 = row.get(5)?;
-            let expires: i64 = row.get(6)?;
-            Ok(ProcessLeaseObservation {
-                process_id: ProcessId::from(row.get::<_, String>(0)?),
-                lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
-                owner: if row.get::<_, Option<String>>(3)?.is_some() {
-                    serde_json::to_value(decode_lease_owner(owner_id, incarnation_id)).unwrap()
-                } else {
-                    serde_json::Value::Null
-                },
-                fencing_token: row.get::<_, i64>(4)? as u64,
-                claimed: claimed != 0,
-                ttl_ms: (claimed != 0).then_some((expires - claimed) as u64),
-            })
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-    };
-    let wake_deliveries = sqlite_simple_json_rows(
-        &process,
-        "SELECT delivery_id, delivery_json, state, claim_token, attempts, first_attempt_ms,
-                next_attempt_at_ms, expires_at_ms, discard_reason
-         FROM process_wake_deliveries ORDER BY delivery_id",
-        |row| {
-            let json: String = row.get(1)?;
-            let wake: serde_json::Value = serde_json::from_str(&json).unwrap();
-            let mut value = serde_json::json!({
-                "delivery_id": row.get::<_, String>(0)?,
-                "wake": wake,
-            });
-            let fields = value.as_object_mut().unwrap();
-            fields.insert(
-                "state".to_string(),
-                serde_json::json!(row.get::<_, String>(2)?),
-            );
-            if let Some(token) = row.get::<_, Option<String>>(3)? {
-                fields.insert("claim_token".to_string(), serde_json::json!(token));
-            } else {
-                fields.remove("claim_token");
-            }
-            fields.insert(
-                "attempts".to_string(),
-                serde_json::json!(row.get::<_, i64>(4)?),
-            );
-            fields.insert(
-                "first_attempt_ms".to_string(),
-                serde_json::json!(row.get::<_, Option<i64>>(5)?),
-            );
-            fields.insert(
-                "next_attempt_at_ms".to_string(),
-                serde_json::json!(row.get::<_, i64>(6)?),
-            );
-            fields.insert(
-                "expires_at_ms".to_string(),
-                serde_json::json!(row.get::<_, i64>(7)?),
-            );
-            fields.insert(
-                "discard_reason".to_string(),
-                serde_json::json!(row.get::<_, Option<String>>(8)?),
-            );
-            Ok(normalized_json(value))
-        },
-    );
-    let wake_allocation_floors = {
-        let mut stmt = process
-            .prepare(
-                "SELECT target_session_id, process_id, allocation_floor
-                 FROM wake_allocation_floors ORDER BY target_session_id, process_id",
-            )
-            .unwrap();
-        stmt.query_map([], |row| {
-            Ok((
-                SessionId::from(row.get::<_, String>(0)?),
-                ProcessId::from(row.get::<_, String>(1)?),
-                row.get::<_, i64>(2)? as u64,
-            ))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-    };
-    let tombstones = sqlite_simple_json_rows(
-        &process,
-        "SELECT process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
-         FROM process_tombstones ORDER BY process_id, incarnation",
-        |row| {
-            Ok(normalized_json(serde_json::json!({
-                "process_id": row.get::<_, String>(0)?,
-                "incarnation": row.get::<_, i64>(1)?,
-                "terminal_label": row.get::<_, String>(2)?,
-                "pruned_at_ms": row.get::<_, i64>(3)?,
-                "pruned_change_seq": row.get::<_, i64>(4)?,
-            })))
-        },
-    );
-    let wake_redelivery_fences = {
-        let mut stmt = runtime
-            .prepare(
-                "SELECT session_id, process_id, allocation_floor
-             FROM wake_redelivery_fences ORDER BY session_id, process_id",
-            )
-            .unwrap();
-        stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as u64))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-    };
-    SurfaceState {
-        processes: ProcessRows {
-            records,
-            events,
-            observers,
-            leases,
-            wake_deliveries,
-            wake_allocation_floors,
-            tombstones,
-        },
-        wake_redelivery_fences,
-        triggers: read_sqlite_triggers(&trigger),
-        effect_journal: Some(sqlite_simple_json_rows(
-            &effect,
-            "SELECT scope_id, session_id, replay_key, envelope_hash, envelope_json, status,
-                    outcome_json, error_json, lease_owner_id, lease_token,
-                    lease_expires_at_ms, due_at_ms
-             FROM runtime_effect_replay ORDER BY scope_id, replay_key",
-            |row| {
-                let envelope: String = row.get(4)?;
-                Ok(normalized_json(serde_json::json!({
-                    "scope_id": row.get::<_, String>(0)?,
-                    "session_id": row.get::<_, Option<String>>(1)?,
-                    "replay_key": row.get::<_, String>(2)?,
-                    "envelope_hash": row.get::<_, String>(3)?,
-                    "envelope": serde_json::from_str::<serde_json::Value>(&envelope).unwrap(),
-                    "status": row.get::<_, String>(5)?,
-                    "outcome": row.get::<_, Option<String>>(6)?.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-                    "error": row.get::<_, Option<String>>(7)?.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-                    "lease_owner_id": row.get::<_, Option<String>>(8)?,
-                    "lease_token": row.get::<_, Option<String>>(9)?,
-                    "lease_expires_at_ms": row.get::<_, i64>(10)?,
-                    "due_at_ms": row.get::<_, Option<i64>>(11)?,
-                })))
-            },
-        )),
-        await_journal: Some(read_sqlite_await(&effect, &process)),
+    /// The shared refusal for grouped ops that do not go through the opener:
+    /// `Release` flips an executor flag and `Drain` runs on the successor, so
+    /// both still apply to a crashed group — only a never-opened one refuses.
+    fn group_exists_gate(&mut self, group: u8, op: &'static str) -> Result<(), String> {
+        if self.book.contains_key(&group) {
+            Ok(())
+        } else {
+            self.record_group(group, op, serde_json::json!({"error": "group_not_open"}));
+            Err(format!("effect group {group} is not open"))
+        }
     }
-}
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn sqlite_simple_json_rows<F>(
-    connection: &rusqlite::Connection,
-    query: &str,
-    decode: F,
-) -> Vec<serde_json::Value>
-where
-    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value>,
-{
-    let mut stmt = connection.prepare(query).unwrap();
-    stmt.query_map([], decode)
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
-    let mut incarnations = BTreeMap::new();
-    let subscriptions = sqlite_simple_json_rows(
-        connection,
-        "SELECT record_json FROM trigger_subscriptions ORDER BY subscription_id",
-        |row| {
-            let json: String = row.get(0)?;
-            Ok(serde_json::from_str(&json).unwrap())
-        },
-    )
-    .into_iter()
-    .map(|row| normalized_trigger_json(row, &mut incarnations))
-    .collect();
-    let mutation_receipts = sqlite_simple_json_rows(connection, "SELECT operation_id, owner_kind, owner_id, request_fingerprint, result_json FROM trigger_mutation_receipts ORDER BY operation_id", |row| {
-        let result: String = row.get(4)?;
-        Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "owner_kind": row.get::<_, String>(1)?, "owner_id": row.get::<_, String>(2)?, "request_fingerprint": row.get::<_, String>(3)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
-    }).into_iter().map(|row| normalized_trigger_receipt_json(row, &mut incarnations)).collect();
-    let occurrences = sqlite_simple_json_rows(connection, "SELECT record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
-        let record: String = row.get(0)?;
-        Ok(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))
-    }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
-    let deliveries = sqlite_simple_json_rows(connection, "SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM trigger_deliveries ORDER BY occurrence_id, subscription_id", |row| {
-        let snapshot: String = row.get(3)?;
-        Ok(serde_json::json!({"occurrence_id": row.get::<_, String>(0)?, "subscription_id": row.get::<_, String>(1)?, "process_id": row.get::<_, String>(2)?, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}))
-    }).into_iter().map(|row| normalized_trigger_delivery_json(row, &mut incarnations)).collect();
-    TriggerRows {
-        subscriptions,
-        mutation_receipts,
-        occurrences,
-        deliveries,
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn read_sqlite_await(
-    connection: &rusqlite::Connection,
-    process_registry: &rusqlite::Connection,
-) -> Vec<serde_json::Value> {
-    let mut rows = sqlite_simple_json_rows(
-        connection,
-        "SELECT key_id, scope_json, wait_json, session_id, turn_control, terminal_json, resolved_at_ms FROM await_event_waits ORDER BY key_id",
-        |row| {
-            let scope: String = row.get(1)?;
-            let wait: String = row.get(2)?;
-            let terminal: Option<String> = row.get(5)?;
-            Ok(normalized_json(serde_json::json!({
-                "kind": "wait", "key_id": row.get::<_, String>(0)?,
-                "scope": serde_json::from_str::<serde_json::Value>(&scope).unwrap(),
-                "wait": serde_json::from_str::<serde_json::Value>(&wait).unwrap(),
-                "session_id": row.get::<_, Option<String>>(3)?,
-                "turn_control": row.get::<_, i64>(4)? != 0,
-                "terminal": terminal.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-                "resolved_at_ms": row.get::<_, Option<i64>>(6)?,
-            })))
-        },
-    );
-    rows.extend(sqlite_simple_json_rows(connection, "SELECT session_id FROM await_event_revoked_sessions ORDER BY session_id", |row| {
-        Ok(serde_json::json!({"kind": "revoked_session", "session_id": row.get::<_, String>(0)?}))
-    }));
-    // A scope fence is one row in one of the two SQLite files — the journal
-    // for runtime operations and unbound process scopes, the registry for a
-    // registered process (ADR 0049) — while PostgreSQL holds them in one
-    // table; the surface reads the union in one order.
-    let mut fences: Vec<String> = Vec::new();
-    for reader in [connection, process_registry] {
-        fences.extend(
-            sqlite_simple_json_rows(
-                reader,
-                "SELECT scope_id FROM effect_scope_retirements ORDER BY scope_id",
-                |row| Ok(serde_json::Value::String(row.get::<_, String>(0)?)),
-            )
-            .into_iter()
-            .map(|value| value.as_str().expect("scope id").to_string()),
+    async fn group_release(&mut self, group: u8, position: u8) -> Result<(), String> {
+        self.group_exists_gate(group, "effect_group_release")?;
+        if let Some(groups) = &self.groups {
+            groups
+                .executors
+                .release(&group_key(group), usize::from(position));
+        }
+        self.record_group(
+            group,
+            "effect_group_release",
+            serde_json::json!({"released": true, "position": position}),
         );
+        // A live opener's released child finalizes asynchronously; wait for
+        // its settlement rank so a prefix ending here observes a quiesced
+        // row. A crashed opener's children settle in the drain instead.
+        if !self.book[&group].crashed {
+            self.wait_group_row_settled(&group_child_replay_key(group, position))
+                .await;
+        }
+        Ok(())
     }
-    fences.sort();
-    fences.dedup();
-    rows.extend(
-        fences
-            .into_iter()
-            .map(|scope_id| serde_json::json!({"kind": "retired_scope", "scope_id": scope_id})),
-    );
-    rows
-}
 
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
-    let record_rows: Vec<(String, i64)> =
-        sqlx::query_as("SELECT record_json, change_seq FROM lash_processes ORDER BY process_id")
-            .fetch_all(pool)
+    async fn group_release_both(&mut self, group: u8, a: u8, b: u8) -> Result<(), String> {
+        self.group_exists_gate(group, "effect_group_release_both")?;
+        if let Some(groups) = &self.groups {
+            groups.executors.release(&group_key(group), usize::from(a));
+            groups.executors.release(&group_key(group), usize::from(b));
+        }
+        self.record_group(
+            group,
+            "effect_group_release_both",
+            serde_json::json!({"released": [a, b]}),
+        );
+        // Both flags land before either settlement is awaited: the child
+        // holding the higher commit rank drains only after its lower-ranked
+        // sibling discharges, so a barrier on one released child alone could
+        // wait on a settle the sibling's park makes unreachable.
+        if !self.book[&group].crashed {
+            for position in [a, b] {
+                self.wait_group_row_settled(&group_child_replay_key(group, position))
+                    .await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Poll the durable journal until the child's settlement rank is
+    /// allocated, bounded by `GROUP_OP_BOUND`.
+    async fn wait_group_row_settled(&self, replay_key: &str) {
+        let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
+        loop {
+            if self
+                .reader
+                .group_row_settled(&group_scope_id(), replay_key)
+                .await
+            {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                return;
+            }
+            tokio::time::sleep(GROUP_POLL).await;
+        }
+    }
+
+    async fn group_await(&mut self, group: u8) -> Result<(), String> {
+        self.group_gate(group, "effect_group_await")?;
+        self.group_send(group, "effect_group_await", GroupOpCommand::Await)
             .await
-            .unwrap();
-    let records = record_rows.into_iter().map(|(record, change_seq)| normalized_json(serde_json::json!({"change_seq": change_seq, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))).collect();
-    let event_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT process_id, event_json FROM lash_process_events ORDER BY process_id, sequence",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let events = event_rows.into_iter().map(|(process_id, event)| normalized_json(serde_json::json!({"process_id": process_id, "event": serde_json::from_str::<serde_json::Value>(&event).unwrap()}))).collect();
-    let observers = sqlx::query_as(
-        "SELECT session_id, process_id, process_incarnation FROM lash_process_observers ORDER BY session_id, process_id, process_incarnation",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap()
-    .into_iter()
-    .map(|(session_id, process_id, incarnation): (String, String, i64)| {
-        (
-            SessionId::from(session_id),
-            ProcessId::from(process_id),
-            u64::try_from(incarnation).expect("non-negative process incarnation"),
+    }
+
+    async fn group_close(&mut self, group: u8) -> Result<(), String> {
+        self.group_gate(group, "effect_group_close")?;
+        let disposition = if self.book[&group].cancel_losers {
+            LoserPolicy::Cancel
+        } else {
+            LoserPolicy::RunToCompletion
+        };
+        self.group_send(
+            group,
+            "effect_group_close",
+            GroupOpCommand::Close { disposition },
         )
-    })
-    .collect();
-    type PgLeaseRow = (
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        i64,
-        i64,
-        i64,
-    );
-    let lease_rows: Vec<PgLeaseRow> = sqlx::query_as("SELECT process_id, lease_owner_id, lease_owner_incarnation_id, lease_token, lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms FROM lash_process_leases ORDER BY process_id").fetch_all(pool).await.unwrap();
-    let leases = lease_rows
-        .into_iter()
-        .map(
-            |(process_id, owner_id, incarnation, token, fencing, claimed, expires)| {
-                ProcessLeaseObservation {
-                    process_id: ProcessId::from(process_id),
-                    owner: if token.is_some() {
-                        serde_json::to_value(decode_lease_owner(owner_id, incarnation)).unwrap()
-                    } else {
-                        serde_json::Value::Null
-                    },
-                    lease_token_present: token.is_some(),
-                    fencing_token: fencing as u64,
-                    claimed: claimed != 0,
-                    ttl_ms: (claimed != 0).then_some((expires - claimed) as u64),
-                }
+        .await
+    }
+
+    async fn group_commit(&mut self, group: u8, position: u8) -> Result<(), String> {
+        self.group_gate(group, "effect_group_commit")?;
+        self.group_send(
+            group,
+            "effect_group_commit",
+            GroupOpCommand::Commit { position },
+        )
+        .await
+    }
+
+    async fn group_commit_both(&mut self, group: u8, a: u8, b: u8) -> Result<(), String> {
+        self.group_gate(group, "effect_group_commit_both")?;
+        self.group_send(
+            group,
+            "effect_group_commit_both",
+            GroupOpCommand::CommitBoth { a, b },
+        )
+        .await?;
+        if self
+            .group_outcomes
+            .last()
+            .and_then(|outcome| outcome.get("law_ok"))
+            == Some(&serde_json::Value::Bool(false))
+        {
+            return Err(format!(
+                "effect group {group} concurrent commits violated the distinct-consecutive law"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn group_drain_blocked(&mut self, group: u8, rank: u8) -> Result<(), String> {
+        self.group_gate(group, "effect_group_drain_blocked")?;
+        let mut seqs: Vec<u64> = self.book[&group].commit_seqs.values().copied().collect();
+        seqs.sort_unstable();
+        let Some(commit_seq) = seqs.get(usize::from(rank.saturating_sub(1))) else {
+            self.record_group(
+                group,
+                "effect_group_drain_blocked",
+                serde_json::json!({"error": "no_commit_at_rank", "rank": rank}),
+            );
+            return Ok(());
+        };
+        self.group_send(
+            group,
+            "effect_group_drain_blocked",
+            GroupOpCommand::DrainBlocked {
+                commit_seq: *commit_seq,
             },
         )
-        .collect();
-    type PgWakeRow = (
-        String,
-        String,
-        String,
-        Option<String>,
-        i64,
-        Option<i64>,
-        i64,
-        i64,
-        Option<String>,
-    );
-    let wake_rows: Vec<PgWakeRow> = sqlx::query_as("SELECT delivery_id, delivery_json, state, claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms, discard_reason FROM lash_process_wake_deliveries ORDER BY delivery_id").fetch_all(pool).await.unwrap();
-    let wake_deliveries = wake_rows
-        .into_iter()
-        .map(
-            |(
-                delivery_id,
-                json,
-                state,
-                token,
-                attempts,
-                first_attempt,
-                next_attempt,
-                expires,
-                discard,
-            )| {
-                let wake: serde_json::Value = serde_json::from_str(&json).unwrap();
-                let mut value = serde_json::json!({
-                    "delivery_id": delivery_id,
-                    "wake": wake,
-                });
-                let fields = value.as_object_mut().unwrap();
-                fields.insert("state".to_string(), serde_json::json!(state));
-                if let Some(token) = token {
-                    fields.insert("claim_token".to_string(), serde_json::json!(token));
-                } else {
-                    fields.remove("claim_token");
+        .await
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the gate guarantees the book; a miss is a harness defect"
+    )]
+    async fn group_crash(&mut self, group: u8) -> Result<(), String> {
+        self.group_gate(group, "effect_group_crash")?;
+        if let Some(groups) = &mut self.groups
+            && let Some(opener) = groups.openers.get_mut(&group)
+        {
+            opener.crash().await;
+        }
+        self.book
+            .get_mut(&group)
+            .expect("the gate guarantees the book")
+            .crashed = true;
+        self.record_group(
+            group,
+            "effect_group_crash",
+            serde_json::json!({"crashed": true}),
+        );
+        Ok(())
+    }
+
+    /// The successor host's drain over the group, retried while children
+    /// report `LeaseLive`/`Contested` so the pass rides out the crashed
+    /// opener's lease boundary rather than racing it.
+    async fn group_drain(&mut self, group: u8) -> Result<(), String> {
+        self.group_exists_gate(group, "effect_group_drain")?;
+        let Some(groups) = &self.groups else {
+            return Ok(());
+        };
+        let drain = groups.successor.group_drain();
+        let key = group_key(group);
+        let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
+        let outcome = loop {
+            match drain.drain_group(&key, &CancellationToken::new()).await {
+                Ok(report) => {
+                    let children: Vec<serde_json::Value> = report
+                        .children
+                        .iter()
+                        .map(|child| {
+                            serde_json::json!({
+                                "replay_key": child.replay_key,
+                                "outcome": match &child.outcome {
+                                    ChildDrainOutcome::Settled => "settled",
+                                    ChildDrainOutcome::Contested => "contested",
+                                    ChildDrainOutcome::LeaseLive { .. } => "lease_live",
+                                    ChildDrainOutcome::Decided => "decided",
+                                    ChildDrainOutcome::NoExecutor => "no_executor",
+                                    ChildDrainOutcome::Interrupted => "interrupted",
+                                    ChildDrainOutcome::Corrupt { .. } => "corrupt",
+                                },
+                            })
+                        })
+                        .collect();
+                    let still_live = report.children.iter().any(|child| {
+                        matches!(
+                            child.outcome,
+                            ChildDrainOutcome::Contested | ChildDrainOutcome::LeaseLive { .. }
+                        )
+                    });
+                    if still_live && std::time::Instant::now() < deadline {
+                        tokio::time::sleep(GROUP_POLL).await;
+                        continue;
+                    }
+                    break serde_json::json!({
+                        "disposition": format!("{:?}", report.disposition),
+                        "children": children,
+                    });
                 }
-                fields.insert("attempts".to_string(), serde_json::json!(attempts));
-                fields.insert(
-                    "first_attempt_ms".to_string(),
-                    serde_json::json!(first_attempt),
-                );
-                fields.insert(
-                    "next_attempt_at_ms".to_string(),
-                    serde_json::json!(next_attempt),
-                );
-                fields.insert("expires_at_ms".to_string(), serde_json::json!(expires));
-                fields.insert("discard_reason".to_string(), serde_json::json!(discard));
-                normalized_json(value)
-            },
-        )
-        .collect();
-    let allocation_rows: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT target_session_id, process_id, allocation_floor
-         FROM lash_wake_allocation_floors ORDER BY target_session_id, process_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let wake_allocation_floors = allocation_rows
-        .into_iter()
-        .map(|(session, process, sequence)| {
-            (
-                SessionId::from(session),
-                ProcessId::from(process),
-                sequence as u64,
-            )
-        })
-        .collect();
-    let tombstone_rows: Vec<(String, i64, String, i64, i64)> = sqlx::query_as("SELECT process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id, incarnation").fetch_all(pool).await.unwrap();
-    let tombstones = tombstone_rows.into_iter().map(|(process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "incarnation": incarnation, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();
-    let fence_rows: Vec<(String, String, i64)> = sqlx::query_as("SELECT session_id, process_id, allocation_floor FROM lash_wake_redelivery_fences ORDER BY session_id, process_id").fetch_all(pool).await.unwrap();
-    let wake_redelivery_fences = fence_rows
-        .into_iter()
-        .map(|(session, process, sequence)| (session, process, sequence as u64))
-        .collect();
-    SurfaceState {
-        processes: ProcessRows {
-            records,
-            events,
-            observers,
-            leases,
-            wake_deliveries,
-            wake_allocation_floors,
-            tombstones,
-        },
-        wake_redelivery_fences,
-        triggers: read_postgres_triggers(pool).await,
-        effect_journal: Some(read_postgres_effects(pool).await),
-        await_journal: Some(read_postgres_await(pool).await),
+                Err(error) => {
+                    break serde_json::json!({"error": neutral_error_code(&error)});
+                }
+            }
+        };
+        self.record_group(group, "effect_group_drain", outcome);
+        Ok(())
     }
-}
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
-    let mut incarnations = BTreeMap::new();
-    let subscriptions: Vec<String> = sqlx::query_scalar(
-        "SELECT record_json FROM lash_trigger_subscriptions ORDER BY subscription_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let subscriptions = subscriptions
-        .into_iter()
-        .map(|row| normalized_trigger_json(serde_json::from_str(&row).unwrap(), &mut incarnations))
-        .collect();
-    let receipts: Vec<(String, String, String, String, String)> = sqlx::query_as("SELECT operation_id, owner_kind, owner_id, request_fingerprint, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
-    let mutation_receipts = receipts.into_iter().map(|(operation_id, owner_kind, owner_id, request_fingerprint, result)| normalized_trigger_receipt_json(serde_json::json!({"operation_id": operation_id, "owner_kind": owner_kind, "owner_id": owner_id, "request_fingerprint": request_fingerprint, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
-    let occurrence_rows: Vec<String> = sqlx::query_scalar(
-        "SELECT record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let occurrences = occurrence_rows.into_iter().map(|record| normalized_trigger_json(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}), &mut incarnations)).collect();
-    let delivery_rows: Vec<(String, String, String, String)> = sqlx::query_as("SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM lash_trigger_deliveries ORDER BY occurrence_id, subscription_id").fetch_all(pool).await.unwrap();
-    let deliveries = delivery_rows.into_iter().map(|(occurrence_id, subscription_id, process_id, snapshot)| normalized_trigger_delivery_json(serde_json::json!({"occurrence_id": occurrence_id, "subscription_id": subscription_id, "process_id": process_id, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}), &mut incarnations)).collect();
-    TriggerRows {
-        subscriptions,
-        mutation_receipts,
-        occurrences,
-        deliveries,
+    async fn observe(&self) -> SurfaceState {
+        let mut state = self.reader.observe().await;
+        state.group_outcomes = self.group_outcomes.clone();
+        state
     }
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-async fn read_postgres_effects(pool: &PgPool) -> Vec<serde_json::Value> {
-    type Row = (
-        String,
-        Option<String>,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        i64,
-        Option<i64>,
-    );
-    let rows: Vec<Row> = sqlx::query_as("SELECT scope_id, session_id, replay_key, envelope_hash, envelope_json, status, outcome_json, error_json, lease_owner_id, lease_token, lease_expires_at_ms, due_at_ms FROM lash_runtime_effect_replay ORDER BY scope_id, replay_key").fetch_all(pool).await.unwrap();
-    rows.into_iter().map(|(scope_id, session_id, replay_key, envelope_hash, envelope, status, outcome, error, owner, token, lease_expires, due)| normalized_json(serde_json::json!({"scope_id": scope_id, "session_id": session_id, "replay_key": replay_key, "envelope_hash": envelope_hash, "envelope": serde_json::from_str::<serde_json::Value>(&envelope).unwrap(), "status": status, "outcome": outcome.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()), "error": error.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()), "lease_owner_id": owner, "lease_token": token, "lease_expires_at_ms": lease_expires, "due_at_ms": due}))).collect()
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-async fn read_postgres_await(pool: &PgPool) -> Vec<serde_json::Value> {
-    type Row = (
-        String,
-        String,
-        String,
-        Option<String>,
-        bool,
-        Option<String>,
-        Option<i64>,
-    );
-    let waits: Vec<Row> = sqlx::query_as("SELECT key_id, scope_json, wait_json, session_id, turn_control, terminal_json, resolved_at_ms FROM lash_await_event_waits ORDER BY key_id").fetch_all(pool).await.unwrap();
-    let mut rows = waits.into_iter().map(|(key_id, scope, wait, session_id, turn_control, terminal, resolved)| normalized_json(serde_json::json!({"kind": "wait", "key_id": key_id, "scope": serde_json::from_str::<serde_json::Value>(&scope).unwrap(), "wait": serde_json::from_str::<serde_json::Value>(&wait).unwrap(), "session_id": session_id, "turn_control": turn_control, "terminal": terminal.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()), "resolved_at_ms": resolved}))).collect::<Vec<_>>();
-    let revoked: Vec<String> = sqlx::query_scalar(
-        "SELECT session_id FROM lash_await_event_revoked_sessions ORDER BY session_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    rows.extend(revoked.into_iter().map(
-        |session_id| serde_json::json!({"kind": "revoked_session", "session_id": session_id}),
-    ));
-    let retired: Vec<String> =
-        sqlx::query_scalar("SELECT scope_id FROM lash_effect_scope_retirements ORDER BY scope_id")
-            .fetch_all(pool)
-            .await
-            .unwrap();
-    rows.extend(
-        retired
-            .into_iter()
-            .map(|scope_id| serde_json::json!({"kind": "retired_scope", "scope_id": scope_id})),
-    );
-    rows
 }
 
 #[expect(
@@ -1759,6 +1409,7 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
 async fn surface_runners(
     root: &Path,
     storage: &PostgresStorage,
+    database_url: &str,
     clock: Arc<dyn Clock>,
 ) -> Vec<SurfaceRunner> {
     let memory_runtime = Arc::new(InMemorySessionStore::with_clock(Arc::clone(&clock)));
@@ -1771,6 +1422,9 @@ async fn surface_runners(
     let sqlite_process_path = root.join("process.db");
     let sqlite_trigger_path = root.join("trigger.db");
     let sqlite_effect_path = root.join("effect.db");
+    // Grouped children journal into their own database: opener and successor
+    // are distinct hosts (distinct lease identities) over the same journal.
+    let sqlite_group_path = root.join("groups.db");
     let sqlite_runtime = Arc::new(SqliteStore::open(&sqlite_runtime_path).await.unwrap());
     let sqlite_registry = Arc::new(
         SqliteProcessRegistry::open_with_clock(
@@ -1791,6 +1445,29 @@ async fn surface_runners(
             .await
             .unwrap(),
     );
+    let sqlite_groups = {
+        let successor = GroupHost::Sqlite(
+            SqliteEffectHost::open_with_options_and_clock(
+                &sqlite_group_path,
+                sqlite_group_options(),
+                Arc::new(SystemClock),
+            )
+            .await
+            .unwrap(),
+        );
+        let executors = Arc::new(DifferentialGroupExecutors::default());
+        successor
+            .register_group_executors(Arc::clone(&executors) as Arc<dyn GroupExecutors>)
+            .unwrap();
+        GroupSurface {
+            executors,
+            backend: GroupBackend::Sqlite {
+                path: sqlite_group_path.clone(),
+            },
+            successor,
+            openers: BTreeMap::new(),
+        }
+    };
 
     let postgres_runtime = Arc::new(
         storage
@@ -1800,6 +1477,25 @@ async fn surface_runners(
     let postgres_registry = Arc::new(storage.process_registry().with_clock(Arc::clone(&clock)));
     let postgres_triggers = Arc::new(storage.trigger_store());
     let postgres_effect = Arc::new(storage.effect_host());
+    let postgres_groups = {
+        let successor = GroupHost::Postgres(PostgresEffectHost::with_options_and_clock(
+            storage,
+            postgres_group_options(),
+            Arc::new(SystemClock),
+        ));
+        let executors = Arc::new(DifferentialGroupExecutors::default());
+        successor
+            .register_group_executors(Arc::clone(&executors) as Arc<dyn GroupExecutors>)
+            .unwrap();
+        GroupSurface {
+            executors,
+            backend: GroupBackend::Postgres {
+                database_url: database_url.to_string(),
+            },
+            successor,
+            openers: BTreeMap::new(),
+        }
+    };
 
     vec![
         SurfaceRunner {
@@ -1811,6 +1507,9 @@ async fn surface_runners(
             process_registry: memory_registry.clone(),
             trigger_store: memory_triggers.clone(),
             effect_host: memory_effect,
+            groups: None,
+            book: BTreeMap::new(),
+            group_outcomes: Vec::new(),
             reader: SurfaceReader::InMemory {
                 runtime: memory_runtime,
                 registry: memory_registry,
@@ -1826,11 +1525,15 @@ async fn surface_runners(
             process_registry: sqlite_registry,
             trigger_store: sqlite_triggers,
             effect_host: sqlite_effect,
+            groups: Some(sqlite_groups),
+            book: BTreeMap::new(),
+            group_outcomes: Vec::new(),
             reader: SurfaceReader::Sqlite {
                 runtime_path: sqlite_runtime_path,
                 process_path: sqlite_process_path,
                 trigger_path: sqlite_trigger_path,
                 effect_path: sqlite_effect_path,
+                group_path: sqlite_group_path,
             },
         },
         SurfaceRunner {
@@ -1842,38 +1545,14 @@ async fn surface_runners(
             process_registry: postgres_registry,
             trigger_store: postgres_triggers,
             effect_host: postgres_effect,
+            groups: Some(postgres_groups),
+            book: BTreeMap::new(),
+            group_outcomes: Vec::new(),
             reader: SurfaceReader::Postgres {
                 pool: storage.pool().clone(),
             },
         },
     ]
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
-    let common = observations.windows(2).all(|pair| {
-        pair[0].1.processes == pair[1].1.processes
-            && pair[0].1.wake_redelivery_fences == pair[1].1.wake_redelivery_fences
-            && pair[0].1.triggers == pair[1].1.triggers
-    });
-    let sqlite = observations
-        .iter()
-        .find(|(name, _)| *name == "sqlite")
-        .unwrap()
-        .1
-        .clone();
-    let postgres = observations
-        .iter()
-        .find(|(name, _)| *name == "postgres")
-        .unwrap()
-        .1
-        .clone();
-    common
-        && sqlite.effect_journal == postgres.effect_journal
-        && sqlite.await_journal == postgres.await_journal
 }
 
 fn operation_results_agree(results: &[(&str, Option<String>)]) -> bool {
@@ -1948,12 +1627,13 @@ fn persist_counterexample(
 )]
 async fn first_divergence(
     storage: &PostgresStorage,
+    database_url: &str,
     operations: &[SurfaceOperation],
 ) -> Option<SurfaceDivergence> {
     reset_postgres_surface(storage).await;
     let root = tempfile::tempdir().unwrap();
     let clock = Arc::new(DifferentialClock) as Arc<dyn Clock>;
-    let mut runners = surface_runners(root.path(), storage, clock).await;
+    let mut runners = surface_runners(root.path(), storage, database_url, clock).await;
     for (step, operation) in operations.iter().enumerate() {
         let (operation_results, observations) = apply_and_observe(&mut runners, operation).await;
         if !operation_results_agree(&operation_results) || !states_agree(&observations) {
@@ -1970,6 +1650,7 @@ async fn first_divergence(
 
 async fn minimize_diverging_prefix(
     storage: &PostgresStorage,
+    database_url: &str,
     operations: &[SurfaceOperation],
 ) -> Vec<SurfaceOperation> {
     let mut minimal = operations.to_vec();
@@ -1977,7 +1658,10 @@ async fn minimize_diverging_prefix(
     while index + 1 < minimal.len() {
         let mut candidate = minimal.clone();
         candidate.remove(index);
-        if first_divergence(storage, &candidate).await.is_some() {
+        if first_divergence(storage, database_url, &candidate)
+            .await
+            .is_some()
+        {
             minimal = candidate;
         } else {
             index += 1;
@@ -2009,14 +1693,22 @@ async fn generated_cross_backend_surface_differential_agrees() {
         .unwrap();
     let storage = PostgresStorage::connect(&database_url).await.unwrap();
     // CI seed 852 minimized to occurrence ingestion with no subscription state.
-    if let Some(divergence) =
-        first_divergence(&storage, &[SurfaceOperation::TriggerOccurrence { key: 0 }]).await
+    if let Some(divergence) = first_divergence(
+        &storage,
+        &database_url,
+        &[SurfaceOperation::TriggerOccurrence { key: 0 }],
+    )
+    .await
     {
         panic!("seed-852 minimized trigger-occurrence regression diverged: {divergence:#?}");
     }
     // PR #570 seed 852 at 9eef49f32 minimized to one session-owned registration.
-    if let Some(divergence) =
-        first_divergence(&storage, &[SurfaceOperation::TriggerRegister { key: 0 }]).await
+    if let Some(divergence) = first_divergence(
+        &storage,
+        &database_url,
+        &[SurfaceOperation::TriggerRegister { key: 0 }],
+    )
+    .await
     {
         panic!("seed-852 minimized trigger-register regression diverged: {divergence:#?}");
     }
@@ -2032,7 +1724,9 @@ async fn generated_cross_backend_surface_differential_agrees() {
         SurfaceOperation::ProcessSignalZero { negative: true },
         SurfaceOperation::ProcessSignalZero { negative: false },
     ];
-    if let Some(divergence) = first_divergence(&storage, &canonical_conflict_material).await {
+    if let Some(divergence) =
+        first_divergence(&storage, &database_url, &canonical_conflict_material).await
+    {
         panic!("canonical conflict-material differential diverged: {divergence:#?}");
     }
     let cases = std::env::var("LASH_CROSS_BACKEND_CASES")
@@ -2072,7 +1766,7 @@ async fn generated_cross_backend_surface_differential_agrees() {
              omitted_operation_kinds={omitted:?}"
         );
         let clock = Arc::new(DifferentialClock) as Arc<dyn Clock>;
-        let mut runners = surface_runners(root.path(), &storage, clock).await;
+        let mut runners = surface_runners(root.path(), &storage, &database_url, clock).await;
         for (step, operation) in operations.iter().enumerate() {
             let (operation_results, observations) =
                 apply_and_observe(&mut runners, operation).await;
@@ -2083,11 +1777,14 @@ async fn generated_cross_backend_surface_differential_agrees() {
                     operation_results,
                     observations,
                 };
-                let minimal = minimize_diverging_prefix(&storage, &operations[..=step]).await;
+                let minimal =
+                    minimize_diverging_prefix(&storage, &database_url, &operations[..=step]).await;
                 // A prefix that stops reproducing is a harness defect, not a
                 // clean run: say which divergence was observed and then lost,
                 // so the report never hides behind a bare expect.
-                let Some(minimal_divergence) = first_divergence(&storage, &minimal).await else {
+                let Some(minimal_divergence) =
+                    first_divergence(&storage, &database_url, &minimal).await
+                else {
                     let path = persist_counterexample(seed, &operations[..=step], &observed);
                     panic!(
                         "cross-backend surface state diverged, but replaying the same prefix \

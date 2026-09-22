@@ -505,7 +505,9 @@ pub enum EffectGroupChildCommitOutcome {
     CancelDecided {
         /// The group the row resolved to.
         group_key: String,
-        /// The position the cancel decision seated the child at.
+        /// The position the cancel decision seated the child at: the
+        /// settlement rank `decide_cancel` allocated, not a commit-order
+        /// position — a cancel-decided row carries no `commit_seq`.
         commit_seq: u64,
     },
 }
