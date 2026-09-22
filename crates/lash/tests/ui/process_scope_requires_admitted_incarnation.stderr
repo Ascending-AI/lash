@@ -17,4 +17,4 @@ error[E0599]: no method named `repin_incarnation` found for reference `&ScopedEf
   --> tests/ui/process_scope_requires_admitted_incarnation.rs:13:20
    |
 13 |     let _ = scoped.repin_incarnation(lash::process::ProcessRef::new(
-   |                    ^^^^^^^^^^^^^^^^ method not found in `&ScopedEffectController<'_>`
+   |             -------^^^^^^^^^^^^^^^^^ method not found in `&ScopedEffectController<'_>`
