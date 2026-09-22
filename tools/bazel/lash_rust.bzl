@@ -38,9 +38,9 @@ def _all_package_files():
         exclude_directories = 1,
     )
 
-def _compile_data():
+def _compile_data(patterns = ["**"]):
     return native.glob(
-        ["**"],
+        patterns,
         allow_empty = True,
         exclude = _IGNORED_FILES + ["**/*.rs"],
         exclude_directories = 1,
@@ -137,6 +137,7 @@ def lash_rust_library(
         build_script = None,
         exec_properties = {},
         test_srcs = [],
+        compile_data_patterns = ["**"],
         extra_compile_data = []):
     deps = all_crate_deps(normal = True)
     if build_script:
@@ -144,11 +145,11 @@ def lash_rust_library(
     rust_library(
         name = name,
         aliases = _aliases_for(deps),
-        compile_data = _compile_data() + extra_compile_data,
+        compile_data = _compile_data(compile_data_patterns) + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = "src/lib.rs",
-        data = _compile_data() + extra_compile_data,
+        data = _compile_data(compile_data_patterns) + extra_compile_data,
         deps = deps,
         edition = "2024",
         exec_properties = exec_properties,
@@ -379,6 +380,7 @@ def lash_rust_feature_library(
         build_script = None,
         exec_properties = {},
         test_srcs = [],
+        compile_data_patterns = ["**"],
         extra_compile_data = [],
         extra_deps = {},
         tags = [],
@@ -393,11 +395,11 @@ def lash_rust_feature_library(
     rust_library(
         name = name,
         aliases = dep_aliases,
-        compile_data = _compile_data() + extra_compile_data,
+        compile_data = _compile_data(compile_data_patterns) + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = "src/lib.rs",
-        data = _compile_data() + extra_compile_data,
+        data = _compile_data(compile_data_patterns) + extra_compile_data,
         deps = deps,
         edition = "2024",
         exec_properties = exec_properties,

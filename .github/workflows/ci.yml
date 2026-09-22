@@ -480,6 +480,7 @@ jobs:
           python3 scripts/test_fast_test.py
           python3 scripts/test_bazel_test_contract.py
           python3 scripts/test_runtime_off_graph.py ManifestInheritance
+          python3 scripts/test_bazel_source_ownership.py
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/test_check_version_bumps.py

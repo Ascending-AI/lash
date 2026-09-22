@@ -150,6 +150,13 @@ def test_source_patterns(directory: str, target: str) -> list[str]:
     )
 
 
+def library_data_patterns_argument(directory: str) -> str:
+    patterns = SOURCE_OWNERSHIP.get(directory, {}).get("library_compile_data")
+    if patterns is None:
+        return ""
+    return f"    compile_data_patterns = {string_list(patterns)},\n"
+
+
 def library_test_sources_argument(directory: str) -> str:
     sources = SOURCE_OWNERSHIP.get(directory, {}).get("library_test_sources", [])
     return f"    test_srcs = {string_list(sources)},\n" if sources else ""
@@ -170,7 +177,7 @@ def validate_source_ownership(metadata: dict) -> None:
     for directory, policy in SOURCE_OWNERSHIP.items():
         if directory not in packages:
             raise ValueError(f"source ownership names unknown package {directory}")
-        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources"}:
+        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources", "library_compile_data"}:
             raise ValueError(f"unknown source ownership keys for {directory}")
         package = packages[directory]
         tests = {
@@ -210,6 +217,22 @@ def validate_source_ownership(metadata: dict) -> None:
                     raise ValueError(f"invalid Rust source pattern {directory}/{pattern}")
                 if not any((ROOT / directory).glob(pattern)):
                     raise ValueError(f"source pattern matches nothing: {directory}/{pattern}")
+        if "library_compile_data" in policy:
+            if not any("lib" in target["kind"] for target in package["targets"]):
+                raise ValueError(f"library compile data names no library: {directory}")
+            patterns = policy["library_compile_data"]
+            if not isinstance(patterns, list):
+                raise ValueError(f"library compile data must be a list: {directory}")
+            for pattern in patterns:
+                if (
+                    not isinstance(pattern, str)
+                    or pattern.startswith("/")
+                    or ".." in pathlib.PurePosixPath(pattern).parts
+                ):
+                    raise ValueError(f"invalid compile data pattern {directory}/{pattern}")
+                matches = [path for path in (ROOT / directory).glob(pattern) if path.is_file()]
+                if not matches or any(path.suffix == ".rs" for path in matches):
+                    raise ValueError(f"compile data pattern must match non-Rust files: {directory}/{pattern}")
         for source in policy.get("library_test_sources", []):
             if "*" in source or not (ROOT / directory / source).is_file():
                 raise ValueError(f"test-only source must name a file: {directory}/{source}")
@@ -502,6 +525,7 @@ def target_support(
             ])
         if target["name"] == "durable_read_fixture":
             extra_compile_data.append("//crates/lash-core:durable_read_fixture_source")
+            extra_data.append("//crates/lash-core:durable_read_predecessor_fixtures")
     if (
         package["name"] == "lash-internal-postgres-store"
         and target["name"] == "preflight_durable_walk"
@@ -653,6 +677,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    declared_features = {string_list(declared_features)},\n"
             + exec_properties_argument(library["name"], "lib")
             + library_test_sources_argument(package_dir)
+            + library_data_patterns_argument(package_dir)
             + f"    extra_compile_data = {string_list(extra_compile_data)},\n"
             f"    manifest_dir = {quote(package_dir)},\n"
             f"    package_name = {quote(package['name'])},\n"
@@ -960,6 +985,10 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "filegroup(\n"
             "    name = \"durable_read_fixture_source\",\n"
             "    srcs = [\"tests/support/durable_read_fixture.rs\"],\n"
+            ")\n\n"
+            "filegroup(\n"
+            "    name = \"durable_read_predecessor_fixtures\",\n"
+            "    srcs = glob([\"tests/fixtures/durable-read-predecessors/**\"]),\n"
             ")\n\n"
             "filegroup(\n"
             "    name = \"queued_claim_atomicity\",\n"
@@ -1731,6 +1760,7 @@ class FeatureLaneGraph:
             f"    declared_features = {string_list(sorted(package['features']))},\n"
             + exec_properties_argument(library["name"], "lib")
             + library_test_sources_argument(directory)
+            + library_data_patterns_argument(directory)
             + f"    extra_compile_data = {string_list(library_compile_data(package_name) + feature_compile_data(package_name, features))},\n"
             f"    manifest_dir = {quote(directory)},\n"
             f"    package_name = {quote(package_name)},\n"

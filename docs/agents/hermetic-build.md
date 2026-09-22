@@ -745,3 +745,21 @@ binaries. The `core-internal-features` lane also runs them with no default
 features, including no `testing` feature, against the production library.
 The lease-preimage and retained-tool-child mutation recipes select their
 integration targets as well as the unit tests.
+
+`library_compile_data` replaces the package-wide non-Rust glob for audited
+libraries, including their feature variants. Core, core-execution, Lashlang,
+PostgreSQL and SQLite declare their manifests, crate-local lint configuration
+where present, and embedded production assets. PostgreSQL retains `schema.sql`,
+`teardown.sql` and `schema-shape.txt`; test pins, regression files and predecessor
+fixtures no longer invalidate these production library actions. Cross-package
+`extra_compile_data` remains additive. Unlisted libraries retain the conservative
+glob, and tests retain their compile fixtures and runtime package files. Add new
+embedded assets to the owning library's declaration in the same change.
+The SQLite and PostgreSQL durable-read tests explicitly declare core's
+predecessor-fixture filegroup as runtime data, including their feature variants.
+
+All five relocated core runtime suites now declare their own Rust module trees
+and shared `runtime_support` helpers. The turns suite also owns its two
+`#[path]` modules outside the turns directory. Editing one suite still reruns
+other tests that scan its source at runtime, but does not recompile unrelated
+suite binaries.
