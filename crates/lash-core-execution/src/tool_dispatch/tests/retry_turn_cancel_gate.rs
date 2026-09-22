@@ -158,7 +158,7 @@ async fn retry_sleep_shape(
 
 #[tokio::test]
 async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
-    let shape = retry_sleep_shape(
+    let shape = Box::pin(retry_sleep_shape(
         ToolAttemptEffectIdentity::Process {
             parent: None,
             process_id: ProcessId::from("process-1"),
@@ -166,7 +166,7 @@ async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
         crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
         crate::ExecutionScope::process("process-1"),
         "ambient-session-a",
-    )
+    ))
     .await;
 
     assert_eq!(
@@ -178,7 +178,7 @@ async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
 
 #[tokio::test]
 async fn retry_sleep_under_a_turn_keeps_the_turn_cancel_gate() {
-    let shape = retry_sleep_shape(
+    let shape = Box::pin(retry_sleep_shape(
         ToolAttemptEffectIdentity::Scalar { parent: None },
         crate::runtime::TurnCancelWait::observing(
             tokio_util::sync::CancellationToken::new(),
@@ -186,7 +186,7 @@ async fn retry_sleep_under_a_turn_keeps_the_turn_cancel_gate() {
         ),
         crate::ExecutionScope::turn("session", "turn"),
         "session",
-    )
+    ))
     .await;
 
     assert!(
@@ -208,7 +208,7 @@ async fn retry_sleep_under_a_turn_keeps_the_turn_cancel_gate() {
 #[tokio::test]
 async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
     let observe = |ambient_session_id| {
-        retry_sleep_shape(
+        Box::pin(retry_sleep_shape(
             ToolAttemptEffectIdentity::Process {
                 parent: None,
                 process_id: ProcessId::from("stable-process"),
@@ -216,7 +216,7 @@ async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
             crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
             crate::ExecutionScope::process("stable-process"),
             ambient_session_id,
-        )
+        ))
     };
     let first = observe("ambient-session-a").await;
     let second = observe("ambient-session-b").await;

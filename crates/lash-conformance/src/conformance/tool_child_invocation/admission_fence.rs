@@ -136,6 +136,15 @@ fn law_fence_orchestrating_tool() -> crate::tool_provider::orchestration::Orches
     }
 }
 
+/// The process-side wiring the opener's dispatch installs: the gated service
+/// the law asserts stayed empty, the env store the child host needs, and the
+/// definition registry the fenced write would have reached.
+struct FenceOpenerProcesses {
+    processes: Arc<dyn crate::ProcessService>,
+    env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
+}
+
 /// The opener registration the law needs: `register_opener_with_processes`
 /// plus the process-definition registry and the law's resolve-only engine,
 /// so the nested leaf's `RegisterProcessDefinition` declaration resolves and
@@ -148,12 +157,15 @@ fn register_fence_opener(
     host: &Arc<dyn crate::EffectHost>,
     scope: &crate::ExecutionScope,
     provider: Arc<dyn crate::ToolProvider>,
-    processes: Arc<dyn crate::ProcessService>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    process_definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
+    processes: FenceOpenerProcesses,
     opener: crate::EffectOpener,
     cooperative: tokio_util::sync::CancellationToken,
 ) -> crate::runtime::effect::LiveOpenerGuard {
+    let FenceOpenerProcesses {
+        processes,
+        env_store: process_env_store,
+        definitions: process_definitions,
+    } = processes;
     let installed = install_child_host(host, &process_env_store);
     let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
         .expect("the opener's scope and incarnation agree");
@@ -329,9 +341,11 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
         &host,
         &scope,
         Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
-        Arc::clone(&processes),
-        Arc::clone(&scenario.process_env_store),
-        Arc::clone(&definitions),
+        FenceOpenerProcesses {
+            processes: Arc::clone(&processes),
+            env_store: Arc::clone(&scenario.process_env_store),
+            definitions: Arc::clone(&definitions),
+        },
         opener.clone(),
         tokio_util::sync::CancellationToken::new(),
     );
