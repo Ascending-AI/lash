@@ -386,10 +386,12 @@ mod blake3_domain_tests {
     // it to a disposition-carrying encoding; and the v3 payload after the same
     // ticket's fix round replaced the hole *count* with per-attempt descriptors;
     // and the v2 tool-intent payload after FIG-2994 moved the start intent from a
-    // caller-minted request to an id-less declaration.
+    // caller-minted request to an id-less declaration. The v2 model-facing
+    // composition hash was superseded by v3.
     const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
         "lash-process-env/v4",
         "lash-process-env/v5",
+        "lash-model-facing-composition/v2",
         "lash-plugin-snapshot-revision/v2",
         "lash-queued-work-claim-lease/v2",
         "lash-rolling-history-compaction/v1",
