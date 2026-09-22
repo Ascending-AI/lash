@@ -129,7 +129,7 @@ impl lash_core::plugin::ProtocolDriverPlugin for UnusedAppendRollbackProtocolDri
 }
 
 #[tokio::test]
-async fn tool_result_projector_only_changes_model_observation() {
+async fn presentation_step_only_changes_model_observation() {
     let committed_results = Arc::new(tokio::sync::Mutex::new(Vec::<serde_json::Value>::new()));
     let committed_results_hook = Arc::clone(&committed_results);
     let plugin = Arc::new(RuntimeTestPluginFactory {
@@ -138,15 +138,15 @@ async fn tool_result_projector_only_changes_model_observation() {
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
                 checkpoint: None,
-                tool_result_projector: Some(Arc::new(|ctx| {
+                presentation_steps: vec![Arc::new(|input| {
                     Box::pin(async move {
                         Ok(lash_core::facade_support::ModelToolReturn::text(
-                            ctx.call_id,
-                            ctx.tool_name,
+                            input.context.call_id,
+                            input.context.tool_name,
                             "model projection",
                         ))
                     })
-                })),
+                })],
                 runtime_event: Some(Arc::new(move |event| {
                     let committed_results = Arc::clone(&committed_results);
                     Box::pin(async move {

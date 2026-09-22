@@ -606,6 +606,67 @@ paths = ["crates/lash-sansio/src/tool_intents.rs"]
 must_cover = ["tool_intent_variants"]
 
 [[surface]]
+constant = "TOOL_PRESENTATION_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs"
+description = "the journaled product of one tool result's ordered presentation chain — the model-facing return plus every retained artifact ref (ADR 0099 section 6, FIG-3420)"
+
+# The presentation is journaled inside a `PresentToolResult` outcome and read
+# back verbatim on replay, so a field added, retired or retyped anywhere in
+# its serialized closure changes what a replay can serve the model. Its
+# `model_return` and `artifacts` reach the same message/attachment/causal
+# leaf set as the settlement's return, guarded here rather than borrowed from
+# the settlement surface because the two records move for different reasons.
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs",
+  "crates/lash-sansio/src/plugin.rs",
+  "crates/lash-sansio/src/session_model/message.rs",
+  "crates/lash-sansio/src/session_model/mod.rs",
+  "crates/lash-sansio/src/llm/types.rs",
+  "crates/lash-sansio/src/attachment.rs",
+  "crates/lash-sansio/src/tool_output.rs",
+  "crates/lash-sansio/src/causal.rs",
+]
+symbols = [
+  "ToolPresentation",
+  "PluginMessage",
+  "MessageRole",
+  "MessageOrigin",
+  "TurnOutputSource",
+  "Part",
+  "FlatPart",
+  "FlatPartRef",
+  "PartAttachment",
+  "PartKind",
+  "AttachmentSource",
+  "ProviderFileScope",
+  "ProviderReplayMeta",
+  "ProviderReasoningReplay",
+  "ProviderRouteIdentity",
+  "ResponsePhase",
+  "ResponseTextMeta",
+  "AttachmentRef",
+  "AttachmentId",
+  "AttachmentTypeMetadata",
+  "MediaType",
+  "ModelToolReturn",
+  "ModelToolReturnPart",
+  "AttachmentMaterializationNotice",
+  "AttachmentMaterializationSource",
+  "AttachmentMaterializationReason",
+  "CausalRef",
+]
+
+# The `string_identity!` output (SessionId/ProcessId — reached via
+# MessageOrigin and AttachmentSource) is macro-generated, so the vocabulary
+# file is pinned whole.
+[[surface.guard]]
+kind = "file"
+paths = ["crates/lash-sansio/src/identity.rs"]
+must_cover = ["string_identity!", "SessionId", "ProcessId"]
+
+[[surface]]
 constant = "TOOL_ATTEMPT_CAPTURE_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
 description = "the semantic facts one atomic tool attempt journaled with its outcome (ADR 0099 section 13)"

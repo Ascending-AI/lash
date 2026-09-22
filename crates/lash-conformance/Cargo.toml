@@ -27,6 +27,9 @@ lash-core = { workspace = true, features = ["testing"] }
 # the same one a deployment runs; the law stands one up for the producers that
 # need it (FIG-3400).
 lash-core-worker = { workspace = true, features = ["testing"] }
+# The presentation-boundary laws run the real budget plugin as one step in a
+# composed chain (FIG-3420).
+lash-plugin-tool-output-budget.workspace = true
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

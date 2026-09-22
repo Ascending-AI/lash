@@ -274,7 +274,7 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
                 mode: crate::plugins::ToolOutputBudgetMode::Bytes,
                 limit: 12,
                 max_lines: 4,
-                spill: None,
+                retain_full_output: false,
             },
         ));
         let observed_tool_results = Arc::new(TokioMutex::new(Vec::<String>::new()));

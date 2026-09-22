@@ -217,6 +217,19 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
+    /// Overrides the session attachment store the context binds.
+    ///
+    /// The default is a fresh in-memory store; a law that must observe or
+    /// share the store a presentation step retains artifacts through (FIG-3420)
+    /// hands in its own facade over a backend it holds.
+    pub fn attachment_store(
+        mut self,
+        attachment_store: Arc<crate::SessionAttachmentStore>,
+    ) -> Self {
+        self.attachment_store = attachment_store;
+        self
+    }
+
     /// Which cell of the turn this context executes, counting from 0.
     ///
     /// Only a fixture that executes more than one cell needs to say.

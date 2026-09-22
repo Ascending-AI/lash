@@ -300,6 +300,14 @@ fn validate_effect_command(
             ));
         }
     }
+    if let RuntimeEffectCommand::PresentToolResult { call_id, .. } = command
+        && call_id.trim().is_empty()
+    {
+        return Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectToolAttemptCallId,
+            "runtime effect tool presentation requires a non-empty call id",
+        ));
+    }
     if let RuntimeEffectCommand::ToolInvocation { request } = command {
         request.validate()?;
     }
@@ -406,6 +414,17 @@ pub enum RuntimeEffectCommand {
         group_key: String,
         through_rank: u64,
     },
+    /// The recorded presentation boundary (ADR 0099 §6, FIG-3420): folds the
+    /// session's ordered presentation steps over this settled output once and
+    /// journals the resulting [`ToolPresentation`](super::ToolPresentation).
+    /// Replay serves the recorded outcome and never re-runs a step.
+    PresentToolResult {
+        call_id: String,
+        tool_name: String,
+        args: serde_json::Value,
+        output: Box<crate::ToolCallOutput>,
+        duration_ms: u64,
+    },
     Trigger {
         command: Box<crate::TriggerCommand>,
     },
@@ -470,6 +489,7 @@ impl RuntimeEffectCommand {
             Self::IncorporateGroupSettlements { .. } => {
                 RuntimeEffectKind::IncorporateGroupSettlements
             }
+            Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
@@ -1082,6 +1102,13 @@ pub enum RuntimeEffectOutcome {
     IncorporateGroupSettlements {
         incorporated: Vec<super::group::IncorporatedGroupRank>,
     },
+    /// What the [`PresentToolResult`](RuntimeEffectCommand::PresentToolResult)
+    /// boundary journaled: the folded `ModelToolReturn` plus every artifact a
+    /// step retained while the chain ran. Replay serves this record verbatim —
+    /// presentation steps never re-run (ADR 0099 §6, FIG-3420).
+    PresentToolResult {
+        presentation: Box<super::ToolPresentation>,
+    },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
     },
@@ -1346,6 +1373,27 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Unpacks the recorded presentation of one settled tool result.
+    ///
+    /// Validates the record rather than trusting it: a journal entry written
+    /// by a build whose presentation format this build cannot read completely
+    /// is refused here, where the outcome is consumed, instead of serving the
+    /// model a prefix of what the chain produced.
+    pub fn into_tool_presentation(
+        self,
+    ) -> Result<super::ToolPresentation, RuntimeEffectControllerError> {
+        match self {
+            Self::PresentToolResult { presentation } => {
+                presentation.validate()?;
+                Ok(*presentation)
+            }
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::PresentToolResult,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_tool_batch_effect(
         self,
     ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
@@ -1497,6 +1545,7 @@ impl RuntimeEffectOutcome {
             Self::IncorporateGroupSettlements { .. } => {
                 RuntimeEffectKind::IncorporateGroupSettlements
             }
+            Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,

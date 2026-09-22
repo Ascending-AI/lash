@@ -18,7 +18,7 @@ fn turn_persisted_borrowed_append_plugin(
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
                 checkpoint: None,
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: Some(Arc::new(move |event| {
                     let attempted = Arc::clone(&attempted);
                     let received_error = Arc::clone(&received_error);
@@ -65,7 +65,7 @@ fn turn_finalized_borrowed_append_plugin() -> Arc<dyn lash_core::facade_support:
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
                 checkpoint: None,
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: Some(Arc::new(move |event| {
                     let retained = Arc::clone(&retained);
                     Box::pin(async move {
@@ -117,7 +117,7 @@ fn retain_turn_persisted_graph_service_plugin(
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
                 checkpoint: None,
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: Some(Arc::new(move |event| {
                     let retained = Arc::clone(&retained);
                     Box::pin(async move {

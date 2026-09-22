@@ -52,16 +52,17 @@
 //! without an in-process slot.
 //!
 //! It projects the child's result exactly once, at its own presentation
-//! boundary: the session's plugin projector is a singleton lent through the
-//! dispatch context, and the driver journals the resolved `ModelToolReturn` on
-//! the settlement rather than leaving a `CompletedToolCall` for the opener to
-//! derive. Incorporation consumes the record; it never re-projects, so a
-//! changed projector environment on replay cannot change what the child
-//! settled.
+//! boundary: the session's ordered presentation steps run once through the
+//! journaled `PresentToolResult` effect under the child's bound controller,
+//! and the driver journals the resolved `ModelToolReturn` on the settlement
+//! rather than leaving a `CompletedToolCall` for the opener to derive.
+//! Incorporation consumes the record; it never re-presents, so a changed
+//! presentation environment on replay cannot change what the child settled.
 
 use std::sync::Arc;
 
-use lash_sansio::core_support::ModelToolReturnCoreSupport;
+use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+
 use tokio_util::sync::CancellationToken;
 
 use super::envelope::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome};
@@ -1053,51 +1054,77 @@ fn failed_child_outcome(
     }
 }
 
-/// The child's presentation boundary: the singleton plugin projector, run once
-/// over the settled outcome, with attachment notices computed under the child's
-/// *recorded* environment (ADR 0099 §3 — a reopen uses the recorded facts).
+/// The child's presentation boundary: the registered presentation steps, run
+/// once over the settled outcome, with attachment notices computed under the
+/// child's *recorded* environment (ADR 0099 §3 — a reopen uses the recorded
+/// facts).
 ///
 /// The resolved return is journaled on the settlement so incorporation consumes
-/// a record instead of re-running the projector: a projector that changed
-/// between execution and replay cannot change what the child settled. A
-/// projector *error* resolves to the same recorded fallback the session path
-/// uses, so a broken projector settles a refusal rather than aborting the
-/// settlement.
+/// a record instead of re-running the steps: a step that changed between
+/// execution and replay cannot change what the child settled. A step *error*
+/// resolves to the same recorded fallback the session path uses, so a broken
+/// step settles a refusal rather than aborting the settlement.
 async fn resolve_model_return(
     dispatch: &ToolDispatchContext<'_>,
     request: &ToolChildRequest,
     outcome: &ToolDispatchOutcome,
     intent_outcomes: &[crate::ToolIntentExecutionOutcome],
 ) -> crate::ModelToolReturn {
-    let mut model_return = match dispatch
-        .plugins
-        .project_tool_result(crate::plugin::ToolResultProjectionContext {
-            session_id: dispatch.session_id.clone(),
-            call_id: request.call.call_id.clone(),
-            tool_name: outcome.record.tool.clone(),
-            args: outcome.record.args.clone(),
-            output: outcome.record.output.clone(),
-            duration_ms: outcome.record.duration_ms,
-        })
-        .await
-    {
-        Ok(projected) => projected,
+    let baseline = crate::ModelToolReturn::from_output(
+        request.call.call_id.clone(),
+        outcome.record.tool.clone(),
+        &outcome.record.output,
+    );
+    let settlement = Arc::new(ToolSettlement::from_dispatch(outcome, baseline));
+    // The child's presentation boundary is a journaled `PresentToolResult`
+    // effect under the child's own bound controller, so the folded return is
+    // the settlement's recorded `model_return` — replay serves the record and
+    // never re-runs a step (ADR 0099 §6, FIG-3420).
+    let replay_key = format!("{}:present", request.call.call_id);
+    let scoped = dispatch.effect_controller.scoped();
+    let presented =
+        match crate::EffectAddress::new(scoped.execution_scope().clone(), replay_key.clone()) {
+            Ok(address) => scoped
+                .execute_effect(
+                    crate::RuntimeEffectEnvelope::new(
+                        crate::RuntimeEffectInvocation::new(
+                            address,
+                            dispatch.parentless_attribution(),
+                            replay_key,
+                        ),
+                        crate::RuntimeEffectCommand::PresentToolResult {
+                            call_id: request.call.call_id.clone(),
+                            tool_name: outcome.record.tool.clone(),
+                            args: outcome.record.args.clone(),
+                            output: Box::new(outcome.record.output.clone()),
+                            duration_ms: outcome.record.duration_ms,
+                        },
+                    ),
+                    crate::RuntimeEffectLocalExecutor::presentation(
+                        Arc::clone(&dispatch.plugins),
+                        settlement,
+                        Arc::clone(&dispatch.attachment_store),
+                        (*dispatch
+                            .execution_env_spec
+                            .policy
+                            .model
+                            .capability
+                            .attachment_acceptance)
+                            .clone(),
+                    ),
+                )
+                .await
+                .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
+            Err(error) => Err(error.into()),
+        };
+    let mut model_return = match presented {
+        Ok(presentation) => presentation.model_return,
         Err(error) => crate::ModelToolReturn::text(
             request.call.call_id.clone(),
             outcome.record.tool.clone(),
             error.to_string(),
         ),
     };
-    crate::session::tool_execution::surface_attachment_materialization_notices(
-        &dispatch
-            .execution_env_spec
-            .policy
-            .model
-            .capability
-            .attachment_acceptance,
-        &outcome.record.output,
-        &mut model_return,
-    );
     // The same addenda the session path appends in `complete_tool_call`: the
     // realized intents are part of the presentation the model sees, so the
     // recorded return carries them rather than leaving incorporation to

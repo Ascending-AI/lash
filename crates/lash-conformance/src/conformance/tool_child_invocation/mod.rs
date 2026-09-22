@@ -98,6 +98,12 @@ const LEAF_COMMIT: &str = "tool:law_commit";
 /// process-definition registration — the journaled CAS write FIG-3470 routes
 /// through the bound controller like every other sink.
 const LEAF_FENCE: &str = "tool:law_fence";
+/// The leaf the presentation laws truncate: returns one oversized string so a
+/// byte-budget step has something to cut (FIG-3420).
+const LEAF_BIG: &str = "tool:law_big";
+/// The byte size of [`LEAF_BIG`]'s output — comfortably over every budget the
+/// presentation laws configure.
+const BIG_OUTPUT_BYTES: usize = 64 * 1024;
 
 /// One host over the substrate under test, plus the drain it hands out.
 pub struct ToolChildWorld {
@@ -342,6 +348,7 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_SPEND_CANCEL,
         LEAF_COMMIT,
         LEAF_FENCE,
+        LEAF_BIG,
     ]
     .into_iter()
     .map(|id| {
@@ -491,6 +498,11 @@ impl crate::ToolProvider for LawLeafProvider {
                     ))
                     .into(),
                 }
+            }
+            name if name == LEAF_BIG.trim_start_matches("tool:") => {
+                crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
+                    serde_json::json!("x".repeat(BIG_OUTPUT_BYTES)),
+                ))
             }
             name if name == LEAF_GRANTED.trim_start_matches("tool:") => {
                 crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
@@ -896,22 +908,38 @@ fn law_orchestrating_tool() -> crate::tool_provider::orchestration::Orchestratin
     }
 }
 
+/// Optional wiring an opener's lent dispatch can carry beyond the law's
+/// defaults (FIG-3420): presentation-step plugin factories, and a session
+/// attachment store the law built itself so it can observe and re-read what
+/// a step retains.
+#[derive(Default)]
+struct OpenerExtras {
+    /// Added on top of the code-protocol factories the context defaults to.
+    plugin_factories: Vec<Arc<dyn crate::plugin::PluginFactory>>,
+    /// The session attachment store the dispatch binds; `None` takes the
+    /// builder's fresh in-memory default.
+    attachment_store: Option<Arc<crate::SessionAttachmentStore>>,
+}
+
 /// The dispatch context one opener lends its children on one host view.
 ///
 /// Every field the driver rebinds comes from the child's recorded request;
 /// everything the law asserts on is lent through here: the leaf provider and
 /// its registry, the process service over the tier's registry, the canned
-/// direct-completion client that feeds the real usage-recording path.
+/// direct-completion client that feeds the real usage-recording path —
+/// plus whatever [`OpenerExtras`] carries.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-fn opener_dispatch(
+fn build_opener_dispatch(
     host: &Arc<dyn crate::EffectHost>,
     admitted: &crate::AdmittedScope,
     provider: Arc<dyn crate::ToolProvider>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    processes: Option<Arc<dyn crate::ProcessService>>,
+    registry: Option<Arc<dyn crate::ProcessRegistry>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    extras: OpenerExtras,
 ) -> Arc<crate::tool_dispatch::ToolDispatchContext<'static>> {
     let controller = host
         .scoped_static(admitted.clone())
@@ -930,11 +958,16 @@ fn opener_dispatch(
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     ));
-    crate::testing::TestExecutionContextBuilder::new()
+    let processes = processes.unwrap_or_else(|| {
+        crate::testing::effect_backed_process_service(
+            registry.expect("a dispatch without a process service takes the registry"),
+        )
+    });
+    let mut builder = crate::testing::TestExecutionContextBuilder::new()
         .provider(provider)
         .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
         .tool_registry(Arc::new(tool_registry))
-        .processes(crate::testing::effect_backed_process_service(registry))
+        .processes(processes)
         .direct_completions(crate::DirectCompletionClient::from_fn(
             |request, _source| {
                 Ok(if request.model == "law-billed-model" {
@@ -945,60 +978,23 @@ fn opener_dispatch(
             },
         ))
         .process_env_store(process_env_store)
-        .borrowed_effect_controller(controller)
-        .build()
-        .dispatch
-}
-
-/// The same dispatch context with the process service the caller supplies —
-/// how a law installs a [`GatedProcessService`] over the tier's registry.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-fn opener_dispatch_with_processes(
-    host: &Arc<dyn crate::EffectHost>,
-    admitted: &crate::AdmittedScope,
-    provider: Arc<dyn crate::ToolProvider>,
-    processes: Arc<dyn crate::ProcessService>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-) -> Arc<crate::tool_dispatch::ToolDispatchContext<'static>> {
-    let controller = host
-        .scoped_static(admitted.clone())
-        .expect("the host lends a scoped controller")
-        .expect("this host hands out owned scoped controllers");
-    let tool_registry = crate::ToolRegistry::from_tool_provider_with_orchestrating_tools(
-        Arc::clone(&provider),
-        vec![law_orchestrating_tool()],
-    )
-    .expect("the law's leaf provider and orchestrating tool register disjoint ids");
-    let mut definitions = leaf_definitions();
-    definitions.push(crate::ToolDefinition::raw(
-        LEAF_ORCHESTRATING,
-        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-        "conformance orchestrating leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    ));
-    crate::testing::TestExecutionContextBuilder::new()
-        .provider(provider)
-        .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
-        .tool_registry(Arc::new(tool_registry))
-        .processes(processes)
-        .direct_completions(crate::DirectCompletionClient::from_fn(
-            |_request, _source| Ok(law_direct_completion()),
-        ))
-        .process_env_store(process_env_store)
-        .borrowed_effect_controller(controller)
-        .build()
-        .dispatch
+        .borrowed_effect_controller(controller);
+    if let Some(attachment_store) = extras.attachment_store {
+        builder = builder.attachment_store(attachment_store);
+    }
+    if !extras.plugin_factories.is_empty() {
+        // A conformance context must keep the code protocol the builder
+        // defaults to; extras are chained after it.
+        let factories = crate::testing::test_code_protocol_factories()
+            .into_iter()
+            .chain(extras.plugin_factories)
+            .collect();
+        builder = builder.plugin_factories(factories);
+    }
+    builder.build().dispatch
 }
 
 /// [`register_opener`] with the process service the caller supplies.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 fn register_opener_with_processes(
     host: &Arc<dyn crate::EffectHost>,
     scope: &crate::ExecutionScope,
@@ -1008,11 +1004,53 @@ fn register_opener_with_processes(
     opener: crate::EffectOpener,
     cooperative: tokio_util::sync::CancellationToken,
 ) -> crate::runtime::effect::LiveOpenerGuard {
+    register_opener_inner(
+        host,
+        scope,
+        provider,
+        Some(processes),
+        None,
+        process_env_store,
+        opener,
+        cooperative,
+        OpenerExtras::default(),
+    )
+}
+
+/// The one registration body every opener variant shares: installs the child
+/// host, builds the lent dispatch from the supplied registry-or-processes and
+/// extras, and registers `opener` against it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the registration's fields are the law's parameters; a struct would only rename the list"
+)]
+fn register_opener_inner(
+    host: &Arc<dyn crate::EffectHost>,
+    scope: &crate::ExecutionScope,
+    provider: Arc<dyn crate::ToolProvider>,
+    processes: Option<Arc<dyn crate::ProcessService>>,
+    registry: Option<Arc<dyn crate::ProcessRegistry>>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    opener: crate::EffectOpener,
+    cooperative: tokio_util::sync::CancellationToken,
+    extras: OpenerExtras,
+) -> crate::runtime::effect::LiveOpenerGuard {
     let installed = install_child_host(host, &process_env_store);
     let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
         .expect("the opener's scope and incarnation agree");
-    let dispatch =
-        opener_dispatch_with_processes(host, &admitted, provider, processes, process_env_store);
+    let dispatch = build_opener_dispatch(
+        host,
+        &admitted,
+        provider,
+        processes,
+        registry,
+        process_env_store,
+        extras,
+    );
     let lent_controller = host
         .scoped_static(admitted)
         .expect("the host lends a scoped controller")
@@ -1575,10 +1613,6 @@ fn install_child_host(
 /// "this worker's opener is gone" edge the recovery phase drives. The
 /// event-channel forwarder is bounded by the registration, exactly as the turn
 /// path's is.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 fn register_opener(
     host: &Arc<dyn crate::EffectHost>,
     scope: &crate::ExecutionScope,
@@ -1588,34 +1622,49 @@ fn register_opener(
     opener: crate::EffectOpener,
     cooperative: tokio_util::sync::CancellationToken,
 ) -> crate::runtime::effect::LiveOpenerGuard {
-    let installed = install_child_host(host, &process_env_store);
     // The opener and its admitted scope are one fact: a process opener's
     // lent controller is scoped under that same incarnation, and a
     // non-process opener's is unpinned by construction.
-    let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
-        .expect("the opener's scope and incarnation agree");
-    let dispatch = opener_dispatch(host, &admitted, provider, registry, process_env_store);
-    let lent_controller = host
-        .scoped_static(admitted)
-        .expect("the host lends a scoped controller")
-        .expect("this host hands out owned scoped controllers");
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
-    let context = crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(
-        &dispatch,
-        lent_controller,
-        event_tx,
+    register_opener_inner(
+        host,
+        scope,
+        provider,
+        None,
+        Some(registry),
+        process_env_store,
+        opener,
         cooperative,
-    );
-    let (guard, ended) = installed.openers().register(opener, context);
-    // The registration owns the sender's lifetime: the forwarder ends when the
-    // entry leaves the registry, not when the channel's last clone drops.
-    crate::task::spawn(async move {
-        tokio::select! {
-            _ = ended.cancelled() => {}
-            _ = async { while event_rx.recv().await.is_some() {} } => {}
-        }
-    });
-    guard
+        OpenerExtras::default(),
+    )
+}
+
+/// [`register_opener`] with the dispatch extras the presentation laws carry —
+/// step factories and an attachment store the law observes (FIG-3420).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the registration's fields are the law's parameters; a struct would only rename the list"
+)]
+fn register_opener_with_extras(
+    host: &Arc<dyn crate::EffectHost>,
+    scope: &crate::ExecutionScope,
+    provider: Arc<dyn crate::ToolProvider>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    opener: crate::EffectOpener,
+    cooperative: tokio_util::sync::CancellationToken,
+    extras: OpenerExtras,
+) -> crate::runtime::effect::LiveOpenerGuard {
+    register_opener_inner(
+        host,
+        scope,
+        provider,
+        None,
+        Some(registry),
+        process_env_store,
+        opener,
+        cooperative,
+        extras,
+    )
 }
 
 /// Everything one scenario needs that is not the host: the observation log,
@@ -1901,6 +1950,7 @@ mod driver;
 mod foreign_opener;
 mod incarnation;
 mod incorporation;
+mod presentation;
 mod recovery;
 mod usage;
 
@@ -1911,5 +1961,6 @@ pub use driver::*;
 pub use foreign_opener::*;
 pub use incarnation::*;
 pub use incorporation::*;
+pub use presentation::*;
 pub use recovery::*;
 pub use usage::*;

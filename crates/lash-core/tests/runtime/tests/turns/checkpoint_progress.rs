@@ -118,7 +118,7 @@ pub(super) fn turn_budget_config_mutator(
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
                 checkpoint: None,
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: None,
                 external_registrar: Some(Arc::new(move |reg| {
                     reg.session()
@@ -212,7 +212,7 @@ pub(super) async fn every_session_config_patch_emits_a_lifecycle_event() {
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
                 checkpoint: None,
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: Some(Arc::new(move |event| {
                     let observed = Arc::clone(&observed);
                     Box::pin(async move {
@@ -430,7 +430,7 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
                     })
                 })),
                 checkpoint: None,
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: None,
                 external_registrar: None,
             }))
@@ -929,7 +929,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                         }
                     })
                 })),
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: None,
                 external_registrar: None,
             }))
@@ -1013,7 +1013,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
                         ])
                     })
                 })),
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: None,
                 external_registrar: None,
             }))
@@ -1177,7 +1177,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
                         ])
                     })
                 })),
-                tool_result_projector: None,
+                presentation_steps: vec![],
                 runtime_event: None,
                 external_registrar: None,
             }))

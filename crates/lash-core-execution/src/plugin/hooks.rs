@@ -36,8 +36,66 @@ pub type BeforeToolCallHook = Arc<
 pub type AfterToolCallHook = Arc<
     dyn Fn(ToolResultHookContext) -> PluginFuture<Vec<AfterToolCallPluginDirective>> + Send + Sync,
 >;
-pub type ToolResultProjector =
-    Arc<dyn Fn(ToolResultProjectionContext) -> PluginFuture<crate::ModelToolReturn> + Send + Sync>;
+/// One composable presentation step (ADR 0099 §6 presentation boundary,
+/// FIG-3420): folds the previous step's `ModelToolReturn` with the recorded
+/// settlement into the next. Pure over its inputs; anything impure it needs
+/// (retaining bytes) goes through
+/// [`ToolResultProjectionContext::artifacts`], which is journaled.
+pub struct ToolPresentationInput {
+    /// The return the chain has produced so far — `ModelToolReturn::from_output`
+    /// before the first step, then each prior step's answer.
+    pub previous: crate::ModelToolReturn,
+    /// The settlement the presented result is being recorded into. Read-only
+    /// evidence for the step: its `model_return` is the pre-chain baseline.
+    pub settlement: Arc<crate::runtime::effect::ToolSettlement>,
+    pub context: ToolResultProjectionContext,
+}
+
+/// A registered presentation step, run in registration order inside the
+/// journaled `PresentToolResult` boundary.
+pub type ToolPresentationStep =
+    Arc<dyn Fn(ToolPresentationInput) -> PluginFuture<crate::ModelToolReturn> + Send + Sync>;
+
+/// The impure capability a presentation step may need, journaled by the
+/// `PresentToolResult` boundary that runs the chain: a blob retained here is
+/// `put` once on the first run and the recorded `crate::AttachmentRef` is what
+/// replay serves.
+pub trait ToolPresentationArtifacts: Send + Sync {
+    /// Retain `text` under `label`, returning the content-addressed reference
+    /// the session now references.
+    fn retain_text<'a>(
+        &'a self,
+        label: &'a str,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::AttachmentRef, PluginError>> + Send + 'a>>;
+
+    /// The refs retained so far, in retain order. The runtime journals them on
+    /// the recorded presentation outcome; a step reads its own `retain_text`
+    /// return, never this.
+    fn retained(&self) -> Vec<crate::AttachmentRef> {
+        Vec::new()
+    }
+}
+
+/// A presentation context that retains nothing: `retain_text` answers a typed
+/// refusal so a step that requires artifacts fails into the chain's recorded
+/// fallback rather than pretending a retention happened.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoPresentationArtifacts;
+
+impl ToolPresentationArtifacts for NoPresentationArtifacts {
+    fn retain_text<'a>(
+        &'a self,
+        _label: &'a str,
+        _text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::AttachmentRef, PluginError>> + Send + 'a>> {
+        Box::pin(async move {
+            Err(PluginError::Session(
+                "this presentation context retains no artifacts".to_string(),
+            ))
+        })
+    }
+}
 pub type AfterTurnHook =
     Arc<dyn Fn(TurnResultHookContext) -> PluginFuture<Vec<AfterTurnPluginDirective>> + Send + Sync>;
 pub type CheckpointHook =
@@ -260,6 +318,10 @@ pub struct ToolResultProjectionContext {
     pub args: serde_json::Value,
     pub output: crate::ToolCallOutput,
     pub duration_ms: u64,
+    /// The journaled artifact capability a presentation step retains bytes
+    /// through (FIG-3420); [`NoPresentationArtifacts`] where the boundary
+    /// supplies none.
+    pub artifacts: Arc<dyn ToolPresentationArtifacts>,
 }
 
 #[derive(Clone)]

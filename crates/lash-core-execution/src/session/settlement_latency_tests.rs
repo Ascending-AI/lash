@@ -50,16 +50,16 @@ impl LeafSettledSignal {
         .unwrap_or(false)
     }
 
-    fn projector(&self) -> crate::plugin::ToolResultProjector {
+    fn presentation_step(&self) -> crate::plugin::ToolPresentationStep {
         let signal = self.clone();
-        Arc::new(move |context: crate::plugin::ToolResultProjectionContext| {
-            if context.call_id == signal.call_id {
+        Arc::new(move |input: crate::plugin::ToolPresentationInput| {
+            if input.context.call_id == signal.call_id {
                 signal.raised.send_replace(true);
             }
             let projected = crate::ModelToolReturn::text(
-                context.call_id,
-                context.tool_name,
-                context.output.value_for_projection().to_string(),
+                input.context.call_id,
+                input.context.tool_name,
+                input.context.output.value_for_projection().to_string(),
             );
             Box::pin(async move { Ok(projected) })
         })
@@ -196,15 +196,15 @@ fn probe_context(
     )
 }
 
-fn probe_context_with_projector(
+fn probe_context_with_presentation_step(
     provider: Arc<dyn crate::ToolProvider>,
     controller: Arc<crate::NativeRuntimeEffectController>,
-    projector: Option<crate::plugin::ToolResultProjector>,
+    step: Option<crate::plugin::ToolPresentationStep>,
 ) -> crate::RuntimeExecutionContext<'static> {
     probe_context_with(
         provider,
         controller,
-        projector,
+        step,
         Arc::new(crate::UnavailableProcessService),
     )
 }
@@ -212,12 +212,12 @@ fn probe_context_with_projector(
 fn probe_context_with(
     provider: Arc<dyn crate::ToolProvider>,
     controller: Arc<crate::NativeRuntimeEffectController>,
-    projector: Option<crate::plugin::ToolResultProjector>,
+    step: Option<crate::plugin::ToolPresentationStep>,
     processes: Arc<dyn crate::ProcessService>,
 ) -> crate::RuntimeExecutionContext<'static> {
     let spec = crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider));
-    let spec = match projector {
-        Some(projector) => spec.with_tool_result_projector(projector),
+    let spec = match step {
+        Some(step) => spec.with_presentation_step(step),
         None => spec,
     };
     let plugins = crate::plugin::PluginHost::new(vec![Arc::new(
@@ -286,19 +286,19 @@ fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
 }
 
 /// A probe context whose synchronous leaf waits for `awaited_leaf` to settle,
-/// and whose result projector raises that signal.
+/// and whose presentation step raises that signal.
 fn handshake_probe_context(
     awaited_leaf: LeafSettledSignal,
 ) -> crate::RuntimeExecutionContext<'static> {
     let controller = Arc::new(
         crate::NativeRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
     );
-    let projector = awaited_leaf.projector();
+    let step = awaited_leaf.presentation_step();
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
         controller: Arc::clone(&controller),
         awaited_leaf: Some(awaited_leaf),
     });
-    probe_context_with_projector(provider, controller, Some(projector))
+    probe_context_with_presentation_step(provider, controller, Some(step))
 }
 
 struct GrantedRetryProbeTools {

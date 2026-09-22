@@ -53,12 +53,12 @@ pub use hooks::{
     AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
     AssistantStreamFinishedHook, AssistantStreamHook, AssistantStreamHookContext,
     AssistantStreamTransform, BeforeToolCallHook, BeforeTurnHook, CheckpointHook,
-    CheckpointHookContext, PluginFuture, PluginLifecycleEvent, PluginLifecycleEventHook,
-    PluginLifecycleFuture, PluginSessionTask, PromptContributor, PromptHookContext,
-    SessionConfigChangedContext, SessionConfigMutator, SessionStateChangedContext,
-    ToolCallHookContext, ToolCatalogContributor, ToolResultHookContext,
-    ToolResultProjectionContext, ToolResultProjector, TurnHookContext, TurnHookReport,
-    TurnResultHookContext,
+    CheckpointHookContext, NoPresentationArtifacts, PluginFuture, PluginLifecycleEvent,
+    PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask, PromptContributor,
+    PromptHookContext, SessionConfigChangedContext, SessionConfigMutator,
+    SessionStateChangedContext, ToolCallHookContext, ToolCatalogContributor,
+    ToolPresentationArtifacts, ToolPresentationInput, ToolPresentationStep, ToolResultHookContext,
+    ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CodeExecutionDisposition, CodeExecutorPlugin,
@@ -919,20 +919,23 @@ mod tests {
         }
 
         fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.tool_results().projector(Arc::new(|ctx| {
+            reg.tool_results().presentation_step(Arc::new(|input| {
                 Box::pin(async move {
                     Ok(crate::ModelToolReturn::from_output(
-                        ctx.call_id,
-                        ctx.tool_name,
-                        &ctx.output,
+                        input.context.call_id,
+                        input.context.tool_name,
+                        &input.context.output,
                     ))
                 })
-            }))
+            }));
+            Ok(())
         }
     }
 
+    /// FIG-3420: presentation steps compose; registering a second step is not
+    /// a `model_observation` conflict anymore.
     #[test]
-    fn duplicate_tool_result_projectors_are_rejected() {
+    fn multiple_presentation_steps_register_in_order() {
         let host = PluginHost::new(vec![
             Arc::new(ProjectorPluginFactory {
                 plugin_id: "projector-a",
@@ -941,12 +944,17 @@ mod tests {
                 plugin_id: "projector-b",
             }),
         ]);
-        let err = match host.build_session("root") {
-            Ok(_) => panic!("duplicate projector"),
-            Err(err) => err,
-        };
-        assert!(err.to_string().contains("duplicate tool result projector"));
-        assert!(err.to_string().contains("projector-a"));
-        assert!(err.to_string().contains("projector-b"));
+        let session = host
+            .build_session("root")
+            .expect("two presentation steps compose");
+        assert_eq!(
+            session
+                .contributions
+                .presentation_steps
+                .iter()
+                .map(|registered| registered.plugin_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["projector-a", "projector-b"],
+        );
     }
 }

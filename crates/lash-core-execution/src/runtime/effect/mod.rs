@@ -24,6 +24,10 @@ pub use tool_child::{
 mod tool_child_driver;
 pub(crate) use tool_child_driver::await_journaled_tool_completion;
 pub use tool_child_driver::{ToolChildDriver, ToolChildHost, opener_for_execution_scope};
+mod tool_presentation;
+pub use tool_presentation::{
+    SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
+};
 mod tool_settlement;
 pub use tool_settlement::{
     TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,

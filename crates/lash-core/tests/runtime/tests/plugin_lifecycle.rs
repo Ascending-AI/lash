@@ -17,7 +17,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                 Ok(Arc::new(RuntimeTestPlugin {
                     before_turn: None,
                     checkpoint: None,
-                    tool_result_projector: None,
+                    presentation_steps: vec![],
                     runtime_event: Some(Arc::new(move |event| {
                         let hook_gate = Arc::clone(&hook_gate);
                         Box::pin(async move {

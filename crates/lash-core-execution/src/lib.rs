@@ -178,6 +178,7 @@ pub mod facade_support {
     pub use crate::plugin::DirectCompletion;
     pub use crate::plugin::DirectLlmCompletion;
     pub use crate::plugin::EnqueueMessagesDirective;
+    pub use crate::plugin::NoPresentationArtifacts;
     pub use crate::plugin::PersistentRuntimeServices;
     pub use crate::plugin::PluginCommand;
     pub use crate::plugin::PluginDirective;
@@ -211,8 +212,10 @@ pub mod facade_support {
     pub use crate::plugin::SessionStateChangedContext;
     pub use crate::plugin::ShortCircuitToolDirective;
     pub use crate::plugin::ToolCatalogContribution;
+    pub use crate::plugin::ToolPresentationArtifacts;
+    pub use crate::plugin::ToolPresentationInput;
+    pub use crate::plugin::ToolPresentationStep;
     pub use crate::plugin::ToolResultProjectionContext;
-    pub use crate::plugin::ToolResultProjector;
     pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
     pub use crate::plugin::TurnHookReport;
