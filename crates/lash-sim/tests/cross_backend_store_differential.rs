@@ -2513,8 +2513,8 @@ async fn cross_backend_store_differential_agrees() {
         &postgres,
     ))
     .await;
-    assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
     fork_cases::selected_observer_intents(sqlite_root.path(), &postgres, &run_nonce).await;
+    assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
     eprintln!(
         "PASSED cross-backend store differential; \
          compared_backends=[in-memory,sqlite,postgres]"
