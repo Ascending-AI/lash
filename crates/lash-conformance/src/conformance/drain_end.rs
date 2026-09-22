@@ -157,6 +157,10 @@ impl crate::ToolProvider for DrainEndTool {
         (name == "drain_end_probe").then(|| Arc::new(drain_end_tool().contract()))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: non-empty frame material always derives"
+    )]
     async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
         // A `SwitchAgentFrame` control makes the protocol close frame 0 with
@@ -286,12 +290,20 @@ async fn run_sweep(world: &DrainEndWorld) {
 }
 
 /// The drain's own end evidence.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each read is established by the setup"
+)]
 async fn drain_ended(store: &Arc<dyn RuntimePersistence>, drain_id: &str) -> bool {
     SessionCommitStore::drain_end_exists(store.as_ref(), drain_id)
         .await
         .expect("read the drain-end receipt")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each read is established by the setup"
+)]
 async fn drain_ledger_row(
     registry: &Arc<dyn ProcessRegistry>,
     drain_id: &str,
@@ -302,6 +314,10 @@ async fn drain_ledger_row(
         .expect("read the drain's parent-end ledger row")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each read is established by the setup"
+)]
 async fn child(registry: &Arc<dyn ProcessRegistry>, id: &str) -> ProcessRecord {
     registry
         .get_process(&ProcessId::from(id))
@@ -314,10 +330,14 @@ fn cancel_origin(record: &ProcessRecord) -> Option<crate::CancelOrigin> {
     record.cancel_request.as_ref().map(|request| request.origin)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each write is established by the setup"
+)]
 async fn seed_turn_input(store: &Arc<dyn RuntimePersistence>, text: &str) {
     store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &SessionId::from(SESSION_ID),
+            SessionId::from(SESSION_ID),
             TurnInputIngress::NextTurn,
             TurnInput::text(text),
         ))
@@ -1033,7 +1053,7 @@ fn gated_executor(
     entered: &Arc<AtomicUsize>,
     release: CancellationToken,
 ) -> crate::RuntimeEffectLocalExecutor<'static> {
-    let entered = Arc::clone(&entered);
+    let entered = Arc::clone(entered);
     crate::RuntimeEffectLocalExecutor::testing(move |_| {
         let entered = Arc::clone(&entered);
         let release = release.clone();
