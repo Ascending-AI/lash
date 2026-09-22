@@ -210,6 +210,7 @@ mod testing_inventory {
     use lash::testing::TestLocalProcessRegistry as _;
     use lash::testing::TestProvider as _;
     use lash::testing::code_execution_context as _;
+    use lash::testing::exec_code_invocation as _;
     use lash::testing::mock_tool_context_with_execution_binding as _;
     use lash::testing::store_fixtures::authorize_completion_deferral_for_test as _;
     // The durable-backend certification laws ride the facade: a host certifies
@@ -230,6 +231,7 @@ mod rlm_testing_inventory {
     };
 
     use lash::rlm::lang::testing::conformance::ReopenableLashlangArtifactStore as _;
+    use lash::testing::deferred_resolution_link_key as _;
     // The host names `lashlang_artifact_store_reopenable`; the live name of the
     // same conformance entry point is `survives_reopen`.
     use lash::rlm::lang::testing::conformance::survives_reopen as _;

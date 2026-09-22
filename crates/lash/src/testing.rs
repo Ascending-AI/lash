@@ -35,7 +35,24 @@ pub use lash_core::testing::{
     code_execution_context_with_tool_provider_catalog_and_invocation,
     code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
+    exec_code_invocation,
 };
+
+/// The [`DeferredResolutionLinkKey`](crate::tools::DeferredResolutionLinkKey) a
+/// deferred link admits for an [`exec_code_invocation`]-built invocation —
+/// the infallible counterpart of
+/// [`DeferredResolutionLinkKey::from_exec_code_invocation`](crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation)
+/// for a fixture known to carry an admitted `ExecCode` effect address. Seed a
+/// [`DeferredResolutionRecord`](crate::tools::DeferredResolutionRecord) with it
+/// when a host test drives
+/// [`link_with_deferred_resolution`](crate::tools::link_with_deferred_resolution).
+#[cfg(feature = "rlm")]
+pub fn deferred_resolution_link_key(
+    invocation: &lash_core::RuntimeInvocation,
+) -> crate::tools::DeferredResolutionLinkKey {
+    crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
+        .expect("an exec_code_invocation carries an admitted ExecCode effect address")
+}
 
 #[cfg(test)]
 pub(crate) fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {
