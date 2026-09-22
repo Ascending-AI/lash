@@ -1865,12 +1865,6 @@
     },
     {
       "features": [],
-      "kind": "unit-test",
-      "label": "//crates/lash-core-execution:lash-core-execution__unit_test__fv_ecbe9667",
-      "package": "lash-internal-core-execution"
-    },
-    {
-      "features": [],
       "kind": "test",
       "label": "//crates/lash-core-execution:process_model__test__fv_ecbe9667",
       "package": "lash-internal-core-execution"

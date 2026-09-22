@@ -197,10 +197,20 @@ impl PostgresSessionStore {
             && let Some(admission) =
                 load_run_tx(&mut tx, &request.session_id, request.identity.as_ref()).await?
         {
-            return request.resume(&admission);
+            let resumed = request.resume(&admission)?;
+            if resumed.origin != admission.origin {
+                write_run_tx(&mut tx, &resumed, false).await?;
+                tx.commit().await.map_err(store_sqlx_error)?;
+            }
+            return Ok(resumed);
         }
         if let Some(admission) = load_run_tx(&mut tx, &request.session_id, None).await? {
-            return request.resume(&admission);
+            let resumed = request.resume(&admission)?;
+            if resumed.origin != admission.origin {
+                write_run_tx(&mut tx, &resumed, false).await?;
+                tx.commit().await.map_err(store_sqlx_error)?;
+            }
+            return Ok(resumed);
         }
         let actual = load_session_head_meta_tx(&mut tx, &request.session_id, false)
             .await?
@@ -237,7 +247,10 @@ impl PostgresSessionStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &fence.session_id).await?;
         ensure_session_execution_lease_tx(&mut tx, &fence.session_id, fence).await?;
-        if !matches!(settlement.progress, QueuedRunProgress::Settle { .. }) {
+        if !matches!(
+            settlement.progress,
+            QueuedRunProgress::Settle { .. } | QueuedRunProgress::ForgetUnworked
+        ) {
             return Err(conflict(&fence.session_id));
         }
         let admission = load_run_tx(&mut tx, &fence.session_id, Some(&settlement.scope))
@@ -252,6 +265,7 @@ impl PostgresSessionStore {
             } if admission.members.as_ref().is_some_and(Vec::is_empty)
                 && admission.withheld_members.is_empty()
                 && admission.assigned_members.is_empty() => {}
+            QueuedRunProgress::ForgetUnworked if admission.can_forget_unworked() => {}
             _ => return Err(conflict(&fence.session_id)),
         }
         let next = admission.advance(&settlement, &[])?;
@@ -259,7 +273,22 @@ impl PostgresSessionStore {
             return Ok(next);
         }
         settle_run_members_tx(&mut tx, fence, &settlement.scope).await?;
-        write_run_tx(&mut tx, &next, false).await?;
+        if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
+            sqlx::query(run_sql().clear_members.sql())
+                .bind(fence.session_id.as_str())
+                .bind(scope_key(&settlement.scope)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            sqlx::query(run_sql().delete_scope.sql())
+                .bind(fence.session_id.as_str())
+                .bind(scope_key(&settlement.scope)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        } else {
+            write_run_tx(&mut tx, &next, false).await?;
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(next)
     }
@@ -386,18 +415,6 @@ impl PostgresSessionStore {
                         (outcome.claim, outcome.already_satisfied_batch_ids, None)
                     }
                 };
-                if inputs.is_none()
-                    && queued.is_none()
-                    && refusal.is_some_and(|reason| reason != QueuedWorkClaimRefusal::Empty)
-                {
-                    return Ok(SelectedQueuedRun {
-                        admission,
-                        inputs: inputs.into_iter().collect(),
-                        queued: queued.into_iter().collect(),
-                        already_satisfied,
-                        refusal,
-                    });
-                }
                 let members = inputs
                     .iter()
                     .flat_map(|claim| {

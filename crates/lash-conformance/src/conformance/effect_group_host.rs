@@ -2280,10 +2280,10 @@ pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() ->
         ))
         .await
         .expect("the companion group opens");
-    let can_list = matches!(
-        host.list_outstanding_await_event_keys(&session_id).await,
-        Ok(_)
-    );
+    let can_list = host
+        .list_outstanding_await_event_keys(&session_id)
+        .await
+        .is_ok();
     if can_list {
         tokio::time::timeout(AWAIT_BUDGET, async {
             loop {

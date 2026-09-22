@@ -1,6 +1,500 @@
 use super::*;
 use lash_core::store::{BeginQueuedRun, QueuedRunRequest};
 
+/// A refused automatic selection has no claimed members, but it must freeze
+/// an empty admission so the runtime can settle it without stranding the lane.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture fails at the violated admission invariant"
+)]
+pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn RuntimePersistence>) {
+    use lash_core::store::{QueuedRunCommit, QueuedRunProgress};
+
+    let session_id = SessionId::from("queued-run-refused-selection");
+    let state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let delayed = store
+        .enqueue_queued_work(
+            checkpoint_claims::queued_draft(
+                &session_id,
+                "not yet available",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_available_at_ms(u64::MAX / 2),
+        )
+        .await
+        .expect("enqueue delayed work");
+    let lease =
+        claim_session_execution_lease_for_test(&store, &session_id, "refused-selection").await;
+    let admission = store
+        .begin_or_resume_queued_run(
+            &lease.authority(),
+            BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: None,
+                request: QueuedRunRequest::Automatic,
+                configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .expect("admit automatic run");
+    assert_eq!(
+        admission.origin,
+        lash_core::store::QueuedRunOrigin::Anonymous
+    );
+    let selection = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &lease.owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("refuse unavailable work");
+    assert_eq!(
+        selection.refusal,
+        Some(crate::QueuedWorkClaimRefusal::NotYetAvailable)
+    );
+    assert!(selection.inputs.is_empty() && selection.queued.is_empty());
+    assert_eq!(
+        selection.admission.members,
+        Some(Vec::new()),
+        "a refused selection must be settleable instead of leaving an unselected pending run"
+    );
+    store
+        .release_session_execution_lease(&lease.authority())
+        .await
+        .expect("release the first lane after the frozen empty selection");
+    let successor =
+        claim_session_execution_lease_for_test(&store, &session_id, "refused-successor").await;
+    let resumed = store
+        .select_queued_run(
+            &successor.authority(),
+            &admission.scope,
+            &successor.owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("replay frozen empty selection");
+    assert_eq!(resumed.admission.members, Some(Vec::new()));
+    assert_eq!(
+        resumed.admission.origin,
+        lash_core::store::QueuedRunOrigin::Anonymous
+    );
+    assert_eq!(resumed.admission.revision, selection.admission.revision);
+    assert!(resumed.inputs.is_empty() && resumed.queued.is_empty());
+    let old_scope = admission.scope.clone();
+    store
+        .settle_queued_run(
+            &successor.authority(),
+            QueuedRunCommit {
+                scope: admission.scope,
+                expected_revision: resumed.admission.revision,
+                progress: QueuedRunProgress::ForgetUnworked,
+            },
+        )
+        .await
+        .expect("settle refused admission");
+    assert!(
+        store
+            .pending_queued_run(&session_id)
+            .await
+            .expect("read admission")
+            .is_none()
+    );
+    let renewed = store
+        .begin_or_resume_queued_run(
+            &successor.authority(),
+            BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: Some(old_scope),
+                request: QueuedRunRequest::Automatic,
+                configuration: admission.configuration,
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .expect("anonymous empty admission has no durable receipt");
+    assert!(
+        renewed.terminal.is_none(),
+        "an anonymous empty wake must not leave a settled receipt"
+    );
+    assert_eq!(renewed.origin, lash_core::store::QueuedRunOrigin::Explicit);
+    let resumed_explicit = store
+        .begin_or_resume_queued_run(
+            &successor.authority(),
+            BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: None,
+                request: QueuedRunRequest::Automatic,
+                configuration: renewed.configuration.clone(),
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .expect("automatic wake resumes explicit admission");
+    assert_eq!(
+        resumed_explicit.origin,
+        lash_core::store::QueuedRunOrigin::Explicit
+    );
+    let explicit_selection = store
+        .select_queued_run(
+            &successor.authority(),
+            &renewed.scope,
+            &successor.owner,
+            64,
+            &renewed.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("freeze explicit empty selection");
+    assert_eq!(explicit_selection.admission.members, Some(Vec::new()));
+    assert!(!explicit_selection.admission.can_forget_unworked());
+    let explicit_settlement = QueuedRunCommit {
+        scope: renewed.scope.clone(),
+        expected_revision: explicit_selection.admission.revision,
+        progress: QueuedRunProgress::ForgetUnworked,
+    };
+    assert!(
+        store
+            .settle_queued_run(&successor.authority(), explicit_settlement.clone())
+            .await
+            .is_err(),
+        "an explicit admission cannot lose its receipt"
+    );
+    store
+        .settle_queued_run(
+            &successor.authority(),
+            QueuedRunCommit {
+                progress: QueuedRunProgress::Settle {
+                    terminal: lash_core::store::QueuedRunTerminal::Empty,
+                },
+                ..explicit_settlement
+            },
+        )
+        .await
+        .expect("settle explicit empty admission");
+    let receipt = store
+        .begin_or_resume_queued_run(
+            &successor.authority(),
+            BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: Some(renewed.scope),
+                request: QueuedRunRequest::Automatic,
+                configuration: renewed.configuration,
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .expect("read explicit receipt");
+    assert_eq!(receipt.origin, lash_core::store::QueuedRunOrigin::Explicit);
+    assert!(matches!(
+        receipt.terminal,
+        Some(lash_core::store::QueuedRunTerminal::Empty)
+    ));
+    assert!(
+        store
+            .list_queued_work(&session_id)
+            .await
+            .expect("read delayed work")
+            .iter()
+            .any(|batch| batch.batch_id == delayed.batch_id)
+    );
+
+    let selected_session = SessionId::from("queued-run-anonymous-selected-retention");
+    let selected_state = RuntimeSessionState {
+        session_id: selected_session.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let selected_lease =
+        claim_session_execution_lease_for_test(&store, &selected_session, "selected-retention")
+            .await;
+    let selected_request = BeginQueuedRun {
+        session_id: selected_session.clone(),
+        identity: None,
+        request: QueuedRunRequest::Selected {
+            batch_ids: Vec::new(),
+        },
+        configuration: RuntimeCommit::persisted_state_for_test(&selected_state, &[]).config,
+        expected_head_revision: 0,
+        initial_turn_index: 1,
+    };
+    let anonymous_selected = store
+        .begin_or_resume_queued_run(&selected_lease.authority(), selected_request.clone())
+        .await
+        .expect("admit unnamed selection");
+    assert!(anonymous_selected.can_forget_unworked());
+    store
+        .settle_queued_run(
+            &selected_lease.authority(),
+            QueuedRunCommit {
+                scope: anonymous_selected.scope,
+                expected_revision: anonymous_selected.revision,
+                progress: QueuedRunProgress::ForgetUnworked,
+            },
+        )
+        .await
+        .expect("forget unnamed unworked selection");
+    assert!(
+        store
+            .pending_queued_run(&selected_session)
+            .await
+            .expect("read selected admission")
+            .is_none()
+    );
+
+    let promoted = store
+        .begin_or_resume_queued_run(&selected_lease.authority(), selected_request.clone())
+        .await
+        .expect("admit another unnamed selection");
+    let explicit_request = BeginQueuedRun {
+        identity: Some(promoted.scope.clone()),
+        ..selected_request.clone()
+    };
+    let explicit = store
+        .begin_or_resume_queued_run(&selected_lease.authority(), explicit_request.clone())
+        .await
+        .expect("explicitly reenter unnamed selection");
+    assert_eq!(explicit.origin, lash_core::store::QueuedRunOrigin::Explicit);
+    let resumed = store
+        .begin_or_resume_queued_run(&selected_lease.authority(), selected_request)
+        .await
+        .expect("automatic wake sees promoted origin");
+    assert_eq!(resumed.origin, lash_core::store::QueuedRunOrigin::Explicit);
+    let frozen = store
+        .select_queued_run(
+            &selected_lease.authority(),
+            &promoted.scope,
+            &selected_lease.owner,
+            64,
+            &promoted.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("freeze promoted empty selection");
+    assert!(!frozen.admission.can_forget_unworked());
+    let commit = QueuedRunCommit {
+        scope: promoted.scope,
+        expected_revision: frozen.admission.revision,
+        progress: QueuedRunProgress::ForgetUnworked,
+    };
+    assert!(
+        store
+            .settle_queued_run(&selected_lease.authority(), commit.clone())
+            .await
+            .is_err(),
+        "promoted identity cannot lose its receipt"
+    );
+    store
+        .settle_queued_run(
+            &selected_lease.authority(),
+            QueuedRunCommit {
+                progress: QueuedRunProgress::Settle {
+                    terminal: lash_core::store::QueuedRunTerminal::Empty,
+                },
+                ..commit
+            },
+        )
+        .await
+        .expect("settle promoted empty selection");
+    let receipt = store
+        .begin_or_resume_queued_run(&selected_lease.authority(), explicit_request)
+        .await
+        .expect("replay promoted receipt");
+    assert!(matches!(
+        receipt.terminal,
+        Some(lash_core::store::QueuedRunTerminal::Empty)
+    ));
+}
+
+/// A lane timeout rotates physical claim authority, not the admitted run's
+/// ownership of its frozen input or batch. Host cancellation must refuse both.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture fails at the violated durable ownership invariant"
+)]
+pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    use lash_core::store::QueuedRunMember;
+
+    let input_session = SessionId::from("queued-run-input-cancel-fence");
+    let input = store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
+            &input_session,
+            "run-owned input",
+        ))
+        .await
+        .expect("enqueue input");
+    let state = RuntimeSessionState {
+        session_id: input_session.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let first = claim_session_execution_lease_for_test(&store, &input_session, "input-first").await;
+    let admission = store
+        .begin_or_resume_queued_run(
+            &first.authority(),
+            BeginQueuedRun {
+                session_id: input_session.clone(),
+                identity: None,
+                request: QueuedRunRequest::Automatic,
+                configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .expect("admit input run");
+    let frozen = store
+        .select_queued_run(
+            &first.authority(),
+            &admission.scope,
+            &first.owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("freeze input");
+    assert_eq!(
+        frozen.admission.members,
+        Some(vec![QueuedRunMember::Input(input.input_id.clone())])
+    );
+    store
+        .release_session_execution_lease(&first.authority())
+        .await
+        .expect("old lane expires");
+    let cancelled = store
+        .cancel_pending_turn_inputs(
+            &input_session,
+            &[crate::PendingTurnInputCancelTarget::input_id(
+                &input.input_id,
+            )],
+        )
+        .await
+        .expect("host cancellation returns a refusal");
+    assert!(matches!(
+        &cancelled[0].outcome,
+        crate::PendingTurnInputCancelOutcome::AlreadyClaimed { input: held, .. }
+            if held.input_id == input.input_id
+    ));
+    let suffix = store
+        .cancel_pending_turn_input_suffix(
+            &input_session,
+            &crate::PendingTurnInputCancelTarget::input_id(&input.input_id),
+        )
+        .await
+        .expect("suffix cancellation also refuses run ownership");
+    let crate::PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } = suffix else {
+        panic!("expected suffix cancellation outcomes, got {suffix:?}");
+    };
+    assert!(matches!(
+        outcomes.as_slice(),
+        [crate::PendingTurnInputCancelOutcome::AlreadyClaimed { input: held, .. }]
+            if held.input_id == input.input_id
+    ));
+    let next = claim_session_execution_lease_for_test(&store, &input_session, "input-next").await;
+    let resumed = store
+        .select_queued_run(
+            &next.authority(),
+            &admission.scope,
+            &next.owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("successor reclaims run input");
+    assert_eq!(
+        resumed.admission.members,
+        Some(vec![QueuedRunMember::Input(input.input_id)])
+    );
+    assert_eq!(resumed.inputs.len(), 1);
+
+    let batch_session = SessionId::from("queued-run-batch-cancel-fence");
+    let batch = store
+        .enqueue_queued_work(checkpoint_claims::queued_draft(
+            &batch_session,
+            "run-owned batch",
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue batch");
+    let state = RuntimeSessionState {
+        session_id: batch_session.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let first = claim_session_execution_lease_for_test(&store, &batch_session, "batch-first").await;
+    let admission = store
+        .begin_or_resume_queued_run(
+            &first.authority(),
+            BeginQueuedRun {
+                session_id: batch_session.clone(),
+                identity: None,
+                request: QueuedRunRequest::Automatic,
+                configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .expect("admit batch run");
+    let frozen = store
+        .select_queued_run(
+            &first.authority(),
+            &admission.scope,
+            &first.owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("freeze batch");
+    assert_eq!(
+        frozen.admission.members,
+        Some(vec![QueuedRunMember::Batch(batch.batch_id.clone())])
+    );
+    store
+        .release_session_execution_lease(&first.authority())
+        .await
+        .expect("old batch lane expires");
+    assert!(
+        store
+            .cancel_queued_work_batch(&batch_session, &batch.batch_id)
+            .await
+            .expect("host batch cancellation returns a refusal")
+            .is_none()
+    );
+    let next = claim_session_execution_lease_for_test(&store, &batch_session, "batch-next").await;
+    let resumed = store
+        .select_queued_run(
+            &next.authority(),
+            &admission.scope,
+            &next.owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("successor reclaims run batch");
+    assert_eq!(
+        resumed.admission.members,
+        Some(vec![QueuedRunMember::Batch(batch.batch_id)])
+    );
+    assert_eq!(resumed.queued.len(), 1);
+}
+
 /// A scheduler retry reacquires physical authority without changing the run
 /// admitted by the first attempt. A competing explicit request cannot steal it.
 #[expect(
@@ -326,6 +820,15 @@ pub async fn queued_run_terminal_disposition_preserves_unassigned_work(
             terminal: QueuedRunTerminal::Empty,
         },
     };
+    let mut forget_selected = settlement.clone();
+    forget_selected.progress = QueuedRunProgress::ForgetUnworked;
+    assert!(
+        store
+            .settle_queued_run(&lease.authority(), forget_selected)
+            .await
+            .is_err(),
+        "forget-empty cannot erase an admission that started a physical turn"
+    );
     assert!(
         store
             .settle_queued_run(&lease.authority(), settlement.clone())

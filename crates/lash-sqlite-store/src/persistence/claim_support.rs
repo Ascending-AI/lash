@@ -32,6 +32,22 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     input,
                 });
             }
+            let run_owns_input: bool = conn
+                .query_row(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .queued_runs
+                        .pending_member
+                        .sql(),
+                    params![row.session_id.as_str(), "input", row.input_id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite_error)?;
+            if run_owns_input {
+                return Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                    claim: pending_turn_input_claim_diagnostics_from_row(&row, input.state.clone()),
+                    input,
+                });
+            }
             conn.execute(
                 crate::turn_ingress::turn_ingress_sql()
                     .pending_inputs

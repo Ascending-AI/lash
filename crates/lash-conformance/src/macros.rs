@@ -156,6 +156,8 @@ macro_rules! runtime_persistence_tests {
             (queued_run_frozen_batches_survive_takeover_and_changed_limits, "queued-run-batches"),
             (queued_run_selected_excludes_pending_input, "queued-run-selected-composition"),
             (queued_run_automatic_prefers_pending_input, "queued-run-automatic-composition"),
+            (queued_run_refused_selection_can_settle_empty, "queued-run-refused-selection"),
+            (queued_run_members_survive_host_cancellation_after_lane_rotation, "queued-run-host-cancel-fence"),
             (queued_run_identity_survives_lane_rotation, "queued-run-identity"),
             (queued_run_commit_receipt_precedes_revisions_but_not_lane_fence, "queued-run-receipt"),
             (queued_run_selection_excludes_later_input_after_takeover, "queued-run-selection"),

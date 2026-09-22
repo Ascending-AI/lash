@@ -11,6 +11,14 @@ pub enum QueuedRunRequest {
     Selected { batch_ids: Vec<BatchId> },
 }
 
+/// Whether admission received a caller-supplied identity. A later automatic
+/// wake can resume either origin, so the current request cannot infer it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum QueuedRunOrigin {
+    Anonymous,
+    Explicit,
+}
+
 /// Initial physical execution position, retained before any effect executes.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueuedRunPosition {
@@ -55,6 +63,7 @@ pub enum QueuedRunMember {
 pub struct QueuedRunAdmission {
     pub scope: ExecutionScope,
     pub request: QueuedRunRequest,
+    pub origin: QueuedRunOrigin,
     pub configuration: PersistedSessionConfig,
     pub revision: u64,
     pub position: QueuedRunPosition,
@@ -123,10 +132,19 @@ impl BeginQueuedRun {
                 session_id: self.session_id.clone(),
             });
         }
-        Ok(admission.clone())
+        let mut resumed = admission.clone();
+        if self.identity.is_some() {
+            resumed.origin = QueuedRunOrigin::Explicit;
+        }
+        Ok(resumed)
     }
 
     pub fn admit(self, drain_id: String) -> QueuedRunAdmission {
+        let origin = if self.identity.is_some() {
+            QueuedRunOrigin::Explicit
+        } else {
+            QueuedRunOrigin::Anonymous
+        };
         let scope = self
             .identity
             .unwrap_or_else(|| ExecutionScope::queue_drain(&self.session_id, drain_id));
@@ -134,6 +152,7 @@ impl BeginQueuedRun {
         QueuedRunAdmission {
             scope,
             request: self.request,
+            origin,
             configuration: self.configuration,
             revision: 0,
             position: QueuedRunPosition {
@@ -188,6 +207,9 @@ pub enum QueuedRunProgress {
     Settle {
         terminal: QueuedRunTerminal,
     },
+    /// Forget an unnamed run that started no physical work, atomically with
+    /// its terminal disposition. No replay identity is exposed to its caller.
+    ForgetUnworked,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -198,6 +220,27 @@ pub struct QueuedRunCommit {
 }
 
 impl QueuedRunAdmission {
+    pub fn can_forget_unworked(&self) -> bool {
+        self.origin == QueuedRunOrigin::Anonymous
+            && self.terminal.is_none()
+            && self.position.physical_ordinal == 0
+            && self.initial_members.as_ref().is_none_or(Vec::is_empty)
+            && self.members.as_ref().is_none_or(Vec::is_empty)
+            && self.withheld_members.is_empty()
+            && self.assigned_members.is_empty()
+            && self.last_commit.is_none()
+    }
+
+    pub fn owns_member(&self, member: &QueuedRunMember) -> bool {
+        self.initial_members
+            .iter()
+            .flatten()
+            .chain(self.members.iter().flatten())
+            .chain(&self.withheld_members)
+            .chain(&self.assigned_members)
+            .any(|owned| owned == member)
+    }
+
     pub fn already_satisfied_batch_ids(&self) -> Vec<BatchId> {
         let (QueuedRunRequest::Selected { batch_ids }, Some(initial_members)) =
             (&self.request, &self.initial_members)
@@ -274,6 +317,14 @@ impl QueuedRunAdmission {
                     });
                 }
                 next.terminal = Some(terminal.clone());
+            }
+            QueuedRunProgress::ForgetUnworked => {
+                if !self.can_forget_unworked() {
+                    return Err(StoreError::QueuedRunConflict {
+                        session_id: session_id.clone(),
+                    });
+                }
+                next.terminal = Some(QueuedRunTerminal::Empty);
             }
         }
         next.last_commit = Some(commit.clone());

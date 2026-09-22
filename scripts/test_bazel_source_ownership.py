@@ -10,6 +10,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/bazel"))
 import generate_build_files as generator
+import feature_variants
+sys.path.insert(0, str(ROOT / "scripts"))
+import check_feature_coverage as coverage
 
 
 def declarations(directory, functions):
@@ -71,6 +74,33 @@ class SourceOwnershipTests(unittest.TestCase):
                     self.assertTrue({"schema.sql", "teardown.sql", "schema-shape.txt"} <= files)
                     self.assertNotIn("payload-schema-fingerprints.txt", files)
             self.assertGreater(count, 1, crate)
+
+    def test_named_feature_tests_keep_both_targets_without_a_unit_harness(self):
+        command = feature_variants.parse_command([
+            "cargo", "test", "-p", "lash-internal-core-execution",
+            "--test", "process_model", "--test", "effect_model", "--no-default-features",
+        ])
+        self.assertEqual(command.test_names, ("process_model", "effect_model"))
+        self.assertTrue(command.with_dev)
+        selected = {}
+        for args in declarations("crates/lash-core-execution", {"lash_rust_feature_test"}):
+            name = ast.literal_eval(args["name"])
+            if name.endswith("__fv_ecbe9667"):
+                selected[ast.literal_eval(args["crate_name"])] = (
+                    ast.literal_eval(args["args"]) if "args" in args else []
+                )
+        self.assertEqual(selected, {"process_model": [], "effect_model": []})
+
+    def test_artifact_census_requires_every_named_integration_test(self):
+        package = coverage.Package("sample", ROOT, {}, {}, frozenset())
+        command = ["cargo", "test", "-p", "sample", "--test", "first", "--test", "second"]
+        def artifact(name):
+            return coverage.CargoArtifact(ROOT / "Cargo.toml", name, ("test",),
+                                          True, True, frozenset(), frozenset())
+        with self.assertRaisesRegex(SystemExit, "second"):
+            coverage.validate_selected_artifacts(command, package, [artifact("first")])
+        coverage.validate_selected_artifacts(command, package,
+                                             [artifact("first"), artifact("second")])
 
     def test_compile_data_rejects_escape_stale_and_rust_patterns(self):
         directory = "crates/lashlang"

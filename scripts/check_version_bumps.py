@@ -669,27 +669,22 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
         "sha256:6056583b23117ff129cf39d93b9407bb95b0d06bf6e495f633b147662da1ed79"
     ),
-    # FIG-3230: GraphAppend became the explicit-intent enum
-    # (`Extend { nodes }` / `PreserveHead`), so the semantic-boundary
-    # projection's `graph.nodes` field read became `graph.nodes()` and the
-    # exhaustive destructure gained the ignored `graph_base_leaf_node_id`.
-    # `nodes()` returns the identical appended-node slice the field carried
-    # (`&nodes` for Extend, `&[]` for PreserveHead, matching the old
-    # `nodes: vec![]` arm), so `appended_payloads` collects the same payload
-    # sequence in the same order. The projection's serialized fields
-    # (operation key, session id, config, appended payloads, usage deltas) and
-    # every serde attribute and constant are unchanged, so the encoded
-    # identity bytes are identical on both sides: RECORD_CONFIG stays 3,
-    # CREATE_SESSION stays 3, and USAGE_LEDGER stays 5. One-time baseline;
-    # any further guarded-shape drift re-fails the gate.
+    # FIG-3484: RuntimeCommit's exhaustive destructure adds queued_run: _,
+    # which semantic-boundary purity validation refuses before encoding.
+    # SemanticBoundaryRequestIntent and the encoded fields/hash are unchanged.
+    # Preserve the record-config/create-session/usage-ledger versions 3/3/5;
+    # the unchanged golden corpus and regenerated SQLite/PostgreSQL fixtures
+    # retain the same record-config hash at identity_encoding_version 3.
+    # Supersedes the FIG-3230 ignored graph_base_leaf_node_id baseline:
+    # sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2.
     "crates/lash-core-store/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+        "sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d"
     ),
     "crates/lash-core-store/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+        "sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d"
     ),
     "crates/lash-core-store/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+        "sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d"
     ),
     # Comment-only sweep: the guarded-shape texts moved solely by deleting or
     # slimming comments; no schema statement, struct, field, serde attribute,

@@ -13,9 +13,19 @@ crate::statements! {
             WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = ?3 AND member_id = ?4
               AND collection_kind IN ('current', 'withheld', 'assigned')
         )";
+        pending_member = "SELECT EXISTS (
+            SELECT 1 FROM queued_run_members AS member
+            WHERE member.session_id = ?1 AND member.member_kind = ?2
+              AND member.member_id = ?3
+              AND member.scope_id = (
+                  SELECT scope_id FROM queued_runs
+                  WHERE session_id = ?1 AND status = 'pending'
+              )
+        )";
         update = "UPDATE queued_runs SET admission_json = ?3, status = ?4, revision = ?5 WHERE session_id = ?1 AND scope_id = ?2";
         members = "SELECT collection_kind, ordinal, member_kind, member_id FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2 ORDER BY collection_kind, ordinal";
         clear_members = "DELETE FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2";
+        delete_scope = "DELETE FROM queued_runs WHERE session_id = ?1 AND scope_id = ?2";
         insert_member = "INSERT INTO queued_run_members (session_id, scope_id, collection_kind, ordinal, member_kind, member_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
         delete_members = "DELETE FROM queued_run_members WHERE session_id = ?1";
         delete_runs = "DELETE FROM queued_runs WHERE session_id = ?1";

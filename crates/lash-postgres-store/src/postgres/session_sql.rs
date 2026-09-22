@@ -750,9 +750,9 @@ lash_store_sql::statements! {
     /// process-prune cascade, which removes a batch of sessions' rows from
     /// every table a session owns, in one statement.
     pub(crate) struct SessionCoreStatements @ "session_core" {
-        /// One statement rather than twelve, and that is the point: the parts
+        /// One statement rather than fourteen, and that is the point: the parts
         /// would race. The prune has already taken each session's advisory
-        /// lock, but a delete split across twelve statements leaves eleven
+        /// lock, but a delete split across fourteen statements leaves thirteen
         /// windows in which a peer can observe a session whose queue is gone
         /// and whose metadata is not, and the tombstoned-row reclaim in the
         /// first arm depends on the ancestry retire that ran before it.
@@ -777,6 +777,17 @@ lash_store_sql::statements! {
                    AND batch.session_id = ANY(?1)
              )
              RETURNING item.batch_id
+         ),
+         deleted_queued_run_members AS (
+             DELETE FROM queued_run_members
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_queued_runs AS (
+             DELETE FROM queued_runs
+             WHERE session_id = ANY(?1)
+               AND (SELECT count(*) FROM deleted_queued_run_members) >= 0
+             RETURNING session_id
          ),
          deleted_queued_work_batches AS (
              DELETE FROM queued_work_batches
@@ -830,6 +841,8 @@ lash_store_sql::statements! {
              RETURNING session_id
          )
          SELECT (SELECT count(*) FROM deleted_graph_nodes)
+              + (SELECT count(*) FROM deleted_queued_run_members)
+              + (SELECT count(*) FROM deleted_queued_runs)
               + (SELECT count(*) FROM deleted_queued_work_batches)
               + (SELECT count(*) FROM deleted_wake_redelivery_fences)
               + (SELECT count(*) FROM deleted_wake_allocation_floors)

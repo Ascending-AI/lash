@@ -494,13 +494,21 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
+        let runs = self.queued_runs.lock_recover();
         let mut pending = self.pending_turn_inputs.lock_recover();
         let mut results = Vec::with_capacity(targets.len());
         for target in targets {
             let outcome = match find_pending_turn_input_index(&pending, session_id, target) {
                 Some(index) => {
                     let claim_is_live = pending[index].claim.live_under(live_generation);
-                    pending[index].cancel_outcome(claim_is_live)
+                    let run_owns_input = runs.values().any(|run| {
+                        run.scope.session_id() == Some(session_id)
+                            && run.terminal.is_none()
+                            && run.owns_member(&crate::store::QueuedRunMember::Input(
+                                pending[index].input.input_id.clone(),
+                            ))
+                    });
+                    pending[index].cancel_outcome(claim_is_live || run_owns_input)
                 }
                 None => crate::PendingTurnInputCancelOutcome::NotFound,
             };
@@ -520,6 +528,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
+        let runs = self.queued_runs.lock_recover();
         let mut pending = self.pending_turn_inputs.lock_recover();
         let Some(anchor_seq) = find_pending_turn_input_index(&pending, session_id, anchor)
             .map(|index| pending[index].input.enqueue_seq)
@@ -535,7 +544,14 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             .filter(|entry| entry.input.enqueue_seq >= anchor_seq)
             .map(|entry| {
                 let claim_is_live = entry.claim.live_under(live_generation);
-                entry.cancel_outcome(claim_is_live)
+                let run_owns_input = runs.values().any(|run| {
+                    run.scope.session_id() == Some(session_id)
+                        && run.terminal.is_none()
+                        && run.owns_member(&crate::store::QueuedRunMember::Input(
+                            entry.input.input_id.clone(),
+                        ))
+                });
+                entry.cancel_outcome(claim_is_live || run_owns_input)
             })
             .collect::<Vec<_>>();
         Ok(crate::PendingTurnInputSuffixCancelOutcome::Outcomes {

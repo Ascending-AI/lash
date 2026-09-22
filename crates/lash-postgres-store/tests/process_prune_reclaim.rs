@@ -150,3 +150,132 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
             .is_empty()
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_prune_removes_queued_run_admission_and_members() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres process-prune queued-run law: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let registry = storage.process_registry();
+    let process = registry
+        .register_process(lash_core::ProcessRegistration::new(
+            "postgres-prune-queued-run",
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        ))
+        .await
+        .expect("register process");
+    let session_id = lash_core::facade_support::process_runtime_session_ids(&process.id)[0].clone();
+    let factory = storage.session_store_factory_with_shared_process_registry();
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create process-owned session");
+    let input = store
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+            &session_id,
+            lash_core::TurnInputIngress::NextTurn,
+            lash_core::TurnInput::text("queued before prune"),
+        ))
+        .await
+        .expect("enqueue pending input");
+    let owner = lash_core::LeaseOwnerIdentity::opaque("prune-run-owner", "prune-run-incarnation");
+    let lease = store
+        .try_claim_session_execution_lease(&session_id, &owner, "prune-run-executor", 60_000)
+        .await
+        .expect("claim lane")
+        .acquired()
+        .expect("lane is free");
+    let admission = store
+        .begin_or_resume_queued_run(
+            &lease.authority(),
+            lash_core::store::BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: None,
+                request: lash_core::store::QueuedRunRequest::Automatic,
+                configuration: lash_core::PersistedSessionConfig::new(
+                    lash_core::TurnBudget::Unbounded,
+                ),
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .expect("admit queued run");
+    let selected = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("freeze queued input");
+    assert_eq!(
+        selected.admission.members,
+        Some(vec![lash_core::store::QueuedRunMember::Input(
+            input.input_id
+        )])
+    );
+    store
+        .release_session_execution_lease(&lease.authority())
+        .await
+        .expect("release lane before prune");
+    for table in ["lash_queued_runs", "lash_queued_run_members"] {
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {table} WHERE session_id = $1"
+        ))
+        .bind(session_id.as_str())
+        .fetch_one(storage.pool())
+        .await
+        .expect("count admission rows before prune");
+        assert!(count > 0, "{table} contains the process-owned admission");
+    }
+    let terminal = registry
+        .complete_process(
+            &process.id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete process");
+    registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            lash_core::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune process-owned session");
+    for table in ["lash_queued_runs", "lash_queued_run_members"] {
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {table} WHERE session_id = $1"
+        ))
+        .bind(session_id.as_str())
+        .fetch_one(storage.pool())
+        .await
+        .expect("count admission rows after prune");
+        assert_eq!(
+            count, 0,
+            "{table} must not retain a deleted process session"
+        );
+    }
+}

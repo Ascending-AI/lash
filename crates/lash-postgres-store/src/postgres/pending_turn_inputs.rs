@@ -235,6 +235,24 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                     claim: pending_turn_input_claim_diagnostics_from_row(&row),
                 });
             }
+            let run_owns_input: bool = sqlx::query_scalar(
+                crate::turn_ingress::turn_ingress_sql()
+                    .queued_runs
+                    .pending_member
+                    .sql(),
+            )
+            .bind(row.session_id.as_str())
+            .bind("input")
+            .bind(row.input_id.as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if run_owns_input {
+                return Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                    input,
+                    claim: pending_turn_input_claim_diagnostics_from_row(&row),
+                });
+            }
             sqlx::query(
                 crate::turn_ingress::turn_ingress_sql()
                     .pending_inputs

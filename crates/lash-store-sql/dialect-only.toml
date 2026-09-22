@@ -148,6 +148,8 @@ statement = "session_core.delete_process_session_rows"
 owner = "crates/lash-postgres-store/src/postgres/session_sql.rs"
 touches = [
     "pending_turn_inputs",
+    "queued_run_members",
+    "queued_runs",
     "queued_work_batches",
     "queued_work_items",
     "session_execution_leases",
@@ -159,12 +161,12 @@ touches = [
 ]
 reason = """
 The process prune deletes a batch of sessions' rows from every table a session
-owns, in one statement, because the parts would race: twelve deletes keyed by
+owns, in one statement, because the parts would race: fourteen deletes keyed by
 the same session array, and a writer landing between two of them would leave a
-session whose queue is gone and whose metadata is not. Two of the twelve
+session whose queue is gone and whose metadata is not. Two of the fourteen
 tables belong to the process family — a session's wake redelivery fences and
-the allocation floors targeting it — and seven to the turn-ingress family: its
-queue, its inputs, its lane lease and its cancellation facts. They all go with
+the allocation floors targeting it. The turn-ingress family owns the queue,
+inputs, lane lease and cancellation facts. They all go with
 the session that owns them, so the session-core family owns the whole cascade
 and deletes from the other two families' tables inside it. SQLite's session
 delete is per session and issues the named per-table deletes in sequence under

@@ -14,7 +14,7 @@ pub(super) fn assign_checkpoint_members_conn(
     let Some(mut admission) = super::queued_run::load_run_conn(tx, session_id, None)? else {
         return Ok(());
     };
-    if &admission.position.turn_id != turn_id {
+    if admission.position.turn_id != *turn_id {
         return Ok(());
     }
     let members = input

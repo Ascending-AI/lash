@@ -444,6 +444,10 @@ async fn cold_queued_child_process() -> Result<()> {
     }
     let recorded: lash_core::store::QueuedRunAdmission =
         serde_json::from_slice(&std::fs::read(directory.join("admission.json")).unwrap()).unwrap();
+    assert_eq!(
+        recorded.origin,
+        lash_core::store::QueuedRunOrigin::Anonymous
+    );
     if boundary == "terminal" {
         assert!(session.durable().pending_queued_run().await?.is_none());
         let replay = session
@@ -461,6 +465,7 @@ async fn cold_queued_child_process() -> Result<()> {
             .await?
             .expect("cold admission is discoverable");
         assert_eq!(before.scope, recorded.scope);
+        assert_eq!(before.origin, recorded.origin);
         assert_eq!(before.position, recorded.position);
         session
             .queued_turn()
@@ -790,7 +795,7 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
                             .enqueue(TurnInput::text("withheld after tool stop"))
                             .id("withheld-input")
                             .ingress(lash_core::TurnInputIngress::active_turn(
-                                &lash_core::TurnId::from("stopped-withheld"),
+                                lash_core::TurnId::from("stopped-withheld"),
                                 lash_core::TurnInputCheckpointBoundary::BeforeCompletion,
                             ))
                             .send()

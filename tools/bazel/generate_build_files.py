@@ -2071,10 +2071,10 @@ class FeatureLaneGraph:
             if not token.startswith("-")
             and token not in (package_name, "check", "test")
             and command.argv[command.argv.index(token) - 1]
-            not in ("-p", "--package", "--features")
+            not in ("-p", "--package", "--features", "--test")
         ]
         runnable = command.subcommand == "test"
-        if library is not None and library.get("test", False) and "test" in kinds:
+        if library is not None and library.get("test", False) and "test" in kinds and not command.test_names:
             label = self.emit_target(
                 package_name, resolution, library, "unit-test", runnable, args
             )
@@ -2097,6 +2097,8 @@ class FeatureLaneGraph:
                 continue
             if kind not in kinds:
                 continue
+            if kind == "test" and command.test_names and target["name"] not in command.test_names:
+                continue
             label = self.emit_target(
                 package_name, resolution, target, kind, runnable, args
             )
@@ -2114,7 +2116,7 @@ class FeatureLaneGraph:
             if kind == "test" and runnable:
                 if not cargo_test_policy(package_name, kind, target["name"])[0]:
                     test_labels.append(label)
-            if kind == "bin" and target.get("test", False) and "test" in kinds:
+            if kind == "bin" and target.get("test", False) and "test" in kinds and not command.test_names:
                 unit_label = self.emit_target(
                     package_name, resolution, target, "bin-unit-test", runnable, args
                 )
@@ -2309,14 +2311,16 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
                 if kind == "custom-build" or not required <= root_features:
                     continue
                 if kind == "lib":
-                    if target.get("test", False) and "test" in kinds:
+                    if target.get("test", False) and "test" in kinds and not command.test_names:
                         expected.add((root, "unit-test", tuple(sorted(root_features))))
                     continue
                 if kind not in kinds:
                     continue
+                if kind == "test" and command.test_names and target["name"] not in command.test_names:
+                    continue
                 features = tuple(sorted(root_features | required))
                 expected.add((root, kind, features))
-                if kind == "bin" and target.get("test", False) and "test" in kinds:
+                if kind == "bin" and target.get("test", False) and "test" in kinds and not command.test_names:
                     expected.add((root, "bin-unit-test", features))
     recorded = {
         (unit["package"], unit["kind"], tuple(unit["features"])) for unit in units

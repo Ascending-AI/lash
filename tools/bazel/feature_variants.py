@@ -215,15 +215,18 @@ class Command:
     features: tuple[str, ...]
     selector: str | None
     argv: tuple[str, ...]
+    test_names: tuple[str, ...] = ()
 
     @property
     def with_dev(self) -> bool:
-        if self.subcommand == "test":
+        if self.subcommand == "test" or self.test_names:
             return True
         return self.selector in DEV_SELECTORS
 
     @property
     def kinds(self) -> tuple[str, ...]:
+        if self.test_names:
+            return ("test", "bin")
         if self.selector is not None:
             return SELECTOR_KINDS[self.selector]
         # A bare `cargo test -p X` compiles the library, its unit tests, the
@@ -236,6 +239,7 @@ class Command:
 def parse_command(argv: list[str]) -> Command:
     package = None
     features: list[str] = []
+    test_names: list[str] = []
     default_features = True
     selector = None
     index = 0
@@ -243,6 +247,10 @@ def parse_command(argv: list[str]) -> Command:
         token = argv[index]
         if token == "-p" or token == "--package":
             package = argv[index + 1]
+            index += 2
+            continue
+        if token == "--test":
+            test_names.append(argv[index + 1])
             index += 2
             continue
         if token == "--features":
@@ -263,6 +271,7 @@ def parse_command(argv: list[str]) -> Command:
         features=tuple(features),
         selector=selector,
         argv=tuple(argv),
+        test_names=tuple(test_names),
     )
 
 

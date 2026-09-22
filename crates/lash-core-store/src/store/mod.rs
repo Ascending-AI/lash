@@ -30,8 +30,8 @@ mod preflight;
 mod queued_run;
 pub mod queued_work;
 pub use queued_run::{
-    BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunPosition,
-    QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
+    BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunOrigin,
+    QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
 };
 mod realization;
 mod retention;

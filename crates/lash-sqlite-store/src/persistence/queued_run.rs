@@ -198,10 +198,18 @@ impl Store {
                         && let Some(admission) =
                             load_run_conn(tx, &request.session_id, request.identity.as_ref())?
                     {
-                        return request.resume(&admission);
+                        let resumed = request.resume(&admission)?;
+                        if resumed.origin != admission.origin {
+                            write_run_conn(tx, &resumed, false)?;
+                        }
+                        return Ok(resumed);
                     }
                     if let Some(admission) = load_run_conn(tx, &request.session_id, None)? {
-                        return request.resume(&admission);
+                        let resumed = request.resume(&admission)?;
+                        if resumed.origin != admission.origin {
+                            write_run_conn(tx, &resumed, false)?;
+                        }
+                        return Ok(resumed);
                     }
                     let actual = try_load_session_head_meta_from_conn(tx, &request.session_id)?
                         .map_or(0, |head| head.head_revision);
@@ -253,7 +261,10 @@ impl Store {
                         &fence,
                         clock.timestamp_ms(),
                     )?;
-                    if !matches!(settlement.progress, QueuedRunProgress::Settle { .. }) {
+                    if !matches!(
+                        settlement.progress,
+                        QueuedRunProgress::Settle { .. } | QueuedRunProgress::ForgetUnworked
+                    ) {
                         return Err(conflict(&fence.session_id));
                     }
                     let admission = load_run_conn(tx, &fence.session_id, Some(&settlement.scope))?
@@ -267,6 +278,7 @@ impl Store {
                         } if admission.members.as_ref().is_some_and(Vec::is_empty)
                             && admission.withheld_members.is_empty()
                             && admission.assigned_members.is_empty() => {}
+                        QueuedRunProgress::ForgetUnworked if admission.can_forget_unworked() => {}
                         _ => return Err(conflict(&fence.session_id)),
                     }
                     let next = admission.advance(&settlement, &[])?;
@@ -274,7 +286,21 @@ impl Store {
                         return Ok(next);
                     }
                     settle_run_members_conn(tx, &fence, &settlement.scope)?;
-                    write_run_conn(tx, &next, false)?;
+                    if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
+                        let scope_key = scope_key(&settlement.scope)?;
+                        tx.execute(
+                            run_sql().clear_members.sql(),
+                            params![fence.session_id.as_str(), &scope_key],
+                        )
+                        .map_err(sqlite_error)?;
+                        tx.execute(
+                            run_sql().delete_scope.sql(),
+                            params![fence.session_id.as_str(), &scope_key],
+                        )
+                        .map_err(sqlite_error)?;
+                    } else {
+                        write_run_conn(tx, &next, false)?;
+                    }
                     Ok(next)
                 })();
                 Ok(match outcome {
@@ -406,18 +432,6 @@ impl Store {
                             (outcome.claim, outcome.already_satisfied_batch_ids, None)
                         }
                     };
-                    if inputs.is_none()
-                        && queued.is_none()
-                        && refusal.is_some_and(|reason| reason != QueuedWorkClaimRefusal::Empty)
-                    {
-                        return Ok(SelectedQueuedRun {
-                            admission,
-                            inputs: inputs.into_iter().collect(),
-                            queued: queued.into_iter().collect(),
-                            already_satisfied,
-                            refusal,
-                        });
-                    }
                     let members = inputs
                         .iter()
                         .flat_map(|claim| {

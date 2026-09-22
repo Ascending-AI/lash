@@ -291,6 +291,7 @@ impl LashRuntime {
             let _ = lease.release_if_live().await;
             return Err(session_head_refresh_error(error).into());
         }
+        let anonymous_caller = queued_opts.source.identity().is_none();
         let request = crate::store::BeginQueuedRun {
             session_id: self.state.session_id.clone(),
             identity: queued_opts.source.identity(),
@@ -379,8 +380,14 @@ impl LashRuntime {
         let opts = match preparation {
             Ok(opts) => opts,
             Err(error) => {
-                let error =
-                    retain_or_settle_queued_error(store.as_ref(), &fence, &admission, error).await;
+                let error = retain_or_settle_queued_error(
+                    store.as_ref(),
+                    &fence,
+                    &admission,
+                    anonymous_caller,
+                    error,
+                )
+                .await;
                 let _ = lease.release_if_live().await;
                 return Err(error.into());
             }
@@ -416,11 +423,15 @@ impl LashRuntime {
                             crate::store::QueuedRunCommit {
                                 scope: admission.scope.clone(),
                                 expected_revision: admission.revision,
-                                progress: crate::store::QueuedRunProgress::Settle {
-                                    terminal: crate::store::QueuedRunTerminal::Failed {
-                                        code: RuntimeErrorCode::QueuedWork,
-                                        message: error.to_string(),
-                                    },
+                                progress: if anonymous_caller && admission.can_forget_unworked() {
+                                    crate::store::QueuedRunProgress::ForgetUnworked
+                                } else {
+                                    crate::store::QueuedRunProgress::Settle {
+                                        terminal: crate::store::QueuedRunTerminal::Failed {
+                                            code: RuntimeErrorCode::QueuedWork,
+                                            message: error.to_string(),
+                                        },
+                                    }
                                 },
                             },
                         )
@@ -470,13 +481,12 @@ impl LashRuntime {
                     .release_if_live()
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-                return Ok(QueuedWorkDrainResult::Automatic(QueuedTurnDrain::Empty(
-                    EmptyQueuedDrainReason::ClaimRefused(
-                        selection
-                            .refusal
-                            .unwrap_or(crate::QueuedWorkClaimRefusal::Empty),
-                    ),
-                )));
+                return Err(super::runtime_error_from_store_commit(
+                    crate::StoreError::QueuedRunConflict {
+                        session_id: self.state.session_id.clone(),
+                    },
+                )
+                .into());
             }
             store
                 .settle_queued_run(
@@ -484,8 +494,12 @@ impl LashRuntime {
                     crate::store::QueuedRunCommit {
                         scope: selection.admission.scope.clone(),
                         expected_revision: selection.admission.revision,
-                        progress: crate::store::QueuedRunProgress::Settle {
-                            terminal: crate::store::QueuedRunTerminal::Empty,
+                        progress: if anonymous_caller && selection.admission.can_forget_unworked() {
+                            crate::store::QueuedRunProgress::ForgetUnworked
+                        } else {
+                            crate::store::QueuedRunProgress::Settle {
+                                terminal: crate::store::QueuedRunTerminal::Empty,
+                            }
                         },
                     },
                 )
@@ -532,7 +546,8 @@ impl LashRuntime {
             .await;
         if let Err(error) = result {
             let error = if let Some(run) = &self.queued_run {
-                retain_or_settle_queued_error(store.as_ref(), &fence, run, error).await
+                retain_or_settle_queued_error(store.as_ref(), &fence, run, anonymous_caller, error)
+                    .await
             } else {
                 error
             };
@@ -671,6 +686,7 @@ async fn retain_or_settle_queued_error(
     store: &dyn crate::RuntimePersistence,
     fence: &crate::SessionExecutionLeaseAuthority,
     run: &crate::store::QueuedRunAdmission,
+    anonymous_caller: bool,
     error: RuntimeError,
 ) -> RuntimeError {
     if error.is_terminal() {
@@ -680,11 +696,15 @@ async fn retain_or_settle_queued_error(
                 crate::store::QueuedRunCommit {
                     scope: run.scope.clone(),
                     expected_revision: run.revision,
-                    progress: crate::store::QueuedRunProgress::Settle {
-                        terminal: crate::store::QueuedRunTerminal::Failed {
-                            code: error.code.clone(),
-                            message: error.message.clone(),
-                        },
+                    progress: if anonymous_caller && run.can_forget_unworked() {
+                        crate::store::QueuedRunProgress::ForgetUnworked
+                    } else {
+                        crate::store::QueuedRunProgress::Settle {
+                            terminal: crate::store::QueuedRunTerminal::Failed {
+                                code: error.code.clone(),
+                                message: error.message.clone(),
+                            },
+                        }
                     },
                 },
             )

@@ -468,6 +468,16 @@ impl QueuedWorkStore for Store {
                     let Some(row) = row else {
                         return Ok(None);
                     };
+                    let run_owns_batch: bool = tx
+                        .query_row(
+                            sql.queued_runs.pending_member.sql(),
+                            params![session_id.as_str(), "batch", batch_id.as_str()],
+                            |row| row.get(0),
+                        )
+                        .map_err(sqlite_error)?;
+                    if run_owns_batch {
+                        return Ok(None);
+                    }
                     let batch = queued_work_batch_from_conn(tx, row)?;
                     tx.execute(
                         sql.queued_batches_sqlite.delete_cancelled.sql(),

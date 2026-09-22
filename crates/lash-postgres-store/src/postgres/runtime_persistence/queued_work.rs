@@ -434,6 +434,17 @@ impl QueuedWorkStore for PostgresSessionStore {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
         };
+        let run_owns_batch: bool = sqlx::query_scalar(sql.queued_runs.pending_member.sql())
+            .bind(session_id.as_str())
+            .bind("batch")
+            .bind(batch_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        if run_owns_batch {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(None);
+        }
         let batch = queued_work_batch_from_row(&mut tx, queued_batch_row(row)?).await?;
         sqlx::query(sql.queued_batches_postgres.delete_cancelled.sql())
             .bind(batch_id)

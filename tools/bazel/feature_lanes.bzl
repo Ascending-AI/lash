@@ -24,7 +24,6 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//crates/lash-core-execution:lash-core-execution__fv_e17624f3",
     "//crates/lash-core-execution:lash-core-execution__fv_e682cce4",
     "//crates/lash-core-execution:lash-core-execution__fv_ecbe9667",
-    "//crates/lash-core-execution:lash-core-execution__unit_test__fv_ecbe9667",
     "//crates/lash-core-execution:process_model__test__fv_ecbe9667",
     "//crates/lash-core-ids:lash-core-ids",
     "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960",
@@ -530,7 +529,6 @@ FEATURE_LANE_COMPILE_TARGETS = [
 
 FEATURE_LANE_TEST_TARGETS = [
     "//crates/lash-core-execution:effect_model__test__fv_ecbe9667",
-    "//crates/lash-core-execution:lash-core-execution__unit_test__fv_ecbe9667",
     "//crates/lash-core-execution:process_model__test__fv_ecbe9667",
     "//crates/lash-core-store:lash-core-store__unit_test__fv_083e6583",
     "//crates/lash-core-store:lash-core-store__unit_test__fv_3719f8c2",
@@ -600,7 +598,6 @@ FEATURE_LANES = {
         "//crates/lash-core-execution:lash-core-execution__fv_4928b98d",
         "//crates/lash-core-execution:lash-core-execution__fv_e17624f3",
         "//crates/lash-core-execution:lash-core-execution__fv_ecbe9667",
-        "//crates/lash-core-execution:lash-core-execution__unit_test__fv_ecbe9667",
         "//crates/lash-core-execution:process_model__test__fv_ecbe9667",
         "//crates/lash-core-ids:lash-core-ids__fv_2998ca5c",
         "//crates/lash-core-ids:lash-core-ids__fv_83f0d150",

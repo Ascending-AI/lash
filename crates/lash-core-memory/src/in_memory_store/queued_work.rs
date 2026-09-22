@@ -8,7 +8,7 @@ impl InMemorySessionStore {
         reason = "matches the fenced claim operation and transaction clock"
     )]
     pub(super) fn claim_exact_run_batches(
-        queued: &mut Vec<super::InMemoryQueuedBatch>,
+        queued: &mut [super::InMemoryQueuedBatch],
         session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
@@ -477,18 +477,6 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             } else {
                 None
             };
-            if inputs.is_none()
-                && queued.is_none()
-                && refusal.is_some_and(|reason| reason != crate::QueuedWorkClaimRefusal::Empty)
-            {
-                return Ok(crate::store::SelectedQueuedRun {
-                    admission,
-                    inputs: inputs.into_iter().collect(),
-                    queued: queued.into_iter().collect(),
-                    already_satisfied,
-                    refusal,
-                });
-            }
             let members: Vec<_> = inputs
                 .iter()
                 .flat_map(|claim| {
@@ -540,6 +528,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             || !matches!(
                 settlement.progress,
                 crate::store::QueuedRunProgress::Settle { .. }
+                    | crate::store::QueuedRunProgress::ForgetUnworked
             )
         {
             return Err(conflict());
@@ -556,6 +545,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             } if run.members.as_ref().is_some_and(Vec::is_empty)
                 && run.withheld_members.is_empty()
                 && run.assigned_members.is_empty() => {}
+            QueuedRunProgress::ForgetUnworked if run.can_forget_unworked() => {}
             _ => return Err(conflict()),
         }
         let settled = run.advance(&settlement, &[])?;
@@ -588,7 +578,11 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 entry.claim.release();
             }
         }
-        *run = settled.clone();
+        if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
+            runs.remove(&settlement.scope);
+        } else {
+            *run = settled.clone();
+        }
         Ok(settled)
     }
 
@@ -602,13 +596,21 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         self.ensure_session_not_deleted(&request.session_id)?;
         self.verify_session_execution_lease(&request.session_id, fence, self.clock.timestamp_ms())?;
         let mut runs = self.queued_runs.lock_recover();
-        if let Some(admitted) = request.identity.as_ref().and_then(|scope| runs.get(scope)) {
-            return request.resume(admitted);
+        if let Some(admitted) = request
+            .identity
+            .as_ref()
+            .and_then(|scope| runs.get_mut(scope))
+        {
+            let resumed = request.resume(admitted)?;
+            *admitted = resumed.clone();
+            return Ok(resumed);
         }
-        if let Some(admitted) = runs.values().find(|run| {
+        if let Some(admitted) = runs.values_mut().find(|run| {
             run.scope.session_id() == Some(&request.session_id) && run.terminal.is_none()
         }) {
-            return request.resume(admitted);
+            let resumed = request.resume(admitted)?;
+            *admitted = resumed.clone();
+            return Ok(resumed);
         }
         let actual = self
             .session_head_meta
@@ -837,6 +839,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
+        let runs = self.queued_runs.lock_recover();
         let mut queued = self.queued_work.lock_recover();
         let Some(index) = queued.iter().position(|entry| {
             entry.batch.session_id == session_id && entry.batch.batch_id == batch_id
@@ -844,6 +847,15 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             return Ok(None);
         };
         let entry = &queued[index];
+        if runs.values().any(|run| {
+            run.scope.session_id() == Some(session_id)
+                && run.terminal.is_none()
+                && run.owns_member(&crate::store::QueuedRunMember::Batch(
+                    entry.batch.batch_id.clone(),
+                ))
+        }) {
+            return Ok(None);
+        }
         if entry.claim.token().is_some() && entry.claim.live_under(live_generation) {
             return Ok(None);
         }

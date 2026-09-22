@@ -77,6 +77,24 @@ must_cover = [
   "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
 ]
 
+# The queued admission JSON is decoded under the PostgreSQL component stamp.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/queued_run.rs"]
+symbols = [
+  "QueuedRunAdmission", "QueuedRunOrigin", "QueuedRunRequest", "QueuedRunPosition",
+  "QueuedRunMember", "QueuedRunTerminal", "QueuedRunProgress", "QueuedRunCommit",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/session_model/mod.rs"]
+symbols = [
+  "TurnOutcome", "TurnFinish", "TurnStop", "TurnCancellationEvidence",
+  "TurnCancelDisposition", "TurnCancelMode",
+  "SessionAppendNode", "ErrorEnvelope",
+]
+
 [[surface]]
 constant = "TRACE_SCHEMA_VERSION"
 constant_path = "crates/lash-trace/src/lib.rs"
@@ -130,6 +148,24 @@ elide = "sql_idempotent_index"
 kind = "rust_items"
 paths = ["crates/lash-sqlite-store/src/lib.rs"]
 symbols = ["StoredBlobEnvelope", "BlobArtifactDescriptor", "BlobStorageHint", "BlobCompression"]
+
+# Durable-core admission JSON must move with the SQLite component stamp.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/queued_run.rs"]
+symbols = [
+  "QueuedRunAdmission", "QueuedRunOrigin", "QueuedRunRequest", "QueuedRunPosition",
+  "QueuedRunMember", "QueuedRunTerminal", "QueuedRunProgress", "QueuedRunCommit",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/session_model/mod.rs"]
+symbols = [
+  "TurnOutcome", "TurnFinish", "TurnStop", "TurnCancellationEvidence",
+  "TurnCancelDisposition", "TurnCancelMode",
+  "SessionAppendNode", "ErrorEnvelope",
+]
 
 [[surface]]
 constant = "PROCESS_SCHEMA_VERSION"

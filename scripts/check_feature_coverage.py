@@ -1377,15 +1377,24 @@ def validate_selected_artifacts(
     subcommand = cargo_subcommand(command)
     expected: list[CargoArtifact]
     if "--test" in command:
-        index = command.index("--test")
-        target_name = command[index + 1] if index + 1 < len(command) else ""
+        target_names = {
+            command[index + 1]
+            for index, token in enumerate(command[:-1])
+            if token == "--test"
+        }
         expected = [
             artifact
             for artifact in artifacts
             if "test" in artifact.target_kinds
-            and artifact.target_name == target_name
+            and artifact.target_name in target_names
             and artifact.test
         ]
+        missing = target_names - {artifact.target_name for artifact in expected}
+        if missing:
+            raise SystemExit(
+                f"Cargo artifacts omit selected tests for {package.name}: "
+                + ", ".join(sorted(missing))
+            )
     elif "--tests" in command:
         expected = [artifact for artifact in artifacts if artifact.test]
     elif "--bench" in command:
