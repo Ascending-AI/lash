@@ -40,11 +40,12 @@ reproduce. It emits
 `context-overflow-recovery e2e passed: rows=N` only after the focused contract test and
 every row's gates pass.
 
-**No container, no token, no network — but not no build.** The store is a SQLite scratch
-directory, fresh per row; the provider is scripted. The companion does run on plain Cargo
-(`cargo run --locked`), not through kiln, so it does not share the Bazel cache and the first
-invocation on a cold fork pays a full build. Do not configure a live provider — a live model cannot be
-made to overflow on demand, and a row that waited for one would be judging the provider.
+**No container or model token.** The store is a SQLite scratch
+directory, fresh per row; the provider is scripted and makes no provider
+network call. In a Kiln fork, the
+companion builds through the shared Bazel pool and runs the harness locally.
+Portable CI uses Cargo because it has no Kiln fork. Do not configure a live
+provider: a live model cannot be made to overflow on demand.
 
 **Two layers.** The scripted layer is the cell that calls the oversized tool and the cell
 that finishes: both must be cells the row's session can *execute*, because a foreign cell

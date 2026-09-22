@@ -71,7 +71,7 @@ exact recipe. See
 [`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md).
 
 Cargo remains for tests that invoke nested Cargo, trybuild fixtures, service
-gates that need local infrastructure, nightly fuzzing, publishing, and judged
+gates without a Bazel route, nightly fuzzing, publishing, and judged
 or release profiles. Use `kiln build //:feature_lanes`, `kiln test
 //:feature_lane_tests`, and `kiln clippy //:feature_lane_clippy` for feature
 coverage. Use `kiln clippy` for workspace linting and `kiln fmt -- --check`

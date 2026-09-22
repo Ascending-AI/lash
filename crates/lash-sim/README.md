@@ -34,7 +34,7 @@ shards covers the configured seed space exactly once. The summary records
 `mode`, `shard`, and `configured_seeds`.
 
 ```sh
-cargo run -p lash-sim -- run --out target/lash-sim/search \
+kiln run //crates/lash-sim:lash-sim__bin -- run --out "$PWD/target/lash-sim/search" \
   --profile full-random --seeds 5000 --max-boundaries 2000 \
   --shard 1/9 --mode search
 ```
@@ -49,7 +49,7 @@ one-shot arms, each targeting a one-based occurrence of one declared point.
 Run the bounded composition witness with:
 
 ```sh
-cargo run -p lash-sim -- backend-faults --backend sqlite \
+kiln run //crates/lash-sim:lash-sim__bin -- backend-faults --backend sqlite \
   --out /tmp/lash-sim-sqlite-faults --seed 140050432
 ```
 
@@ -148,7 +148,9 @@ bound, not a discovered runtime invariant violation.
 
 ## Implemented DST substance
 
-Each item below is landed and gated by `kiln test //crates/lash-sim:all`:
+The routine tests for the items below run with
+`kiln test //crates/lash-sim:lash-sim__unit_test //crates/lash-sim:test_batch`.
+The deferred cross-backend suites run in their named service gates.
 
 - The scheduler actually interleaves work: provider turns are spawned as live
   futures whose scripted-transport SSE chunks are released by

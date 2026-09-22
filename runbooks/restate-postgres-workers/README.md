@@ -63,7 +63,8 @@ The package-level build/unit check is lighter and does not start the distributed
 services:
 
 ```sh
-cargo test -p lash-restate-postgres-workers-e2e --all-targets
+kiln build //runbooks/restate-postgres-workers:all
+kiln test //runbooks/restate-postgres-workers:test_batch
 ```
 
 The focused parked-tool process-loss replay gate lives at the Restate endpoint
