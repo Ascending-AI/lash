@@ -845,6 +845,7 @@ impl RuntimeExecutionContext<'_> {
     #[allow(clippy::too_many_arguments)]
     pub async fn pending_completion_dispatch_outcome(
         &self,
+        call_id: &str,
         tool_name: String,
         args: serde_json::Value,
         resolution: crate::Resolution,
@@ -870,6 +871,7 @@ impl RuntimeExecutionContext<'_> {
             .with_usage_ledger(usage_ledger.clone());
         let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
             &resumed_dispatch,
+            call_id,
             tool_name,
             args,
             resolution,
@@ -1018,6 +1020,7 @@ impl RuntimeExecutionContext<'_> {
             }
         };
         self.pending_completion_dispatch_outcome(
+            call_id,
             pending.tool_name,
             pending.args,
             resolution,
