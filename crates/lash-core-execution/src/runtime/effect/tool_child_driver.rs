@@ -17,7 +17,10 @@
 //!
 //! This module is therefore the body of a
 //! [`ToolInvocation`](super::envelope::RuntimeEffectCommand::ToolInvocation)
-//! child: it runs against the child's own admitted controller and emits that
+//! child: it runs against the child's own admitted controller — bound to the
+//! child's recorded identity through
+//! [`GroupChildBinding`](crate::GroupChildBinding) so every admission it
+//! serves arbitrates under the child's own §4 decision — and emits that
 //! child's attempts, retry sleeps and awaits as its own journal entries.
 //!
 //! # The one rebind site
@@ -439,8 +442,10 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // The environment the child was admitted under, resolved from its recorded
     // reference rather than inherited from whatever the opener is running now.
     child.execution_env_spec = execution_env_spec.clone();
-    // §2: the child's own admitted controller, never the lent one. This is the
-    // authority boundary; everything else on this list is attribution.
+    // §2: the child's own admitted controller, never the lent one — bound to
+    // the child's recorded identity (§4), so a nested admission minted after
+    // the child's cancel decision commits refuses at the substrate. This is
+    // the authority boundary; everything else on this list is attribution.
     child.effect_controller =
         crate::runtime::RuntimeEffectControllerHandle::borrowed(controller.clone());
     // Child-local buffers. Their contents ride the child's outcome (§6, §13),

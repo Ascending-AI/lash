@@ -720,6 +720,14 @@ impl EffectHost for RetirementFailsHost {
         self.inner.scoped_static(scope)
     }
 
+    fn scoped_for_group_child(
+        &self,
+        scope: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.scoped_for_group_child(scope, binding)
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }
@@ -1439,6 +1447,14 @@ impl EffectHost for ParticipantCrashHost {
         scope: lash_core::AdmittedScope,
     ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
         self.inner.scoped_static(scope)
+    }
+
+    fn scoped_for_group_child(
+        &self,
+        scope: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.scoped_for_group_child(scope, binding)
     }
 
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
