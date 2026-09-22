@@ -264,3 +264,272 @@ async fn absent_session_surface_is_refused_at_admission() {
         "refusal must name the missing vocabulary: {failure:?}"
     );
 }
+
+struct RecoveryEchoTool {
+    executions: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl RecoveryEchoTool {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:recovery_echo",
+            "recovery_echo",
+            "Echo once after process recovery.",
+            serde_json::json!({"type":"object","properties":{"line":{"type":"string"}},"required":["line"],"additionalProperties":false}),
+            serde_json::json!({"type":"object"}),
+        )
+        .with_tool_binding(ToolBinding::new(["tools"], "recovery_echo"))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for RecoveryEchoTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "recovery_echo").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.executions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        lash_core::ToolAttemptOutcome::done_without_intents(lash_core::ToolOutcomeDone::ok(
+            serde_json::json!({
+                "echo": call.args.get("line").and_then(serde_json::Value::as_str)
+            }),
+        ))
+    }
+}
+
+fn recovery_echo_catalog() -> lashlang::LashlangHostCatalog {
+    let contract = RecoveryEchoTool::definition().contract();
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_contract(
+            ["tools"],
+            "Tools",
+            "recovery_echo",
+            "tool:recovery_echo",
+            &lashlang::OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
+        )
+        .expect("recovery echo catalog");
+    catalog
+}
+
+struct CrashAfterFirstNodeStarted {
+    graphs: Arc<lash_trace::TraceLashlangGraphStore>,
+    crashed: std::sync::atomic::AtomicBool,
+    notified: tokio::sync::Notify,
+}
+
+impl lash_trace::TraceSink for CrashAfterFirstNodeStarted {
+    fn append(&self, record: &lash_trace::TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
+        self.graphs.append(record)?;
+        if matches!(
+            &record.event,
+            lash_trace::TraceEvent::LanguageExecution {
+                event: lash_trace::TraceLanguageExecution {
+                    payload: lash_trace::TraceLanguageExecutionPayload::NodeStarted { .. },
+                    ..
+                },
+                ..
+            }
+        ) && !self.crashed.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.notified.notify_one();
+            panic!("injected worker crash after NodeStarted");
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn crashed_worker_retry_keeps_both_telemetry_attempts_but_executes_effect_once() {
+    let artifact_store: Arc<dyn LashlangArtifactStore> =
+        Arc::new(InMemoryLashlangArtifactStore::new());
+    let environment = lashlang::LashlangHostEnvironment::new(
+        recovery_echo_catalog(),
+        lashlang::LashlangAbilities::default(),
+    );
+    let module = b::module(
+        vec![b::process(
+            "main",
+            Vec::new(),
+            b::finish(b::receiver_call(
+                b::resource(&["tools"]),
+                "recovery_echo",
+                vec![b::record(vec![("line", b::string("once"))])],
+            )),
+        )],
+        Vec::new(),
+    );
+    let linked = lashlang::LinkedModule::link(module, &environment).expect("link recovery process");
+    artifact_store
+        .publish_module_artifact(&ArtifactOwner::host("fig3463-recovery"), &linked.artifact)
+        .await
+        .expect("publish recovery process");
+    let process_input = LashlangProcessInput {
+        module_ref: linked.module_ref,
+        process_ref: linked
+            .artifact
+            .process_ref("main")
+            .expect("main process")
+            .clone(),
+        host_requirements_ref: linked.host_requirements_ref,
+        process_name: "main".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let process_identity = process_input.process_identity();
+    let process_id = lash_sansio::ProcessId::from("fig3463-crash-retry");
+    let env_store: Arc<dyn ProcessExecutionEnvStore> =
+        Arc::new(InMemoryProcessExecutionEnvStore::new());
+    let env_ref = lash_core::runtime::publish_process_execution_env(
+        env_store.as_ref(),
+        &ArtifactOwner::host("fig3463-recovery-env"),
+        &ProcessExecutionEnvSpec::new(PluginOptions::empty(), session_policy()),
+    )
+    .await
+    .expect("publish process env");
+    let registry: Arc<dyn ProcessRegistry> =
+        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
+    let crash_sink = Arc::new(CrashAfterFirstNodeStarted {
+        graphs: Arc::clone(&graphs),
+        crashed: std::sync::atomic::AtomicBool::new(false),
+        notified: tokio::sync::Notify::new(),
+    });
+    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "fig3463-recovery-echo",
+            PluginSpec::new().with_tool_provider(Arc::new(RecoveryEchoTool {
+                executions: Arc::clone(&executions),
+            })),
+        ));
+    let worker = |sink: Arc<dyn lash_trace::TraceSink>| {
+        let engine =
+            LashlangProcessEngine::new(Arc::clone(&artifact_store), LashlangSurface::default())
+                .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
+        let runtime_host = RuntimeHostConfig::new(
+            Arc::new(lash_core::facade_support::NativeEffectHost::default()),
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            Arc::clone(&env_store),
+            CommitBudget::bounded(1024 * 1024, 512),
+            QueuedWorkBatchingConfig::new(1),
+        )
+        .with_lease_timings(
+            lash_core::facade_support::LeaseTimings::from_ttl(std::time::Duration::from_millis(
+                120,
+            ))
+            .expect("short crash lease"),
+        )
+        .with_process_engine_registration(lashlang_process_engine_registration(engine));
+        let mut factories = lash_core::testing::test_code_protocol_factories();
+        factories.push(Arc::clone(&tool_factory));
+        DurableProcessWorker::new(
+            DurableProcessWorkerConfig::new(
+                Arc::new(PluginHost::new(factories)),
+                runtime_host,
+                Arc::new(InMemorySessionStoreFactory::new()),
+                WorkerProcessWork::SelfNative(watch_process_registry(Arc::clone(&registry))),
+                Arc::new(NoQueuedWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(session_policy()),
+        )
+        .expect("recovery worker")
+    };
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                process_id.clone(),
+                process_input.into_process_input().expect("process input"),
+                RecoveryContract::Rerunnable,
+                ProcessProvenance::host(),
+                ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+            )
+            .with_admitted_identity(AdmittedProcessIdentity::for_testing(process_identity))
+            .with_execution_env_ref(Some(env_ref)),
+        )
+        .await
+        .expect("register recovery process");
+    let worker_a = worker(crash_sink.clone());
+    let first_report = worker_a
+        .drive_pending_processes()
+        .await
+        .expect("admit first attempt");
+    if tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crash_sink.notified.notified(),
+    )
+    .await
+    .is_err()
+    {
+        panic!(
+            "first attempt must crash after NodeStarted: report={first_report:?}, process={:?}, graphs={:?}",
+            registry.get_process(&process_id).await,
+            graphs.graphs()
+        );
+    }
+    assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 0);
+    drop(worker_a);
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+    let worker_b = worker(graphs.clone());
+    let _retry_report = worker_b
+        .drive_pending_processes()
+        .await
+        .expect("admit retry");
+    let terminal = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&process_id),
+    )
+    .await
+    .expect("retry reaches terminal")
+    .expect("await retried process");
+    assert!(
+        matches!(terminal, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success())
+    );
+    assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let graphs = graphs.graphs();
+    assert_eq!(graphs.len(), 2, "both attempts must remain visible");
+    let mut attempts = graphs
+        .iter()
+        .map(|graph| {
+            graph
+                .history
+                .first()
+                .expect("attempt has trace history")
+                .event
+                .identity
+                .attempt()
+                .expect("process attempt")
+        })
+        .collect::<Vec<_>>();
+    attempts.sort_unstable();
+    assert_eq!(attempts, [1, 2]);
+    for (attempt, completed) in [(1, false), (2, true)] {
+        let graph = graphs
+            .iter()
+            .find(|graph| graph.history[0].event.identity.attempt() == Some(attempt))
+            .expect("one graph per attempt");
+        assert!(graph.nodes.iter().any(|node| {
+            if completed {
+                matches!(
+                    node.observation,
+                    lash_trace::TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
+                )
+            } else {
+                matches!(
+                    node.observation,
+                    lash_trace::TraceLashlangNodeObservation::Running { occurrence: 1, .. }
+                )
+            }
+        }));
+    }
+}
