@@ -117,6 +117,26 @@ struct Args {
     turn_wall_limit_secs: u64,
 }
 
+fn resolve_user_path(path: &mut std::path::PathBuf, working_dir: &std::path::Path) {
+    if path.is_relative() {
+        *path = working_dir.join(&*path);
+    }
+}
+
+fn resolve_user_paths(args: &mut Args, working_dir: &std::path::Path) {
+    resolve_user_path(&mut args.results_file, working_dir);
+    for path in [
+        args.trace_log.as_mut(),
+        args.reconcile.as_mut(),
+        args.dump_requests.as_mut(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        resolve_user_path(path, working_dir);
+    }
+}
+
 fn parse_cost(value: &str) -> Result<f64, String> {
     let cost: f64 = value
         .parse()
@@ -168,8 +188,16 @@ struct TaskResult {
               construction, so as_object_mut/as_object are Some"
 )]
 async fn main() -> Result<()> {
-    let _ = dotenvy::dotenv();
-    let args = Args::parse();
+    let bazel_working_dir =
+        std::env::var_os("BUILD_WORKING_DIRECTORY").map(std::path::PathBuf::from);
+    if let Some(dir) = &bazel_working_dir {
+        let _ = dotenvy::from_path(dir.join(".env"));
+    } else {
+        let _ = dotenvy::dotenv();
+    }
+    let mut args = Args::parse();
+    let working_dir = bazel_working_dir.unwrap_or(std::env::current_dir()?);
+    resolve_user_paths(&mut args, &working_dir);
     if args.repetitions == 0 || args.concurrency == 0 {
         bail!("--repetitions/--runs and --concurrency must be at least 1");
     }
@@ -467,6 +495,38 @@ mod tests {
             assert!(Args::try_parse_from(["toolbench", "--max-task-cost-usd", cost]).is_err());
         }
         assert!(Args::try_parse_from(["toolbench", "--turn-wall-limit-secs", "0"]).is_err());
+    }
+
+    #[test]
+    fn bazel_run_paths_resolve_against_invocation_directory() {
+        let mut args = Args::parse_from([
+            "toolbench",
+            "--results-file",
+            "results.jsonl",
+            "--trace-log",
+            "/tmp/trace.log",
+            "--reconcile",
+            "inputs.jsonl",
+            "--dump-requests",
+            "wire/dump.json",
+        ]);
+        resolve_user_paths(&mut args, std::path::Path::new("/tmp/lash-fork"));
+        assert_eq!(
+            args.results_file,
+            std::path::Path::new("/tmp/lash-fork/results.jsonl")
+        );
+        assert_eq!(
+            args.trace_log.as_deref(),
+            Some(std::path::Path::new("/tmp/trace.log"))
+        );
+        assert_eq!(
+            args.reconcile.as_deref(),
+            Some(std::path::Path::new("/tmp/lash-fork/inputs.jsonl"))
+        );
+        assert_eq!(
+            args.dump_requests.as_deref(),
+            Some(std::path::Path::new("/tmp/lash-fork/wire/dump.json"))
+        );
     }
 
     #[test]

@@ -41,13 +41,21 @@ pool and starts the program locally. `kiln fmt [-- --check]` runs local Cargo
 formatting. `kiln sync` regenerates the graph and lockfile after input changes;
 `kiln clean` expunges only this fork's output base and is not routine.
 
+For a test that needs localhost or writes a checked-in fixture, use a named
+`just` recipe or `kiln run <test-label> -- <libtest args>` when its paths support
+local execution. `kiln test` executes on the pool and cannot reach a local
+service. Bazel changes the working directory for `kiln run`; source writers
+must resolve `BUILD_WORKSPACE_DIRECTORY`, and tools accepting relative user
+paths must resolve `BUILD_WORKING_DIRECTORY`. Do not convert a Cargo fixture
+writer to Kiln until those paths are handled and the output diff is checked.
+
 Keep one heavy build request in flight per fork. Check `kiln cgroup status`
 before optional broad gates on the shared host; if it is pressured, defer
 another full suite rather than stacking builds. Do not raise job budgets,
 set `CARGO_*` by hand, or purge shared caches. Cargo on PATH is a cgroup shim,
 not NativeLink: reserve it for semantics Bazel does not cover, such as
-`just seal`/trybuild, nested-Cargo fault matrices, service tests, publishing,
-and nightly fuzzing. Preserve the workspace feature graph with
+`just seal`/trybuild, nested-Cargo fault matrices, service gates without a Bazel
+route, publishing, and nightly fuzzing. Preserve the workspace feature graph with
 `--workspace --all-targets` when a local Cargo compile is required.
 
 ## Commits, PRs, published text

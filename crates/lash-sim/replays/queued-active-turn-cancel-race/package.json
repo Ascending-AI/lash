@@ -23,8 +23,8 @@
     "sqlite",
     "postgres_when_available"
   ],
-  "replay_command": "cargo run -p lash-sim --locked -- replay crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json",
-  "sqlite_replay_command": "cargo run -p lash-sim --locked -- replay-sqlite crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json --out /tmp/lash-sim-queued-cancel-replay",
-  "postgres_replay_command": "LASH_POSTGRES_DATABASE_URL=postgres://... cargo run -p lash-sim --locked -- replay-postgres crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json --out /tmp/lash-sim-queued-cancel-replay",
-  "regeneration_command": "cargo build --workspace --bins --locked && \"$CARGO_TARGET_DIR/debug/lash-sim\" run --out /tmp/fig2113-queued-active-turn-cancel-race --profile fast-random --seed 7313380382653661636"
+  "replay_command": "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$PWD/crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json\"",
+  "sqlite_replay_command": "kiln run //crates/lash-sim:lash-sim__bin -- replay-sqlite \"$PWD/crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json\" --out /tmp/lash-sim-queued-cancel-replay",
+  "postgres_replay_command": "LASH_POSTGRES_DATABASE_URL=postgres://... kiln run //crates/lash-sim:lash-sim__bin -- replay-postgres \"$PWD/crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json\" --out /tmp/lash-sim-queued-cancel-replay",
+  "regeneration_command": "kiln run //crates/lash-sim:lash-sim__bin -- run --out /tmp/fig2113-queued-active-turn-cancel-race --profile fast-random --seed 7313380382653661636"
 }

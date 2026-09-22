@@ -34,14 +34,11 @@ fields.
 
 ## Safety and stop conditions
 
-1. Load `env.sh` from the owned warm workspace before Cargo commands. Prefer the
-   crate-and-target-scoped form of every command below (`-p <crate> --test <target>`) over
-   `--workspace --all-targets`: it is the same coverage in one cached invocation per crate
-   instead of a full workspace build per named test, and it makes a stale filter fail loudly
-   instead of silently.
+1. Work in the owned Kiln fork. Use the exact Bazel label for each deterministic
+   test. `kiln test` executes these on the shared pool; the PostgreSQL gate below
+   keeps its service-owned Cargo recipe.
 1b. **Every named test filter in this runbook must be scored on its executed count, never on
-   its exit code.** A Cargo or nextest filter that matches nothing exits 0 and prints
-   `0 passed; N filtered out`, so an exit-0 run is not evidence a test ran. Require a
+   its exit code.** A filter that matches nothing does not prove the named test ran. Require a
    non-zero passed count for each filter — for example by guarding on
    `test result: ok. <n> passed` — and treat `0 passed` as a failure of the runbook, not a
    pass of the code.
@@ -58,12 +55,12 @@ From the repository root:
 
 ```sh
 . ./env.sh
-cargo test --workspace --all-targets scoped_controller_refuses_wrong_scope_before_controller_or_local_execution
-cargo test --workspace --all-targets task_proxy_refuses_wrong_scope_before_handoff
-cargo test --workspace --all-targets restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution
-cargo test --workspace --all-targets same_replay_key_in_distinct_scopes_has_distinct_graph_identity
-cargo test --workspace --all-targets effect_header_round_trips_without_universal_subject_or_replay_slots
-cargo test --workspace --all-targets legacy_universal_effect_header_is_refused
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=scoped_controller_refuses_wrong_scope_before_controller_or_local_execution
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=task_proxy_refuses_wrong_scope_before_handoff
+kiln test --test_output=all //crates/lash-restate:lash-restate__unit_test --test_arg=restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution
+kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test --test_arg=same_replay_key_in_distinct_scopes_has_distinct_graph_identity
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=effect_header_round_trips_without_universal_subject_or_replay_slots
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=legacy_universal_effect_header_is_refused
 ```
 
 The first three tests must refuse before the wrapped controller, local executor, task handoff,
@@ -76,7 +73,7 @@ conformance is the shared `effect_controller_` conformance family instantiated f
 backend (`crates/lash-sqlite-store/tests/conformance.rs`), not a test of its own:
 
 ```sh
-cargo test -p lash-internal-sqlite-store --locked --test conformance effect_controller_ -- --nocapture
+kiln test --test_output=all //crates/lash-sqlite-store:conformance__test --test_arg=effect_controller_ --test_arg=--nocapture
 ```
 
 (The former filter `sqlite_effect_host_satisfies_scope_conformance` names no test and matched
@@ -98,9 +95,9 @@ scripts/ci/with-service.sh pg16 -- \
 ## Phase 2 — Truthful attribution
 
 ```sh
-cargo test --workspace --all-targets parentless_effect_envelopes_use_process_originator_not_ambient_session
-cargo test --workspace --all-targets process_trace_session_attribution_comes_only_from_a_session_originator
-cargo test --workspace --all-targets session_node_identity_is_structural_and_missing_identity_is_refused
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=parentless_effect_envelopes_use_process_originator_not_ambient_session
+kiln test --test_output=all //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test --test_arg=process_trace_session_attribution_comes_only_from_a_session_originator
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=session_node_identity_is_structural_and_missing_identity_is_refused
 ```
 
 Require foreground session effects to retain their real session. A session-origin process must
@@ -112,8 +109,8 @@ that omitted it.
 ## Phase 3 — Cause and shared trace projection
 
 ```sh
-cargo test --workspace --all-targets remote_cause_validation_preserves_partial_trigger_identity_and_checks_effect_scope
-cargo test --workspace --all-targets turn_keeps_causal_parent_when_present
+kiln test --test_output=all //crates/lash-remote-protocol:lash-remote-protocol__unit_test --test_arg=remote_cause_validation_preserves_partial_trigger_identity_and_checks_effect_scope
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=turn_keeps_causal_parent_when_present
 ```
 
 (`same_replay_key_in_distinct_scopes_has_distinct_graph_identity` belongs to Phase 1 and is
@@ -127,10 +124,10 @@ must use the same scoped causal graph address while retaining unrelated base tra
 ## Phase 4 — Remote grammar and cutover
 
 ```sh
-cargo test --workspace --all-targets remote_owner_scope_validation_matches_each_core_owner_grammar
-cargo test --workspace --all-targets journal_identity_v2_bytes_remain_unchanged_for_all_scope_variants
-cargo test --workspace --all-targets direct_effect_identity_golden_corpus
-cargo test -p lash-internal-trace --test schema trace_schema_version_is_pinned_at_
+kiln test --test_output=all //crates/lash-remote-protocol:lash-remote-protocol__unit_test --test_arg=remote_owner_scope_validation_matches_each_core_owner_grammar
+kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test --test_arg=journal_identity_v2_bytes_remain_unchanged_for_all_scope_variants
+kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=direct_effect_identity_golden_corpus
+kiln test --test_output=all //crates/lash-trace:schema__test --test_arg=trace_schema_version_is_pinned_at_
 ```
 
 The pin test is named for the version it pins, so it is renamed at every bump. Filter on the

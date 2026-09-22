@@ -188,8 +188,8 @@ async fn sqlite_durable_fixture_reads_with_identical_semantics() {
     assert_eq!(
         recorded, current,
         "declared SQLite durable schema versions changed without fixture regeneration; run \
-         LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p lash-internal-sqlite-store --test \
-         durable_read_fixture regenerate_sqlite_durable_fixture -- --ignored --exact"
+         LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run //crates/lash-sqlite-store:durable_read_fixture__test -- \
+         regenerate_sqlite_durable_fixture --ignored --exact"
     );
 
     let temp = tempfile::tempdir().expect("SQLite fixture tempdir");
@@ -604,12 +604,41 @@ fn database_names() -> [&'static str; 4] {
 }
 
 fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/durable-read/v1/sqlite")
+    source_manifest_dir().join("../../fixtures/durable-read/v1/sqlite")
 }
 
 fn prior_component_fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/checkpoint-component-v1-refusal/sqlite")
+    source_manifest_dir().join("../../fixtures/checkpoint-component-v1-refusal/sqlite")
+}
+
+fn source_manifest_dir() -> PathBuf {
+    let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
+    if workspace.is_none()
+        && std::env::var(REGENERATE_ENV).as_deref() == Ok("1")
+        && Path::new(env!("CARGO_MANIFEST_DIR")).is_relative()
+    {
+        panic!("Bazel fixture regeneration requires BUILD_WORKSPACE_DIRECTORY");
+    }
+    source_manifest_dir_for(workspace)
+}
+
+fn source_manifest_dir_for(workspace: Option<std::ffi::OsString>) -> PathBuf {
+    workspace.map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        |root| PathBuf::from(root).join("crates/lash-sqlite-store"),
+    )
+}
+
+#[test]
+fn fixture_source_dir_resolves_bazel_workspace() {
+    assert_eq!(
+        source_manifest_dir_for(Some("/tmp/lash-fork".into())),
+        PathBuf::from("/tmp/lash-fork/crates/lash-sqlite-store")
+    );
+    assert_eq!(
+        source_manifest_dir_for(None),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    );
 }
 
 fn json_with_newline(value: &impl Serialize) -> Vec<u8> {

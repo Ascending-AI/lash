@@ -47,7 +47,7 @@ just slack-clone-logs-follow   # tail the logs
 just slack-clone-down
 ```
 
-State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model key
+State lives under `.slack-clone/`. `kiln test //examples/slack-clone:slack-clone__unit_test //examples/slack-clone:mcp__test` needs no model key
 — the suite drives a scripted provider.
 
 ## Coverage

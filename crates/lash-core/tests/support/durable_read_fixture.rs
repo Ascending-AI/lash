@@ -195,8 +195,8 @@
 //!
 //! ```text
 //! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
-//!   cargo test -p lash-internal-sqlite-store --test durable_read_fixture \
-//!   regenerate_sqlite_durable_fixture -- --ignored --exact
+//!   kiln run //crates/lash-sqlite-store:durable_read_fixture__test -- \
+//!   regenerate_sqlite_durable_fixture --ignored --exact
 //! ```
 //!
 //! Generate PostgreSQL against a caller-owned throwaway database (Docker is used
@@ -205,15 +205,15 @@
 //! ```text
 //! LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:55487/lash \
 //! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
-//!   cargo test -p lash-internal-postgres-store --test durable_read_fixture \
-//!   regenerate_postgres_durable_fixture -- --ignored --exact
+//!   kiln run //crates/lash-postgres-store:durable_read_fixture__test -- \
+//!   regenerate_postgres_durable_fixture --ignored --exact
 //! ```
 //!
 //! ```text
-//! cargo test -p lash-internal-sqlite-store --test durable_read_fixture
+//! kiln test //crates/lash-sqlite-store:durable_read_fixture__test
 //! LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:55487/lash \
 //! LASH_REQUIRE_POSTGRES=1 \
-//!   cargo test -p lash-internal-postgres-store --test durable_read_fixture
+//!   kiln run //crates/lash-postgres-store:durable_read_fixture__test
 //! ```
 //!
 //! For the no-diff proof, hash every file under `fixtures/durable-read/v1/`, run
@@ -1752,11 +1752,10 @@ pub fn assert_committed_expectations_match_current_writes(committed: &[u8], writ
     );
 }
 
-const REGENERATION_COMMANDS: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p \
-     lash-sqlite-store --test durable_read_fixture regenerate_sqlite_durable_fixture -- \
-     --ignored --exact\n  LASH_POSTGRES_DATABASE_URL=<throwaway> \
-     LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p lash-postgres-store --test \
-     durable_read_fixture regenerate_postgres_durable_fixture -- --ignored --exact";
+const REGENERATION_COMMANDS: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run //crates/lash-sqlite-store:durable_read_fixture__test -- \
+     regenerate_sqlite_durable_fixture --ignored --exact\n  LASH_POSTGRES_DATABASE_URL=<throwaway> \
+     LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run //crates/lash-postgres-store:durable_read_fixture__test -- \
+     regenerate_postgres_durable_fixture --ignored --exact";
 
 fn rendered_expectation_drift(committed: &[u8], written_now: &[u8]) -> String {
     let (Ok(committed), Ok(written_now)) = (

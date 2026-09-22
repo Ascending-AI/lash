@@ -23,9 +23,9 @@ mkdir -p "$LASH_MCP_NAMING_EVIDENCE_DIR"
 Do:
 
 ```bash
-kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
-  '. ./env.sh && cargo test --workspace --all-targets --locked \
-  naming::tests -- --nocapture' \
+kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
+  kiln test //crates/lash-plugin-mcp:lash-plugin-mcp__unit_test --test_output=all \
+  --test_arg=naming::tests --test_arg=--nocapture \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-names.log"
 ```
 
@@ -48,15 +48,13 @@ fixed vector changes without an intentional naming-contract change.
 Do:
 
 ```bash
-kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
-  '. ./env.sh && cargo test --workspace --all-targets --locked \
-  deferred_call_ -- --nocapture' \
+kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
+  kiln test //crates/lash-plugin-mcp:lash-plugin-mcp__unit_test --test_output=all \
+  --test_arg=deferred_call_ --test_arg=--nocapture \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-refresh.log"
 ```
 
-Expect the MCP crate to run exactly two matching tests with
-`2 passed; 0 failed`. Other workspace crates may also contain tests matching
-the broad filter. The controlled
+Expect exactly two matching tests with `2 passed; 0 failed`. The controlled
 stdio peer first advertises raw `get_user`. The host accepts a call by durable
 ToolId and pauses after resolving it. The peer then publishes
 tools/list_changed and introduces raw `get-user` before the call resumes.
@@ -77,14 +75,13 @@ the bounded test timeout.
 Do:
 
 ```bash
-kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
-  '. ./env.sh && cargo test --workspace --all-targets --locked \
-  refuses_a_forced_ -- --nocapture' \
+kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
+  kiln test //crates/lash-plugin-mcp:lash-plugin-mcp__unit_test --test_output=all \
+  --test_arg=refuses_a_forced_ --test_arg=--nocapture \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-collisions.log"
 ```
 
-Expect the MCP crate to run exactly two matching tests with
-`2 passed; 0 failed`. One injects an
+Expect exactly two matching tests with `2 passed; 0 failed`. One injects an
 identical final name for two raw tools in a single server catalog. The other
 injects the same name across two configured servers and checks the pool-wide
 publication view. Both must return a configuration error naming the collision;

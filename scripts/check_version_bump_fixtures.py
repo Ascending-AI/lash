@@ -81,9 +81,9 @@ COMPONENT_VERSION_PINS = (
         pattern=re.compile(r"PostgresStorage::schema_version\(\),\s*(\d+)\s*\)"),
         remedy=(
             "move the literal with the bump and regenerate the fixture it pins "
-            "(LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p "
-            "lash-internal-postgres-store --test durable_read_fixture "
-            "regenerate_postgres_prior_component_fixture_catalog -- --ignored --exact)"
+            "(LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run "
+            "//crates/lash-postgres-store:durable_read_fixture__test -- "
+            "regenerate_postgres_prior_component_fixture_catalog --ignored --exact)"
         ),
     ),
     PinFamily(

@@ -12,13 +12,13 @@
   "verdict_evidence": "The backend-equivalence test crates/lash-sim/tests/cross_backend_active_turn_divergence.rs builds two real lash::StandardCore instances (in-memory vs lash-sqlite-store) over an UN-GATED scripted transport and proves they agree across the active-turn enqueue / cancel / claim / complete orderings (cancel-before-turn, cancel-after-turn, no-cancel-claim, claim-then-cancel).",
   "resolution": "The cross-backend lane no longer uses a separate gated, fixed-exchange-count serial re-drive. It now re-runs the SAME generated workload through the SAME scheduler-driven, concurrency-faithful driver (run_generated_workload / drive_generated_workload), parameterized only by the store factory (replay_workload_on_sqlite in crates/lash-sim/src/runner.rs), and compares the resulting abstract world summary against the in-memory reference. Apples-to-apples by construction, so the fidelity gap cannot exist.",
   "model_replay": "passes (this trace is model-replayable; the trace and abstract model were always sound)",
-  "minimization": "not applied \u2014 the former fidelity gap was scale-dependent (it only appeared in the gated re-drive at broad/full scale). The full broad-lane trace is retained as the canonical fixture pinning the active-turn-cancel shape.",
+  "minimization": "not applied — the former fidelity gap was scale-dependent (it only appeared in the gated re-drive at broad/full scale). The full broad-lane trace is retained as the canonical fixture pinning the active-turn-cancel shape.",
   "scale_evidence": "528 events; retained full-random active-turn queued-input cancel followed by subsequent provider turns, pinned by the model replay guard.",
   "replay_backends": [
     "model",
     "sqlite"
   ],
-  "replay_command": "cargo run -p lash-sim --locked -- replay crates/lash-sim/replays/cross-backend-sqlite-active-turn-divergence/trace.json",
-  "guard": "crates/lash-sim/src/replay.rs::cross_backend_active_turn_fixture_model_replays_and_pins_shape keeps this trace model-replayable and pins the shape under `cargo test`.",
-  "regeneration_command": "cargo build --workspace --bins --locked && \"$CARGO_TARGET_DIR/debug/lash-sim\" run --out /tmp/fig2113-cross-backend-sqlite-active-turn-divergence --profile full-random --seed 14123330213291275571"
+  "replay_command": "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$PWD/crates/lash-sim/replays/cross-backend-sqlite-active-turn-divergence/trace.json\"",
+  "guard": "crates/lash-sim/src/replay.rs::cross_backend_active_turn_fixture_model_replays_and_pins_shape keeps this trace model-replayable and pins the shape under `kiln test`.",
+  "regeneration_command": "kiln run //crates/lash-sim:lash-sim__bin -- run --out /tmp/fig2113-cross-backend-sqlite-active-turn-divergence --profile full-random --seed 14123330213291275571"
 }

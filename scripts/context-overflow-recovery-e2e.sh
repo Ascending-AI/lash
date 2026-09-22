@@ -34,9 +34,17 @@ cleanup() {
 trap cleanup EXIT
 
 # The mapping this scenario judges, proved in the kernel before a row is spent.
-cargo test --locked -p lash-internal-sansio \
-  context_overflow_response_stops_as_its_own_outcome \
-  2>&1 | tee "$artifact_root/01-contract-tests.log" | tee "$run_log"
+if [[ -f .kiln.bazelrc ]]; then
+  kiln test --test_output=all \
+    --test_arg=context_overflow_response_stops_as_its_own_outcome \
+    //crates/lash-sansio:lash-sansio__unit_test \
+    2>&1 | tee "$artifact_root/01-contract-tests.log" | tee "$run_log"
+else
+  # The portable CI runner has no Kiln fork or shared executor.
+  cargo test --locked -p lash-internal-sansio \
+    context_overflow_response_stops_as_its_own_outcome \
+    2>&1 | tee "$artifact_root/01-contract-tests.log" | tee "$run_log"
+fi
 if ! grep -Eq 'test result: ok\. 1 passed' "$artifact_root/01-contract-tests.log"; then
   echo "focused contract filter did not execute exactly one passing test" >&2
   exit 1
@@ -57,9 +65,14 @@ fi
 
 staging="$artifact_root/context-overflow-recovery/.observed"
 mkdir -p "$staging"
-cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
-  --bin lash-e2e-context-overflow-recovery \
-  2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
+if [[ -f .kiln.bazelrc ]]; then
+  kiln run //runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin \
+    2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
+else
+  cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
+    --bin lash-e2e-context-overflow-recovery \
+    2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
+fi
 
 dialect="$(python3 - "$staging/03-observed.jsonl" <<'DIALECT'
 import json
