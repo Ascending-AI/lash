@@ -858,6 +858,19 @@ kind = "server clock"
 reason = "Same lease-clock fork as effect_replay.finalize_terminal."
 
 [[dialect_only]]
+statement = "effect_replay.select_arbitration_by_key_locked"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+The claim fence must serialize a minted admission against an in-flight
+decide_cancel on the minting child's replay row. PostgreSQL takes the row's
+write lock explicitly (FOR UPDATE OF the replay row) because READ COMMITTED
+would otherwise re-read the pre-commit arbitration state; SQLite already holds
+the database write lock from BEGIN IMMEDIATE and reads through the shared
+unlocked select_arbitration_by_key, so it has no locked counterpart to name.
+"""
+
+[[dialect_only]]
 statement = "effect_group_child.insert_accepted"
 backends = ["sqlite", "postgres"]
 kind = "RETURNING"

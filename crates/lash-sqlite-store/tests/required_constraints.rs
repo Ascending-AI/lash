@@ -231,8 +231,18 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
         .execute_batch(
             "CREATE TABLE runtime_effect_replay (
                 \"STATUS\" TEXT,
+                \"COMMIT_STATE\" TEXT,
+                \"COMMIT_SEQ\" INTEGER,
+                \"GROUP_KEY\" TEXT,
+                \"DRAIN_INPUT\" TEXT,
                 CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_STATUS\"
-                    CHECK ([STATUS] IN ('in_progress', 'completed', 'failed'))
+                    CHECK ([STATUS] IN ('in_progress', 'completed', 'failed')),
+                CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_COMMIT_STATE\"
+                    CHECK ([COMMIT_STATE] IN ('pending', 'committed', 'drained', 'cancel_decided')),
+                CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_COMMIT_SEQ\"
+                    CHECK (([COMMIT_SEQ] IS NULL OR ([GROUP_KEY] IS NOT NULL AND [COMMIT_STATE] IN ('committed', 'drained'))) AND ([GROUP_KEY] IS NULL OR NOT ([COMMIT_STATE] IN ('committed', 'drained')) OR [COMMIT_SEQ] IS NOT NULL)),
+                CONSTRAINT \"CK_RUNTIME_EFFECT_REPLAY_DRAIN_INPUT\"
+                    CHECK ([DRAIN_INPUT] IS NULL OR ([GROUP_KEY] IS NOT NULL AND [COMMIT_STATE] IN ('committed', 'drained')))
             );",
         )
         .expect("create genuinely quoted lowercase identifiers");
@@ -313,10 +323,20 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
              PRAGMA user_version = 731;
              CREATE TABLE runtime_effect_replay (
                  status TEXT,
+                 commit_state TEXT,
+                 commit_seq INTEGER,
+                 group_key TEXT,
+                 drain_input TEXT,
                  CONSTRAINT ck_runtime_effect_replay_status
-                     CHECK (status IN ('in_progress', 'completed', 'failed'))
+                     CHECK (status IN ('in_progress', 'completed', 'failed')),
+                 CONSTRAINT ck_runtime_effect_replay_commit_state
+                     CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
+                 CONSTRAINT ck_runtime_effect_replay_commit_seq
+                     CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
+                 CONSTRAINT ck_runtime_effect_replay_drain_input
+                     CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained')))
              );
-             INSERT INTO runtime_effect_replay(status) VALUES ('completed');",
+             INSERT INTO runtime_effect_replay(status, commit_state) VALUES ('completed', 'drained');",
         )
         .expect("create and checkpoint fixture");
     checkpointed
@@ -380,10 +400,20 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
          PRAGMA wal_autocheckpoint = 0;
          CREATE TABLE runtime_effect_replay (
              status TEXT,
+             commit_state TEXT,
+             commit_seq INTEGER,
+             group_key TEXT,
+             drain_input TEXT,
              CONSTRAINT ck_runtime_effect_replay_status
-                 CHECK (status IN ('in_progress', 'completed', 'failed'))
+                 CHECK (status IN ('in_progress', 'completed', 'failed')),
+             CONSTRAINT ck_runtime_effect_replay_commit_state
+                 CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
+             CONSTRAINT ck_runtime_effect_replay_commit_seq
+                 CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
+             CONSTRAINT ck_runtime_effect_replay_drain_input
+                 CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained')))
          );
-         INSERT INTO runtime_effect_replay(status) VALUES ('completed');",
+         INSERT INTO runtime_effect_replay(status, commit_state) VALUES ('completed', 'drained');",
     )
     .expect("commit schema and row to the live WAL");
     live.execute_batch(lash_sqlite_store::testing::database_table_ddl(

@@ -147,7 +147,7 @@ use super::executor::RuntimeEffectControllerError;
 /// [`AdmittedScope`], the checked scope/incarnation pair controller
 /// construction takes (FIG-3430, ADR 0099 §1). A v3 journal could pair a
 /// process claim with no pin — or with a pin the scope never agreed to — and
-/// only the driver's `with_admitted_process` block caught it; the checked pair
+/// only the driver's post-admission pin block caught it; the checked pair
 /// makes that shape unrepresentable, on the wire as everywhere else, because
 /// decoding runs `AdmittedScope::new` rather than trusting the bytes.
 pub const TOOL_CHILD_REQUEST_VERSION: u16 = 4;

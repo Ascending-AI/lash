@@ -64,6 +64,16 @@ impl crate::RuntimeEffectController for RetrySleepShapeRecorder {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("RetrySleepShapeRecorder"))
     }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: crate::runtime::effect::GroupChildFinalCommit,
+    ) -> Result<
+        crate::runtime::effect::EffectGroupChildCommitOutcome,
+        crate::RuntimeEffectControllerError,
+    > {
+        Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
+    }
 }
 
 async fn retry_sleep_shape(

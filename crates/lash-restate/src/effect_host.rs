@@ -657,6 +657,26 @@ impl RuntimeEffectController for FencedRestateController {
             .close_effect_group(handle, disposition)
             .await
     }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        RuntimeEffectControllerError,
+    > {
+        self.controller.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.controller
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
 }
 #[derive(Clone)]
 struct RestateAwaitEventIngress {
@@ -1303,8 +1323,6 @@ impl RuntimeEffectController for RestateEffectHostController {
                         "run",
                         &EffectGroupDispatchRequest {
                             group_key: group_key.clone(),
-                            shape: shape.clone(),
-                            children: group.children().to_vec(),
                         },
                     )
                     .await
@@ -1525,6 +1543,111 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "effect group {group_key} is retired"
             ))),
         }
+    }
+
+    /// The §4 boundary over ingress — the same route the ctx-based
+    /// controller takes, with the durable membership record resolving which
+    /// group's index owns this replay key. The serialized index handler is
+    /// the linearization point; `drain_input` is deliberately not retained
+    /// on this tier because the committed-but-unseated index state plus the
+    /// dispatch workflow's redrive is the resumable publication obligation.
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        RuntimeEffectControllerError,
+    > {
+        use lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome as Outcome;
+        let scope = ExecutionScope::from_journal_key(&commit.scope_id).ok_or_else(|| {
+            group_shape_error(format!(
+                "group-child commit scope id `{}` does not decode to an execution scope",
+                commit.scope_id
+            ))
+        })?;
+        let ingress = &self.await_event_ingress.ingress;
+        let index_key = durable_wait_index_key_for_scope(&scope);
+        let membership: Option<String> = ingress
+            .call_object_json::<_, Option<String>>(
+                "LashDurableWaitIndex",
+                &index_key,
+                "group_child_membership",
+                &crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest {
+                    replay_key: commit.replay_key.clone(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                ingress_group_error("LashDurableWaitIndex/group_child_membership", error)
+            })?;
+        let Some(group_key) = membership else {
+            return Ok(Outcome::Ungrouped);
+        };
+        let response = ingress
+            .call_object_json::<_, crate::effect_group::EffectGroupCommitChildResponse>(
+                "EffectGroupIndex",
+                &group_key,
+                "commit_child",
+                &crate::effect_group::EffectGroupCommitChildRequest {
+                    replay_key: commit.replay_key.clone(),
+                },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/commit_child", error))?;
+        Ok(match response {
+            crate::effect_group::EffectGroupCommitChildResponse::Committed {
+                commit_seq, ..
+            } => Outcome::Committed {
+                group_key,
+                commit_seq,
+            },
+            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
+                commit_seq,
+                ..
+            } => Outcome::AlreadyCommitted {
+                group_key,
+                commit_seq,
+                drain_input: None,
+            },
+            crate::effect_group::EffectGroupCommitChildResponse::CancelDecided { rank } => {
+                Outcome::CancelDecided {
+                    group_key,
+                    commit_seq: rank,
+                }
+            }
+            crate::effect_group::EffectGroupCommitChildResponse::UnknownChild => {
+                return Err(group_shape_error(format!(
+                    "effect group {group_key} membership names replay key `{}` but its \
+                     index holds no such child; the two durable records disagree",
+                    commit.replay_key
+                )));
+            }
+            crate::effect_group::EffectGroupCommitChildResponse::UnknownGroup
+            | crate::effect_group::EffectGroupCommitChildResponse::Retired => {
+                return Err(group_shape_error(format!(
+                    "effect group {group_key} carries membership for replay key `{}` but \
+                     its index is gone or retired; the two durable records disagree",
+                    commit.replay_key
+                )));
+            }
+        })
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.await_event_ingress
+            .ingress
+            .call_object_json::<_, bool>(
+                "EffectGroupIndex",
+                group_key,
+                "drain_blocked",
+                &crate::effect_group::EffectGroupDrainBlockedRequest { commit_seq },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blocked", error))
     }
 
     async fn runtime_effect_failure_disposition(

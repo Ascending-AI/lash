@@ -222,6 +222,7 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
                 Self::SessionMismatch { expected, recorded }
             }
             Core::CommandFailed { code, message } => Self::CommandFailed { code, message },
+            Core::MintingGroupChildCancelled => Self::MintingGroupChildCancelled,
         }
     }
 }

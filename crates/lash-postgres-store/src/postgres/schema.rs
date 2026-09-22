@@ -51,8 +51,11 @@ struct DeclaredGuard {
     /// prefixes can be scanned, not which rows the guard rejects.
     columns: &'static [&'static str],
     /// The guard's partial-index predicate in [`UniqueGuard`]'s normalized form:
-    /// lower-cased, whitespace collapsed, outer parentheses stripped.
-    predicate: &'static str,
+    /// lower-cased, whitespace collapsed, outer parentheses stripped. `None`
+    /// declares a full `UNIQUE`, whose absence the declaration then tolerates
+    /// exactly — a predicate-less guard cannot match a partial index's finding
+    /// or vice versa.
+    predicate: Option<&'static str>,
 }
 
 #[cfg(test)]
@@ -319,7 +322,7 @@ const DROP_OBSERVER_INTENT_DEPTH_DDL: &str =
 const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
     table: "lash_runtime_effect_replay",
     columns: &["group_key", "settlement_seq"],
-    predicate: "(group_key is not null) and (settlement_seq is not null)",
+    predicate: Some("(group_key is not null) and (settlement_seq is not null)"),
 }];
 
 /// Columns whose presence makes every older component shape a hard-cutover
@@ -915,7 +918,7 @@ fn remove_guard(
                 .map(str::to_string)
                 .collect::<std::collections::BTreeSet<_>>()
                 == columns
-            && expected.predicate.as_deref() == Some(guard.predicate)
+            && expected.predicate.as_deref() == guard.predicate
     }) else {
         return false;
     };
@@ -1102,7 +1105,11 @@ fn record_schema_migration_denial(
 fn forward_migration_sentence(found: i32) -> String {
     let sources = SCHEMA_MIGRATIONS
         .iter()
-        .filter(|migration| migration.to == SCHEMA_VERSION)
+        // Only *executable* upgrades advertise a path: a recreate-boundary row
+        // exists so preflight can refuse with the right vocabulary, and naming
+        // it here would tell an operator to "re-open with provisioning" for a
+        // migration that can never apply anything.
+        .filter(|migration| migration.to == SCHEMA_VERSION && !migration.is_recreate_boundary())
         .map(|migration| migration.from)
         .collect::<Vec<_>>();
     if sources.is_empty() {

@@ -27,9 +27,10 @@
 //!   process, skipped on a live lease across processes.
 //! * A closed group's orphaned losers settle, exactly once, journal-visible,
 //!   across a restart of the driver.
-//! * A `Cancel` group's children are left alone: their terminals are synthesized
-//!   inside their own claims at close, and the drain has no terminal of its own
-//!   to invent.
+//! * A `Cancel` group's children are *decided*, never re-executed: the drain
+//!   journals the cancel decision from the retained membership — the same
+//!   terminal a live close writes — which ADR 0099 §4 makes a durable fact
+//!   rather than a signal a dead process failed to receive.
 //! * A host that cannot run a child says so rather than fabricating an outcome.
 //! * A pass is bounded: cancelling it stops the child in flight, reports the
 //!   untouched tail, and damages nothing.
@@ -616,20 +617,20 @@ async fn a_child_another_drain_holds_is_reported_contested(make: &DrainWorldFact
     );
 }
 
-/// The drain never runs a `Cancel` group's child, whatever state that child is
-/// in.
+/// A `Cancel` group's orphaned children are *decided* by the drain, never
+/// re-executed by it.
 ///
-/// A `Cancel` group's terminals belong to the process running each child, which
-/// synthesizes them inside the claim it already holds. The drain has no terminal
-/// of its own to invent here — and it says so, child by child, rather than
-/// reporting an empty pass that could not be told apart from a group with
-/// nothing left.
+/// The fixture is the harshest case rather than the tidiest: a process that
+/// died *between open and close*, so the close-time decisions were never
+/// journaled at all and the children are simply orphaned. The drain supplies
+/// them anyway — the decision is read off the group's declared disposition and
+/// the retained membership, not off what happened to the children.
 ///
-/// The fixture is the harshest case rather than the tidiest: a process that died
-/// *between open and close*, so the close-time terminals were never synthesized
-/// at all and the children are simply orphaned. Even then the drain declines,
-/// which is the point — the refusal is read off the group's declared
-/// disposition, not off what happened to the children.
+/// ADR 0099 §4 makes the cancel a journal write, not a signal a dead process
+/// failed to receive: the drain synthesizes the cancelled terminal from the
+/// retained membership — the same bytes a live close writes — and seats it at
+/// a settlement rank through the membership row's decision CAS. What it does
+/// not do is run the effect, which is the half of the law that cannot change.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -655,7 +656,7 @@ async fn a_cancel_group_is_never_re_executed_by_the_drain(make: &DrainWorldFacto
                 until(|| entered.load(Ordering::SeqCst) == 2).await;
                 // Deliberately no close: this is the process dying between open
                 // and close, which is the only way a `Cancel` group reaches the
-                // drain with children still unsettled.
+                // drain with children still undecided.
                 drop(handle);
             })
         }
@@ -664,30 +665,68 @@ async fn a_cancel_group_is_never_re_executed_by_the_drain(make: &DrainWorldFacto
 
     let executors = RecordingExecutors::settling();
     let world = make(spec(CRASH_LEASE_MS, &executors)).await;
-    // No wait for the dead leases: the disposition is read before the lease is,
-    // so a `Cancel` group answers the same whether or not its children still
-    // look claimed. That ordering is the law.
+    // No wait for the dead leases: the decision races the claim at the
+    // membership CAS, which is the linearization point — a lease the dead
+    // process left held does not hold back the disposition the group row
+    // declares.
     let report = pass(&world, &key).await.expect("the pass runs");
     assert_eq!(report.disposition, LoserPolicy::Cancel);
     assert_eq!(report.children.len(), 2);
     for child in &report.children {
         assert_eq!(
             child.outcome,
-            ChildDrainOutcome::CancelDeclared,
-            "a cancel-declared child is named, not silently dropped from the pass"
+            ChildDrainOutcome::Decided,
+            "the drain journals the cancel decision itself rather than leaving \
+             the child for a process that no longer exists"
         );
     }
     assert_eq!(
         executors.invocations(),
         0,
-        "the drain never runs a cancel-declared child"
+        "the drain never runs a cancel-decided child: the decision is written \
+         over the retained membership, not over a fresh execution"
     );
+
+    let second = world
+        .drain
+        .drain_group(&key, &CancellationToken::new())
+        .await
+        .expect("a second pass over a decided group is allowed");
+    assert!(
+        second.is_complete(),
+        "the decision is durable, so a second pass finds nothing unsettled: {second:?}"
+    );
+
+    // Journal-visible: a reader holding none of the drain's memory is served
+    // the cancelled terminal at each rank, one per child.
+    let reader = make(spec(CRASH_LEASE_MS, &RecordingExecutors::settling())).await;
+    let scoped = reader.host.scoped(admit(scope)).expect("scope");
+    let mut handle = reopen(&scoped, &key, 2, CANCEL).await;
+    let mut positions = Vec::new();
+    for rank in 1..=2 {
+        let settlement = next(&scoped, &mut handle)
+            .await
+            .unwrap_or_else(|err| panic!("rank {rank} is served from the journal: {err}"));
+        positions.push(settlement.position);
+        let error = settlement.outcome.expect_err(
+            "a cancel-decided child's terminal is the disposition's cancellation, \
+             not an outcome an execution produced",
+        );
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+            "the terminal the drain wrote is the same one a live close writes: {error}"
+        );
+    }
+    positions.sort_unstable();
     assert_eq!(
-        report.settled(),
-        0,
-        "and never reports one as settled: these rows are still unsettled, which \
-         is the bounded residual a crash before close leaves"
+        positions,
+        vec![0, 1],
+        "every child settled once, so every position appears once"
     );
+    close(&scoped, handle, CANCEL)
+        .await
+        .expect("the reader closes");
 }
 
 /// A host that cannot run a journaled command answers `None`, and the pass
@@ -1620,7 +1659,7 @@ mod tests {
             children: vec![
                 drained("a", ChildDrainOutcome::Contested),
                 drained("b", ChildDrainOutcome::NoExecutor),
-                drained("c", ChildDrainOutcome::CancelDeclared),
+                drained("c", ChildDrainOutcome::Decided),
             ],
         };
         assert_eq!(report.settled(), 0);

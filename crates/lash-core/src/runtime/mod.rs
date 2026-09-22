@@ -20,6 +20,7 @@ mod config_ops;
 pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
 pub use effect::await_event_coordinator;
 pub use effect::effect_replay_driver;
+pub use effect::effect_replay_driver::{EffectCommitState, StoredChildArbitration};
 pub use effect::promise_semantics;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::effect;

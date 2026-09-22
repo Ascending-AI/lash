@@ -315,7 +315,7 @@ fn the_child_runs_on_its_own_admitted_controller() {
 /// A process opener legitimately encloses its own incarnation, so the pair
 /// `opener = P#7, enclosing = P#7` validates — but when the admitted claim is a
 /// turn scope, the controller must stay that turn's controller. The retired
-/// `with_admitted_process` block would have pinned P#7 onto it instead, making
+/// post-admission pin block would have pinned P#7 onto it instead, making
 /// the execution context the claim pin.
 #[test]
 fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
@@ -1306,6 +1306,17 @@ impl crate::RuntimeEffectController for SleepShapeRecorder {
     ) -> Result<(), RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("SleepShapeRecorder"))
     }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: crate::runtime::effect::GroupChildFinalCommit,
+    ) -> Result<crate::runtime::effect::EffectGroupChildCommitOutcome, RuntimeEffectControllerError>
+    {
+        // This recorder journals no durable group membership, so every row it
+        // is asked about is ungrouped — the same cheap answer a real host
+        // gives an ordinary attempt.
+        Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
+    }
 }
 
 /// A leaf that fails retryably once, so a nested batch has one journaled retry
@@ -1406,7 +1417,8 @@ async fn a_nested_retry_sleep_observes_no_host_turn_gate() {
     assert_eq!(replies.len(), 1, "the nested call settles");
     assert!(
         replies[0].output.is_success(),
-        "the retried call succeeds on its second attempt"
+        "the retried call succeeds on its second attempt: {:?}",
+        replies[0].output
     );
     let sleeps = recorder.sleeps.lock_recover().clone();
     assert_eq!(sleeps.len(), 1, "exactly one retry sleep is journaled");

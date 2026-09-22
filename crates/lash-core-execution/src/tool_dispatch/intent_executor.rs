@@ -23,6 +23,17 @@ pub async fn execute_final_tool_intents(
         ));
     }
 
+    // ADR 0099 §4: once the group child whose emission minted this batch is
+    // cancel-decided, no new semantic admission may be created beneath it. The
+    // fence is not a read this executor performs — every intent's sink admits
+    // itself under the substrate's own arbitration (the minting replay-row
+    // claim, the native group mutex, or the serialized index handler), so a
+    // cancel that lands between intents surfaces as the typed
+    // `RuntimeEffectGroupChildCancelDecided` refusal from the next admission.
+    // The decision can land mid-batch, so the refusal latches: once one
+    // admission reports it, the remaining intents refuse without reaching
+    // their sinks — `Cancelled` is terminal.
+    let mut minting_cancelled = false;
     let mut outcomes = Vec::with_capacity(intents.intents.len());
     for (index, intent) in intents.intents.iter().enumerate() {
         let identity = match derive_identity(context, &execution_scope_id, tool_call_id, index) {
@@ -32,6 +43,15 @@ pub async fn execute_final_tool_intents(
                 continue;
             }
         };
+        if minting_cancelled {
+            outcomes.push(refused(
+                index,
+                intent.kind(),
+                Some(identity),
+                crate::ToolIntentRefusalReason::MintingGroupChildCancelled,
+            ));
+            continue;
+        }
         let span = tracing::info_span!(
             target: "lash::tool_intent",
             "tool_intent.execute",
@@ -57,6 +77,17 @@ pub async fn execute_final_tool_intents(
                 if error.code.is_replay_mismatch() =>
             {
                 return Err(error);
+            }
+            Err(crate::PluginError::RuntimeEffectController(error))
+                if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided =>
+            {
+                minting_cancelled = true;
+                refused(
+                    index,
+                    intent.kind(),
+                    Some(identity),
+                    crate::ToolIntentRefusalReason::MintingGroupChildCancelled,
+                )
             }
             Err(error) => refused(
                 index,

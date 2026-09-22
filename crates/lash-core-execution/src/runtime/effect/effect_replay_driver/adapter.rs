@@ -395,4 +395,27 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         )
         .await
     }
+
+    /// The §4 boundary commit, forwarded to the same driver the child's claim
+    /// rides on: the request's lease owner is this host's driver identity, so
+    /// the CAS is fenced on the claim this execution holds rather than on any
+    /// owner a caller could name.
+    async fn commit_group_child_final(
+        &self,
+        commit: crate::runtime::effect::GroupChildFinalCommit,
+    ) -> Result<crate::runtime::effect::EffectGroupChildCommitOutcome, RuntimeEffectControllerError>
+    {
+        self.replay_driver().commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.replay_driver()
+            .row_store
+            .drain_blocked(group_key, commit_seq)
+            .await
+    }
 }

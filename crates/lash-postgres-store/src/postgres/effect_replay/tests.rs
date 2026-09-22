@@ -10,7 +10,10 @@
 use super::*;
 use crate::postgres_test_support;
 
-use lash_core::facade_support::effect_replay_driver::EffectClaimObservation;
+use lash_core::ChildDrainOutcome;
+use lash_core::facade_support::effect_replay_driver::{
+    EffectClaimObservation, EffectCommitState, MintingEffectRef,
+};
 
 #[test]
 fn stored_effect_corruption_is_non_retryable() {
@@ -28,13 +31,16 @@ fn stored_effect_corruption_is_non_retryable() {
     assert!(!error.code.is_retryable());
 }
 
-/// The rank a grouped child's finalize took, insisting it took one.
-fn allocated_rank(outcome: EffectFinalizeOutcome) -> u64 {
+/// The durable commit position a grouped child's finalize took, insisting it
+/// took one.
+fn allocated_commit_seq(outcome: EffectFinalizeOutcome) -> u64 {
     match outcome {
         EffectFinalizeOutcome::Written {
-            settlement_seq: Some(sequence),
+            commit_seq: Some(sequence),
         } => sequence,
-        other => panic!("a grouped child's finalize must allocate a rank, got {other:?}"),
+        other => {
+            panic!("a grouped child's finalize must allocate a commit position, got {other:?}")
+        }
     }
 }
 
@@ -43,6 +49,7 @@ struct GroupFixture {
     /// other Postgres suite, and an unlocked fixture would provision or truncate
     /// underneath them.
     _database_lock: postgres_test_support::SharedDatabaseLock,
+    storage: PostgresStorage,
     store: PostgresEffectReplayRowStore,
     scope_id: String,
     session_id: SessionId,
@@ -68,16 +75,35 @@ impl GroupFixture {
             store: PostgresEffectReplayRowStore {
                 pool: storage.pool().clone(),
             },
+            storage,
             scope_id,
             group_key: format!("session:{session_id}/group-1"),
             session_id,
         };
         fixture
             .store
-            .open_group(&fixture.record(), &[])
+            .open_group(&fixture.record(), &fixture.membership())
             .await
             .expect("open the group row");
         Some(fixture)
+    }
+
+    /// The accepted membership the fixture's two children carry.
+    ///
+    /// `envelope_json` is opaque to the store — the retained accepted envelope
+    /// is the raw child request, not the canonical replay form — so the same
+    /// bytes the claim request writes stand in for it; what the tests assert
+    /// is which row's copy a read reports.
+    fn membership(&self) -> Vec<AcceptedGroupChild> {
+        [("k1", 0), ("k2", 1)]
+            .into_iter()
+            .map(|(replay_key, position)| AcceptedGroupChild {
+                position,
+                replay_key: replay_key.to_string(),
+                envelope_json: format!(r#"{{"json":"{replay_key}","hash":"hash-{replay_key}"}}"#),
+                command_version: 2,
+            })
+            .collect()
     }
 
     fn record(&self) -> EffectGroupRecord {
@@ -87,7 +113,7 @@ impl GroupFixture {
             session_id: Some(self.session_id.clone()),
             wake: lash_core::GroupWakePolicy::All,
             loser_disposition: lash_core::LoserPolicy::RunToCompletion,
-            children: 2,
+            expected_children: 2,
             created_at_ms: 1_000,
         }
     }
@@ -104,6 +130,7 @@ impl GroupFixture {
             lease_ttl_ms: 30_000,
             sleep: None,
             group_key: Some(self.group_key.clone()),
+            minting_effect: None,
             strict_replay: false,
         }
     }
@@ -137,30 +164,65 @@ impl GroupFixture {
             .await
             .expect("read the group counter")
     }
+
+    async fn next_commit_seq(&self) -> i64 {
+        sqlx::query_scalar(
+            "SELECT next_commit_seq FROM lash_runtime_effect_group WHERE group_key = $1",
+        )
+        .bind(&self.group_key)
+        .fetch_one(&self.store.pool)
+        .await
+        .expect("read the commit counter")
+    }
+
+    /// Discharge one committed child, insisting the barrier admits it.
+    async fn discharge(&self, replay_key: &str) -> u64 {
+        match self
+            .store
+            .discharge_child(&EffectDischargeRequest {
+                group_key: self.group_key.clone(),
+                scope_id: self.scope_id.clone(),
+                replay_key: replay_key.to_string(),
+                terminal: None,
+            })
+            .await
+            .expect("discharge the child")
+        {
+            EffectDischargeOutcome::Discharged { settlement_seq }
+            | EffectDischargeOutcome::AlreadyDischarged { settlement_seq } => settlement_seq,
+            EffectDischargeOutcome::Blocked => {
+                panic!(
+                    "no lower commit position is outstanding, so the barrier must admit {replay_key}"
+                )
+            }
+        }
+    }
 }
 
-/// Two siblings finalizing at the same time must take *different* settlement
-/// sequences.
+/// Two siblings finalizing at the same time must take *different* commit
+/// positions, and only their discharges allocate settlement ranks.
 ///
-/// This is the anchor for the group row existing at all: an allocator that reads
-/// `MAX(settlement_seq) + 1` and writes the result is a read-then-write that no
-/// fence covers, so under `READ COMMITTED` two concurrent finalizes both observe
-/// the same maximum and both write the same rank — one settlement silently
-/// overwrites the other's position in the queue a consumer reads by rank. The
-/// counter lives on a single row so the bump takes that row's write lock and the
-/// second finalize blocks until the first commits.
+/// This is the anchor for the group row carrying both counters: an allocator
+/// that reads `MAX(commit_seq) + 1` and writes the result is a read-then-write
+/// that no fence covers, so under `READ COMMITTED` two concurrent finalizes
+/// both observe the same maximum and both write the same commit position — one
+/// child's final silently loses its place in the commit order a drain replays.
+/// Each counter lives on a single row so the bump takes that row's write lock
+/// and the second writer blocks until the first commits.
 ///
 /// Two axes, with different strengths, stated rather than implied. The
-/// counter-equals-settlements assertion is deterministic: a `MAX`-based
-/// allocator never moves the counter, so it fails on every run. The
-/// distinct-ranks assertion is a race guard — whether the two finalizes actually
-/// overlap inside one `READ COMMITTED` window depends on scheduling — so it is a
-/// probabilistic net over a defect the deterministic assertion already catches,
-/// backed by `UNIQUE (group_key, settlement_seq)` failing the write closed. This
-/// is the concurrent half of the pair; the SQLite sibling serializes on one
-/// writer and can only hold the deterministic axis.
+/// counter-equals-commits assertion is deterministic: a `MAX`-based allocator
+/// never moves the counter, so it fails on every run. The distinct-positions
+/// assertion is a race guard — whether the two finalizes actually overlap
+/// inside one `READ COMMITTED` window depends on scheduling — so it is a
+/// probabilistic net over a defect the deterministic assertion already
+/// catches, backed by the partial `UNIQUE (commit_seq, group_key)` failing the
+/// write closed. The `next_seq` assertion is the §5 law: finalize moves no
+/// settlement rank, so a consumer cannot observe a child as settled before
+/// its drain discharged. This is the concurrent half of the pair; the SQLite
+/// sibling serializes on one writer and can only hold the deterministic axis.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn concurrent_finalize_allocates_distinct_settlement_sequences() {
+async fn concurrent_finalize_allocates_distinct_commit_positions() {
     let Some(fixture) = GroupFixture::open("concurrent").await else {
         eprintln!("skipping effect-group concurrent finalize: database URL is not set");
         return;
@@ -174,15 +236,63 @@ async fn concurrent_finalize_allocates_distinct_settlement_sequences() {
         fixture.store.finalize(&first, &first_terminal),
         fixture.store.finalize(&second, &second_terminal),
     );
-    let mut sequences = vec![
-        allocated_rank(left.expect("finalize the first child")),
-        allocated_rank(right.expect("finalize the second child")),
+    let mut children = vec![
+        (
+            "k1",
+            allocated_commit_seq(left.expect("finalize the first child")),
+        ),
+        (
+            "k2",
+            allocated_commit_seq(right.expect("finalize the second child")),
+        ),
     ];
-    sequences.sort_unstable();
+    children.sort_by_key(|(_, commit_seq)| *commit_seq);
     assert_eq!(
-        sequences,
+        children
+            .iter()
+            .map(|(_, commit_seq)| *commit_seq)
+            .collect::<Vec<_>>(),
         vec![1, 2],
-        "each settling child must take its own rank"
+        "each committing child must take its own durable commit position"
+    );
+    assert_eq!(
+        fixture.next_commit_seq().await,
+        2,
+        "the commit counter counts finals"
+    );
+    assert_eq!(
+        fixture.next_seq().await,
+        0,
+        "finalize allocates no settlement rank — the discharge does"
+    );
+
+    // The barrier holds a later commit behind an undrained earlier one.
+    let (later_key, _) = children[1];
+    let outcome = fixture
+        .store
+        .discharge_child(&EffectDischargeRequest {
+            group_key: fixture.group_key.clone(),
+            scope_id: fixture.scope_id.clone(),
+            replay_key: later_key.to_string(),
+            terminal: None,
+        })
+        .await
+        .expect("probe the out-of-order discharge");
+    assert_eq!(
+        outcome,
+        EffectDischargeOutcome::Blocked,
+        "a committed child may not jump its undrained lower-commit sibling"
+    );
+
+    // Discharged in commit order, the children take ranks in that order.
+    let mut ranks = Vec::new();
+    for (replay_key, _) in &children {
+        ranks.push(fixture.discharge(replay_key).await);
+    }
+    assert_eq!(
+        ranks,
+        vec![1, 2],
+        "settlement order agrees with commit order"
     );
     assert_eq!(
         fixture.next_seq().await,
@@ -192,13 +302,13 @@ async fn concurrent_finalize_allocates_distinct_settlement_sequences() {
 }
 
 /// A finalize that loses the lease fence must change nothing at all — including
-/// the group's counter.
+/// both of the group's counters.
 ///
-/// Bumping first and writing the child second would burn a rank on a write that
-/// never lands: the group would count a settlement no row carries, and a consumer
-/// waiting on that rank would wait forever. This is why the fenced `UPDATE` runs
-/// first, returns the child's own `group_key`, and the counter moves only when it
-/// returned a row.
+/// Bumping first and writing the child second would burn a commit position on a
+/// write that never lands: the group would count a final no row carries, and a
+/// drain ordered over commit positions would wait on a slot nothing occupies.
+/// This is why the fenced `UPDATE` runs first, returns the child's own
+/// `group_key`, and the commit counter moves only when it returned a row.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_fence_miss_allocates_nothing() {
     let Some(fixture) = GroupFixture::open("fence-miss").await else {
@@ -221,6 +331,11 @@ async fn a_fence_miss_allocates_nothing() {
         "a stale lease token must report the fence moved"
     );
     assert_eq!(
+        fixture.next_commit_seq().await,
+        0,
+        "a finalize that wrote no child row must not consume a commit position"
+    );
+    assert_eq!(
         fixture.next_seq().await,
         0,
         "a finalize that wrote no child row must not consume a settlement rank"
@@ -233,6 +348,123 @@ async fn a_fence_miss_allocates_nothing() {
             .expect("read rank 1")
             .is_none(),
         "no settlement may be readable when no child settled"
+    );
+}
+
+/// The commit-position CHECK is group-aware: a grouped row's `commit_seq` is
+/// mandatory in `committed` and `drained` alike, while an ungrouped row's
+/// terminal commit state legitimately carries none — a naive biconditional
+/// would reject the second case, and the old state-only guard admitted the
+/// first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_commit_seq_check_holds_grouped_rows_to_their_position() {
+    let Some(fixture) = GroupFixture::open("commit-check").await else {
+        eprintln!("skipping commit-seq CHECK anchor: database URL is not set");
+        return;
+    };
+    fixture.claim("k1", "owner-a").await;
+
+    for commit_state in ["committed", "drained"] {
+        let error = sqlx::query(
+            "UPDATE lash_runtime_effect_replay
+             SET commit_state = $2, commit_seq = NULL
+             WHERE scope_id = $1 AND replay_key = 'k1'",
+        )
+        .bind(&fixture.scope_id)
+        .bind(commit_state)
+        .execute(&fixture.store.pool)
+        .await
+        .expect_err("a grouped terminal commit state with no position is unwritable");
+        assert!(
+            error
+                .to_string()
+                .contains("ck_runtime_effect_replay_commit_seq"),
+            "the group-aware CHECK is what rejects it: {error}"
+        );
+    }
+
+    // The ungrouped case the naive biconditional would have broken: a row with
+    // no group may be `committed`/`drained` with no commit position — commit
+    // order is only a group property.
+    let ungrouped = EffectClaimRequest {
+        replay_key: "u1".to_string(),
+        group_key: None,
+        ..fixture.claim_request("u1", "owner-u")
+    };
+    let observation = fixture
+        .store
+        .claim(&ungrouped)
+        .await
+        .expect("claim the ungrouped row");
+    assert!(matches!(
+        observation,
+        EffectClaimObservation::Claimed { .. }
+    ));
+    for commit_state in ["committed", "drained"] {
+        sqlx::query(
+            "UPDATE lash_runtime_effect_replay
+             SET commit_state = $2, commit_seq = NULL
+             WHERE scope_id = $1 AND replay_key = 'u1'",
+        )
+        .bind(&fixture.scope_id)
+        .bind(commit_state)
+        .execute(&fixture.store.pool)
+        .await
+        .unwrap_or_else(|error| {
+            panic!("an ungrouped {commit_state} row may carry no commit position: {error}")
+        });
+    }
+}
+
+/// `drain_input` is a committed-row fact: it is unwritable on a pending or
+/// ungrouped row, where nothing could legitimately have staged a resumable
+/// drain.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_drain_input_check_confines_it_to_decided_rows() {
+    let Some(fixture) = GroupFixture::open("drain-input-check").await else {
+        eprintln!("skipping drain-input CHECK anchor: database URL is not set");
+        return;
+    };
+    fixture.claim("k1", "owner-a").await;
+
+    let error = sqlx::query(
+        "UPDATE lash_runtime_effect_replay SET drain_input = '{\"x\":1}'
+         WHERE scope_id = $1 AND replay_key = 'k1'",
+    )
+    .bind(&fixture.scope_id)
+    .execute(&fixture.store.pool)
+    .await
+    .expect_err("a pending grouped row must not carry drain input");
+    assert!(
+        error
+            .to_string()
+            .contains("ck_runtime_effect_replay_drain_input"),
+        "the drain-input CHECK is what rejects it: {error}"
+    );
+
+    let ungrouped = EffectClaimRequest {
+        replay_key: "u1".to_string(),
+        group_key: None,
+        ..fixture.claim_request("u1", "owner-u")
+    };
+    fixture
+        .store
+        .claim(&ungrouped)
+        .await
+        .expect("claim the ungrouped row");
+    let error = sqlx::query(
+        "UPDATE lash_runtime_effect_replay SET drain_input = '{\"x\":1}'
+         WHERE scope_id = $1 AND replay_key = 'u1'",
+    )
+    .bind(&fixture.scope_id)
+    .execute(&fixture.store.pool)
+    .await
+    .expect_err("an ungrouped row has no drain to resume");
+    assert!(
+        error
+            .to_string()
+            .contains("ck_runtime_effect_replay_drain_input"),
+        "the drain-input CHECK is what rejects it: {error}"
     );
 }
 
@@ -251,6 +483,7 @@ async fn settlements_are_read_by_rank_not_by_sequence_value() {
             .finalize(&fence, &GroupFixture::terminal(replay_key))
             .await
             .expect("finalize the child");
+        fixture.discharge(replay_key).await;
     }
     // Open a gap the way a retried allocation would: the ranks a consumer reads
     // must not move.
@@ -305,6 +538,7 @@ async fn retirement_removes_a_group_and_its_children_together() {
         .finalize(&fence, &GroupFixture::terminal("k1"))
         .await
         .expect("finalize the first child");
+    fixture.discharge("k1").await;
 
     let removed = fixture
         .store
@@ -354,15 +588,44 @@ async fn retirement_removes_a_group_and_its_children_together() {
 /// the group is in one answer or the other, never both and never neither.
 ///
 /// It is what makes "this group is complete" a single question instead of a walk
-/// up the ranks, and it is the drain queue FIG-1536 reads, which is why the row
-/// carries the child's journal identity, its recorded envelope, and its lease
-/// boundary rather than only its key.
+/// up the ranks, and it is the drain queue FIG-1536 reads — which is why the
+/// read is anchored on the retained membership rather than the replay row: an
+/// accepted-but-never-claimed child is unsettled work with no replay row, and
+/// a committed-but-undrained child is unsettled work whose terminal already
+/// committed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unsettled_children_are_exactly_the_children_without_a_rank() {
     let Some(fixture) = GroupFixture::open("unsettled").await else {
         eprintln!("skipping effect-group unsettled read: database URL is not set");
         return;
     };
+
+    // Before any claim the whole membership is already the unsettled set: an
+    // accepted child with no replay row is work the drain must still see.
+    let unsettled = fixture
+        .store
+        .read_unsettled_group_children(&fixture.group_key)
+        .await
+        .expect("read the unsettled children before any claim");
+    assert_eq!(
+        unsettled
+            .iter()
+            .map(|child| child.replay_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["k1", "k2"],
+        "accepted membership is unsettled from the moment the group opens"
+    );
+    assert_eq!(unsettled[0].scope_id, fixture.scope_id);
+    assert_eq!(
+        unsettled[0].state, None,
+        "a never-claimed child has no replay row state"
+    );
+    assert_eq!(unsettled[0].commit_state, None);
+    assert_eq!(
+        unsettled[0].envelope_json, r#"{"json":"k1","hash":"hash-k1"}"#,
+        "the row carries the retained envelope a drain re-executes from"
+    );
+
     let first_fence = fixture.claim("k1", "owner-a").await;
     let second_fence = fixture.claim("k2", "owner-b").await;
 
@@ -379,20 +642,17 @@ async fn unsettled_children_are_exactly_the_children_without_a_rank() {
         vec!["k1", "k2"],
         "a claimed child with no terminal holds no rank, so it is unsettled"
     );
-    assert_eq!(unsettled[0].scope_id, fixture.scope_id);
     assert_eq!(
         unsettled[0].state,
-        effect_replay_driver::EffectRowState::InProgress
-    );
-    assert_eq!(
-        unsettled[0].envelope_json, r#"{"json":"k1","hash":"hash-k1"}"#,
-        "the row carries the recorded canonical envelope a drain re-executes from"
+        Some(effect_replay_driver::EffectRowState::InProgress)
     );
     assert!(
         unsettled[0].lease_expires_at_ms > 0,
         "the row carries the lease boundary a drain decides takeover against"
     );
 
+    // A committed child stays unsettled until its drain discharges: finalize
+    // allocates the commit position, not the settlement rank.
     fixture
         .store
         .finalize(&first_fence, &GroupFixture::terminal("k1"))
@@ -408,6 +668,38 @@ async fn unsettled_children_are_exactly_the_children_without_a_rank() {
             .iter()
             .map(|child| child.replay_key.as_str())
             .collect::<Vec<_>>(),
+        vec!["k1", "k2"],
+        "a committed-but-undrained child holds no rank, so it stays unsettled"
+    );
+    assert!(
+        unsettled[0].commit_state == Some(EffectCommitState::Committed)
+            && unsettled[0].commit_seq == Some(1),
+        "the committed child leads, carrying its commit position: {:?}/{:?}",
+        unsettled[0].commit_state,
+        unsettled[0].commit_seq
+    );
+    assert!(
+        matches!(
+            unsettled[0].state,
+            Some(effect_replay_driver::EffectRowState::Settled(
+                EffectTerminal::Completed { .. }
+            ))
+        ),
+        "the committed child's terminal is already on its replay row: {:?}",
+        unsettled[0].state
+    );
+
+    fixture.discharge("k1").await;
+    let unsettled = fixture
+        .store
+        .read_unsettled_group_children(&fixture.group_key)
+        .await
+        .expect("read the unsettled children after the discharge");
+    assert_eq!(
+        unsettled
+            .iter()
+            .map(|child| child.replay_key.as_str())
+            .collect::<Vec<_>>(),
         vec!["k2"],
         "a child that took a rank leaves the unsettled set in the same write"
     );
@@ -417,6 +709,7 @@ async fn unsettled_children_are_exactly_the_children_without_a_rank() {
         .finalize(&second_fence, &GroupFixture::terminal("k2"))
         .await
         .expect("finalize the second child");
+    fixture.discharge("k2").await;
     assert!(
         fixture
             .store
@@ -441,7 +734,7 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
     let recorded = fixture.record();
 
     let mut shrunk = recorded.clone();
-    shrunk.children = 1;
+    shrunk.expected_children = 1;
     shrunk.loser_disposition = lash_core::LoserPolicy::Cancel;
     shrunk.created_at_ms = 9_999;
     let reopened = fixture
@@ -454,4 +747,293 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
         "the recorded row wins: a reopen may not restate a group's children or \
          its declared disposition, and the store is what says so"
     );
+}
+
+// ============================================================================
+// The §4 admission fence (ADR 0099)
+// ============================================================================
+//
+// These tests pin the claim-level fence: a *fresh* effect admission minted
+// under a cancel-decided group child is refused before a row exists for it,
+// while the admitted commands the decision protects — replay rows already
+// journaled — claim, take over, and finalize exactly as before. On this
+// backend the fence read runs `FOR NO KEY UPDATE` inside the claim
+// transaction, so it serializes against `decide_cancel`'s membership write.
+
+impl GroupFixture {
+    /// Journals the cancel decision for `replay_key`, insisting it wins.
+    async fn cancel_child(&self, replay_key: &str) {
+        let outcome = self
+            .store
+            .decide_cancel(&EffectCancelRequest {
+                group_key: self.group_key.clone(),
+                replay_key: replay_key.to_string(),
+                terminal: EffectTerminal::Failed {
+                    error_json: r#"{"code":"cancelled"}"#.to_string(),
+                },
+                envelope_json: format!(r#"{{"json":"{replay_key}","hash":"hash-{replay_key}"}}"#),
+                envelope_hash: format!("hash-{replay_key}"),
+            })
+            .await
+            .expect("journal the cancel decision");
+        assert!(
+            matches!(outcome, EffectCancelOutcome::Decided { .. }),
+            "the child must be decided by this call, got {outcome:?}"
+        );
+    }
+
+    /// A claim on an ungrouped effect minted by `minting_replay_key`.
+    fn minted_claim(
+        &self,
+        replay_key: &str,
+        owner: &str,
+        minting_replay_key: &str,
+    ) -> EffectClaimRequest {
+        EffectClaimRequest {
+            replay_key: replay_key.to_string(),
+            group_key: None,
+            minting_effect: Some(MintingEffectRef {
+                scope_id: self.scope_id.clone(),
+                replay_key: minting_replay_key.to_string(),
+            }),
+            ..self.claim_request(replay_key, owner)
+        }
+    }
+}
+
+/// §4: a new admission beneath a cancel-decided child is refused with no write.
+///
+/// The fence lives inside the claim transaction, on the `Insert` arm only:
+/// what it must produce is the typed observation *and* the absence of the row
+/// — a refusal that had inserted first would leave an orphan the next claim
+/// could take over.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_claim_minted_by_a_cancel_decided_child_is_refused_without_a_row() {
+    let Some(fixture) = GroupFixture::open("mint-fence").await else {
+        eprintln!("skipping effect-group minting fence: database URL is not set");
+        return;
+    };
+    fixture.cancel_child("k1").await;
+
+    let observation = fixture
+        .store
+        .claim(&fixture.minted_claim("n1", "owner-n", "k1"))
+        .await
+        .expect("the fence refuses through the observation vocabulary");
+    assert_eq!(
+        observation,
+        EffectClaimObservation::MintingChildCancelled,
+        "a fresh admission under a cancelled minting child must be refused"
+    );
+    assert!(
+        !fixture
+            .store
+            .replay_row_exists(&fixture.scope_id, "n1")
+            .await
+            .expect("read the row"),
+        "the refused admission must not leave a replay row behind"
+    );
+}
+
+/// The fence is discriminating, not broad: only `Cancelled` refuses.
+///
+/// Every other state the join can answer is admission-permitting — a committed
+/// parent's descendants are the protected side of the same decision, an
+/// undecided one is still racing, and a minting key that resolves to no group
+/// child (an ungrouped effect, or a key no row holds) is simply not fenced.
+/// `minting_effect: None` covers the common case, where the envelope carries
+/// no effect causation at all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_fence_refuses_only_a_cancelled_minting_child() {
+    let Some(fixture) = GroupFixture::open("mint-fence-arms").await else {
+        eprintln!("skipping effect-group minting fence arms: database URL is not set");
+        return;
+    };
+    let parent = fixture.claim("k1", "owner-a").await;
+
+    // Undecided parent: the child is claimed and running, so a minted
+    // admission is ordinary work.
+    let observation = fixture
+        .store
+        .claim(&fixture.minted_claim("n1", "owner-n", "k1"))
+        .await
+        .expect("claim under an undecided parent");
+    assert!(
+        matches!(observation, EffectClaimObservation::Claimed { .. }),
+        "an undecided minting child must not fence admissions: {observation:?}"
+    );
+
+    // Committed parent: the decision went the other way, so its declared
+    // intents are exactly the work §4 protects.
+    fixture
+        .store
+        .finalize(&parent, &GroupFixture::terminal("k1"))
+        .await
+        .expect("finalize the parent");
+    fixture.discharge("k1").await;
+    let observation = fixture
+        .store
+        .claim(&fixture.minted_claim("n2", "owner-n", "k1"))
+        .await
+        .expect("claim under a committed parent");
+    assert!(
+        matches!(observation, EffectClaimObservation::Claimed { .. }),
+        "a committed minting child must not fence admissions: {observation:?}"
+    );
+
+    // A minting key that resolves to no group child — an ungrouped effect's
+    // replay key here — fences nothing.
+    let mut ungrouped = fixture.claim_request("sibling", "owner-s");
+    ungrouped.group_key = None;
+    assert!(matches!(
+        fixture
+            .store
+            .claim(&ungrouped)
+            .await
+            .expect("claim the sibling"),
+        EffectClaimObservation::Claimed { .. }
+    ));
+    let observation = fixture
+        .store
+        .claim(&fixture.minted_claim("n3", "owner-n", "sibling"))
+        .await
+        .expect("claim under an ungrouped parent");
+    assert!(
+        matches!(observation, EffectClaimObservation::Claimed { .. }),
+        "a minting key outside the group must not fence admissions: {observation:?}"
+    );
+
+    // No minting reference at all.
+    let mut plain = fixture.claim_request("n4", "owner-n");
+    plain.group_key = None;
+    assert!(matches!(
+        fixture
+            .store
+            .claim(&plain)
+            .await
+            .expect("claim with no parent"),
+        EffectClaimObservation::Claimed { .. }
+    ));
+}
+
+/// An admitted command outlives its minting child's cancel decision.
+///
+/// §4 forbids *new* admission under the cancelled invocation; what was already
+/// journaled beneath it is the protected half of the same rule. The takeover
+/// claim below lands on the row the earlier admission wrote, so the minting
+/// check never runs — and that ordering is the law: a replay that consulted
+/// the fence would strand every in-flight descendant of a cancelled child.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_admitted_descendants_row_survives_its_minting_childs_cancel() {
+    let Some(fixture) = GroupFixture::open("mint-fence-replay").await else {
+        eprintln!("skipping effect-group minting replay fence: database URL is not set");
+        return;
+    };
+    let parent = fixture.claim("k1", "owner-a").await;
+
+    // The descendant's lease is minted already expired, so the second claim is
+    // a takeover of an existing row — the replay-of-admitted-work path, not a
+    // fresh insert.
+    let mut admitted = fixture.minted_claim("n1", "owner-n", "k1");
+    admitted.lease_ttl_ms = 0;
+    assert!(matches!(
+        fixture
+            .store
+            .claim(&admitted)
+            .await
+            .expect("admit the descendant"),
+        EffectClaimObservation::Claimed { .. }
+    ));
+    fixture.cancel_child("k1").await;
+
+    let mut takeover = fixture.minted_claim("n1", "owner-t", "k1");
+    takeover.lease_ttl_ms = 0;
+    let observation = fixture
+        .store
+        .claim(&takeover)
+        .await
+        .expect("take over the admitted descendant");
+    assert!(
+        matches!(observation, EffectClaimObservation::Claimed { .. }),
+        "a takeover of admitted work is protected, not fenced: {observation:?}"
+    );
+
+    // And the cancelled child's own late final is the typed §4 refusal, not a
+    // fence miss: the arbitration row, not the lease, answers it.
+    let outcome = fixture
+        .store
+        .finalize(&parent, &GroupFixture::terminal("k1"))
+        .await
+        .expect("a late finalize resolves through the journal");
+    assert!(
+        matches!(outcome, EffectFinalizeOutcome::CancelDecided),
+        "a final arriving after the cancel decision is W17's typed refusal: {outcome:?}"
+    );
+}
+
+/// W19: a committed-but-undrained child — the crash window between the §4
+/// decision write and the §5 rank write — is finished by the drain, in commit
+/// order, not re-executed.
+///
+/// The row store stages the window directly: `finalize` writes `Committed`
+/// with a commit position, and the `discharge` the driver would have run next
+/// is the write the crash took. A drain pass over the same journal owes the
+/// rank behind the commit-order barrier, so the child declared second but
+/// committed first settles at rank one.
+#[tokio::test]
+async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
+    let Some(fixture) = GroupFixture::open("committed-undrained-drain").await else {
+        return;
+    };
+
+    // `k2` (position 1) commits *before* `k1`: the commit order is the durable
+    // fact the drain must honor, and it is not the declaration order.
+    for replay_key in ["k2", "k1"] {
+        let fence = fixture.claim(replay_key, "owner-1").await;
+        let outcome = fixture
+            .store
+            .finalize(&fence, &GroupFixture::terminal(replay_key))
+            .await
+            .expect("commit the child");
+        allocated_commit_seq(outcome);
+        // Deliberately no discharge — that write is what the crash took.
+    }
+
+    let drain = std::sync::Arc::new(build_effect_replay_driver(
+        &fixture.storage,
+        PostgresEffectReplayOptions::default(),
+        std::sync::Arc::new(lash_core::facade_support::SystemClock),
+    ))
+    .into_group_drain();
+    let report = drain
+        .drain_group(
+            &fixture.group_key,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("drain the group");
+
+    assert_eq!(report.children.len(), 2);
+    for child in &report.children {
+        assert_eq!(
+            child.outcome,
+            ChildDrainOutcome::Decided,
+            "a committed child is discharged, never re-executed: {child:?}"
+        );
+    }
+    // Ranks follow the commit order the journal recorded, not positions.
+    let first = fixture
+        .store
+        .read_group_settlement(&fixture.group_key, 1)
+        .await
+        .expect("read rank one")
+        .expect("rank one is discharged");
+    assert_eq!(first.replay_key, "k2");
+    let second = fixture
+        .store
+        .read_group_settlement(&fixture.group_key, 2)
+        .await
+        .expect("read rank two")
+        .expect("rank two is discharged");
+    assert_eq!(second.replay_key, "k1");
 }

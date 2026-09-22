@@ -52,6 +52,16 @@ impl crate::RuntimeEffectController for SleepRecordingEffectController {
             "SleepRecordingEffectController",
         ))
     }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: crate::runtime::effect::GroupChildFinalCommit,
+    ) -> Result<
+        crate::runtime::effect::EffectGroupChildCommitOutcome,
+        crate::RuntimeEffectControllerError,
+    > {
+        Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
+    }
 }
 
 pub(super) struct FailingSleepEffectController;
@@ -102,5 +112,15 @@ impl crate::RuntimeEffectController for FailingSleepEffectController {
         Err(crate::effect_groups_unsupported(
             "FailingSleepEffectController",
         ))
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: crate::runtime::effect::GroupChildFinalCommit,
+    ) -> Result<
+        crate::runtime::effect::EffectGroupChildCommitOutcome,
+        crate::RuntimeEffectControllerError,
+    > {
+        Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
     }
 }

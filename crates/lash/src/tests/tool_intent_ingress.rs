@@ -667,6 +667,18 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
     ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
         Err(lash_core::effect_groups_unsupported("KeyJournalController"))
     }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> std::result::Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        Ok(
+            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
+        )
+    }
 }
 
 #[derive(Default)]
@@ -831,6 +843,26 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         Err(lash_core::effect_groups_unsupported(
             "AdmissionCrashController",
         ))
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> std::result::Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> std::result::Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 

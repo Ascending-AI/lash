@@ -373,6 +373,9 @@ pub(super) fn durable_wait_index_call_response(
     match handler {
         "begin_effect" | "record_group" => Some(serde_json::Value::Bool(true)),
         "end_effect" => Some(serde_json::Value::Null),
+        // The stub answers "no membership", which is the honest answer for
+        // every row these protocol tests settle: none mints a durable group.
+        "group_child_membership" => Some(serde_json::Value::Null),
         _ => None,
     }
 }

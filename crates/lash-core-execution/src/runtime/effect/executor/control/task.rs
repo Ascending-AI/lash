@@ -61,6 +61,20 @@ pub enum EffectControllerTaskRequest {
         disposition: LoserPolicy,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
     },
+    CommitGroupChildFinal {
+        commit: crate::runtime::effect::group_journal::GroupChildFinalCommit,
+        response: oneshot::Sender<
+            Result<
+                crate::runtime::effect::group_journal::EffectGroupChildCommitOutcome,
+                RuntimeEffectControllerError,
+            >,
+        >,
+    },
+    GroupChildDrainBlocked {
+        group_key: String,
+        commit_seq: u64,
+        response: oneshot::Sender<Result<bool, RuntimeEffectControllerError>>,
+    },
 }
 
 impl EffectControllerTaskRequest {
@@ -155,6 +169,20 @@ impl EffectControllerTaskRequest {
                 response,
             } => Box::pin(async move {
                 let _ = response.send(controller.close_effect_group(handle, disposition).await);
+            }),
+            Self::CommitGroupChildFinal { commit, response } => Box::pin(async move {
+                let _ = response.send(controller.commit_group_child_final(commit).await);
+            }),
+            Self::GroupChildDrainBlocked {
+                group_key,
+                commit_seq,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(
+                    controller
+                        .group_child_drain_blocked(&group_key, commit_seq)
+                        .await,
+                );
             }),
         }
     }
@@ -523,6 +551,59 @@ impl RuntimeEffectController for EffectTaskController {
             RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "group-close controller response was dropped",
+            )
+        })?
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: crate::runtime::effect::group_journal::GroupChildFinalCommit,
+    ) -> Result<
+        crate::runtime::effect::group_journal::EffectGroupChildCommitOutcome,
+        RuntimeEffectControllerError,
+    > {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::CommitGroupChildFinal {
+                commit,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "group-child commit controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "group-child commit controller response was dropped",
+            )
+        })?
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::GroupChildDrainBlocked {
+                group_key: group_key.to_string(),
+                commit_seq,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "drain-barrier controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "drain-barrier controller response was dropped",
             )
         })?
     }

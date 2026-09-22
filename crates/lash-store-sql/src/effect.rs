@@ -36,7 +36,7 @@ crate::statements! {
              ) OR EXISTS(
                 SELECT 1 FROM runtime_effect_group AS grp
                 WHERE grp.scope_id = ?1
-                  AND grp.children > (
+                  AND grp.expected_children > (
                       SELECT COUNT(*) FROM runtime_effect_replay AS child
                       WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
                   )

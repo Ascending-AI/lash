@@ -108,8 +108,11 @@ use super::group_drain::GroupExecutors;
 /// The durable group shape this port's backends implement, re-exported so a
 /// backend imports the whole effect-journal vocabulary from one place.
 pub use super::group_journal::{
-    AcceptedGroupChild, EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord,
-    StoredGroupSettlement, UnsettledGroupChild,
+    AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectCommitState,
+    EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
+    EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupColumn,
+    EffectGroupRecord, GroupChildFinalCommit, StoredChildArbitration, StoredGroupSettlement,
+    UnsettledGroupChild,
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
@@ -381,8 +384,32 @@ pub struct EffectClaimRequest {
     /// mismatch](EffectClaimObservation::ReplayMismatch) before any status is
     /// read.
     pub group_key: Option<String>,
+    /// The journal address of the effect this admission is minted under —
+    /// the envelope's `caused_by` lineage — when the cause is an effect.
+    ///
+    /// The claim consults it on the **insert path only**, and only for §4's
+    /// fence: when the minting effect is a group child whose cancel
+    /// disposition already committed, a new semantic admission under it is
+    /// refused with
+    /// [`MintingChildCancelled`](EffectClaimObservation::MintingChildCancelled)
+    /// and no row is written. A replay row that already exists — completed,
+    /// failed, or reclaimed by takeover — is an *admitted* command, which §4
+    /// protects exactly: cancellation fences new admission, it never undoes
+    /// what was admitted before it.
+    pub minting_effect: Option<MintingEffectRef>,
     /// Strict replay: a missing row is an error instead of a fresh claim.
     pub strict_replay: bool,
+}
+
+/// The journal identity of the effect a fresh admission is minted under —
+/// what [`EffectClaimRequest::minting_effect`] carries so the claim can fence
+/// the insert on the minting child's §4 decision without re-deriving scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MintingEffectRef {
+    /// The minting effect's journal scope key.
+    pub scope_id: String,
+    /// The minting effect's replay key.
+    pub replay_key: String,
 }
 
 /// The effect-replay row as persisted, projected for [`decide_effect_claim`].
@@ -399,6 +426,13 @@ pub struct StoredEffectRow {
     pub envelope_json: String,
     /// The status and payload columns, decoded once by the store.
     pub state: EffectRowState,
+    /// The §4 commit-protocol phase, when the row belongs to a group child.
+    /// `None` is the honest answer for an ungrouped row: it never contests a
+    /// §4 point, so it carries no phase to read.
+    pub commit_state: Option<EffectCommitState>,
+    /// The drain input a boundary-committed child recorded — what a recovery
+    /// drains instead of re-executing the attempt.
+    pub drain_input: Option<String>,
     /// Lease expiry of the current claim, `0` once finalized.
     pub lease_expires_at_ms: u64,
     /// Recorded due time for a `Sleep` effect.
@@ -469,6 +503,11 @@ pub enum EffectClaimObservation {
     /// The scope carries a permanent retirement tombstone: its journal was
     /// deleted as unreachable and nothing may re-admit an effect under it.
     ScopeRetired,
+    /// The minting parent named by [`EffectClaimRequest::minting_effect`] is a
+    /// group child whose cancel disposition already committed. §4 forbids a
+    /// new semantic admission under a cancelled invocation, so the claim
+    /// wrote nothing — no row, no lease, no decision of its own.
+    MintingChildCancelled,
     /// The row cannot be interpreted.
     CorruptRow {
         /// Which invariant the row broke.
@@ -494,6 +533,16 @@ pub enum EffectRowDefect {
     UnknownStatus {
         /// The unrecognized column value.
         status: String,
+    },
+    /// `commit_state` is `committed` but `drain_input` is `NULL`: only the
+    /// §4 boundary writes that state, and it always writes the input with it.
+    MissingDrainInput,
+    /// `commit_state` is `drained` or `cancel_decided` while `status` is still
+    /// `in_progress`: both states journal their terminal in the same write,
+    /// so the pair cannot represent a row any writer produced.
+    CommitStateWithoutTerminal {
+        /// The recorded commit state.
+        commit_state: String,
     },
     /// The backend's claim mechanics saw the row appear and then vanish.
     ///
@@ -522,6 +571,15 @@ impl EffectRowDefect {
             ),
             Self::UnknownStatus { status } => {
                 format!("unknown runtime effect replay status `{status}`")
+            }
+            Self::MissingDrainInput => {
+                "committed runtime effect row is missing drain_input".to_string()
+            }
+            Self::CommitStateWithoutTerminal { commit_state } => {
+                format!(
+                    "runtime effect row is `{commit_state}` but still `in_progress`; \
+                     a decided or drained row journals its terminal in the same write"
+                )
             }
             Self::VanishedUnderClaim => {
                 "effect replay insert conflicted but no row could be selected".to_string()
@@ -620,6 +678,13 @@ impl EffectRowState {
             Self::Corrupt(EffectRowDefect::UnexpectedPayloads { status, .. }) => status.column(),
             Self::Corrupt(EffectRowDefect::UnknownStatus { status }) => status,
             Self::Corrupt(EffectRowDefect::VanishedUnderClaim) => "vanished",
+            // Both defects describe `in_progress` rows: a boundary commit
+            // leaves the status column alone, so a row missing its drain
+            // input or ahead of its terminal still reads `in_progress`.
+            Self::Corrupt(
+                EffectRowDefect::MissingDrainInput
+                | EffectRowDefect::CommitStateWithoutTerminal { .. },
+            ) => EffectRowStatus::InProgress.column(),
         }
     }
 }
@@ -701,9 +766,31 @@ pub fn decide_effect_claim(
                 retry_at_ms: row.lease_expires_at_ms,
             })
         }
-        EffectRowState::InProgress => {
-            EffectClaimDecision::TakeOver(stamp(row.due_at_ms.or(fresh_due_at_ms)))
-        }
+        EffectRowState::InProgress => match row.commit_state {
+            // A boundary-committed child is taken over exactly like any
+            // expired claim: the executor re-runs, its journaled inner rows
+            // replay, and the settle path's `commit_group_child` read-back
+            // lands `AlreadyCommitted` so the drain resumes rather than the
+            // sealed attempt re-executing. The drain input the commit
+            // recorded is what makes that resume honest — a committed row
+            // without one is corruption, not a recovery candidate.
+            Some(EffectCommitState::Committed) => match row.drain_input {
+                Some(_) => EffectClaimDecision::TakeOver(stamp(row.due_at_ms.or(fresh_due_at_ms))),
+                None => EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
+                    defect: EffectRowDefect::MissingDrainInput,
+                }),
+            },
+            Some(state @ (EffectCommitState::Drained | EffectCommitState::CancelDecided)) => {
+                EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
+                    defect: EffectRowDefect::CommitStateWithoutTerminal {
+                        commit_state: state.column().to_string(),
+                    },
+                })
+            }
+            Some(EffectCommitState::Pending) | None => {
+                EffectClaimDecision::TakeOver(stamp(row.due_at_ms.or(fresh_due_at_ms)))
+            }
+        },
         EffectRowState::Corrupt(defect) => {
             EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
                 defect: defect.clone(),
@@ -789,28 +876,50 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         replay_key: &str,
     ) -> Result<bool, RuntimeEffectControllerError>;
 
-    /// Write `terminal` and release the lease, guarded by `fence`, allocating a
-    /// settlement rank when the row belongs to a durable effect group.
+    /// Write `terminal` and release the lease, guarded by `fence`; for a
+    /// grouped child, contest the group's §4 linearization point in the same
+    /// transaction.
     ///
     /// Atomically, and only while the row still matches all five fence columns,
     /// is `in_progress`, and has not expired against the substrate's lease
     /// clock: set the terminal's status and payload column, clear the lease
     /// owner and token, and zero the lease expiry. Report
     /// [`EffectFinalizeOutcome::FenceMoved`] when the guarded write matched no
-    /// row — the fence moved and this driver no longer owns the effect.
+    /// row and no cancel disposition explains the miss — the fence moved and
+    /// this driver no longer owns the effect.
     ///
-    /// # Normative ordering (N1)
+    /// # Normative ordering (N1, extended by ADR 0099 §4)
     ///
-    /// One transaction, in this order:
+    /// One transaction, in this order — **replay row, then group row**, the
+    /// one lock order every arbitration path in this contract shares. The §4
+    /// point itself is the replay row's `commit_state`: the CAS that moves it
+    /// `pending → committed` runs under the same row lock the fenced write
+    /// already holds, and the group's counter bump is what lets that CAS
+    /// write its `commit_seq` in the same statement:
     ///
     /// 1. Perform the fenced `UPDATE` above.
-    /// 2. **If its rowcount is 0: roll back and report `FenceMoved`.** No
-    ///    counter bump.
-    /// 3. Only on rowcount 1, and only when the row records a `group_key`:
-    ///    `UPDATE lash_runtime_effect_group SET next_seq = next_seq + 1 WHERE
-    ///    group_key = $g RETURNING next_seq`, and write the returned value into
-    ///    this child's `settlement_seq`.
-    /// 4. Commit, reporting [`EffectFinalizeOutcome::Written`] with the rank.
+    /// 2. **If its rowcount is 0:** read the row's `group_key` and
+    ///    `commit_state`. `cancel_decided` means the cancel disposition
+    ///    already won the linearization point: roll back and report
+    ///    [`EffectFinalizeOutcome::CancelDecided`]. Anything else is an
+    ///    ordinary fence miss: roll back and report `FenceMoved`. **No
+    ///    counter bump either way.**
+    /// 3. On rowcount 1 with a `group_key`: bump `next_commit_seq` on the
+    ///    group row, then CAS the replay row `commit_state = 'committed'`,
+    ///    `commit_seq` = the returned position — guarded on
+    ///    `commit_state = 'pending'`. A CAS miss means a cancel disposition
+    ///    committed between the claim and now: roll back — the terminal, the
+    ///    bump and the state all go away together — and report
+    ///    `CancelDecided`. A `committed` state cannot cause the miss — it is
+    ///    written only with a terminal, which the fenced `UPDATE` would not
+    ///    have matched — so any other miss is corruption, not an outcome arm.
+    /// 4. Commit, reporting [`EffectFinalizeOutcome::Written`] with the
+    ///    commit-order position.
+    ///
+    /// Because every contestant for a child's commit state must first pass
+    /// the replay row's lock, holding it makes the CAS at step 3 serialize
+    /// behind one writer: no concurrent `decide_cancel` can be inside the
+    /// row while this transaction holds it.
     ///
     /// The group is read from the child's own row rather than passed in, so a
     /// finalize cannot bump a group the row does not belong to. Bumping before
@@ -826,6 +935,155 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         fence: &EffectLeaseFence,
         terminal: &EffectTerminal,
     ) -> Result<EffectFinalizeOutcome, RuntimeEffectControllerError>;
+
+    /// Commit the cancel disposition for one group child at the group's §4
+    /// linearization point, or report the decision that already holds.
+    ///
+    /// This is the durable half of cancellation: the body signal and the local
+    /// grace that follow it are *signalling*, and this is the *decision* —
+    /// journaled, fenced, and irreversible once committed (ADR 0099 §4).
+    ///
+    /// # Normative ordering
+    ///
+    /// One transaction, in the shared lock order — replay row, then group
+    /// row. The terminal write deliberately precedes the commit-state CAS:
+    /// writing first is what keeps this path from deadlocking against a
+    /// concurrent `finalize`, which holds the replay row's lock while it
+    /// reaches for the group row. A CAS that loses rolls the speculative
+    /// write back with the rest.
+    ///
+    /// 1. Read the replay row's `commit_state`, joining the row to
+    ///    `request`'s `group_key`. `cancel_decided` → report
+    ///    [`EffectCancelOutcome::AlreadyDecided`] with the rank the first
+    ///    decision seated the child at. `committed` or `drained` → report
+    ///    [`EffectCancelOutcome::FinalCommitted`]; the child's final record
+    ///    holds the point and the cancel may not commit. No replay row for
+    ///    the pair means an accepted-but-never-claimed child — the membership
+    ///    row is the admission, so proceed to insert one.
+    /// 2. Write the cancelled terminal into the child's replay row — an
+    ///    `UPDATE` for a claimed child, an `INSERT` for an unclaimed one,
+    ///    sourcing `scope_id` from the group row and
+    ///    `envelope_json`/`envelope_hash` from the request, which carries the
+    ///    canonical envelope form the caller captured from retained
+    ///    membership.
+    /// 3. Bump `next_seq` on the group row: the rank the cancelled terminal is
+    ///    about to take. Bumping before the CAS keeps this path in the shared
+    ///    lock order, and a CAS miss rolls the bump back with the terminal.
+    /// 4. CAS the replay row `commit_state = 'cancel_decided'`, guarded on
+    ///    `commit_state = 'pending'`. A miss means a contestant won between
+    ///    the read and the CAS: roll back and answer with the state that
+    ///    committed.
+    /// 5. Write the bumped rank onto the replay row's `settlement_seq`: a
+    ///    cancel-decided child is rankable immediately, because it has no
+    ///    protected admission left to discharge — new admission is exactly
+    ///    what the decision fences out. Commit, reporting
+    ///    [`EffectCancelOutcome::Decided`].
+    ///
+    /// Idempotent end to end: a retried decision observes step 1's
+    /// `AlreadyDecided` and writes nothing.
+    async fn decide_cancel(
+        &self,
+        request: &EffectCancelRequest,
+    ) -> Result<EffectCancelOutcome, RuntimeEffectControllerError>;
+
+    /// Discharge one committed child's §5 drain: record the durable drain
+    /// stamp and allocate its settlement rank, in commit order.
+    ///
+    /// Rank is allocated *here* and not at finalize, because a rank a consumer
+    /// could observe before the child's declared intents landed would be a
+    /// settlement published ahead of its own effects (ADR 0099 §5). Separating
+    /// commit order (`commit_seq`, assigned at finalize) from rank
+    /// (`settlement_seq`, assigned here) is what makes "intent drains are
+    /// admitted in final-commit order" a durable fact rather than a scheduler
+    /// convention.
+    ///
+    /// # Normative ordering
+    ///
+    /// One transaction, in the shared lock order — replay row, then group
+    /// row:
+    ///
+    /// 1. Take the child's replay row lock (a write; the row must exist and
+    ///    carry `request`'s `group_key` — a missing or foreign row is
+    ///    corruption).
+    /// 2. Read the row's `commit_state`. `drained` → report
+    ///    [`EffectDischargeOutcome::AlreadyDischarged`] with the rank the
+    ///    first discharge seated, and write nothing. Anything other than
+    ///    `committed` is corruption: only a committed child has a drain to
+    ///    discharge.
+    /// 3. The commit-order barrier: if any sibling replay row holds
+    ///    `commit_state = 'committed'` with `commit_seq` below this child's,
+    ///    roll back and report [`EffectDischargeOutcome::Blocked`]. The set
+    ///    of lower commit positions is fixed at commit time, so a blocked
+    ///    child becomes dischargeable exactly when the siblings ahead of it
+    ///    drain — never by the barrier loosening.
+    /// 4. Bump `next_seq` on the group row, write the returned rank onto the
+    ///    replay row's `settlement_seq`, and CAS `commit_state` to `drained`
+    ///    — rank and state in one commit, so a recovered reader never sees a
+    ///    rankable child that is not drained nor a drained child without a
+    ///    rank.
+    /// 5. Commit, reporting [`EffectDischargeOutcome::Discharged`].
+    async fn discharge_child(
+        &self,
+        request: &EffectDischargeRequest,
+    ) -> Result<EffectDischargeOutcome, RuntimeEffectControllerError>;
+
+    /// Whether any sibling replay row of `group_key` holds `commit_state =
+    /// 'committed'` with `commit_seq` below `commit_seq` — the durable gate a
+    /// child's intent drain waits behind so drains are admitted in
+    /// final-commit order (ADR 0099 §5).
+    ///
+    /// Monotonic in the caller's favour: the set of commit positions below
+    /// `commit_seq` was fixed when it was allocated, so once this answers
+    /// `false` it cannot become `true` again, and a driver may poll it without
+    /// a notification channel.
+    async fn drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError>;
+
+    /// Commit one group child's final record at the §4 point — the
+    /// final-attempt boundary's durable half.
+    ///
+    /// In one transaction, in the shared lock order:
+    ///
+    /// 1. Read the child's replay row (its group is the row's own
+    ///    `group_key`, never the caller's): `committed`/`drained` answers
+    ///    [`EffectGroupChildCommitOutcome::AlreadyCommitted`] with the
+    ///    recorded `commit_seq` and `drain_input`, `cancel_decided` answers
+    ///    [`EffectGroupChildCommitOutcome::CancelDecided`], and anything
+    ///    other than `pending` is corruption the CAS makes unwritable.
+    /// 2. Bump `next_commit_seq` on the group row and CAS the child's
+    ///    `commit_state` to `committed`, writing the returned position and
+    ///    the drain input — guarded on `pending` *and* on the row's lease
+    ///    still belonging to `request.owner_id`, so a stale executor whose
+    ///    claim was reclaimed commits nothing. A miss re-reads: a committed
+    ///    cancel decides the race; a committed sibling CAS is idempotent;
+    ///    a still-pending row under a moved lease is a fence loss.
+    /// 3. Commit, reporting [`EffectGroupChildCommitOutcome::Committed`].
+    ///
+    /// What the commit deliberately does **not** write is the terminal: a
+    /// boundary-committed row stays `in_progress` holding only the decision,
+    /// the position, and the drain input — the projected outcome lands at
+    /// discharge, when the drain it records has actually finished.
+    async fn commit_group_child(
+        &self,
+        request: &EffectGroupChildCommitRequest,
+    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError>;
+
+    /// The same arbitration state, reached through the child's replay row
+    /// instead of its group: `(scope_id, replay_key)` is the journal address
+    /// a caller already holds, and the join resolves the group from the row
+    /// itself rather than trusting the caller's word for it.
+    ///
+    /// `None` means the replay row exists but belongs to no group child — or
+    /// no row exists at all; the fence callers cannot and need not tell the
+    /// two apart.
+    async fn read_group_child_arbitration(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<Option<StoredChildArbitration>, RuntimeEffectControllerError>;
 
     /// Record `record` as an open durable effect group, idempotently.
     ///
@@ -1004,10 +1262,28 @@ pub fn tool_intent_replay_key_format_cutover(
     )
 }
 
+/// The typed refusal a late final record earns when the cancel disposition
+/// already owns the §4 linearization point: no terminal, no rank, no journal
+/// write from the loser.
+fn group_child_cancel_decided(replay_key: &str) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+        format!(
+            "the cancel disposition won the durable linearization point for \
+             group child `{replay_key}` before its final record could commit; the \
+             terminal was refused and nothing was journaled",
+        ),
+    )
+}
+
 /// A claim this driver holds: the fence plus the due time it recorded.
 struct ClaimedEffect {
     fence: EffectLeaseFence,
     due_at_ms: Option<u64>,
+    /// The group this claim belongs to, when it does — carried from the claim
+    /// request so the post-commit discharge can name it without re-reading the
+    /// row.
+    group_key: Option<String>,
 }
 
 /// What a prepared claim attempt resolved to, after decoding.
@@ -1523,7 +1799,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                             }
                         }
                     };
-                    let finalize = self.finalize_effect(&claim.fence, &result).await;
+                    let finalize = self.finalize_effect(&claim, &result).await;
                     return match (result, finalize) {
                         (Ok(outcome), Ok(())) => Ok(EffectRun::Terminal(outcome)),
                         (Err(err), Ok(())) => Err(err),
@@ -1565,6 +1841,18 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 .group
                 .as_deref()
                 .map(|membership| membership.group_key.clone()),
+            minting_effect: match envelope.invocation.caused_by.as_ref() {
+                Some(crate::CausalRef::Effect { address }) => Some(MintingEffectRef {
+                    scope_id: address
+                        .execution_scope
+                        .journal_identity()
+                        .map_err(RuntimeEffectControllerError::from)?
+                        .key()
+                        .to_string(),
+                    replay_key: address.replay_key.clone(),
+                }),
+                _ => None,
+            },
             strict_replay: self.replay_mode.load(Ordering::SeqCst),
         };
 
@@ -1579,6 +1867,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                         lease_token: request.lease_token,
                     },
                     due_at_ms,
+                    group_key: request.group_key,
                 }))
             }
             EffectClaimObservation::ReplayMismatch {
@@ -1636,14 +1925,29 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 Err(vocabulary.error(EffectReplayFailure::CorruptRow, defect.message()))
             }
             EffectClaimObservation::ScopeRetired => Err(scope_retired(&request.scope_id)),
+            // The §4 fence, raised inside the claim transaction: the minting
+            // child's cancel disposition is already durable, so this admission
+            // writes nothing and the nested command surfaces as the typed
+            // refusal, not a journaled failure of its own.
+            EffectClaimObservation::MintingChildCancelled => {
+                Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+                    format!(
+                        "the group child that minted replay key `{}` is cancel-decided; \
+                         ADR 0099 §4 forbids a new semantic admission under it",
+                        request.replay_key
+                    ),
+                ))
+            }
         }
     }
 
     async fn finalize_effect(
         &self,
-        fence: &EffectLeaseFence,
+        claim: &ClaimedEffect,
         outcome: &Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
     ) -> Result<(), RuntimeEffectControllerError> {
+        let fence = &claim.fence;
         let vocabulary = self.vocabulary();
         let terminal = match outcome {
             Ok(outcome) => EffectTerminal::Completed {
@@ -1655,19 +1959,119 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     .map_err(|err| vocabulary.encode_error(err))?,
             },
         };
-        if matches!(
-            self.row_store.finalize(fence, &terminal).await?,
-            EffectFinalizeOutcome::Written { .. }
-        ) {
-            return Ok(());
+        // A group child whose final-attempt boundary already ran arrives here
+        // `committed` with no terminal: the commit journaled the decision, the
+        // position and the drain input while the lease was held, and the
+        // intents drained underneath it. Its discharge is the write that seats
+        // this execution's projected terminal and marks the row `drained`. A
+        // `pending` row still owes its §4 decision — taken below — and
+        // `cancel_decided` is the typed refusal either way.
+        if let Some(group_key) = &claim.group_key
+            && let Some(arbitration) = self
+                .row_store
+                .read_group_child_arbitration(&fence.scope_id, &fence.replay_key)
+                .await?
+            && arbitration.group_key == *group_key
+        {
+            match arbitration.commit_state {
+                EffectCommitState::Committed | EffectCommitState::Drained => {
+                    return self
+                        .discharge_committed_claim(
+                            &fence.scope_id,
+                            &fence.replay_key,
+                            group_key,
+                            Some(terminal),
+                        )
+                        .await;
+                }
+                EffectCommitState::CancelDecided => {
+                    return Err(group_child_cancel_decided(&fence.replay_key));
+                }
+                EffectCommitState::Pending => {}
+            }
         }
-        Err(vocabulary.error(
-            EffectReplayFailure::LeaseLost,
-            format!(
-                "runtime effect replay lease was lost before finalizing scope `{}` replay key `{}`",
-                fence.scope_id, fence.replay_key
-            ),
-        ))
+        match self.row_store.finalize(fence, &terminal).await? {
+            EffectFinalizeOutcome::Written { commit_seq: _ } => {
+                // A grouped child that won the §4 point owes its §5 discharge
+                // before its rank becomes visible. Its declared intents are
+                // already durable — they journal inside the attempt that
+                // produced this outcome — so the discharge here is the barrier
+                // wait and the rank write, not a re-execution. The barrier
+                // holds this child behind lower-commit siblings still
+                // draining; a sibling whose host died mid-drain is finished by
+                // the next drain pass, which this poll is the fallback for,
+                // not the driver of.
+                let Some(group_key) = &claim.group_key else {
+                    return Ok(());
+                };
+                self.discharge_committed_claim(
+                    &fence.scope_id,
+                    &fence.replay_key,
+                    group_key,
+                    None,
+                )
+                .await
+            }
+            EffectFinalizeOutcome::CancelDecided => {
+                Err(group_child_cancel_decided(&fence.replay_key))
+            }
+            EffectFinalizeOutcome::FenceMoved => Err(vocabulary.error(
+                EffectReplayFailure::LeaseLost,
+                format!(
+                    "runtime effect replay lease was lost before finalizing scope `{}` replay key `{}`",
+                    fence.scope_id, fence.replay_key
+                ),
+            )),
+        }
+    }
+
+    /// The §4 boundary commit the scoped controller forwards: the lease
+    /// owner is this driver's identity, so the CAS is fenced on the claim
+    /// this host holds, and the group resolves from the durable row rather
+    /// than anything the caller asserts.
+    async fn commit_group_child_final(
+        &self,
+        commit: GroupChildFinalCommit,
+    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
+        self.row_store
+            .commit_group_child(&EffectGroupChildCommitRequest {
+                group_key: None,
+                scope_id: commit.scope_id,
+                replay_key: commit.replay_key,
+                drain_input: commit.drain_input,
+                owner_id: self.owner_id.clone(),
+            })
+            .await
+    }
+
+    /// Discharge one committed group child: the barrier wait, the rank write,
+    /// and — for a boundary-committed row — the projected terminal its §4
+    /// commit deliberately did not carry.
+    async fn discharge_committed_claim(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+        group_key: &str,
+        terminal: Option<EffectTerminal>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        loop {
+            match self
+                .row_store
+                .discharge_child(&EffectDischargeRequest {
+                    group_key: group_key.to_string(),
+                    scope_id: scope_id.to_string(),
+                    replay_key: replay_key.to_string(),
+                    terminal: terminal.clone(),
+                })
+                .await?
+            {
+                EffectDischargeOutcome::Discharged { .. }
+                | EffectDischargeOutcome::AlreadyDischarged { .. } => return Ok(()),
+                EffectDischargeOutcome::Blocked => {
+                    self.clock.sleep(BUSY_POLL).await;
+                }
+            }
+        }
     }
 
     async fn renew_effect_lease(

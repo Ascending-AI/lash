@@ -11,7 +11,7 @@ SELECT EXISTS(
              ) OR EXISTS(
                 SELECT 1 FROM lash_runtime_effect_group AS grp
                 WHERE grp.scope_id = $1
-                  AND grp.children > (
+                  AND grp.expected_children > (
                       SELECT COUNT(*) FROM lash_runtime_effect_replay AS child
                       WHERE child.scope_id = $1 AND child.group_key = grp.group_key
                   )
@@ -36,24 +36,99 @@ UPDATE lash_runtime_effect_replay
 UPDATE lash_runtime_effect_replay
              SET settlement_seq = $3
              WHERE scope_id = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.select_group_commit_state
+SELECT group_key, commit_state FROM lash_runtime_effect_replay
+             WHERE scope_id = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.select_child_commit_state
+SELECT commit_state, commit_seq FROM lash_runtime_effect_replay
+             WHERE group_key = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.select_arbitration_by_key
+SELECT commit_state, commit_seq, group_key FROM lash_runtime_effect_replay
+             WHERE scope_id = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.commit_child
+UPDATE lash_runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = $4
+             WHERE scope_id = $1 AND replay_key = $2 AND group_key = $3
+               AND commit_state = 'pending'
+=== effect::replay::ReplayStatements | effect_replay.commit_ungrouped
+UPDATE lash_runtime_effect_replay
+             SET commit_state = 'committed'
+             WHERE scope_id = $1 AND replay_key = $2 AND commit_state = 'pending'
+=== effect::replay::ReplayStatements | effect_replay.commit_child_final
+UPDATE lash_runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = $4, drain_input = $5,
+                 updated_at_ms = $7
+             WHERE scope_id = $1 AND replay_key = $2 AND group_key = $3
+               AND commit_state = 'pending'
+               AND lease_owner_id = $6
+=== effect::replay::ReplayStatements | effect_replay.select_child_drain
+SELECT commit_state, commit_seq, drain_input FROM lash_runtime_effect_replay
+             WHERE group_key = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.cancel_commit_state
+UPDATE lash_runtime_effect_replay
+             SET commit_state = 'cancel_decided'
+             WHERE scope_id = $1 AND replay_key = $2 AND group_key = $3
+               AND commit_state = 'pending'
+=== effect::replay::ReplayStatements | effect_replay.settle_drained
+UPDATE lash_runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = $4
+             WHERE scope_id = $1 AND replay_key = $2 AND group_key = $3
+               AND commit_state = 'committed'
+=== effect::replay::ReplayStatements | effect_replay.settle_drained_final
+UPDATE lash_runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = $4,
+                 status = $5, outcome_json = $6, error_json = $7,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = $8
+             WHERE scope_id = $1 AND replay_key = $2 AND group_key = $3
+               AND commit_state = 'committed'
+=== effect::replay::ReplayStatements | effect_replay.has_undrained_lower_commit
+SELECT EXISTS(
+                 SELECT 1 FROM lash_runtime_effect_replay
+                 WHERE group_key = $1 AND commit_state = 'committed'
+                   AND commit_seq < $2
+             )
+=== effect::replay::ReplayStatements | effect_replay.write_cancelled
+INSERT INTO lash_runtime_effect_replay (
+                scope_id, session_id, replay_key, envelope_hash,
+                envelope_json, status, outcome_json, error_json, lease_owner_id,
+                lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+                commit_state, commit_seq, created_at_ms, updated_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, 'failed', NULL, $6, NULL, NULL, 0, NULL, $7, NULL, 'pending', NULL, $8, $8)
+             ON CONFLICT (scope_id, replay_key) DO UPDATE
+             SET status = 'failed', outcome_json = NULL, error_json = $6,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = $8
+             WHERE lash_runtime_effect_replay.status = 'in_progress'
+=== effect::replay::ReplayStatements | effect_replay.touch_for_discharge
+UPDATE lash_runtime_effect_replay
+             SET updated_at_ms = $4
+             WHERE scope_id = $1 AND replay_key = $2 AND group_key = $3
 === effect::replay::ReplayStatements | effect_replay.select_unsettled_children
-SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
-             FROM lash_runtime_effect_replay
-             WHERE group_key = $1 AND settlement_seq IS NULL
-             ORDER BY replay_key
+SELECT g.scope_id, c.position, c.replay_key, c.envelope_json, c.command_version, r.status, r.outcome_json, r.error_json, r.lease_expires_at_ms, r.commit_state, r.commit_seq
+             FROM lash_runtime_effect_group_child c
+             JOIN lash_runtime_effect_group g ON g.group_key = c.group_key
+             LEFT JOIN lash_runtime_effect_replay r
+               ON r.scope_id = g.scope_id AND r.replay_key = c.replay_key
+             WHERE c.group_key = $1 AND r.settlement_seq IS NULL
+             ORDER BY r.commit_seq IS NULL, r.commit_seq, c.position
 === effect::replay::ReplayStatements | effect_replay.select_settlement_by_rank
 SELECT settlement_seq, replay_key, status, outcome_json, error_json
              FROM lash_runtime_effect_replay
              WHERE group_key = $1 AND settlement_seq IS NOT NULL
              ORDER BY settlement_seq
              LIMIT 1 OFFSET $2
+=== effect::replay::ReplayStatements | effect_replay.select_settlement_seq
+SELECT settlement_seq FROM lash_runtime_effect_replay
+             WHERE scope_id = $1 AND replay_key = $2
 === effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM lash_runtime_effect_replay WHERE session_id = $1
 === effect::replay::ReplayStatements | effect_replay.delete_by_scope
 DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1
 === effect::group::GroupStatements | effect_group.select_by_key
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    children, created_at_ms
+                    expected_children, created_at_ms
              FROM lash_runtime_effect_group
              WHERE group_key = $1
 === effect::group::GroupStatements | effect_group.bump_next_seq
@@ -61,6 +136,11 @@ UPDATE lash_runtime_effect_group
              SET next_seq = next_seq + 1
              WHERE group_key = $1
              RETURNING next_seq
+=== effect::group::GroupStatements | effect_group.bump_next_commit_seq
+UPDATE lash_runtime_effect_group
+             SET next_commit_seq = next_commit_seq + 1
+             WHERE group_key = $1
+             RETURNING next_commit_seq
 === effect::group::GroupStatements | effect_group.delete_by_session
 DELETE FROM lash_runtime_effect_group WHERE session_id = $1
 === effect::group::GroupStatements | effect_group.delete_by_scope
@@ -118,7 +198,7 @@ INSERT INTO lash_effect_scope_retirements (
              ON CONFLICT (scope_id) DO NOTHING
 === postgres::ReplayPostgresStatements | effect_replay.select_for_claim
 SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
-                lease_expires_at_ms, due_at_ms
+                lease_expires_at_ms, due_at_ms, commit_state, drain_input
              FROM lash_runtime_effect_replay
              WHERE scope_id = $1 AND replay_key = $2
              FOR UPDATE
@@ -127,9 +207,9 @@ INSERT INTO lash_runtime_effect_replay (
                 scope_id, session_id, replay_key, envelope_hash,
                 envelope_json, status, outcome_json, error_json, lease_owner_id,
                 lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-                created_at_ms, updated_at_ms
+                commit_state, commit_seq, created_at_ms, updated_at_ms
              )
-             VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $13, NULL, $11, $12)
+             VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $13, NULL, 'pending', NULL, $11, $12)
              ON CONFLICT (scope_id, replay_key) DO NOTHING
 === postgres::ReplayPostgresStatements | effect_replay.finalize_terminal
 UPDATE lash_runtime_effect_replay
@@ -148,6 +228,10 @@ UPDATE lash_runtime_effect_replay
                AND status = 'in_progress'
                AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
              RETURNING group_key
+=== postgres::ReplayPostgresStatements | effect_replay.select_arbitration_by_key_locked
+SELECT commit_state, commit_seq, group_key, drain_input FROM lash_runtime_effect_replay
+             WHERE scope_id = $1 AND replay_key = $2
+             FOR UPDATE
 === postgres::ReplayPostgresStatements | effect_replay.renew_lease
 UPDATE lash_runtime_effect_replay
              SET lease_expires_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint + $6,
@@ -162,12 +246,12 @@ UPDATE lash_runtime_effect_replay
 === postgres::GroupPostgresStatements | effect_group.insert_new
 INSERT INTO lash_runtime_effect_group (
                 group_key, scope_id, session_id, wake, loser_disposition,
-                children, next_seq, created_at_ms
+                expected_children, next_seq, next_commit_seq, created_at_ms
              )
-             VALUES ($1, $2, $3, $4, $5, $6, 0, $7)
+             VALUES ($1, $2, $3, $4, $5, $6, 0, 0, $7)
              ON CONFLICT (group_key) DO NOTHING
              RETURNING group_key, scope_id, session_id, wake, loser_disposition,
-                       children, created_at_ms
+                       expected_children, created_at_ms
 === postgres::ScopeRetirementPostgresStatements | effect_scope_retirement.insert_fence
 INSERT INTO lash_effect_scope_retirements (
                  scope_id, retired_at_ms, artifact_cleanup_completed

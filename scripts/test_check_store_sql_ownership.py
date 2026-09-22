@@ -189,9 +189,9 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         self.tree.substitute(
             "crates/lash-store-sql/src/effect/group.rs",
             '        select_by_key = "SELECT group_key, scope_id, session_id, wake, loser_disposition,\n'
-            "                    children, created_at_ms",
+            "                    expected_children, created_at_ms",
             '        select_by_key = "SELECT group_key, scope_id, session_id, wake, loser_disposition,\n'
-            "                    children, created_at_ms, next_seq",
+            "                    expected_children, created_at_ms, next_seq",
         )
         self.assert_refused("is not one of the column lists")
 

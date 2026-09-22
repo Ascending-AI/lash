@@ -400,6 +400,17 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         Box::pin(async { Ok(true) })
     }
 
+    fn scope_group_child_membership<'run>(
+        &'run self,
+        _index_key: String,
+        _replay_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Ok(None) })
+    }
+
     fn sleep_send<'run>(
         &'run self,
         duration: Duration,
@@ -1966,6 +1977,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         'ctx: 'run,
     {
         self.events.attach_process_terminal(request)
+    }
+
+    fn scope_group_child_membership<'run>(
+        &'run self,
+        index_key: String,
+        replay_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.events
+            .scope_group_child_membership(index_key, replay_key)
     }
 
     fn sleep_send<'run>(

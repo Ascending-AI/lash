@@ -225,7 +225,12 @@ pub use usage_activity::*;
 // `{turn|process|host}` vocabulary to `Owned(RemoteEffectOpener) | Host`,
 // adding the drain arm a peer could not name before; a window-83 peer's scope
 // fails this decode and vice versa, so peers must adopt 84.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 84;
+// Window 85: FIG-3409 adds `minting_group_child_cancelled` to the tool-intent
+// refusal vocabulary — the ADR 0099 §4 refusal of a new semantic admission
+// beneath a cancel-decided group child. A window-84 peer refuses the unknown
+// reason tag when decoding a turn report that carries it, so peers must adopt
+// 85.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 85;
 
 /// One versioned remote-protocol message.
 ///

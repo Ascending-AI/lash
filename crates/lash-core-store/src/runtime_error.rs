@@ -253,6 +253,10 @@ pub enum RuntimeErrorCode {
     RuntimeEffectGroupAwaitCancelled,
     /// A group's `Cancel` loser disposition made this child terminal.
     RuntimeEffectGroupChildCancelled,
+    /// The child's cancel decision already won the group's durable
+    /// linearization point, so its late final record was refused and nothing
+    /// was journaled (ADR 0099 §4, W17).
+    RuntimeEffectGroupChildCancelDecided,
     /// Drain deferred while this host still works the group or its children.
     /// Retry succeeds once it finishes; permanent refusal uses
     /// `RuntimeEffectGroupShape`.
@@ -562,6 +566,9 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectEnvelopeVersion => "runtime_effect_envelope_version_unsupported",
             Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
             Self::RuntimeEffectGroupChildCancelled => "runtime_effect_group_child_cancelled",
+            Self::RuntimeEffectGroupChildCancelDecided => {
+                "runtime_effect_group_child_cancel_decided"
+            }
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
@@ -794,6 +801,7 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectEnvelopeVersion
             | Self::RuntimeEffectGroupAwaitCancelled
             | Self::RuntimeEffectGroupChildCancelled
+            | Self::RuntimeEffectGroupChildCancelDecided
             | Self::RuntimeEffectGroupShape
             | Self::RuntimeEffectInvocationSubject
             | Self::RuntimeEffectScopeMismatch
@@ -1009,6 +1017,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectEnvelopeVersion,
         Self::RuntimeEffectGroupAwaitCancelled,
         Self::RuntimeEffectGroupChildCancelled,
+        Self::RuntimeEffectGroupChildCancelDecided,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
         Self::RuntimeEffectToolChildCancellationAuthority,
@@ -1227,6 +1236,9 @@ impl RuntimeErrorCode {
             "runtime_effect_envelope_version_unsupported" => Self::RuntimeEffectEnvelopeVersion,
             "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
             "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
+            "runtime_effect_group_child_cancel_decided" => {
+                Self::RuntimeEffectGroupChildCancelDecided
+            }
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,

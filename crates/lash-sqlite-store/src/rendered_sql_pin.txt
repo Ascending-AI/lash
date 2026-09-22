@@ -11,7 +11,7 @@ SELECT EXISTS(
              ) OR EXISTS(
                 SELECT 1 FROM main.runtime_effect_group AS grp
                 WHERE grp.scope_id = ?1
-                  AND grp.children > (
+                  AND grp.expected_children > (
                       SELECT COUNT(*) FROM main.runtime_effect_replay AS child
                       WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
                   )
@@ -36,24 +36,99 @@ UPDATE main.runtime_effect_replay
 UPDATE main.runtime_effect_replay
              SET settlement_seq = ?3
              WHERE scope_id = ?1 AND replay_key = ?2
+=== main | effect::replay::ReplayStatements | effect_replay.select_group_commit_state
+SELECT group_key, commit_state FROM main.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
+=== main | effect::replay::ReplayStatements | effect_replay.select_child_commit_state
+SELECT commit_state, commit_seq FROM main.runtime_effect_replay
+             WHERE group_key = ?1 AND replay_key = ?2
+=== main | effect::replay::ReplayStatements | effect_replay.select_arbitration_by_key
+SELECT commit_state, commit_seq, group_key FROM main.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
+=== main | effect::replay::ReplayStatements | effect_replay.commit_child
+UPDATE main.runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+=== main | effect::replay::ReplayStatements | effect_replay.commit_ungrouped
+UPDATE main.runtime_effect_replay
+             SET commit_state = 'committed'
+             WHERE scope_id = ?1 AND replay_key = ?2 AND commit_state = 'pending'
+=== main | effect::replay::ReplayStatements | effect_replay.commit_child_final
+UPDATE main.runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = ?4, drain_input = ?5,
+                 updated_at_ms = ?7
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+               AND lease_owner_id = ?6
+=== main | effect::replay::ReplayStatements | effect_replay.select_child_drain
+SELECT commit_state, commit_seq, drain_input FROM main.runtime_effect_replay
+             WHERE group_key = ?1 AND replay_key = ?2
+=== main | effect::replay::ReplayStatements | effect_replay.cancel_commit_state
+UPDATE main.runtime_effect_replay
+             SET commit_state = 'cancel_decided'
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+=== main | effect::replay::ReplayStatements | effect_replay.settle_drained
+UPDATE main.runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'committed'
+=== main | effect::replay::ReplayStatements | effect_replay.settle_drained_final
+UPDATE main.runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = ?4,
+                 status = ?5, outcome_json = ?6, error_json = ?7,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = ?8
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'committed'
+=== main | effect::replay::ReplayStatements | effect_replay.has_undrained_lower_commit
+SELECT EXISTS(
+                 SELECT 1 FROM main.runtime_effect_replay
+                 WHERE group_key = ?1 AND commit_state = 'committed'
+                   AND commit_seq < ?2
+             )
+=== main | effect::replay::ReplayStatements | effect_replay.write_cancelled
+INSERT INTO main.runtime_effect_replay (
+                scope_id, session_id, replay_key, envelope_hash,
+                envelope_json, status, outcome_json, error_json, lease_owner_id,
+                lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+                commit_state, commit_seq, created_at_ms, updated_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, 'failed', NULL, ?6, NULL, NULL, 0, NULL, ?7, NULL, 'pending', NULL, ?8, ?8)
+             ON CONFLICT (scope_id, replay_key) DO UPDATE
+             SET status = 'failed', outcome_json = NULL, error_json = ?6,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = ?8
+             WHERE main.runtime_effect_replay.status = 'in_progress'
+=== main | effect::replay::ReplayStatements | effect_replay.touch_for_discharge
+UPDATE main.runtime_effect_replay
+             SET updated_at_ms = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
 === main | effect::replay::ReplayStatements | effect_replay.select_unsettled_children
-SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
-             FROM main.runtime_effect_replay
-             WHERE group_key = ?1 AND settlement_seq IS NULL
-             ORDER BY replay_key
+SELECT g.scope_id, c.position, c.replay_key, c.envelope_json, c.command_version, r.status, r.outcome_json, r.error_json, r.lease_expires_at_ms, r.commit_state, r.commit_seq
+             FROM main.runtime_effect_group_child c
+             JOIN main.runtime_effect_group g ON g.group_key = c.group_key
+             LEFT JOIN main.runtime_effect_replay r
+               ON r.scope_id = g.scope_id AND r.replay_key = c.replay_key
+             WHERE c.group_key = ?1 AND r.settlement_seq IS NULL
+             ORDER BY r.commit_seq IS NULL, r.commit_seq, c.position
 === main | effect::replay::ReplayStatements | effect_replay.select_settlement_by_rank
 SELECT settlement_seq, replay_key, status, outcome_json, error_json
              FROM main.runtime_effect_replay
              WHERE group_key = ?1 AND settlement_seq IS NOT NULL
              ORDER BY settlement_seq
              LIMIT 1 OFFSET ?2
+=== main | effect::replay::ReplayStatements | effect_replay.select_settlement_seq
+SELECT settlement_seq FROM main.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
 === main | effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM main.runtime_effect_replay WHERE session_id = ?1
 === main | effect::replay::ReplayStatements | effect_replay.delete_by_scope
 DELETE FROM main.runtime_effect_replay WHERE scope_id = ?1
 === main | effect::group::GroupStatements | effect_group.select_by_key
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    children, created_at_ms
+                    expected_children, created_at_ms
              FROM main.runtime_effect_group
              WHERE group_key = ?1
 === main | effect::group::GroupStatements | effect_group.bump_next_seq
@@ -61,6 +136,11 @@ UPDATE main.runtime_effect_group
              SET next_seq = next_seq + 1
              WHERE group_key = ?1
              RETURNING next_seq
+=== main | effect::group::GroupStatements | effect_group.bump_next_commit_seq
+UPDATE main.runtime_effect_group
+             SET next_commit_seq = next_commit_seq + 1
+             WHERE group_key = ?1
+             RETURNING next_commit_seq
 === main | effect::group::GroupStatements | effect_group.delete_by_session
 DELETE FROM main.runtime_effect_group WHERE session_id = ?1
 === main | effect::group::GroupStatements | effect_group.delete_by_scope
@@ -116,7 +196,7 @@ INSERT INTO main.effect_scope_retirements (
              ON CONFLICT (scope_id) DO NOTHING
 === main | sqlite::ReplaySqliteStatements | effect_replay.select_for_claim
 SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
-                lease_expires_at_ms, due_at_ms
+                lease_expires_at_ms, due_at_ms, commit_state, drain_input
              FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
 === main | sqlite::ReplaySqliteStatements | effect_replay.insert_claimed
@@ -124,9 +204,9 @@ INSERT INTO main.runtime_effect_replay (
                 scope_id, session_id, replay_key, envelope_hash,
                 envelope_json, status, outcome_json, error_json, lease_owner_id,
                 lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-                created_at_ms, updated_at_ms
+                commit_state, commit_seq, created_at_ms, updated_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, ?11, ?12)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, 'pending', NULL, ?11, ?12)
 === main | sqlite::ReplaySqliteStatements | effect_replay.finalize_terminal
 UPDATE main.runtime_effect_replay
              SET status = ?6,
@@ -158,9 +238,9 @@ UPDATE main.runtime_effect_replay
 === main | sqlite::GroupSqliteStatements | effect_group.insert_new
 INSERT INTO main.runtime_effect_group (
                 group_key, scope_id, session_id, wake, loser_disposition,
-                children, next_seq, created_at_ms
+                expected_children, next_seq, next_commit_seq, created_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING
 === main | sqlite::ScopeRetirementSqliteStatements | effect_scope_retirement.insert_fence
 INSERT INTO main.effect_scope_retirements (
@@ -215,7 +295,7 @@ SELECT EXISTS(
              ) OR EXISTS(
                 SELECT 1 FROM effect_journal.runtime_effect_group AS grp
                 WHERE grp.scope_id = ?1
-                  AND grp.children > (
+                  AND grp.expected_children > (
                       SELECT COUNT(*) FROM effect_journal.runtime_effect_replay AS child
                       WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
                   )
@@ -240,24 +320,99 @@ UPDATE effect_journal.runtime_effect_replay
 UPDATE effect_journal.runtime_effect_replay
              SET settlement_seq = ?3
              WHERE scope_id = ?1 AND replay_key = ?2
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.select_group_commit_state
+SELECT group_key, commit_state FROM effect_journal.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.select_child_commit_state
+SELECT commit_state, commit_seq FROM effect_journal.runtime_effect_replay
+             WHERE group_key = ?1 AND replay_key = ?2
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.select_arbitration_by_key
+SELECT commit_state, commit_seq, group_key FROM effect_journal.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.commit_child
+UPDATE effect_journal.runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.commit_ungrouped
+UPDATE effect_journal.runtime_effect_replay
+             SET commit_state = 'committed'
+             WHERE scope_id = ?1 AND replay_key = ?2 AND commit_state = 'pending'
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.commit_child_final
+UPDATE effect_journal.runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = ?4, drain_input = ?5,
+                 updated_at_ms = ?7
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+               AND lease_owner_id = ?6
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.select_child_drain
+SELECT commit_state, commit_seq, drain_input FROM effect_journal.runtime_effect_replay
+             WHERE group_key = ?1 AND replay_key = ?2
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.cancel_commit_state
+UPDATE effect_journal.runtime_effect_replay
+             SET commit_state = 'cancel_decided'
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.settle_drained
+UPDATE effect_journal.runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'committed'
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.settle_drained_final
+UPDATE effect_journal.runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = ?4,
+                 status = ?5, outcome_json = ?6, error_json = ?7,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = ?8
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'committed'
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.has_undrained_lower_commit
+SELECT EXISTS(
+                 SELECT 1 FROM effect_journal.runtime_effect_replay
+                 WHERE group_key = ?1 AND commit_state = 'committed'
+                   AND commit_seq < ?2
+             )
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.write_cancelled
+INSERT INTO effect_journal.runtime_effect_replay (
+                scope_id, session_id, replay_key, envelope_hash,
+                envelope_json, status, outcome_json, error_json, lease_owner_id,
+                lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+                commit_state, commit_seq, created_at_ms, updated_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, 'failed', NULL, ?6, NULL, NULL, 0, NULL, ?7, NULL, 'pending', NULL, ?8, ?8)
+             ON CONFLICT (scope_id, replay_key) DO UPDATE
+             SET status = 'failed', outcome_json = NULL, error_json = ?6,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = ?8
+             WHERE effect_journal.runtime_effect_replay.status = 'in_progress'
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.touch_for_discharge
+UPDATE effect_journal.runtime_effect_replay
+             SET updated_at_ms = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_unsettled_children
-SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
-             FROM effect_journal.runtime_effect_replay
-             WHERE group_key = ?1 AND settlement_seq IS NULL
-             ORDER BY replay_key
+SELECT g.scope_id, c.position, c.replay_key, c.envelope_json, c.command_version, r.status, r.outcome_json, r.error_json, r.lease_expires_at_ms, r.commit_state, r.commit_seq
+             FROM effect_journal.runtime_effect_group_child c
+             JOIN effect_journal.runtime_effect_group g ON g.group_key = c.group_key
+             LEFT JOIN effect_journal.runtime_effect_replay r
+               ON r.scope_id = g.scope_id AND r.replay_key = c.replay_key
+             WHERE c.group_key = ?1 AND r.settlement_seq IS NULL
+             ORDER BY r.commit_seq IS NULL, r.commit_seq, c.position
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_settlement_by_rank
 SELECT settlement_seq, replay_key, status, outcome_json, error_json
              FROM effect_journal.runtime_effect_replay
              WHERE group_key = ?1 AND settlement_seq IS NOT NULL
              ORDER BY settlement_seq
              LIMIT 1 OFFSET ?2
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.select_settlement_seq
+SELECT settlement_seq FROM effect_journal.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
 === effect_journal | effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM effect_journal.runtime_effect_replay WHERE session_id = ?1
 === effect_journal | effect::replay::ReplayStatements | effect_replay.delete_by_scope
 DELETE FROM effect_journal.runtime_effect_replay WHERE scope_id = ?1
 === effect_journal | effect::group::GroupStatements | effect_group.select_by_key
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    children, created_at_ms
+                    expected_children, created_at_ms
              FROM effect_journal.runtime_effect_group
              WHERE group_key = ?1
 === effect_journal | effect::group::GroupStatements | effect_group.bump_next_seq
@@ -265,6 +420,11 @@ UPDATE effect_journal.runtime_effect_group
              SET next_seq = next_seq + 1
              WHERE group_key = ?1
              RETURNING next_seq
+=== effect_journal | effect::group::GroupStatements | effect_group.bump_next_commit_seq
+UPDATE effect_journal.runtime_effect_group
+             SET next_commit_seq = next_commit_seq + 1
+             WHERE group_key = ?1
+             RETURNING next_commit_seq
 === effect_journal | effect::group::GroupStatements | effect_group.delete_by_session
 DELETE FROM effect_journal.runtime_effect_group WHERE session_id = ?1
 === effect_journal | effect::group::GroupStatements | effect_group.delete_by_scope
@@ -320,7 +480,7 @@ INSERT INTO effect_journal.effect_scope_retirements (
              ON CONFLICT (scope_id) DO NOTHING
 === effect_journal | sqlite::ReplaySqliteStatements | effect_replay.select_for_claim
 SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
-                lease_expires_at_ms, due_at_ms
+                lease_expires_at_ms, due_at_ms, commit_state, drain_input
              FROM effect_journal.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
 === effect_journal | sqlite::ReplaySqliteStatements | effect_replay.insert_claimed
@@ -328,9 +488,9 @@ INSERT INTO effect_journal.runtime_effect_replay (
                 scope_id, session_id, replay_key, envelope_hash,
                 envelope_json, status, outcome_json, error_json, lease_owner_id,
                 lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-                created_at_ms, updated_at_ms
+                commit_state, commit_seq, created_at_ms, updated_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, ?11, ?12)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, 'pending', NULL, ?11, ?12)
 === effect_journal | sqlite::ReplaySqliteStatements | effect_replay.finalize_terminal
 UPDATE effect_journal.runtime_effect_replay
              SET status = ?6,
@@ -362,9 +522,9 @@ UPDATE effect_journal.runtime_effect_replay
 === effect_journal | sqlite::GroupSqliteStatements | effect_group.insert_new
 INSERT INTO effect_journal.runtime_effect_group (
                 group_key, scope_id, session_id, wake, loser_disposition,
-                children, next_seq, created_at_ms
+                expected_children, next_seq, next_commit_seq, created_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING
 === effect_journal | sqlite::ScopeRetirementSqliteStatements | effect_scope_retirement.insert_fence
 INSERT INTO effect_journal.effect_scope_retirements (
@@ -419,7 +579,7 @@ SELECT EXISTS(
              ) OR EXISTS(
                 SELECT 1 FROM process_registry.runtime_effect_group AS grp
                 WHERE grp.scope_id = ?1
-                  AND grp.children > (
+                  AND grp.expected_children > (
                       SELECT COUNT(*) FROM process_registry.runtime_effect_replay AS child
                       WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
                   )
@@ -444,24 +604,99 @@ UPDATE process_registry.runtime_effect_replay
 UPDATE process_registry.runtime_effect_replay
              SET settlement_seq = ?3
              WHERE scope_id = ?1 AND replay_key = ?2
+=== process_registry | effect::replay::ReplayStatements | effect_replay.select_group_commit_state
+SELECT group_key, commit_state FROM process_registry.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
+=== process_registry | effect::replay::ReplayStatements | effect_replay.select_child_commit_state
+SELECT commit_state, commit_seq FROM process_registry.runtime_effect_replay
+             WHERE group_key = ?1 AND replay_key = ?2
+=== process_registry | effect::replay::ReplayStatements | effect_replay.select_arbitration_by_key
+SELECT commit_state, commit_seq, group_key FROM process_registry.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
+=== process_registry | effect::replay::ReplayStatements | effect_replay.commit_child
+UPDATE process_registry.runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+=== process_registry | effect::replay::ReplayStatements | effect_replay.commit_ungrouped
+UPDATE process_registry.runtime_effect_replay
+             SET commit_state = 'committed'
+             WHERE scope_id = ?1 AND replay_key = ?2 AND commit_state = 'pending'
+=== process_registry | effect::replay::ReplayStatements | effect_replay.commit_child_final
+UPDATE process_registry.runtime_effect_replay
+             SET commit_state = 'committed', commit_seq = ?4, drain_input = ?5,
+                 updated_at_ms = ?7
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+               AND lease_owner_id = ?6
+=== process_registry | effect::replay::ReplayStatements | effect_replay.select_child_drain
+SELECT commit_state, commit_seq, drain_input FROM process_registry.runtime_effect_replay
+             WHERE group_key = ?1 AND replay_key = ?2
+=== process_registry | effect::replay::ReplayStatements | effect_replay.cancel_commit_state
+UPDATE process_registry.runtime_effect_replay
+             SET commit_state = 'cancel_decided'
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'pending'
+=== process_registry | effect::replay::ReplayStatements | effect_replay.settle_drained
+UPDATE process_registry.runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'committed'
+=== process_registry | effect::replay::ReplayStatements | effect_replay.settle_drained_final
+UPDATE process_registry.runtime_effect_replay
+             SET commit_state = 'drained', settlement_seq = ?4,
+                 status = ?5, outcome_json = ?6, error_json = ?7,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = ?8
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
+               AND commit_state = 'committed'
+=== process_registry | effect::replay::ReplayStatements | effect_replay.has_undrained_lower_commit
+SELECT EXISTS(
+                 SELECT 1 FROM process_registry.runtime_effect_replay
+                 WHERE group_key = ?1 AND commit_state = 'committed'
+                   AND commit_seq < ?2
+             )
+=== process_registry | effect::replay::ReplayStatements | effect_replay.write_cancelled
+INSERT INTO process_registry.runtime_effect_replay (
+                scope_id, session_id, replay_key, envelope_hash,
+                envelope_json, status, outcome_json, error_json, lease_owner_id,
+                lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+                commit_state, commit_seq, created_at_ms, updated_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, 'failed', NULL, ?6, NULL, NULL, 0, NULL, ?7, NULL, 'pending', NULL, ?8, ?8)
+             ON CONFLICT (scope_id, replay_key) DO UPDATE
+             SET status = 'failed', outcome_json = NULL, error_json = ?6,
+                 lease_owner_id = NULL, lease_token = NULL,
+                 lease_expires_at_ms = 0, due_at_ms = NULL, updated_at_ms = ?8
+             WHERE process_registry.runtime_effect_replay.status = 'in_progress'
+=== process_registry | effect::replay::ReplayStatements | effect_replay.touch_for_discharge
+UPDATE process_registry.runtime_effect_replay
+             SET updated_at_ms = ?4
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_unsettled_children
-SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
-             FROM process_registry.runtime_effect_replay
-             WHERE group_key = ?1 AND settlement_seq IS NULL
-             ORDER BY replay_key
+SELECT g.scope_id, c.position, c.replay_key, c.envelope_json, c.command_version, r.status, r.outcome_json, r.error_json, r.lease_expires_at_ms, r.commit_state, r.commit_seq
+             FROM process_registry.runtime_effect_group_child c
+             JOIN process_registry.runtime_effect_group g ON g.group_key = c.group_key
+             LEFT JOIN process_registry.runtime_effect_replay r
+               ON r.scope_id = g.scope_id AND r.replay_key = c.replay_key
+             WHERE c.group_key = ?1 AND r.settlement_seq IS NULL
+             ORDER BY r.commit_seq IS NULL, r.commit_seq, c.position
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_settlement_by_rank
 SELECT settlement_seq, replay_key, status, outcome_json, error_json
              FROM process_registry.runtime_effect_replay
              WHERE group_key = ?1 AND settlement_seq IS NOT NULL
              ORDER BY settlement_seq
              LIMIT 1 OFFSET ?2
+=== process_registry | effect::replay::ReplayStatements | effect_replay.select_settlement_seq
+SELECT settlement_seq FROM process_registry.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
 === process_registry | effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM process_registry.runtime_effect_replay WHERE session_id = ?1
 === process_registry | effect::replay::ReplayStatements | effect_replay.delete_by_scope
 DELETE FROM process_registry.runtime_effect_replay WHERE scope_id = ?1
 === process_registry | effect::group::GroupStatements | effect_group.select_by_key
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    children, created_at_ms
+                    expected_children, created_at_ms
              FROM process_registry.runtime_effect_group
              WHERE group_key = ?1
 === process_registry | effect::group::GroupStatements | effect_group.bump_next_seq
@@ -469,6 +704,11 @@ UPDATE process_registry.runtime_effect_group
              SET next_seq = next_seq + 1
              WHERE group_key = ?1
              RETURNING next_seq
+=== process_registry | effect::group::GroupStatements | effect_group.bump_next_commit_seq
+UPDATE process_registry.runtime_effect_group
+             SET next_commit_seq = next_commit_seq + 1
+             WHERE group_key = ?1
+             RETURNING next_commit_seq
 === process_registry | effect::group::GroupStatements | effect_group.delete_by_session
 DELETE FROM process_registry.runtime_effect_group WHERE session_id = ?1
 === process_registry | effect::group::GroupStatements | effect_group.delete_by_scope
@@ -524,7 +764,7 @@ INSERT INTO process_registry.effect_scope_retirements (
              ON CONFLICT (scope_id) DO NOTHING
 === process_registry | sqlite::ReplaySqliteStatements | effect_replay.select_for_claim
 SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
-                lease_expires_at_ms, due_at_ms
+                lease_expires_at_ms, due_at_ms, commit_state, drain_input
              FROM process_registry.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
 === process_registry | sqlite::ReplaySqliteStatements | effect_replay.insert_claimed
@@ -532,9 +772,9 @@ INSERT INTO process_registry.runtime_effect_replay (
                 scope_id, session_id, replay_key, envelope_hash,
                 envelope_json, status, outcome_json, error_json, lease_owner_id,
                 lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-                created_at_ms, updated_at_ms
+                commit_state, commit_seq, created_at_ms, updated_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, ?11, ?12)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, 'pending', NULL, ?11, ?12)
 === process_registry | sqlite::ReplaySqliteStatements | effect_replay.finalize_terminal
 UPDATE process_registry.runtime_effect_replay
              SET status = ?6,
@@ -566,9 +806,9 @@ UPDATE process_registry.runtime_effect_replay
 === process_registry | sqlite::GroupSqliteStatements | effect_group.insert_new
 INSERT INTO process_registry.runtime_effect_group (
                 group_key, scope_id, session_id, wake, loser_disposition,
-                children, next_seq, created_at_ms
+                expected_children, next_seq, next_commit_seq, created_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)
              ON CONFLICT (group_key) DO NOTHING
 === process_registry | sqlite::ScopeRetirementSqliteStatements | effect_scope_retirement.insert_fence
 INSERT INTO process_registry.effect_scope_retirements (

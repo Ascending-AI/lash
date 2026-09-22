@@ -429,6 +429,7 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
     ("trigger_occurrences", TRIGGERS),
     ("trigger_subscriptions", TRIGGERS),
     ("runtime_effect_group", EFFECTS),
+    ("runtime_effect_group_child", EFFECTS),
     ("runtime_effect_replay", EFFECTS),
     ("effect_scope_retirements", EFFECTS),
     ("tool_intent_submissions", EFFECTS),

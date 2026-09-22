@@ -63,6 +63,7 @@ pub use group::{
 pub use group_drain::{
     ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
 };
+pub use group_journal::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
 };

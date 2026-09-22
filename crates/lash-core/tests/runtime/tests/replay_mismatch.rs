@@ -93,6 +93,26 @@ impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.rejecting.close_effect_group(handle, disposition).await
     }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.rejecting.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.rejecting
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
 }
 
 #[tokio::test]

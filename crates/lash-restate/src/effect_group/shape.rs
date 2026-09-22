@@ -15,7 +15,6 @@ use restate_sdk::errors::TerminalError;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupShape {
-    pub children: usize,
     pub wake: GroupWakePolicy,
     pub loser_disposition: LoserPolicy,
     pub replay_keys: Vec<String>,
@@ -65,7 +64,6 @@ impl EffectGroupShape {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
-            children: group.children().len(),
             wake: group.wake(),
             loser_disposition: group.loser_disposition(),
             replay_keys,
@@ -74,35 +72,47 @@ impl EffectGroupShape {
         })
     }
 
+    /// The declared arity: the write-time expectation, derived from the
+    /// retained replay keys rather than stored as a second fact — the SQL
+    /// tiers' `expected_children` is the same answer spelled as a column.
+    pub(crate) fn children(&self) -> usize {
+        self.replay_keys.len()
+    }
+
     /// The invariant `from_group` establishes, re-checked on the way in.
     ///
-    /// `children` and `replay_keys` are two public fields of a public type, so
-    /// a shape that arrives over the wire carries whatever the caller put in
-    /// it. Every later reader pairs a position drawn from `children` with the
-    /// replay key at that position; a shape whose two halves disagree is a
-    /// caller defect that can never become valid by retrying, so it is refused
-    /// once, terminally, at the boundary rather than surviving into stored
-    /// state where a later handler would meet it.
+    /// `replay_keys` and `membership` are two public fields of a public type,
+    /// so a shape that arrives over the wire carries whatever the caller put
+    /// in it. Every later reader pairs a position drawn from the retained
+    /// list with the replay key at that position; a shape whose two halves
+    /// disagree is a caller defect that can never become valid by retrying,
+    /// so it is refused once, terminally, at the boundary rather than
+    /// surviving into stored state where a later handler would meet it.
     pub(crate) fn validate_wire(&self) -> Result<(), TerminalError> {
-        if self.children != self.replay_keys.len() {
-            return Err(TerminalError::new(format!(
-                "effect-group shape declares {} children but carries {} replay keys",
-                self.children,
-                self.replay_keys.len()
-            )));
-        }
         // Every disagreement, empty included: a shape that cannot rebuild its
         // own children is a caller defect no retry fixes, refused once here
         // rather than left to a handler that would rebuild the wrong number.
-        if self.membership.len() != self.children {
+        if self.membership.len() != self.replay_keys.len() {
             return Err(TerminalError::new(format!(
                 "effect-group shape declares {} children but retains {} accepted \
                  requests",
-                self.children,
+                self.replay_keys.len(),
                 self.membership.len()
             )));
         }
         Ok(())
+    }
+
+    /// The reopen fence, matching the shared `fence_reopen` contract the SQL
+    /// tiers apply: arity, wake rule, and declared loser disposition are the
+    /// journaled facts a reopen may not restate. `replay_keys` and
+    /// `membership` are deliberately absent — they are the *retained* state,
+    /// and a reopen is exactly the caller offering children that may disagree
+    /// with it; the recorded membership wins (ADR 0099 §3).
+    pub(crate) fn fences_equivalent(&self, other: &Self) -> bool {
+        self.replay_keys.len() == other.replay_keys.len()
+            && self.wake == other.wake
+            && self.loser_disposition == other.loser_disposition
     }
 
     /// The replay key of a child position, as a terminal error when the shape
@@ -114,7 +124,7 @@ impl EffectGroupShape {
             .ok_or_else(|| {
                 TerminalError::new(format!(
                     "effect-group shape has no replay key for child {position} of {}",
-                    self.children
+                    self.replay_keys.len()
                 ))
             })
     }

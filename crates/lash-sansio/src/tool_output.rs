@@ -120,6 +120,10 @@ pub enum ToolIntentRefusalReason {
         code: String,
         message: String,
     },
+    /// The group child whose emission minted this intent is cancel-decided:
+    /// ADR 0099 §4 forbids new semantic admission under a cancelled
+    /// invocation, so the intent is refused before any of its commands run.
+    MintingGroupChildCancelled,
 }
 
 impl ToolIntentRefusalReason {
@@ -133,6 +137,7 @@ impl ToolIntentRefusalReason {
             Self::PerKindBudgetExceeded { .. } => "per_kind_budget_exceeded",
             Self::SessionMismatch { .. } => "session_mismatch",
             Self::CommandFailed { .. } => "command_failed",
+            Self::MintingGroupChildCancelled => "minting_group_child_cancelled",
         }
     }
 }

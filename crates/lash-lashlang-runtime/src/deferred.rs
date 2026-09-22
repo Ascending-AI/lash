@@ -548,6 +548,18 @@ mod tests {
                 "FaultJournalController",
             ))
         }
+
+        async fn commit_group_child_final(
+            &self,
+            _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        ) -> Result<
+            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+            lash_core::RuntimeEffectControllerError,
+        > {
+            Ok(
+                lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
+            )
+        }
     }
 
     #[test]

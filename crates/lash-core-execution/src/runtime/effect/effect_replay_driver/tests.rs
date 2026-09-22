@@ -75,6 +75,7 @@ fn request() -> EffectClaimRequest {
         lease_ttl_ms: TTL,
         sleep: None,
         group_key: None,
+        minting_effect: None,
         strict_replay: false,
     }
 }
@@ -98,6 +99,8 @@ fn row_with_columns(
         ),
         lease_expires_at_ms: 0,
         due_at_ms: None,
+        commit_state: None,
+        drain_input: None,
     }
 }
 
@@ -388,6 +391,76 @@ fn an_unknown_status_is_corrupt_rather_than_claimable() {
 }
 
 #[test]
+fn a_boundary_committed_row_is_taken_over_so_its_drain_resumes() {
+    let mut stored = row("in_progress");
+    stored.commit_state = Some(EffectCommitState::Committed);
+    stored.drain_input = Some("{\"intents\":[]}".to_string());
+    assert_eq!(
+        decide_effect_claim(Some(&stored), &request(), NOW),
+        EffectClaimDecision::TakeOver(EffectLeaseStamp {
+            lease_expires_at_ms: NOW + TTL,
+            due_at_ms: None,
+            now_ms: NOW,
+        }),
+        "a committed-but-undrained child must be reclaimable: the executor \
+         re-runs, the journaled inner rows replay, and settle lands \
+         AlreadyCommitted instead of re-deciding"
+    );
+}
+
+#[test]
+fn a_committed_row_without_drain_input_is_corrupt_not_resumable() {
+    let mut stored = row("in_progress");
+    stored.commit_state = Some(EffectCommitState::Committed);
+    assert_eq!(
+        decide_effect_claim(Some(&stored), &request(), NOW),
+        EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
+            defect: EffectRowDefect::MissingDrainInput,
+        }),
+        "a committed row with nothing to resume is corruption, not a \
+         takeover candidate that would silently re-execute"
+    );
+}
+
+#[test]
+fn a_drained_or_cancel_decided_row_still_in_progress_is_corrupt() {
+    for (commit_state, column) in [
+        (EffectCommitState::Drained, "drained"),
+        (EffectCommitState::CancelDecided, "cancel_decided"),
+    ] {
+        let mut stored = row("in_progress");
+        stored.commit_state = Some(commit_state);
+        stored.drain_input = Some("{\"intents\":[]}".to_string());
+        assert_eq!(
+            decide_effect_claim(Some(&stored), &request(), NOW),
+            EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
+                defect: EffectRowDefect::CommitStateWithoutTerminal {
+                    commit_state: column.to_string(),
+                },
+            }),
+            "`{column}` is a terminal commit state: an `in_progress` status \
+             contradicts it and must not be retaken"
+        );
+    }
+}
+
+#[test]
+fn a_pending_commit_state_stays_an_ordinary_takeover() {
+    let mut stored = row("in_progress");
+    stored.commit_state = Some(EffectCommitState::Pending);
+    assert_eq!(
+        decide_effect_claim(Some(&stored), &request(), NOW),
+        EffectClaimDecision::TakeOver(EffectLeaseStamp {
+            lease_expires_at_ms: NOW + TTL,
+            due_at_ms: None,
+            now_ms: NOW,
+        }),
+        "pending is the minted state, not a §4 decision: an expired lease \
+         on it is claimed like any abandoned row"
+    );
+}
+
+#[test]
 fn a_live_lease_is_busy_and_an_expired_one_is_taken_over() {
     let mut live = row("in_progress");
     live.lease_expires_at_ms = NOW + 1;
@@ -596,6 +669,18 @@ fn row_defects_render_the_messages_hosts_already_see() {
     assert_eq!(
         EffectRowDefect::VanishedUnderClaim.message(),
         "effect replay insert conflicted but no row could be selected"
+    );
+    assert_eq!(
+        EffectRowDefect::MissingDrainInput.message(),
+        "committed runtime effect row is missing drain_input"
+    );
+    assert_eq!(
+        EffectRowDefect::CommitStateWithoutTerminal {
+            commit_state: "drained".to_string(),
+        }
+        .message(),
+        "runtime effect row is `drained` but still `in_progress`; a decided \
+         or drained row journals its terminal in the same write"
     );
 }
 

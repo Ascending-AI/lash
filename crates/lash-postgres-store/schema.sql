@@ -564,9 +564,15 @@ CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
     due_at_ms BIGINT,
     group_key TEXT,
     settlement_seq BIGINT,
+    commit_state TEXT NOT NULL DEFAULT 'pending',
+    commit_seq BIGINT,
+    drain_input TEXT,
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
     CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
+    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
+    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
+    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
     PRIMARY KEY (scope_id, replay_key)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
@@ -579,28 +585,34 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
     ON lash_runtime_effect_replay(group_key, settlement_seq)
     WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
--- The loser drain's queue read: one group's children that hold no rank yet. The
--- predicate keeps the index to exactly the rows a drain can act on, so it
--- shrinks as a group settles and holds nothing at all for a drained one.
-CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_group_unsettled
-    ON lash_runtime_effect_replay(group_key, replay_key)
-    WHERE group_key IS NOT NULL AND settlement_seq IS NULL;
-
+-- One commit position per child, per group: the §4 linearization point's
+-- backstop, the same role the settlement-seq unique index plays for ranks.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_commit_seq
+    ON lash_runtime_effect_replay(group_key, commit_seq)
+    WHERE commit_seq IS NOT NULL;
 -- One row per open effect group. `next_seq` is the group's settlement counter:
--- a finalizing child bumps it inside its own fenced transaction, which is the
--- only allocator that cannot lose an update the way `MAX(settlement_seq) + 1`
--- can under concurrent finalize.
+-- a discharging child bumps it inside its own transaction, which is the only
+-- allocator that cannot lose an update the way `MAX(settlement_seq) + 1`
+-- can under concurrent discharge. `next_commit_seq` is the §4 twin: the
+-- final-commit counter a winning final record bumps at the linearization
+-- point (ADR 0099). `expected_children` is the write-time arity the opener
+-- declared; actual cardinality is COUNT of membership rows. `lifecycle` is
+-- the enum-per-phase column — live today; closing/settled are FIG-3410's
+-- writes on this column, not new columns.
 CREATE TABLE IF NOT EXISTS lash_runtime_effect_group (
     group_key TEXT PRIMARY KEY,
     scope_id TEXT NOT NULL,
     session_id TEXT,
     wake TEXT NOT NULL,
     loser_disposition TEXT NOT NULL,
-    children BIGINT NOT NULL,
+    expected_children BIGINT NOT NULL,
     next_seq BIGINT NOT NULL DEFAULT 0,
+    next_commit_seq BIGINT NOT NULL DEFAULT 0,
+    lifecycle JSONB NOT NULL DEFAULT '{"type":"live"}',
     created_at_ms BIGINT NOT NULL,
     CONSTRAINT ck_runtime_effect_group_wake CHECK (wake IN ('first', 'first_success', 'all')),
-    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK (loser_disposition IN ('run_to_completion', 'cancel'))
+    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK (loser_disposition IN ('run_to_completion', 'cancel')),
+    CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (lifecycle->>'type' IN ('live', 'closing', 'settled'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_session
     ON lash_runtime_effect_group(session_id);
@@ -608,18 +620,27 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
     ON lash_runtime_effect_group(scope_id);
 
 -- One row per accepted child of a group, carrying the request that
--- reconstructs it (ADR 0099 section 3). Written with the group row in one
--- transaction, children first (ADR 0065 N2), so a recorded group always has
--- discoverable complete input. No scope_id: the group row owns that fact.
+-- reconstructs it (ADR 0099 section 3). Retained input only: the section 4/5
+-- arbitration state lives on the replay row as commit_state/commit_seq,
+-- because the CAS that decides a child runs under the replay row's lock and
+-- must not reach a second row to win. `command_version` is the command
+-- encoding the retained envelope was minted under, checked at decode.
+-- Written with the group row in one transaction, children first
+-- (ADR 0065 N2), so a recorded group always has discoverable complete input.
+-- No scope_id: the group row owns that fact.
 CREATE TABLE IF NOT EXISTS lash_runtime_effect_group_child (
     group_key        TEXT NOT NULL,
     position         BIGINT NOT NULL,
     replay_key       TEXT NOT NULL,
     envelope_json    TEXT NOT NULL,
-    request_version  BIGINT NOT NULL,
+    command_version  BIGINT NOT NULL,
     created_at_ms    BIGINT NOT NULL,
     PRIMARY KEY (group_key, position)
 );
+-- Reopens, drains and the unsettled-children join all reach a membership row
+-- by (group_key, replay_key), which the position primary key does not serve.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_group_child_replay_key
+    ON lash_runtime_effect_group_child(group_key, replay_key);
 
 CREATE TABLE IF NOT EXISTS lash_await_event_meta (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
@@ -798,7 +819,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 109)
+VALUES ('lash-postgres-store', 110)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (
