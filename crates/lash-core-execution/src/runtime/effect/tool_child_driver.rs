@@ -633,8 +633,9 @@ pub(crate) async fn run_tool_child<'run>(
     // reconstruct completely is a child it would run under partial authority.
     request.validate()?;
 
+    let process_env_store = host.process_env_store.lock_recover().clone();
     let execution_env_spec = crate::runtime::load_process_execution_env(
-        host.process_env_store.lock_recover().as_ref(),
+        process_env_store.as_ref(),
         &request.execution_env,
     )
     .await
