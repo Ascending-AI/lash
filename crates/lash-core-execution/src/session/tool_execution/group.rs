@@ -332,16 +332,23 @@ impl RuntimeExecutionContext<'_> {
     /// A `RuntimeEffectGroupAwaitCancelled` await means the turn was
     /// cancelled: consumption stops, every unsettled position is filled with
     /// the batch surface's cancelled reply and appended to the settlement
-    /// order in position order, and the group is deliberately **not** closed —
-    /// closing at turn cancel is FIG-3410's lifecycle work (ADR 0099 §7).
-    /// Children keep running under host ownership and cancel cooperatively
-    /// through the live opener's token.
+    /// order in position order, and the group is deliberately **not** closed
+    /// here — closing at turn end/cancel/process terminal is the opener's
+    /// lifecycle obligation (ADR 0099 §7), driven through the host-owned
+    /// finalization driver FIG-3410 landed and its `OpenerFinalizationSteps`;
+    /// wiring the opener's real implementation — whose
+    /// `commit_outcome_and_accounting` is FIG-3411 step 2, "incorporate every
+    /// settled rank" — is PR C's. Children keep running under host ownership
+    /// and cancel cooperatively through the live opener's token.
     ///
     /// On clean exhaustion the group is closed under the declared
-    /// `RunToCompletion` disposition to release consumer interest; a close
-    /// error is logged rather than failing the batch, because close is
-    /// retryable by the trait contract and the settlements are already
-    /// consumed.
+    /// `RunToCompletion` disposition to release consumer interest: the close
+    /// CASes the journaled `Live → Closing` fact and returns without waiting —
+    /// finalization is host-owned and cursor-resumable — and it runs against
+    /// `GroupOnlyFinalization`, so a consumer-only close owes no opener steps.
+    /// A close error is logged rather than failing the batch, because close is
+    /// idempotent and retryable by the trait contract and the settlements are
+    /// already consumed.
     pub(crate) async fn consume_all_tool_child_settlements(
         &self,
         mut handle: crate::EffectGroupHandle,
