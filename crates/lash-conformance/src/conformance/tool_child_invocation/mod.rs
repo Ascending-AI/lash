@@ -1036,8 +1036,9 @@ impl IntentSink {
                     return;
                 }
             }
-            self.blocked.lock_recover().insert(call_id.to_string());
-            self.changed.notify_waiters();
+            if self.blocked.lock_recover().insert(call_id.to_string()) {
+                self.changed.notify_waiters();
+            }
             notified.await;
         }
     }
