@@ -57,19 +57,19 @@
 //!
 //! * Under
 //!   [`LoserPolicy::Cancel`](super::super::group::LoserPolicy::Cancel),
-//!   a close cancels the children this process is running and each of them
-//!   journals its own cancellation terminal through its own fence. The drain
-//!   never touches a `Cancel` group: a terminal for a child it is not running is
-//!   a terminal it would have to invent, and a cancellation the effect never saw
-//!   is a lie at a rank a real settlement would have taken. It reports such
-//!   children as declared-cancelled and leaves them.
+//!   a close journals the cancel decision itself: every outstanding child is a
+//!   loser the moment the group closes, so the close writes the cancelled
+//!   terminal and its rank through the membership row's decision CAS — the
+//!   same linearization point a child's own final record races (ADR 0099 §4).
+//!   The in-process cancellation token still fires, to stop work the decision
+//!   has already made unrecordable, and a child whose final beat the decision
+//!   keeps its committed terminal. Children of a `Cancel` group whose process
+//!   died between open and close are decided by the drain, which writes the
+//!   identical terminal from the retained membership — the decision is a
+//!   journal write, not a signal a dead process failed to receive.
 //! * Under `RunToCompletion` the drain is the executor of last resort, and the
 //!   disposition it applies is the one journaled on the group row at open. That
 //!   is why the disposition is durable: the drain never invents one.
-//!
-//! The residual is therefore narrow and named: children of a `Cancel` group
-//! whose process died between open and close stay `in_progress` until their
-//! rows are retired with the rest of the group's journal.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -93,7 +93,7 @@ impl EffectGroupRecordAccessor for EffectGroupRecord {
     }
 
     fn children(&self) -> usize {
-        self.children
+        self.expected_children
     }
 
     fn wake(&self) -> GroupWakePolicy {
@@ -166,11 +166,14 @@ pub(super) struct DurableEffectGroups {
 
 /// One group this process has open.
 struct OpenGroup {
-    /// The replay key at each position, in child order. The journal names a
-    /// settled child by `replay_key`; the contract reports it by position, and
-    /// this is the map between them — held rather than stored, because the
-    /// caller that opened the group is the party that knows it.
-    replay_keys: Vec<String>,
+    /// The child identity at each position, in child order. The journal names
+    /// a settled child by `replay_key`; the contract reports it by position,
+    /// and this is the map between them — held rather than stored, because the
+    /// caller that opened the group is the party that knows it. The canonical
+    /// envelope and its hash ride along because a `Cancel` close owes each
+    /// undecided child a `decide_cancel`, and the decision's insert path binds
+    /// the pair the claim would have written.
+    children: Vec<OpenGroupChild>,
     /// Fired by a close that resolves to [`LoserPolicy::Cancel`]. Children
     /// take child tokens, so cancelling the group cancels exactly the children
     /// this process is still running.
@@ -196,6 +199,17 @@ struct OpenGroupState {
     /// tightened.
     effective: LoserPolicy,
     closed: bool,
+}
+
+/// One child's durable identity as this process holds it.
+struct OpenGroupChild {
+    replay_key: String,
+    /// The canonical envelope `capture` builds over the accepted envelope —
+    /// the wire form the child's claim row records, and what a `decide_cancel`
+    /// insert writes for a child that was never claimed.
+    envelope_json: String,
+    /// The hash inside `envelope_json`.
+    envelope_hash: String,
 }
 
 impl DurableEffectGroups {
@@ -333,7 +347,8 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         let prepared = if self.groups.get(group.group_key()).is_some() {
             None
         } else {
-            Some(self.resolve_group_children(&group).await?)
+            let children = child_identities_of(&group)?;
+            Some((children, self.resolve_group_children(&group).await?))
         };
         let record = EffectGroupRecord::from_group(
             &group,
@@ -347,7 +362,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         let offered = accepted_membership(&group, self.clock.timestamp_ms())?;
         let persisted = self.row_store.open_group(&record, &offered).await?;
         fence_reopen(&record, &persisted)?;
-        let Some(offered_executors) = prepared else {
+        let Some((offered_children, offered_executors)) = prepared else {
             // Already running here. The durable fence above has judged the
             // shape, so there is nothing left to check and nothing to dispatch.
             return Ok(handle);
@@ -371,71 +386,41 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             .row_store
             .read_group_membership(group.group_key())
             .await?;
-        // The retained bytes are the evidence an offered runner must match
-        // before it may run a child: a replay key is the child's durable
-        // identity, not its request's, and two envelopes can share a key while
-        // carrying different recorded authority.
-        let retained_envelopes: HashMap<String, String> = retained
-            .iter()
-            .map(|child| (child.replay_key.clone(), child.envelope_json.clone()))
-            .collect();
-        // The offered runners, keyed by replay key and carrying the exact
-        // envelope each was resolved against, so the dispatch below can tell
-        // "same replay key" from "same recorded authority". On a first open
-        // the retained rows are these same envelopes serialized, and an honest
-        // reopen that re-presents the accepted children matches for the same
-        // reason — so a matching offer keeps its staged runners. A reopen
-        // that offered a same-key envelope with different recorded authority
-        // does not match: the offered runner was bound to what the *offered*
-        // request claims, and running it against the retained child would
-        // execute the child under an opener it was not admitted to. That
-        // child is instead re-resolved through this host's resolver against
-        // the *retained* envelope — the same answer the loser drain gets — and
-        // a resolver that cannot run that recorded request answers `None`,
-        // the drain's `NoExecutor` case: an absent recorded opener means no
-        // execution and no fabricated terminal.
-        let mut offered: HashMap<String, (String, RuntimeEffectLocalExecutor<'static>)> = group
-            .children()
-            .iter()
-            .zip(offered_executors)
-            .filter_map(|(child, executor)| executor.map(|executor| (child, executor)))
-            .map(|(child, executor)| {
-                Ok((
-                    child.invocation.replay_key().to_string(),
-                    (
-                        serde_json::to_string(child).map_err(|error| {
-                            group_shape_error(format!(
-                                "a child of durable effect group {} cannot be compared \
-                                 with its retained request: {error}",
-                                group.group_key()
-                            ))
-                        })?,
-                        executor,
-                    ),
-                ))
-            })
-            .collect::<Result<_, RuntimeEffectControllerError>>()?;
         let group = reconstruct_group(&group, retained, self.vocabulary())?;
-        let replay_keys = replay_keys_of(&group)?;
+        // A replay key is the child's durable identity, not its request's:
+        // two envelopes can share a key while carrying different recorded
+        // authority. Canonical identity — the hash and canonical JSON
+        // `child_identities_of` computes — is the evidence the offered runner
+        // was bound to the retained request, and the retained row's
+        // formatting is not identity. A matching offer keeps its staged
+        // runner; anything else is re-resolved through this host's resolver
+        // against the *retained* envelope — the same answer the loser drain
+        // gets — and a resolver that cannot run that recorded request answers
+        // `None`, the drain's `NoExecutor` case.
+        let children = child_identities_of(&group)?;
+        let mut offered: HashMap<&str, (&OpenGroupChild, RuntimeEffectLocalExecutor<'static>)> =
+            offered_children
+                .iter()
+                .zip(offered_executors)
+                .filter_map(|(child, executor)| {
+                    executor.map(|executor| (child.replay_key.as_str(), (child, executor)))
+                })
+                .collect();
         let resolver = self.group_executors()?;
         let executors = group
             .children()
             .iter()
-            .map(|child| {
-                let key = child.invocation.replay_key();
-                match offered.remove(key) {
-                    Some((envelope_json, executor))
-                        if self.offered_executor_may_run(
-                            key,
-                            &envelope_json,
-                            &retained_envelopes,
-                        ) =>
+            .zip(children.iter())
+            .map(
+                |(envelope, retained)| match offered.remove(retained.replay_key.as_str()) {
+                    Some((offered, executor))
+                        if self.offered_executor_may_run(offered, retained) =>
                     {
                         Some(executor)
                     }
-                    _ => resolver.executor_for(child),
-                }
-            })
+                    _ => resolver.executor_for(envelope),
+                },
+            )
             .collect::<Vec<_>>();
         let dispatched = executors
             .iter()
@@ -452,7 +437,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 // task that could report it finished, and counting it here would
                 // pin the entry open for the life of the process.
                 outstanding: AtomicUsize::new(dispatched),
-                replay_keys,
+                children,
                 cancel: CancellationToken::new(),
                 state: Mutex::new(OpenGroupState {
                     effective: persisted.loser_disposition,
@@ -529,22 +514,24 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     /// Whether an executor the caller staged for its own offered child may run
     /// the retained child of the same replay key.
     ///
-    /// Outside `testing` the only honest answer is byte-identical envelopes:
-    /// the staged runner is bound to the *offered* envelope's authority, and
-    /// the replay key is the child's durable identity rather than its
-    /// request's — two envelopes sharing a key is exactly what a reoffering
-    /// successor presents. The testing build's `KeyOnly` strategy is the leak
-    /// the two-opener differential is red-proved against; it is selected per
-    /// host through [`StoreEffectReplayDriver::set_offered_child_selection`],
-    /// never here.
+    /// Outside `testing` the only honest answer is canonical identity: the
+    /// staged runner is bound to the *offered* envelope's authority, and the
+    /// replay key is the child's durable identity rather than its request's —
+    /// two envelopes sharing a key is exactly what a reoffering successor
+    /// presents. The canonical hash and canonical JSON `child_identities_of`
+    /// computes are the evidence; the retained row's formatting is not
+    /// identity. The testing build's `KeyOnly` strategy is the leak the
+    /// two-opener differential is red-proved against; it is selected per host
+    /// through [`StoreEffectReplayDriver::set_offered_child_selection`], never
+    /// here.
     #[cfg(not(feature = "testing"))]
     fn offered_executor_may_run(
         &self,
-        key: &str,
-        offered_envelope_json: &str,
-        retained_envelopes: &HashMap<String, String>,
+        offered: &OpenGroupChild,
+        retained: &OpenGroupChild,
     ) -> bool {
-        retained_envelopes.get(key) == Some(&offered_envelope_json.to_string())
+        offered.envelope_hash == retained.envelope_hash
+            && offered.envelope_json == retained.envelope_json
     }
 
     /// The `testing` build reads the strategy installed on this host. See the
@@ -552,16 +539,16 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     #[cfg(feature = "testing")]
     fn offered_executor_may_run(
         &self,
-        key: &str,
-        offered_envelope_json: &str,
-        retained_envelopes: &HashMap<String, String>,
+        offered: &OpenGroupChild,
+        retained: &OpenGroupChild,
     ) -> bool {
         if self.offered_child_selection.load(Ordering::SeqCst)
             == OfferedChildSelection::KeyOnly as usize
         {
             return true;
         }
-        retained_envelopes.get(key) == Some(&offered_envelope_json.to_string())
+        offered.envelope_hash == retained.envelope_hash
+            && offered.envelope_json == retained.envelope_json
     }
 
     /// Spawns one host-owned task per child this host has a runner for.
@@ -725,9 +712,9 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         let vocabulary = self.vocabulary();
         let position = state
-            .replay_keys
+            .children
             .iter()
-            .position(|key| *key == stored.replay_key)
+            .position(|child| child.replay_key == stored.replay_key)
             .ok_or_else(|| {
                 vocabulary.error(
                     EffectReplayFailure::CorruptRow,
@@ -735,7 +722,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                         "durable effect group {group_key} recorded a settlement for \
                          replay key `{}`, which is not one of its {} children",
                         stored.replay_key,
-                        state.replay_keys.len()
+                        state.children.len()
                     ),
                 )
             })?;
@@ -784,11 +771,18 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     /// fresh process — closes successfully, since there is nothing left here for
     /// a disposition to decide and the declared one is journaled for the drain.
     ///
-    /// Under [`LoserPolicy::Cancel`] the children this process runs are
-    /// cancelled, and each writes its cancellation as its own terminal through
-    /// its own fence, allocating a rank exactly as any other outcome would.
-    /// Children of this group that this process does not run are the drain's
-    /// (FIG-1536), which applies the disposition on the group row.
+    /// Under [`LoserPolicy::Cancel`] the close journals the cancel decision
+    /// for every child that has not already committed a final record — the
+    /// durable half of the disposition (ADR 0099 §4). The cancelled terminal
+    /// and its rank are written through the membership row's decision CAS, so
+    /// a child whose final record won first keeps it, a child still running
+    /// here is then stopped by the in-process token and refused at its own
+    /// finalize with `CancelDecided`, and a child no process is running is
+    /// settled identically — the decision does not wait on a live claimant.
+    /// Children of this group that this process does not run — because they
+    /// belong to a reopen on another host or this process died between open
+    /// and close — are the drain's (FIG-1536), which decides the same rows
+    /// from the retained membership.
     ///
     /// An unwired host refuses here too, with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
@@ -815,6 +809,23 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             matches!(effective, LoserPolicy::Cancel)
         };
         if cancelled {
+            let group_key = handle.group_key();
+            for (position, child) in state.children.iter().enumerate() {
+                // Position order is also settlement-rank order among children
+                // decided by the same close, which is the only ordering the
+                // contract promises losers.
+                let error_json = serde_json::to_string(&child_cancelled_error(group_key, position))
+                    .map_err(|err| self.vocabulary().encode_error(err))?;
+                self.row_store
+                    .decide_cancel(&EffectCancelRequest {
+                        group_key: group_key.to_string(),
+                        replay_key: child.replay_key.clone(),
+                        terminal: EffectTerminal::Failed { error_json },
+                        envelope_json: child.envelope_json.clone(),
+                        envelope_hash: child.envelope_hash.clone(),
+                    })
+                    .await?;
+            }
             state.cancel.cancel();
         }
         state.settled.notify_waiters();
@@ -847,7 +858,7 @@ fn accepted_membership(
                         group.group_key()
                     ))
                 })?,
-                request_version: super::super::TOOL_CHILD_REQUEST_VERSION,
+                command_version: super::super::TOOL_CHILD_REQUEST_VERSION,
             })
         })
         .collect()
@@ -885,6 +896,25 @@ fn reconstruct_group(
     let children = retained
         .into_iter()
         .map(|child| {
+            // The membership row's command version is checked, not assumed:
+            // it records which command encoding minted the retained envelope,
+            // and a build that cannot read it refuses rather than
+            // reconstructs a guess.
+            if child.command_version != super::super::TOOL_CHILD_REQUEST_VERSION {
+                return Err(vocabulary.error(
+                    EffectReplayFailure::CorruptRow,
+                    format!(
+                        "child `{}` of durable effect group {} was minted under \
+                         command version {} but this build reconstructs version \
+                         {}; a request that cannot be read is corruption, not \
+                         a guess",
+                        child.replay_key,
+                        offered.group_key(),
+                        child.command_version,
+                        super::super::TOOL_CHILD_REQUEST_VERSION,
+                    ),
+                ));
+            }
             serde_json::from_str::<RuntimeEffectEnvelope>(&child.envelope_json)
                 .map_err(|error| vocabulary.decode_error(error))
         })
@@ -898,20 +928,34 @@ fn reconstruct_group(
     )
 }
 
-/// The replay key of each child, in position order.
+/// The durable identity of each child, in position order.
 ///
-/// A child without one could never be claimed, so a group containing one is
-/// refused at open rather than at the moment its rank fails to resolve.
+/// A child without a replay key could never be claimed, so a group containing
+/// one is refused at open rather than at the moment its rank fails to resolve.
 ///
 /// Distinctness is not rechecked here: [`RuntimeEffectGroup::try_new`] is the
 /// sole constructor and refuses two children sharing a replay key, so the
 /// position map this builds is one entry per journaled child by construction.
-fn replay_keys_of(group: &RuntimeEffectGroup) -> Result<Vec<String>, RuntimeEffectControllerError> {
-    Ok(group
+fn child_identities_of(
+    group: &RuntimeEffectGroup,
+) -> Result<Vec<OpenGroupChild>, RuntimeEffectControllerError> {
+    group
         .children()
         .iter()
-        .map(|child| child.invocation.replay_key().to_string())
-        .collect())
+        .map(|child| {
+            let canonical = CanonicalRuntimeEffectEnvelope::capture(child)?;
+            Ok(OpenGroupChild {
+                replay_key: child.invocation.replay_key().to_string(),
+                envelope_json: serde_json::to_string(&canonical).map_err(|err| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectEnvelopeHash,
+                        format!("failed to serialize canonical effect envelope: {err}"),
+                    )
+                })?,
+                envelope_hash: canonical.hash().to_string(),
+            })
+        })
+        .collect()
 }
 
 /// A drain refusal a caller fixes by waiting, not by changing anything.

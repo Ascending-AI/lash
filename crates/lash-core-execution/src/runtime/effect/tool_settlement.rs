@@ -124,8 +124,10 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// [`ToolUsageDelta::provider_attempt`] from a count to the sealed provider
 /// attempt's own ordinal — usage is journaled one fact per provider attempt,
 /// so a billed failed attempt and the retry that replaced it each carry their
-/// own spend.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 2;
+/// own spend. Version 3 adds
+/// `ToolIntentRefusalReason::MintingGroupChildCancelled`, the §4 refusal an
+/// intent minted by a cancel-decided group child carries.
+pub const TOOL_SETTLEMENT_VERSION: u16 = 3;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///

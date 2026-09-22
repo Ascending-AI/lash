@@ -7,11 +7,12 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CompletionKeyPreparation, EffectGroupHandle, EffectHost, EffectJournalRetirement,
-    ExecutionScope, GroupSettlement, LoserPolicy, NativeRuntimeEffectController, Resolution,
-    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlParticipation,
+    CompletionKeyPreparation, EffectGroupChildCommitOutcome, EffectGroupHandle, EffectHost,
+    EffectJournalRetirement, ExecutionScope, GroupChildFinalCommit, GroupSettlement, LoserPolicy,
+    NativeRuntimeEffectController, Resolution, ResolveOutcome, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
+    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
+    SegmentProgress, TurnControlParticipation,
 };
 use crate::RuntimeError;
 
@@ -594,6 +595,23 @@ impl RuntimeEffectController for FencedNativeController {
         }
         result
     }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: GroupChildFinalCommit,
+    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
+        self.host.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.host
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -659,6 +677,23 @@ impl RuntimeEffectController for NativeEffectHost {
     ) -> Result<(), RuntimeEffectControllerError> {
         self.controller
             .close_effect_group(handle, disposition)
+            .await
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: GroupChildFinalCommit,
+    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
+        self.controller.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.controller
+            .group_child_drain_blocked(group_key, commit_seq)
             .await
     }
 }

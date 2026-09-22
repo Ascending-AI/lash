@@ -67,37 +67,54 @@ const POST_FLOOR_TABLES: [&str; 2] = [
 ];
 /// The post-floor indexes the fixture must drop by name: the child table's own
 /// guards drop with it, and component 102 added no index over a table the floor
-/// already had.
-const POST_FLOOR_INDEXES: [&str; 0] = [];
+/// already had. Component 110's commit-order unique lands on the replay table,
+/// which predates the floor, so it drops by name (FIG-3409).
+const POST_FLOOR_INDEXES: [&str; 1] = ["uq_lash_runtime_effect_replay_commit_seq"];
 /// The columns absent from component 101: the trigger mutation-receipt owner
 /// columns component 105 installed (FIG-1956) — the receipts table itself
-/// predates the floor, so its post-floor columns drop by name — and the typed
-/// parent payload component 109 installed (FIG-3418).
-const POST_FLOOR_COLUMNS: [(&str, &str); 3] = [
+/// predates the floor, so its post-floor columns drop by name — the typed
+/// parent payload component 109 installed (FIG-3418) and the effect-group
+/// arbitration state component 110 installs (FIG-3409): the commit-order
+/// counter and lifecycle on the group, the renamed arity expectation, and the
+/// commit protocol columns on the replay row.
+const POST_FLOOR_COLUMNS: [(&str, &str); 9] = [
     ("lash_trigger_mutation_receipts", "owner_kind"),
     ("lash_trigger_mutation_receipts", "owner_id"),
     ("lash_parent_end_plans", "parent_payload"),
+    ("lash_runtime_effect_group", "next_commit_seq"),
+    ("lash_runtime_effect_group", "lifecycle"),
+    ("lash_runtime_effect_group", "expected_children"),
+    ("lash_runtime_effect_replay", "commit_state"),
+    ("lash_runtime_effect_replay", "commit_seq"),
+    ("lash_runtime_effect_replay", "drain_input"),
 ];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
+const POST_FLOOR_ARTIFACTS: [&str; 2] = [
+    "lash_turn_cancel_affected_inputs",
+    "uq_lash_runtime_effect_replay_commit_seq",
+];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
 ///
-/// Under the component-109 boundary the retained generation is 108, whose
-/// predecessor arm (component 107 → 108) introduces no relation: component
-/// 108 was the journaled `exec_code` outcome cutover, an encoding move with
-/// no relational DDL. The boundary is destructive, so the pre-cutover refusal
-/// is reject-and-recreate and this list is never emitted.
-const DIVERGENT_ARTIFACTS: [&str; 0] = [];
+/// Under the component-110 boundary the retained generation is 109, and the
+/// 109 → 110 arm introduces the arbitration guards FIG-3409 installs (ADR
+/// 0099 §§4–5): the final-commit-order unique over the replay rows of one
+/// group and the replay-key unique on the retained membership. A
+/// component-109 catalog therefore diverges from the current one by exactly
+/// those relations, and the refusal must name them.
+const DIVERGENT_ARTIFACTS: [&str; 2] = [
+    "uq_lash_runtime_effect_replay_commit_seq",
+    "uq_lash_runtime_effect_group_child_replay_key",
+];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
-/// reject-and-recreate boundary. Component 109 is destructive (typed
-/// parent-end plan payload, FIG-3418): the 108 stamp has no applicable
-/// migration.
+/// reject-and-recreate boundary. Component 110 is destructive: no arm leaves
+/// from component 109, so the component-109 stamp is refused as having no
+/// applicable migration.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even

@@ -452,6 +452,26 @@ impl RuntimeEffectController for JournalController {
     ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
         self.inline.close_effect_group(handle, disposition).await
     }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash::runtime::RuntimeEffectControllerError,
+    > {
+        self.inline.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash::runtime::RuntimeEffectControllerError> {
+        self.inline
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
 }
 
 /// Every scenario writes a JSONL trace. A drain step that claims it flushed

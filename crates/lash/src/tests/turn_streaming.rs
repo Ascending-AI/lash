@@ -489,6 +489,18 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
             "RecordingDurableEffectController",
         ))
     }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> std::result::Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        Ok(
+            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
+        )
+    }
 }
 
 #[derive(Default)]
@@ -626,6 +638,26 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         Err(lash_core::effect_groups_unsupported(
             "RecordingNativeEffectController",
         ))
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> std::result::Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> std::result::Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.native
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 

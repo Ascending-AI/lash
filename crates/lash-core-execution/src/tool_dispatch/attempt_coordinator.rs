@@ -338,17 +338,25 @@ impl IntentDrainCommitSignal {
     }
 }
 
-/// Where the authority to derive a completion key comes from for one
-/// coordinated invocation.
+/// What a tool child of an effect group carries into coordination and a live
+/// caller cannot: the completion routing it was admitted under (ADR 0099 §3)
+/// and the address of its own replay row — the §4 linearization point (ADR
+/// 0099 §4). `None` for every caller that admitted its call live.
 ///
-/// Every caller with a live admission in scope answers `None`: deferral is read
-/// from the live registry or provider, which is what admitted the call a moment
-/// ago. A **tool child of an effect group** answers `Some`, because ADR 0099 §3
-/// makes the *recorded* admission authoritative — "a reopen uses the recorded
-/// facts, not current session policy or fresh admission" — and the two live
-/// inputs completion-key preparation reads are deployment facts at recovery
-/// time, not admission facts.
-pub type RecordedCompletionRouting = Option<crate::runtime::ToolChildCompletionRouting>;
+/// A live admission answers `None` for both halves: deferral is read from the
+/// live registry or provider, which is what admitted the call a moment ago,
+/// and there is no group membership to commit against. A **tool child of an
+/// effect group** answers `Some`, because §3 makes the *recorded* admission
+/// authoritative — "a reopen uses the recorded facts, not current session
+/// policy or fresh admission" — and §4 makes the child's own replay row the
+/// commit boundary its final record must reach.
+#[derive(Clone, Debug)]
+pub struct GroupChildCoordination {
+    pub completion_routing: crate::runtime::ToolChildCompletionRouting,
+    /// The child's `ToolInvocation` envelope address: its execution scope and
+    /// replay key.
+    pub child: crate::EffectAddress,
+}
 
 /// Refuses a child whose recorded routing this deployment cannot honour.
 ///
@@ -383,8 +391,8 @@ pub async fn coordinate_tool_invocation<'run>(
     retry_policy: ToolRetryPolicy,
     // `None` for every caller that admitted this call live; `Some` only for a
     // group child running from its retained request. See
-    // [`RecordedCompletionRouting`].
-    recorded_completion_routing: RecordedCompletionRouting,
+    // [`GroupChildCoordination`].
+    group_child: Option<GroupChildCoordination>,
     identity: ToolAttemptEffectIdentity,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     // Owned for the whole coordination: the guard discharges its drain slot on
@@ -402,7 +410,7 @@ pub async fn coordinate_tool_invocation<'run>(
     // Whether this attempt may defer is a recorded fact for a group child and a
     // live one for everyone else. Read once, above the loop, because every
     // attempt of one invocation is admitted under the same authority.
-    let may_defer = match recorded_completion_routing {
+    let may_defer = match group_child.as_ref().map(|child| &child.completion_routing) {
         None => context.attempt_may_defer(&call.tool_id, execution_grant.as_deref()),
         Some(crate::runtime::ToolChildCompletionRouting::Inline) => false,
         Some(
@@ -421,7 +429,7 @@ pub async fn coordinate_tool_invocation<'run>(
                 may_defer,
             )
             .await;
-        if let Some(ref recorded) = recorded_completion_routing {
+        if let Some(recorded) = group_child.as_ref().map(|child| &child.completion_routing) {
             let observed = match &prepared_key {
                 Ok(crate::CompletionKeyPreparation::Issued(_)) => "issued",
                 Ok(crate::CompletionKeyPreparation::NotNeeded) => "not-needed",
@@ -563,6 +571,7 @@ pub async fn coordinate_tool_invocation<'run>(
                                 intent_drain_slot: intent_drain_slot.take(),
                                 child_trace_hook: child_trace_hook.as_ref(),
                                 recorded_call_id: recorded_call_id.as_deref(),
+                                group_child,
                                 record,
                                 intents,
                                 attempts,
@@ -594,6 +603,7 @@ pub async fn coordinate_tool_invocation<'run>(
                                 intent_drain_slot: intent_drain_slot.take(),
                                 child_trace_hook: child_trace_hook.as_ref(),
                                 recorded_call_id: recorded_call_id.as_deref(),
+                                group_child,
                                 record,
                                 intents,
                                 attempts,
@@ -660,10 +670,35 @@ struct TerminalAttemptSettlement<'settlement> {
     intent_drain_slot: Option<IntentDrainGuard>,
     child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
     recorded_call_id: Option<&'settlement str>,
+    group_child: Option<GroupChildCoordination>,
     record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
 }
+
+/// The sealed settlement a §4 boundary commit persists as its drain input:
+/// the record the drain projects onto and the declared intents, so a
+/// committed-but-undrained row carries everything its recovery needs.
+#[derive(serde::Serialize)]
+struct GroupChildDrainInput<'settlement> {
+    record: &'settlement ToolCallRecord,
+    intents: &'settlement crate::ToolIntents,
+    recorded_call_id: Option<&'settlement str>,
+}
+
+/// The owned decode of [`GroupChildDrainInput`]: what a re-driven attempt
+/// that lost the §4 point drains instead of whatever it re-derived — the
+/// committed settlement is the durable fact, not the replay.
+#[derive(serde::Deserialize)]
+struct SealedGroupChildDrainInput {
+    record: ToolCallRecord,
+    intents: crate::ToolIntents,
+    recorded_call_id: Option<String>,
+}
+
+/// How long a drain waits on the §5 barrier before re-reading whether a
+/// lower-commit sibling finished — the durable driver's own poll cadence.
+const GROUP_DRAIN_BARRIER_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 
 async fn settle_terminal_attempt(
     context: &ToolDispatchContext<'_>,
@@ -674,10 +709,112 @@ async fn settle_terminal_attempt(
         intent_drain_slot,
         child_trace_hook,
         recorded_call_id,
+        group_child,
         mut record,
-        intents,
+        mut intents,
         attempts,
     } = settlement;
+    let mut recorded_call_id = recorded_call_id.map(str::to_string);
+    // The §4 boundary: a group child's final record commits *before* any
+    // declared intent runs, because the durable final-commit order — not
+    // drain-completion order — is the order children may emit nested
+    // semantic commands. Only a group child carries the address of its own
+    // replay row into settlement; every other attempt leaves `group_child`
+    // `None` and pays no boundary work at all. A `CancelDecided` answer is
+    // the group's arbitration losing this child's final — the typed refusal
+    // is the whole record, and no intent mints beneath it.
+    let controller = context.effect_controller.controller();
+    let drain_admission = match group_child.as_ref().map(|child| &child.child) {
+        Some(address) => {
+            let scope_id = address
+                .execution_scope
+                .journal_identity()
+                .map_err(crate::RuntimeEffectControllerError::from)?
+                .key()
+                .to_string();
+            let drain_input = serde_json::to_string(&GroupChildDrainInput {
+                record: &record,
+                intents: &intents,
+                recorded_call_id: recorded_call_id.as_deref(),
+            })
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!(
+                        "sealed drain input for {} does not encode: {error}",
+                        address.replay_key
+                    ),
+                )
+            })?;
+            match controller
+                .commit_group_child_final(crate::runtime::effect::GroupChildFinalCommit {
+                    scope_id,
+                    replay_key: address.replay_key.clone(),
+                    drain_input,
+                })
+                .await?
+            {
+                crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped => None,
+                crate::runtime::effect::EffectGroupChildCommitOutcome::Committed {
+                    group_key,
+                    commit_seq,
+                } => Some((group_key, commit_seq)),
+                crate::runtime::effect::EffectGroupChildCommitOutcome::AlreadyCommitted {
+                    group_key,
+                    commit_seq,
+                    drain_input: sealed,
+                } => {
+                    // The §4 point already holds this child's settlement: the
+                    // sealed drain input the winner committed is the durable
+                    // fact this drain owes, so it replaces whatever the
+                    // re-execution re-derived (W6/W7 — a recovered drain must
+                    // not depend on the replay re-declaring identical intents).
+                    if let Some(sealed) = sealed {
+                        let sealed: SealedGroupChildDrainInput = serde_json::from_str(&sealed)
+                            .map_err(|error| {
+                                crate::RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                    format!(
+                                        "committed drain input for {} does not decode: {error}",
+                                        address.replay_key
+                                    ),
+                                )
+                            })?;
+                        *record = sealed.record;
+                        intents = sealed.intents;
+                        recorded_call_id = sealed.recorded_call_id;
+                    }
+                    Some((group_key, commit_seq))
+                }
+                crate::runtime::effect::EffectGroupChildCommitOutcome::CancelDecided {
+                    group_key,
+                    ..
+                } => {
+                    return Err(crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+                        format!(
+                            "the final record of `{}` reached durable effect group {group_key} \
+                             after its cancel disposition committed; the refusal is the whole \
+                             record and no declared intent may mint beneath it",
+                            address.replay_key
+                        ),
+                    ));
+                }
+            }
+        }
+        None => None,
+    };
+    // The §5 barrier: admitted drains emit their nested semantic commands in
+    // final-commit order, so a committed sibling below this child that still
+    // owes its drain holds this drain back until it finishes.
+    if let Some((group_key, commit_seq)) = &drain_admission {
+        while controller
+            .group_child_drain_blocked(group_key, *commit_seq)
+            .await?
+        {
+            context.clock.sleep(GROUP_DRAIN_BARRIER_POLL).await;
+        }
+    }
     if let Some(slot) = &intent_drain_slot {
         slot.begin_final_drain().await;
     }
@@ -685,7 +822,7 @@ async fn settle_terminal_attempt(
     intent_context.parent_invocation = Some(minting_emission.clone().into_runtime_invocation());
     let intent_outcomes = super::execute_final_tool_intents(
         &intent_context,
-        recorded_call_id,
+        recorded_call_id.as_deref(),
         &intents,
         child_trace_hook,
     )

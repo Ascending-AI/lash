@@ -8,6 +8,7 @@
 
 use lash_sansio::SessionId;
 pub(crate) mod context;
+mod group_commit;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 mod scope_recording;
@@ -716,8 +717,6 @@ where
                 self.context
                     .effect_group_submit(EffectGroupDispatchRequest {
                         group_key: group_key.clone(),
-                        shape: shape.clone(),
-                        children: group.children().to_vec(),
                     })
                     .await
                     .map_err(|error| effect_group_engine_error("EffectGroupDispatch/run", error))?;
@@ -921,6 +920,35 @@ where
                 "effect group {group_key} is retired"
             ))),
         }
+    }
+
+    /// The §4 boundary, routed through the durable membership record: the
+    /// child's own scope index answers which group owns its replay key, and
+    /// that group's index takes the commit. The serialized object handler —
+    /// not any state this controller holds — is the linearization point, so
+    /// a cancel decision racing the commit is fenced inside the index. The
+    /// Restate index does not retain `drain_input`: the durable publication
+    /// obligation is the committed-but-unseated child plus the dispatch
+    /// workflow's own redrive, so `AlreadyCommitted` reports it `None`.
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        RuntimeEffectControllerError,
+    > {
+        group_commit::commit_group_child_final(&self.context, commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.context
+            .effect_group_drain_blocked(group_key.to_string(), commit_seq)
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blocked", error))
     }
 
     async fn runtime_effect_failure_disposition(

@@ -43,11 +43,10 @@
 //! It does not take an [`IntentDrainGuard`](crate::tool_dispatch::IntentDrainGuard).
 //! §5 replaces the in-process source-order gate with a durable per-group
 //! final-commit order and is explicit that the gate's `Drop` discharge is
-//! "wrong if copied into durable recovery". FIG-3409 owns that order; until it
-//! lands the driver passes `None`, which means each child drains its own
-//! declared intents in ADR 0042's intra-attempt source order and waits for no
-//! sibling. See the module's `intent_drain_slot` note in
-//! [`tool_child`](super::tool_child).
+//! "wrong if copied into durable recovery". The child therefore passes
+//! `None`: §4 commits its final at the attempt boundary and §5 admits its
+//! drain by the recorded `commit_seq`, which orders it against every sibling
+//! without an in-process slot.
 //!
 //! It projects the child's result exactly once, at its own presentation
 //! boundary: the session's plugin projector is a singleton lent through the
@@ -268,6 +267,7 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
             &self.host,
             &self.context,
             &request,
+            envelope.invocation.address.clone(),
             self.host.child_controller(&request.scope.admitted_scope)?,
             self.context.cancellation().child_token(),
         ))
@@ -310,6 +310,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
             &self.host,
             &self.live,
             &request,
+            envelope.invocation.address.clone(),
             self.host.child_controller(&request.scope.admitted_scope)?,
             self.live.cancellation().child_token(),
         ))
@@ -335,11 +336,14 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
 #[async_trait::async_trait]
 pub trait ToolChildDriver: Send {
     /// Runs the child to a terminal on `controller`, returning its settlement
-    /// outcome. Cancellation comes from the captured live opener's token, the
-    /// same parent the in-process `execute` mints the child token from.
+    /// outcome. `child` is the child's own `ToolInvocation` envelope address —
+    /// the replay row its §4 final commits against (ADR 0099 §4). Cancellation
+    /// comes from the captured live opener's token, the same parent the
+    /// in-process `execute` mints the child token from.
     async fn drive<'run>(
         &self,
         request: &ToolChildRequest,
+        child: crate::EffectAddress,
         controller: ScopedEffectController<'run>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
 }
@@ -349,12 +353,14 @@ impl ToolChildDriver for ToolChildRunner {
     async fn drive<'run>(
         &self,
         request: &ToolChildRequest,
+        child: crate::EffectAddress,
         controller: ScopedEffectController<'run>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         Box::pin(run_tool_child(
             &self.host,
             &self.live,
             request,
+            child,
             controller,
             self.live.cancellation().child_token(),
         ))
@@ -485,15 +491,16 @@ fn admitted_catalog(
 
 /// Runs one tool child to a terminal and reports what it produced.
 ///
-/// The ordering this provides, stated rather than assumed (§5, FIG-3409): a
-/// child drains **its own** declared intents, in ADR 0042's intra-attempt
-/// source order, and waits on no sibling. There is no cross-child order here
-/// and none is invented — the group's rank order is the group's, and the
-/// durable per-group commit order is FIG-3409's.
+/// The ordering this provides, stated rather than assumed (§4/§5, FIG-3409):
+/// a child takes no in-process slot because the durable group owns the order —
+/// its final commits at the attempt's terminal boundary against its own
+/// replay row (`child`), and its drain is admitted by the recorded
+/// `commit_seq` barrier before the first declared intent runs.
 pub(crate) async fn run_tool_child<'run>(
     host: &ToolChildHost,
     live: &LiveOpenerContext,
     request: &ToolChildRequest,
+    child: crate::EffectAddress,
     controller: ScopedEffectController<'run>,
     cancel: CancellationToken,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
@@ -551,6 +558,7 @@ pub(crate) async fn run_tool_child<'run>(
     let mut outcome = Box::pin(drive(
         &dispatch,
         request,
+        child,
         turn_cancel_wait,
         orchestrating_starts.clone(),
     ))
@@ -714,6 +722,7 @@ async fn validate_recorded_authorities(
 async fn drive(
     dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
+    child: crate::EffectAddress,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
     orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
@@ -749,7 +758,10 @@ async fn drive(
         request.call.clone(),
         request.admission.grant().cloned().map(Box::new),
         request.admission.retry_policy(),
-        Some(request.completion_routing.clone()),
+        Some(crate::tool_dispatch::GroupChildCoordination {
+            completion_routing: request.completion_routing.clone(),
+            child,
+        }),
         request.attempt_identity.clone(),
         &turn_cancel_wait,
         // §5: no cross-child gate here. See `run_tool_child`.

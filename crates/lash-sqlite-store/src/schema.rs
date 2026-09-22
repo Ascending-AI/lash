@@ -1148,9 +1148,15 @@ CREATE TABLE IF NOT EXISTS runtime_effect_replay (
     due_at_ms            INTEGER,
     group_key            TEXT,
     settlement_seq       INTEGER,
+    commit_state         TEXT NOT NULL DEFAULT 'pending',
+    commit_seq           INTEGER,
+    drain_input          TEXT,
     created_at_ms        INTEGER NOT NULL,
     updated_at_ms        INTEGER NOT NULL,
     CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
+    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
+    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
+    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
     PRIMARY KEY (scope_id, replay_key)
 );
 
@@ -1170,9 +1176,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_group_seq
     ON runtime_effect_replay(group_key, settlement_seq)
     WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_group_unsettled
-    ON runtime_effect_replay(group_key, replay_key)
-    WHERE group_key IS NOT NULL AND settlement_seq IS NULL;
+-- One commit position per child, per group: the §4 linearization point's
+-- backstop, the same role the settlement-seq unique index plays for ranks.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_commit_seq
+    ON runtime_effect_replay(group_key, commit_seq)
+    WHERE commit_seq IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS runtime_effect_group (
     group_key          TEXT PRIMARY KEY,
@@ -1180,11 +1188,14 @@ CREATE TABLE IF NOT EXISTS runtime_effect_group (
     session_id         TEXT,
     wake               TEXT NOT NULL,
     loser_disposition  TEXT NOT NULL,
-    children           INTEGER NOT NULL,
+    expected_children  INTEGER NOT NULL,
     next_seq           INTEGER NOT NULL DEFAULT 0,
+    next_commit_seq    INTEGER NOT NULL DEFAULT 0,
+    lifecycle          TEXT NOT NULL DEFAULT '{\"type\":\"live\"}',
     created_at_ms      INTEGER NOT NULL,
     CONSTRAINT ck_runtime_effect_group_wake CHECK (wake IN ('first', 'first_success', 'all')),
-    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK (loser_disposition IN ('run_to_completion', 'cancel'))
+    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK (loser_disposition IN ('run_to_completion', 'cancel')),
+    CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (json_extract(lifecycle, '$.type') IN ('live', 'closing', 'settled'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_session
@@ -1194,18 +1205,28 @@ CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_scope
     ON runtime_effect_group(scope_id);
 
 -- One row per accepted child of a group, carrying the request that
--- reconstructs it (ADR 0099 section 3). Written with the group row in one
--- transaction, children first (ADR 0065 N2), so a recorded group always has
--- discoverable complete input. No scope_id: the group row owns that fact.
+-- reconstructs it (ADR 0099 section 3). Retained input only: the section 4/5
+-- arbitration state lives on the replay row as commit_state/commit_seq,
+-- because the CAS that decides a child runs under the replay row's lock and
+-- must not reach a second row to win. `command_version` is the command
+-- encoding the retained envelope was minted under, checked at decode.
+-- Written with the group row in one transaction, children first
+-- (ADR 0065 N2), so a recorded group always has discoverable complete input.
+-- No scope_id: the group row owns that fact.
 CREATE TABLE IF NOT EXISTS runtime_effect_group_child (
     group_key        TEXT NOT NULL,
     position         INTEGER NOT NULL,
     replay_key       TEXT NOT NULL,
     envelope_json    TEXT NOT NULL,
-    request_version  INTEGER NOT NULL,
+    command_version  INTEGER NOT NULL,
     created_at_ms    INTEGER NOT NULL,
     PRIMARY KEY (group_key, position)
 );
+
+-- Reopens, drains and the unsettled-children join all reach a membership row
+-- by (group_key, replay_key), which the position primary key does not serve.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_group_child_replay_key
+    ON runtime_effect_group_child(group_key, replay_key);
 
 -- The await-event tables this database shares with durable core and the
 -- scope-retirement fence it shares with the process registry are applied
@@ -1309,6 +1330,8 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// Version 26 (FIG-3376) moves the `SessionCreateRequest` carried in effect
 /// payloads to the spawn-time plugin-init cutover and drops `usage_source`;
 /// a pre-26 journal is rejected at open and recreated.
+/// Version 27 adds the accepted-membership table `runtime_effect_group_child`
+/// (FIG-3408, ADR 0099 §3). A pre-27 journal is rejected at open and recreated.
 /// Version 28 (FIG-2362) types the journaled `exec_code` outcome failure: the
 /// erased `Err(String)` becomes `Err(ExecCodeFailure { reason, message })` so
 /// the closed reason reaches the trace event on replay. The new decoder still
@@ -1319,7 +1342,14 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// start declarations from `{turn|process|host}` to `Owned(EffectOpener) |
 /// Host`: a pre-29 journal's command bytes no longer decode to the current
 /// shape, so it is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 29;
+/// Version 30 (FIG-3409) carries ADR 0099 §§4–5: `commit_state`/`commit_seq`
+/// on `runtime_effect_replay` give the §4 arbitration point and the
+/// final-commit order one enum-plus-counter shape, `drain_input` seals the
+/// committed drain input, `next_commit_seq` and `lifecycle` join
+/// `runtime_effect_group`, the group arity column is renamed
+/// `expected_children`, and the membership's `request_version` becomes
+/// `command_version`. A pre-30 journal is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 30;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -1909,16 +1939,16 @@ mod check_constraint_tests {
             &effects,
             "INSERT INTO runtime_effect_group (
                  group_key, scope_id, session_id, wake, loser_disposition,
-                 children, next_seq, created_at_ms
-             ) VALUES ('bad-wake', 'scope', 'session', 'majority', 'cancel', 0, 0, 0)",
+                 expected_children, next_seq, next_commit_seq, created_at_ms
+             ) VALUES ('bad-wake', 'scope', 'session', 'majority', 'cancel', 0, 0, 0, 0)",
             "ck_runtime_effect_group_wake",
         );
         assert_check_rejects(
             &effects,
             "INSERT INTO runtime_effect_group (
                  group_key, scope_id, session_id, wake, loser_disposition,
-                 children, next_seq, created_at_ms
-             ) VALUES ('bad-disposition', 'scope', 'session', 'all', 'retry', 0, 0, 0)",
+                 expected_children, next_seq, next_commit_seq, created_at_ms
+             ) VALUES ('bad-disposition', 'scope', 'session', 'all', 'retry', 0, 0, 0, 0)",
             "ck_runtime_effect_group_loser_disposition",
         );
     }

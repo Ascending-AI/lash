@@ -10,7 +10,7 @@ fn check(controller: &lash::runtime::NativeRuntimeEffectController) {
 fn repin(scoped: &lash::runtime::ScopedEffectController<'_>) {
     // Nor can a same-name successor's incarnation be pinned onto a controller
     // after construction: there is no post-admission pin call.
-    let _ = scoped.with_admitted_process(lash::process::ProcessRef::new(
+    let _ = scoped.repin_incarnation(lash::process::ProcessRef::new(
         "unadmitted",
         lash::process::ProcessIncarnation::from_registration_sequence(2),
     ));

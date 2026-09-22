@@ -85,6 +85,16 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("AwaitShapeRecorder"))
     }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: crate::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        crate::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        crate::RuntimeEffectControllerError,
+    > {
+        Ok(crate::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped)
+    }
 }
 
 struct RetryingProcessTool {

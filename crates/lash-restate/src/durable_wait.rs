@@ -141,6 +141,9 @@ const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
 /// An effect group opened under the scope, keyed by group key; cleared once
 /// the group's index reports no unsettled child.
 const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
+/// A group child's replay-key-to-group binding, keyed by replay key: the
+/// membership a §4 boundary commit resolves its group from (FIG-3409).
+const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v2/group-child/";
 const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
 
 #[cfg(test)]
@@ -351,6 +354,22 @@ pub struct RestateDurableWaitEffectRequest {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateDurableWaitGroupRequest {
     pub group_key: String,
+}
+
+/// One group child's durable membership binding under its own scope's index:
+/// the replay key the §4 boundary names and the group the dispatch admitted
+/// it to. The row is the Restate twin of the SQL tiers' `group_key` column —
+/// who asked carries no weight; the record decides (FIG-3409).
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitGroupChildRequest {
+    pub replay_key: String,
+    pub group_key: String,
+}
+
+/// The membership read [`RestateDurableWaitGroupChildRequest`] records.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitGroupChildMembershipRequest {
+    pub replay_key: String,
 }
 
 /// One session catalog whose durable cancellation closure may still depend on
@@ -735,6 +754,17 @@ pub trait LashDurableWaitIndex {
     async fn record_group(
         request: Json<RestateDurableWaitGroupRequest>,
     ) -> HandlerResult<Json<bool>>;
+    /// Record one group child's durable membership under this scope,
+    /// answering whether the scope admits it (`false` once revoked).
+    async fn record_group_child(
+        request: Json<RestateDurableWaitGroupChildRequest>,
+    ) -> HandlerResult<Json<bool>>;
+    /// The group `replay_key` is a committed member of under this scope, or
+    /// `None` when no dispatch admitted one — the §4 boundary's answer to
+    /// "which group's index owns this child's final" (FIG-3409).
+    async fn group_child_membership(
+        request: Json<RestateDurableWaitGroupChildMembershipRequest>,
+    ) -> HandlerResult<Json<Option<String>>>;
     async fn register_closure_participant(
         request: Json<RestateTurnCancelClosureParticipantRequest>,
     ) -> HandlerResult<Json<bool>>;
@@ -1076,6 +1106,10 @@ fn durable_wait_index_group_key(group_key: &str) -> String {
     format!("{DURABLE_WAIT_INDEX_GROUP_PREFIX}{group_key}")
 }
 
+fn durable_wait_index_group_child_key(replay_key: &str) -> String {
+    format!("{DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX}{replay_key}")
+}
+
 fn durable_wait_index_closure_participant_key(participant_id: &str) -> String {
     let digest = Sha256::digest(participant_id.as_bytes());
     format!("{DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX}{digest:x}")
@@ -1345,6 +1379,35 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             Json(true),
         );
         Ok(Json(true))
+    }
+
+    async fn record_group_child(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitGroupChildRequest>,
+    ) -> HandlerResult<Json<bool>> {
+        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            return Ok(Json(false));
+        }
+        ctx.set(
+            &durable_wait_index_group_child_key(&request.replay_key),
+            Json(request.group_key),
+        );
+        Ok(Json(true))
+    }
+
+    async fn group_child_membership(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitGroupChildMembershipRequest>,
+    ) -> HandlerResult<Json<Option<String>>> {
+        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        Ok(Json(
+            ctx.get::<Json<String>>(&durable_wait_index_group_child_key(&request.replay_key))
+                .await?
+                .map(|Json(group_key)| group_key),
+        ))
     }
 
     async fn register_closure_participant(

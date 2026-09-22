@@ -41,7 +41,7 @@
 
 use crate::ProcessId;
 use crate::SessionId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -59,6 +59,7 @@ use super::super::group::{
     exhausted_group_error, fence_reopen, group_shape_error,
 };
 use super::super::group_drain::GroupExecutors;
+use super::super::group_journal::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 use super::control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
     ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
@@ -298,6 +299,34 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         self.groups.registered_executors()?;
         NativeEffectGroups::close(&self.groups, &handle, disposition)
     }
+
+    /// The §4 boundary under the group's own lock — the same lock `record` and
+    /// `close` race for the arbitration decision, so a commit here and a
+    /// cancel-seat there cannot interleave a second writer between them.
+    ///
+    /// Membership resolves before the executor gate: a caller whose replay
+    /// key belongs to no open group is answered `Ungrouped` — the honest
+    /// answer — even on a controller that hosts no groups at all, because
+    /// ordinary tool settlements ask this question of every attempt.
+    async fn commit_group_child_final(
+        &self,
+        commit: GroupChildFinalCommit,
+    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
+        if self.groups.member_of(&commit.replay_key).is_none() {
+            return Ok(EffectGroupChildCommitOutcome::Ungrouped);
+        }
+        self.groups.registered_executors()?;
+        NativeEffectGroups::commit_group_child_final(&self.groups, commit)
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.groups.registered_executors()?;
+        NativeEffectGroups::group_child_drain_blocked(&self.groups, group_key, commit_seq)
+    }
 }
 
 impl NativeRuntimeEffectController {
@@ -474,8 +503,29 @@ struct NativeEffectGroup {
     /// settlement. Owning them here — rather than detaching each on
     /// `task::spawn` — is what makes the group its children's supervisor.
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
+    /// Replay key → position, so the §4 boundary commit can address a child by
+    /// the identity its own envelope carries rather than by a position a
+    /// caller could mistake.
+    positions: HashMap<String, usize>,
     state: Mutex<NativeEffectGroupState>,
     settled: Notify,
+}
+
+/// Which side of a child's §4 point committed, matching the durable tiers'
+/// `decision` column. On this tier the point is the group lock itself:
+/// `record` and `close` take it in whichever order they arrive, and the first
+/// writer's decision is the arbitration fact the loser reads.
+///
+/// `Committed` carries no `commit_seq` of its own: this tier fuses commit and
+/// seat under one lock, so a committed child's final-commit order is its
+/// settlement rank — the same relation the Restate object records explicitly
+/// and the SQL stores record as a separate column.
+enum NativeChildDecision {
+    /// The child's own final committed.
+    Committed,
+    /// The group's cancel disposition committed first; a late `record` reads
+    /// this and drops the child's outcome rather than seating it twice.
+    Cancelled,
 }
 
 struct NativeEffectGroupState {
@@ -484,6 +534,22 @@ struct NativeEffectGroupState {
     /// is the read-then-max shape ADR 0065 rejects because two siblings settling
     /// at once both read `k` and both write `k + 1`.
     next_sequence: u64,
+    /// The §4 arbitration record: position → which side committed. A position
+    /// appears here exactly when it is seated, so membership alone settles
+    /// "has this child's point been decided"; the variant says by whom.
+    decisions: HashMap<usize, NativeChildDecision>,
+    /// The final-commit allocation point for children that win the §4 point at
+    /// their attempt boundary rather than at `record`: bumped under this lock
+    /// as each boundary commit lands, so two children racing the boundary seat
+    /// at distinct positions — the `commit_seq` column's in-memory analogue.
+    next_commit_seq: u64,
+    /// position → (commit_seq, drain input) for every boundary-committed child
+    /// and for direct `record` commits, which allocate their position here so
+    /// the commit order is one column no matter which path wrote it.
+    commits: HashMap<usize, (u64, Option<String>)>,
+    /// Positions whose obligations have fully seated. A committed position not
+    /// yet here is exactly what `group_child_drain_blocked` waits behind.
+    drained: HashSet<usize>,
     /// Settled children in rank order. Allocating and appending under one lock
     /// makes append order sequence order, so rank *n* is `order[n - 1]` and the
     /// rank read is an index rather than a sort.
@@ -536,8 +602,18 @@ impl NativeEffectGroup {
             wake: group.wake(),
             declared: group.loser_disposition(),
             cancel: CancellationToken::new(),
+            positions: group
+                .children()
+                .iter()
+                .enumerate()
+                .map(|(position, child)| (child.invocation.replay_key().to_string(), position))
+                .collect(),
             state: Mutex::new(NativeEffectGroupState {
                 next_sequence: 0,
+                decisions: HashMap::new(),
+                next_commit_seq: 0,
+                commits: HashMap::new(),
+                drained: HashSet::new(),
                 order: Vec::new(),
                 effective: group.loser_disposition(),
                 closed: false,
@@ -686,10 +762,25 @@ impl NativeEffectGroups {
             let task_owner = Arc::clone(&state);
             let child_task = tracing::Instrument::instrument(
                 async move {
+                    let execution = executor.execute(child);
+                    tokio::pin!(execution);
                     let outcome = tokio::select! {
                         biased;
-                        () = cancel.cancelled() => Err(child_cancelled_error(&group_key, position)),
-                        outcome = executor.execute(child) => outcome,
+                        () = cancel.cancelled() => {
+                            // A committed child retains authority to finish its
+                            // drain (§4); the close decides only undecided
+                            // children, so the token is not authorization here.
+                            let committed = matches!(
+                                state.state.lock_recover().decisions.get(&position),
+                                Some(NativeChildDecision::Committed)
+                            );
+                            if committed {
+                                execution.await
+                            } else {
+                                Err(child_cancelled_error(&group_key, position))
+                            }
+                        }
+                        outcome = &mut execution => outcome,
                     };
                     Self::record(&groups, &group_key, &state, position, outcome);
                 },
@@ -711,13 +802,30 @@ impl NativeEffectGroups {
     ) {
         let complete = {
             let mut inner = state.state.lock_recover();
-            if inner
-                .order
-                .iter()
-                .any(|settled| settled.position == position)
-            {
-                return;
+            // The decision, not the seat: a position the cancel disposition
+            // already committed drops its outcome here, and a position whose
+            // own final committed keeps the first record — either way the §4
+            // point admits exactly one writer. A boundary-committed position
+            // (decision already `Committed`, not yet `drained`) is the child's
+            // own final arriving to seat: it seats now and marks the drain
+            // complete, since this tier has no post-commit intent window to
+            // wait out.
+            match inner.decisions.get(&position) {
+                Some(NativeChildDecision::Cancelled) => return,
+                Some(NativeChildDecision::Committed) if inner.drained.contains(&position) => {
+                    return;
+                }
+                Some(NativeChildDecision::Committed) => {}
+                None => {
+                    inner
+                        .decisions
+                        .insert(position, NativeChildDecision::Committed);
+                    inner.next_commit_seq += 1;
+                    let commit_seq = inner.next_commit_seq;
+                    inner.commits.insert(position, (commit_seq, None));
+                }
             }
+            inner.drained.insert(position);
             inner.next_sequence += 1;
             let sequence = inner.next_sequence;
             inner.order.push(NativeSettlement {
@@ -801,19 +909,19 @@ impl NativeEffectGroups {
             inner.closed = true;
             let cancelled = matches!(effective, LoserPolicy::Cancel);
             if cancelled {
-                // Each cancellation is journaled as that child's terminal, here
-                // and now rather than whenever the task notices, so a caller that
-                // has closed under `Cancel` can read every child's terminal
-                // immediately — and so a child that completes in the cancellation
-                // window cannot claim a second rank.
+                // Each cancellation is decided and journaled as that child's
+                // terminal, here and now rather than whenever the task notices,
+                // so a caller that has closed under `Cancel` can read every
+                // child's terminal immediately — and so a child that completes
+                // in the cancellation window reads its `Cancelled` decision in
+                // `record` and cannot claim a second rank.
                 for position in 0..state.children {
-                    if inner
-                        .order
-                        .iter()
-                        .any(|settled| settled.position == position)
-                    {
+                    if inner.decisions.contains_key(&position) {
                         continue;
                     }
+                    inner
+                        .decisions
+                        .insert(position, NativeChildDecision::Cancelled);
                     inner.next_sequence += 1;
                     let sequence = inner.next_sequence;
                     inner.order.push(NativeSettlement {
@@ -833,6 +941,90 @@ impl NativeEffectGroups {
             groups.reap(handle.group_key(), &state);
         }
         Ok(())
+    }
+
+    /// The §4 boundary commit, under the same lock `record` and `close` take:
+    /// a child's final terminal commits its position in the group's
+    /// final-commit order before its obligations drain, and a cancel that
+    /// reached the position first refuses the late final instead.
+    ///
+    /// The child names itself by replay key and its membership resolves here —
+    /// the durable row's `group_key` column analogue — never from a caller's
+    /// assertion.
+    fn commit_group_child_final(
+        groups: &Arc<Self>,
+        commit: GroupChildFinalCommit,
+    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
+        let Some((group_key, state)) = groups
+            .member_of(&commit.replay_key)
+            .and_then(|key| groups.get(&key).map(|state| (key, state)))
+        else {
+            return Ok(EffectGroupChildCommitOutcome::Ungrouped);
+        };
+        let position = state.positions[&commit.replay_key];
+        let mut inner = state.state.lock_recover();
+        match inner.decisions.get(&position) {
+            Some(NativeChildDecision::Cancelled) => {
+                Ok(EffectGroupChildCommitOutcome::CancelDecided {
+                    group_key,
+                    commit_seq: inner
+                        .order
+                        .iter()
+                        .find(|seated| seated.position == position)
+                        .map(|seated| seated.sequence)
+                        .unwrap_or(0),
+                })
+            }
+            Some(NativeChildDecision::Committed) => {
+                let (commit_seq, drain_input) =
+                    inner.commits.get(&position).cloned().unwrap_or((0, None));
+                Ok(EffectGroupChildCommitOutcome::AlreadyCommitted {
+                    group_key,
+                    commit_seq,
+                    drain_input,
+                })
+            }
+            None => {
+                inner.next_commit_seq += 1;
+                let commit_seq = inner.next_commit_seq;
+                inner
+                    .decisions
+                    .insert(position, NativeChildDecision::Committed);
+                inner
+                    .commits
+                    .insert(position, (commit_seq, Some(commit.drain_input)));
+                Ok(EffectGroupChildCommitOutcome::Committed {
+                    group_key,
+                    commit_seq,
+                })
+            }
+        }
+    }
+
+    /// Whether a committed sibling below `commit_seq` still owes its seat —
+    /// the in-memory analogue of the durable drain barrier.
+    fn group_child_drain_blocked(
+        groups: &Arc<Self>,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let state = groups.lookup(group_key)?;
+        let inner = state.state.lock_recover();
+        Ok(inner
+            .commits
+            .iter()
+            .any(|(position, (seq, _))| *seq < commit_seq && !inner.drained.contains(position)))
+    }
+
+    /// Which open group owns `replay_key`, if any — the membership lookup
+    /// every child-addressed operation resolves through, so a caller's
+    /// asserted group can never substitute for it.
+    fn member_of(&self, replay_key: &str) -> Option<String> {
+        self.open
+            .read_recover()
+            .iter()
+            .find(|(_, state)| state.positions.contains_key(replay_key))
+            .map(|(key, _)| key.clone())
     }
 
     fn get(&self, group_key: &str) -> Option<Arc<NativeEffectGroup>> {

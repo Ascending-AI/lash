@@ -68,14 +68,15 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::durable_wait::{
     LashDurableWaitIndexClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
     RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
-    RestateDurableWaitGroupRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
-    RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
-    register_turn_cancel_gate, restate_await_event_key_for_authority, restate_durable_wait_request,
-    retire_turn_cancel_gate,
+    RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
+    RestateDurableWaitResolveRequest, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
+    RestateTurnCancelWake, durable_wait_index_object_key, register_turn_cancel_gate,
+    restate_await_event_key_for_authority, restate_durable_wait_request, retire_turn_cancel_gate,
 };
 use crate::effect_group::{
-    EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupDispatchClient,
-    EffectGroupDispatchRequest, EffectGroupIndexClient, EffectGroupOpenRequest,
+    EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupCommitChildRequest,
+    EffectGroupCommitChildResponse, EffectGroupDispatchClient, EffectGroupDispatchRequest,
+    EffectGroupDrainBlockedRequest, EffectGroupIndexClient, EffectGroupOpenRequest,
     EffectGroupOpenResponse, EffectGroupPayloadClient, EffectGroupPayloadGetResponse,
     EffectGroupProbeResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
 };
@@ -575,6 +576,18 @@ where
     }
 }
 
+/// The default every unregistered group-index call shares: a pinned refusal
+/// naming the handler, so a wiring miss surfaces as a typed terminal error
+/// rather than a silent `Ok`.
+fn unregistered_group_index<'run, T>(
+    handler: &'static str,
+) -> Pin<Box<dyn Future<Output = Result<T, TerminalError>> + Send + 'run>>
+where
+    T: Send + 'run,
+{
+    Box::pin(async move { Err(TerminalError::new(format!("{handler} is not registered"))) })
+}
+
 pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn sleep_send<'run>(
         &'run self,
@@ -864,6 +877,51 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
                 "EffectGroupIndex/close is not registered",
             ))
         })
+    }
+
+    /// The group one replay key is a committed member of under the scope
+    /// whose index is `index_key`: the membership record a §4 boundary
+    /// resolves before it can name its index (FIG-3409).
+    fn scope_group_child_membership<'run>(
+        &'run self,
+        _index_key: String,
+        _replay_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        unregistered_group_index("LashDurableWaitIndex/group_child_membership")
+    }
+
+    /// The §4 boundary decision for one group child's final record.
+    fn effect_group_commit_child<'run>(
+        &'run self,
+        _group_key: String,
+        _request: EffectGroupCommitChildRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<EffectGroupCommitChildResponse, TerminalError>>
+                + Send
+                + 'run,
+        >,
+    >
+    where
+        'ctx: 'run,
+    {
+        unregistered_group_index("EffectGroupIndex/commit_child")
+    }
+
+    /// Whether a lower-commit sibling still owes its settlement seat — the
+    /// durable §5 barrier read.
+    fn effect_group_drain_blocked<'run>(
+        &'run self,
+        _group_key: String,
+        _commit_seq: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        unregistered_group_index("EffectGroupIndex/drain_blocked")
     }
 
     fn await_effect_group_wait<'run>(
@@ -1579,6 +1637,59 @@ macro_rules! impl_restate_controller_context {
                         let Json(response) = call.await?;
                         Ok(response)
                     })
+                }
+
+                fn scope_group_child_membership<'run>(
+                    &'run self,
+                    index_key: String,
+                    replay_key: String,
+                ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .group_child_membership(Json(
+                            RestateDurableWaitGroupChildMembershipRequest { replay_key },
+                        ))
+                        .call();
+                    Box::pin(async move { call.await.map(|Json(group_key)| group_key) })
+                }
+
+                fn effect_group_commit_child<'run>(
+                    &'run self,
+                    group_key: String,
+                    request: EffectGroupCommitChildRequest,
+                ) -> Pin<
+                    Box<
+                        dyn Future<Output = Result<EffectGroupCommitChildResponse, TerminalError>>
+                            + Send
+                            + 'run,
+                    >,
+                >
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .commit_child(Json(request))
+                        .call();
+                    Box::pin(async move { call.await.map(|Json(response)| response) })
+                }
+
+                fn effect_group_drain_blocked<'run>(
+                    &'run self,
+                    group_key: String,
+                    commit_seq: u64,
+                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .drain_blocked(Json(EffectGroupDrainBlockedRequest { commit_seq }))
+                        .call();
+                    Box::pin(async move { call.await.map(|Json(blocked)| blocked) })
                 }
 
                 fn await_effect_group_wait<'run>(

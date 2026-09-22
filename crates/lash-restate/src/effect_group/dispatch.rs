@@ -4,9 +4,12 @@ use lash_core::RuntimeEffectCommand;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupDispatchRequest {
+    /// The object and workflow key. Everything else the dispatcher needs —
+    /// the shape and the children it runs — is the index object's recorded
+    /// state, never anything this request carries: a reopen's caller may
+    /// offer different children, and the retained membership wins (ADR 0099
+    /// §3).
     pub group_key: String,
-    pub shape: EffectGroupShape,
-    pub children: Vec<RuntimeEffectEnvelope>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -51,7 +54,6 @@ impl EffectGroupDispatch {
         ctx: WorkflowContext<'_>,
         Json(request): Json<EffectGroupDispatchRequest>,
     ) -> HandlerResult<Json<()>> {
-        request.shape.validate_wire()?;
         let own_id = ctx.invocation_id().to_string();
         let Json(adopted) = ctx
             .object_client::<EffectGroupIndexClient>(request.group_key.clone())
@@ -60,9 +62,9 @@ impl EffectGroupDispatch {
             }))
             .call()
             .await?;
-        match adopted {
-            EffectGroupProbeAdoptResponse::Adopted
-            | EffectGroupProbeAdoptResponse::AlreadyAdopted => {}
+        let shape = match adopted {
+            EffectGroupProbeAdoptResponse::Adopted { shape }
+            | EffectGroupProbeAdoptResponse::AlreadyAdopted { shape } => shape,
             EffectGroupProbeAdoptResponse::Ready
             | EffectGroupProbeAdoptResponse::Closed
             | EffectGroupProbeAdoptResponse::Retired => return Ok(Json(())),
@@ -74,10 +76,28 @@ impl EffectGroupDispatch {
                 ))
                 .into());
             }
-        }
+        };
+        // The recorded membership is the child set, on first dispatch and on
+        // every reopen alike. Decoding is pure — a membership entry that does
+        // not decode is corruption the journal itself produced, a protocol
+        // defect rather than a retryable error.
+        let children = shape
+            .membership
+            .iter()
+            .enumerate()
+            .map(|(position, member)| {
+                serde_json::from_str::<RuntimeEffectEnvelope>(member).map_err(|error| {
+                    TerminalError::new(format!(
+                        "retained membership of effect group {} child {position} does \
+                         not decode: {error}",
+                        request.group_key
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let executors = Arc::clone(&self.executors);
-        let preflight_children = request.children.clone();
+        let preflight_children = children.clone();
         let Json(missing) = ctx
             .run(move || async move {
                 let mut missing = None;
@@ -130,17 +150,17 @@ impl EffectGroupDispatch {
         // point would deadlock the open. Issue all, record all, register, then
         // hold.
         let mut addresses = BTreeMap::new();
-        let mut children = Vec::with_capacity(request.children.len());
-        for (position, envelope) in request.children.into_iter().enumerate() {
+        let mut calls = Vec::with_capacity(children.len());
+        for (position, envelope) in children.into_iter().enumerate() {
             let call = ctx
                 .workflow_client::<EffectGroupDispatchClient>(request.group_key.clone())
                 .child(Json(EffectGroupChildRequest {
                     group_key: request.group_key.clone(),
-                    shape: request.shape.clone(),
+                    shape: shape.clone(),
                     position,
                     envelope,
                 }))
-                .idempotency_key(request.shape.replay_key(position)?)
+                .idempotency_key(shape.replay_key(position)?)
                 .call();
             let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
             let Json(recorded) = ctx
@@ -164,7 +184,7 @@ impl EffectGroupDispatch {
                 }
             }
             addresses.insert(position, invocation_id);
-            children.push((position, call));
+            calls.push((position, call));
         }
         let Json(registered) = ctx
             .object_client::<EffectGroupIndexClient>(request.group_key.clone())
@@ -199,7 +219,7 @@ impl EffectGroupDispatch {
         // already correctly recorded. Worse, failing here would drop the
         // remaining children's tracking, which is the one thing this loop
         // exists to hold.
-        for (position, call) in children {
+        for (position, call) in calls {
             if let Err(error) = call.await {
                 tracing::debug!(
                     group_key = %request.group_key,
@@ -287,6 +307,26 @@ impl EffectGroupDispatch {
             }
         }
 
+        // The child's durable membership, written before anything of it can
+        // run: the §4 boundary inside the child's own settle resolves its
+        // group from this record — the Restate twin of the SQL tiers'
+        // `group_key` column — never from a caller's assertion. A revoked
+        // scope index refuses the record, and a child whose scope is gone
+        // settles nowhere.
+        let Json(membership_admitted) = ctx
+            .object_client::<LashDurableWaitIndexClient>(durable_wait_index_key_for_scope(
+                request.envelope.invocation.execution_scope(),
+            ))
+            .record_group_child(Json(RestateDurableWaitGroupChildRequest {
+                replay_key: request.envelope.invocation.replay_key().to_string(),
+                group_key: request.group_key.clone(),
+            }))
+            .call()
+            .await?;
+        if !membership_admitted {
+            return Ok(Json(()));
+        }
+
         let cancel_key = group_wait_key(
             &request.shape.wait_scope,
             &request.group_key,
@@ -335,7 +375,8 @@ impl EffectGroupDispatch {
             let scoped = controller
                 .scoped_effect_controller(child.scope.admitted_scope.clone())
                 .map_err(TerminalError::from_error)?;
-            let mut drive = driver.drive(child, scoped);
+            let mut drive =
+                driver.drive(child, request.envelope.invocation.address.clone(), scoped);
             let outcome = tokio::select! {
                 biased;
                 cancel = &mut cancel_watch => {
@@ -356,13 +397,7 @@ impl EffectGroupDispatch {
                     EffectGroupChildRunOutcome::Completed { outcome }
                 }
             };
-            return record_child_settlement(
-                controller.context(),
-                &request.group_key,
-                request.position,
-                outcome,
-            )
-            .await;
+            return record_child_settlement(controller.context(), &request, outcome).await;
         }
 
         let cancellation = tokio_util::sync::CancellationToken::new();
@@ -406,7 +441,7 @@ impl EffectGroupDispatch {
             outcome = &mut run => outcome?,
         };
 
-        record_child_settlement(&ctx, &request.group_key, request.position, outcome).await
+        record_child_settlement(&ctx, &request, outcome).await
     }
 
     #[handler]
@@ -451,7 +486,7 @@ impl EffectGroupDispatch {
                 .into());
             }
         }
-        for position in 0..cleanup.children {
+        for position in 0..cleanup.children() {
             let Json(()) = ctx
                 .object_client::<EffectGroupPayloadClient>(payload_key(&group_key, position))
                 .retire()
@@ -465,7 +500,7 @@ impl EffectGroupDispatch {
             EffectGroupWaitKind::Ready,
             EffectGroupWaitResolution::Retired,
         ))
-        .chain((1..=cleanup.children as u64).map(|rank| {
+        .chain((1..=cleanup.children() as u64).map(|rank| {
             (
                 EffectGroupWaitKind::Rank(rank),
                 EffectGroupWaitResolution::Retired,
@@ -477,7 +512,7 @@ impl EffectGroupDispatch {
                 EffectGroupWaitResolution::Retired,
             )
         }))
-        .chain((0..cleanup.children).map(|position| {
+        .chain((0..cleanup.children()).map(|position| {
             (
                 EffectGroupWaitKind::Admit(position),
                 EffectGroupWaitResolution::Retired,
@@ -496,7 +531,7 @@ impl EffectGroupDispatch {
                 .call()
                 .await?;
         }
-        for position in 0..cleanup.children {
+        for position in 0..cleanup.children() {
             let Json(()) = ctx
                 .object_client::<EffectGroupPayloadClient>(payload_key(&group_key, position))
                 .delete_bytes()
@@ -532,10 +567,75 @@ impl EffectGroupDispatch {
 /// group to read.
 async fn record_child_settlement(
     ctx: &SharedWorkflowContext<'_>,
-    group_key: &str,
-    position: usize,
+    request: &EffectGroupChildRequest,
     outcome: EffectGroupChildRunOutcome,
 ) -> HandlerResult<Json<()>> {
+    // The §4 boundary: the index decides this child's final before its
+    // payload and settlement exist. A child whose own settle already
+    // committed reads `AlreadyCommitted` back with the same position; one
+    // the cancel disposition beat is refused by name, and its payload
+    // and settlement never write.
+    let Json(committed) = ctx
+        .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+        .commit_child(Json(EffectGroupCommitChildRequest {
+            replay_key: request.envelope.invocation.replay_key().to_string(),
+        }))
+        .call()
+        .await?;
+    let blocking_positions = match committed {
+        EffectGroupCommitChildResponse::Committed {
+            blocking_positions, ..
+        }
+        | EffectGroupCommitChildResponse::AlreadyCommitted {
+            blocking_positions, ..
+        } => blocking_positions,
+        EffectGroupCommitChildResponse::CancelDecided { .. } => {
+            let refusal = RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+                format!(
+                    "the final record of effect group {} child {} reached durable \
+                         arbitration after its cancel disposition committed; the refusal \
+                         is the whole record and no payload or settlement journals \
+                         beneath it",
+                    request.group_key, request.position
+                ),
+            );
+            return Err(TerminalError::new(
+                serde_json::to_string(&refusal).unwrap_or(refusal.message),
+            )
+            .into());
+        }
+        other => {
+            return Err(TerminalError::new(format!(
+                "commit child protocol defect for {} child {}: {other:?}",
+                request.group_key, request.position
+            ))
+            .into());
+        }
+    };
+    // The §5 barrier: committed siblings below this child seat their
+    // settlements first. Each wake is durable, so a redrive of this
+    // handler re-reads the index's answer rather than racing it.
+    for position in blocking_positions {
+        let key = group_wait_key(
+            &request.shape.wait_scope,
+            &request.group_key,
+            EffectGroupWaitKind::Drained(position),
+        )?;
+        let address = RestateDurableWaitAddress::for_key(&key);
+        let Json(_) = ctx
+            .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+            .await_resolution(Json(
+                RestateDurableWaitAwaitRequest {
+                    key,
+                    deadline: None,
+                }
+                .into(),
+            ))
+            .call()
+            .await?;
+    }
+
     let terminal = match outcome {
         EffectGroupChildRunOutcome::Cancelled => EffectGroupSettlementTerminal::Cancelled,
         EffectGroupChildRunOutcome::Completed {
@@ -546,11 +646,15 @@ async fn record_child_settlement(
         } => {
             let bytes = serde_json::to_vec(&outcome).map_err(|error| {
                 TerminalError::new(format!(
-                    "serialize effect group {group_key} child {position} outcome: {error}"
+                    "serialize effect group {} child {} outcome: {error}",
+                    request.group_key, request.position
                 ))
             })?;
             let Json(put) = ctx
-                .object_client::<EffectGroupPayloadClient>(payload_key(group_key, position))
+                .object_client::<EffectGroupPayloadClient>(payload_key(
+                    &request.group_key,
+                    request.position,
+                ))
                 .put(Json(EffectGroupPayloadPutRequest { bytes }))
                 .call()
                 .await?;
@@ -562,7 +666,8 @@ async fn record_child_settlement(
                 EffectGroupPayloadPutResponse::Retired => return Ok(Json(())),
                 EffectGroupPayloadPutResponse::Conflict => {
                     return Err(TerminalError::new(format!(
-                        "payload byte fence conflict for effect group {group_key} child {position}"
+                        "payload byte fence conflict for effect group {} child {}",
+                        request.group_key, request.position
                     ))
                     .into());
                 }
@@ -570,9 +675,9 @@ async fn record_child_settlement(
         }
     };
     let Json(recorded) = ctx
-        .object_client::<EffectGroupIndexClient>(group_key.to_owned())
+        .object_client::<EffectGroupIndexClient>(request.group_key.clone())
         .record_settlement(Json(EffectGroupRecordSettlementRequest {
-            position,
+            position: request.position,
             terminal,
         }))
         .call()
@@ -582,7 +687,8 @@ async fn record_child_settlement(
         | EffectGroupRecordSettlementResponse::Duplicate { .. }
         | EffectGroupRecordSettlementResponse::Retired => Ok(Json(())),
         other => Err(TerminalError::new(format!(
-            "record settlement protocol defect for {group_key} child {position}: {other:?}"
+            "record settlement protocol defect for {} child {}: {other:?}",
+            request.group_key, request.position
         ))
         .into()),
     }

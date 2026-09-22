@@ -411,7 +411,14 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // collision-free canonical projection, and the journaled `ParentScope` shape
 // inside start declarations moves to `Owned(EffectOpener) | Host`.
 // Component-108 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 109;
+// Version 110 (FIG-3409) carries ADR 0099 §§4–5: `commit_state`/`commit_seq`
+// on `lash_runtime_effect_replay` give the §4 arbitration point and the
+// final-commit order one enum-plus-counter shape, `drain_input` seals the
+// committed drain input, `next_commit_seq` and `lifecycle` join
+// `lash_runtime_effect_group`, the group arity column is renamed
+// `expected_children`, and the membership's `request_version` becomes
+// `command_version`. Component-109 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 110;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

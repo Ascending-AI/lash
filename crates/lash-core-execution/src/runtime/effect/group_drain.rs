@@ -203,7 +203,11 @@ pub struct GroupDrainReport {
 }
 
 impl GroupDrainReport {
-    /// How many children this pass drove to a terminal.
+    /// How many children this pass drove to a terminal *by running them*.
+    /// Children the pass settled by journaling a durable decision instead —
+    /// [`ChildDrainOutcome::Decided`] — are counted separately: they reached a
+    /// rank too, but distinguishing them is how a report answers "did the
+    /// drain execute anything" honestly.
     #[must_use]
     pub fn settled(&self) -> usize {
         self.children
@@ -284,12 +288,15 @@ pub enum ChildDrainOutcome {
         /// The lease boundary the pass read, on the substrate's clock.
         expires_at_ms: u64,
     },
-    /// Left alone: the group declared [`LoserPolicy::Cancel`], whose
-    /// terminals are synthesized inside each child's own claim by the process
-    /// running it. There is nothing for a re-execution to add, and cancelling
-    /// from here would be the drain inventing a terminal for a child it never
-    /// ran.
-    CancelDeclared,
+    /// The pass journalled the child's durable arbitration fact — a cancel
+    /// decision the group row's [`LoserPolicy::Cancel`] disposition owed it,
+    /// or the settlement rank a committed-but-undrained child's §5 discharge
+    /// owed it — and the confirm read shows the child settled. Reported
+    /// separately from [`Settled`](Self::Settled) because the pass did not run
+    /// the effect: what it wrote is a decision over the retained record, which
+    /// is exactly the journal write ADR 0099 §4 makes durable and exactly not
+    /// a terminal invented for a child no process ran.
+    Decided,
     /// Left alone: [`GroupExecutors`] had no executor for this command, so
     /// this host cannot run it. Reported rather than skipped silently, because a
     /// child no host will run is a queue that never empties and an operator has

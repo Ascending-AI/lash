@@ -60,7 +60,7 @@
 //! children in one transaction means no partially-retired group ever exists for
 //! rank to be computed over.
 
-use super::effect_replay_driver::EffectRowState;
+use super::effect_replay_driver::{EffectRowState, EffectTerminal};
 use super::group::{GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 use crate::SessionId;
 
@@ -88,9 +88,11 @@ pub struct EffectGroupRecord {
     /// The disposition declared at open, which a crash-drain of this group
     /// applies rather than inventing one.
     pub loser_disposition: LoserPolicy,
-    /// How many children the group has. Persisted so a drain knows the group's
-    /// membership without reconstructing the caller's envelopes.
-    pub children: usize,
+    /// How many children the opener declared at write time. Persisted so a
+    /// drain knows the group's membership without reconstructing the caller's
+    /// envelopes — the write-time expectation, named distinctly from the
+    /// actual cardinality `COUNT(membership rows)` answers.
+    pub expected_children: usize,
     /// The open instant, for the row's `created_at_ms`.
     pub created_at_ms: u64,
 }
@@ -132,7 +134,7 @@ impl EffectGroupRecord {
             session_id,
             wake: group.wake(),
             loser_disposition: group.loser_disposition(),
-            children: group.children().len(),
+            expected_children: group.children().len(),
             created_at_ms,
         }
     }
@@ -162,11 +164,15 @@ pub struct AcceptedGroupChild {
     pub position: usize,
     /// The child's replay key, its durable identity within the scope.
     pub replay_key: String,
-    /// The recorded canonical envelope JSON, which rebuilds the child whole.
+    /// The recorded accepted envelope JSON — the raw `RuntimeEffectEnvelope`,
+    /// which rebuilds the child whole. Not the canonical `{json, hash}` form
+    /// the replay column stores; a writer needing that form captures it from
+    /// the decoded envelope.
     pub envelope_json: String,
-    /// The retained-request format version, refused rather than guessed when a
-    /// build cannot read it.
-    pub request_version: u16,
+    /// The command format version the retained envelope was minted under,
+    /// checked at decode: a build that cannot read it refuses rather than
+    /// guesses.
+    pub command_version: u16,
 }
 
 /// The persisted `wake` and `loser_disposition` column values.
@@ -232,20 +238,291 @@ impl EffectGroupColumn for LoserPolicy {
 /// A richer answer than the `bool` it replaces, because N1's defect is
 /// invisible to a boolean: "the fence moved" and "the fence moved *and nothing
 /// was allocated*" are the same `false`, and the second is the property with no
-/// other backstop. Making the allocated rank part of the answer means a backend
-/// that bumps on the miss cannot report conformantly.
+/// other backstop. Making the allocated position part of the answer means a
+/// backend that bumps on the miss cannot report conformantly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectFinalizeOutcome {
     /// The guarded write matched the row and the terminal is committed.
+    ///
+    /// For a grouped child the same transaction also won the group's §4
+    /// linearization point: `commit_seq` is the child's durable position in
+    /// the group's final-commit order, allocated from the group's second
+    /// counter (`next_commit_seq`). It is **not** a settlement rank — rank is
+    /// allocated only when the child's drain discharges
+    /// ([`EffectReplayRowStore::discharge_child`](super::effect_replay_driver::EffectReplayRowStore::discharge_child)),
+    /// because a rank a consumer could observe before the child's declared
+    /// intents landed would be observable-before-durable (ADR 0099 §5).
+    /// `None` for an ungrouped effect.
     Written {
-        /// The rank allocated from the group counter, `None` for an ungrouped
-        /// effect. Monotonic and unique within the group, never gapless.
-        settlement_seq: Option<u64>,
+        /// The child's durable final-commit position within its group.
+        commit_seq: Option<u64>,
     },
     /// The guarded write matched no row: the fence moved and this driver no
     /// longer owns the effect. Nothing was written and, for a grouped child,
-    /// **no rank was allocated** (N1).
+    /// **no commit position was allocated** (N1).
     FenceMoved,
+    /// The child's replay row already carries `commit_state = 'cancel_decided'`:
+    /// the cancel disposition won the §4 linearization point first, so this
+    /// late final record is refused and **nothing was journaled** — the
+    /// terminal write, the commit-state CAS and both counters all rolled back
+    /// (ADR 0099 §4, crash window W17).
+    CancelDecided,
+}
+
+/// The durable phase of one group child's §4/§5 commit protocol — the value
+/// the replay row's `commit_state` column carries.
+///
+/// One enum rather than a decision flag plus a drain flag, because each phase
+/// is a CAS arm with its own guards: `pending` while neither side holds the
+/// §4 point, `committed` when the child's final record won it (with
+/// `commit_seq`, the durable position in the group's final-commit order),
+/// `drained` once §5's discharge seated the rank, and `cancel_decided` when
+/// the cancel disposition won the point instead. "Both" or "neither" is not
+/// a representable state.
+///
+/// An ungrouped replay row's column is vacuous: it goes `pending` →
+/// `committed` with its terminal and never `drained` or `cancel_decided` —
+/// there is no group arbitration for it to carry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectCommitState {
+    /// Neither contestant holds the §4 point; the row is `in_progress`.
+    Pending,
+    /// The final record won the §4 point and awaits its §5 discharge.
+    Committed,
+    /// The committed child's drain completed and its rank is seated.
+    Drained,
+    /// The cancel disposition won the §4 point.
+    CancelDecided,
+}
+
+impl EffectCommitState {
+    /// The persisted column value.
+    pub fn column(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Committed => "committed",
+            Self::Drained => "drained",
+            Self::CancelDecided => "cancel_decided",
+        }
+    }
+
+    /// The value a persisted column names, or `None` when no version of this
+    /// runtime wrote it.
+    pub fn from_column(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "committed" => Some(Self::Committed),
+            "drained" => Some(Self::Drained),
+            "cancel_decided" => Some(Self::CancelDecided),
+            _ => None,
+        }
+    }
+}
+
+/// What [`decide_cancel`](super::effect_replay_driver::EffectReplayRowStore::decide_cancel)
+/// did with a cancel disposition offered for one group child.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectCancelOutcome {
+    /// The decision committed: the child's replay row now carries
+    /// `commit_state = 'cancel_decided'`, and the same transaction wrote the
+    /// cancelled terminal and seated the child at `settlement_seq`, so no
+    /// later claim, dispatch or finalize can move it.
+    Decided {
+        /// The rank the cancelled child was seated at.
+        settlement_seq: u64,
+    },
+    /// The cancel disposition already held for this child. Idempotent: a
+    /// retried close or a second cancel observes the first decision's rank.
+    AlreadyDecided {
+        /// The rank the first decision seated the child at.
+        settlement_seq: u64,
+    },
+    /// Refused: the child's final record already won the linearization point
+    /// (`commit_state = 'committed'`), so the cancel decision may not commit.
+    /// The child is protected and proceeds through drain to its real rank.
+    FinalCommitted {
+        /// The commit-order position the winning final record holds.
+        commit_seq: u64,
+    },
+}
+
+/// The cancellation request one group child's arbitration point answers.
+///
+/// `terminal` is the cancelled terminal the decision journals — the caller
+/// builds it (`child_cancelled_error`) because its content is the contract's,
+/// not the store's. `envelope_json`/`envelope_hash` are the child's canonical
+/// envelope and its hash — the same pair the child's claim would have
+/// recorded — supplied by the caller, which owns envelope hashing and holds
+/// the only copy of the canonical wire form: the membership row retains the
+/// *raw* accepted envelope, not the `{json, hash}` wrapper the replay column's
+/// readers decode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectCancelRequest {
+    /// The group the child belongs to.
+    pub group_key: String,
+    /// The child's replay key — its durable identity.
+    pub replay_key: String,
+    /// The cancelled terminal to journal with the decision.
+    pub terminal: EffectTerminal,
+    /// The child's canonical envelope JSON, exactly as its claim would have
+    /// recorded it.
+    pub envelope_json: String,
+    /// Hash of `envelope_json`'s canonical payload.
+    pub envelope_hash: String,
+}
+
+/// What [`discharge_child`](super::effect_replay_driver::EffectReplayRowStore::discharge_child)
+/// did with one committed child's drain completion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectDischargeOutcome {
+    /// The discharge committed: the replay row's `commit_state` is `drained`
+    /// and the child was seated at `settlement_seq` — rank allocated only
+    /// now, after the drain, which is what makes rank order agree with commit
+    /// order (ADR 0099 §5).
+    Discharged {
+        /// The rank the child was seated at.
+        settlement_seq: u64,
+    },
+    /// The child was already discharged. Idempotent, so a crashed drain step
+    /// retried after recovery observes the first discharge's rank.
+    AlreadyDischarged {
+        /// The rank the first discharge seated the child at.
+        settlement_seq: u64,
+    },
+    /// Refused for now: a committed sibling at a lower commit position is
+    /// still undrained. Drains proceed in commit order, so the caller waits
+    /// and retries — the barrier is durable and recovery finishes the missing
+    /// drain rather than letting this child jump it.
+    Blocked,
+}
+
+/// The discharge request one committed child's drain completion answers.
+///
+/// `terminal` is `Some` exactly when the child's §4 commit ran at its
+/// final-attempt boundary rather than at the older finalize path: a
+/// boundary-committed row holds no terminal — the commit journals only the
+/// decision, its position, and the drain input — so the discharge is the
+/// write that seats the projected outcome, moves the row to its terminal,
+/// and marks it `drained` in one transaction. `None` keeps the legacy shape:
+/// the row's terminal was journaled with its commit and the discharge writes
+/// only rank and drain state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectDischargeRequest {
+    /// The group the child belongs to.
+    pub group_key: String,
+    /// The journal scope the child's replay row lives under.
+    pub scope_id: String,
+    /// The child's replay key — its durable identity.
+    pub replay_key: String,
+    /// The terminal to journal with the discharge, when the row's was not
+    /// written at commit.
+    pub terminal: Option<EffectTerminal>,
+}
+
+/// What a tool child's final-attempt boundary asks its controller to commit.
+///
+/// Identity and drain input only. The lease owner is the substrate's own
+/// fact, so the request does not carry it and no caller can claim another
+/// owner's fence — and the group is *resolved* from the durable record rather
+/// than asserted by the caller, so `group_key` is an output of the decision,
+/// not an input a caller could get wrong.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupChildFinalCommit {
+    /// The journal scope the child's replay row lives under.
+    pub scope_id: String,
+    /// The child's replay key — its durable identity.
+    pub replay_key: String,
+    /// The sealed drain input — the declared intents and projection data a
+    /// recovery replays instead of re-running the attempt.
+    pub drain_input: String,
+}
+
+/// The §4 commit request one group child's final-attempt boundary answers.
+///
+/// This is the final record's durable commit at the linearization point —
+/// deliberately *not* the finalize-time CAS the older path used. What the
+/// commit persists is the arbitration result and everything a recovered
+/// drain needs to finish the child's obligations without re-executing its
+/// attempt: the allocated `commit_seq` (the order nested semantic commands
+/// may drain in) and `drain_input` (the sealed attempt outcome plus its
+/// declared intents). The projected outcome itself journals at discharge,
+/// after the obligations finish (ADR 0099 §5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectGroupChildCommitRequest {
+    /// The group the caller believes the row belongs to, when it has a
+    /// durable answer already — the driver's own group membership from the
+    /// minted claim. `None` means "resolve it": the row's own `group_key`
+    /// column is the authority either way, and a `Some` that disagrees is
+    /// corruption, not a different group.
+    pub group_key: Option<String>,
+    /// The journal scope the child's replay row lives under.
+    pub scope_id: String,
+    /// The child's replay key — its durable identity.
+    pub replay_key: String,
+    /// The serialized drain input the commit records: what a recovered pass
+    /// drains and projects rather than re-executes.
+    pub drain_input: String,
+    /// The lease owner the CAS must still find on the row. A boundary is
+    /// built by the claiming process, so its commit is fenced to that claim —
+    /// a row reclaimed under another owner cannot be committed by a stale
+    /// executor.
+    pub owner_id: String,
+}
+
+/// What [`commit_group_child`](super::effect_replay_driver::EffectReplayRowStore::commit_group_child)
+/// decided for one replay key's final record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EffectGroupChildCommitOutcome {
+    /// The replay key names no group child: an ordinary effect, which takes
+    /// the process-local drain path and owes no durable discharge.
+    Ungrouped,
+    /// The final record won the §4 point: `commit_state` is `committed`, the
+    /// commit position `commit_seq` is allocated, and the drain input is
+    /// durable. The caller may drain once every lower commit position has
+    /// drained.
+    Committed {
+        /// The group the row resolved to.
+        group_key: String,
+        /// The child's durable position in the group's final-commit order.
+        commit_seq: u64,
+    },
+    /// The point already holds this child's final record — a crashed or
+    /// retried executor reaching the boundary again. `drain_input` is the
+    /// recorded obligation set the winner committed, so recovery drains the
+    /// recorded intents rather than whatever a re-execution re-declared.
+    AlreadyCommitted {
+        /// The group the row resolved to.
+        group_key: String,
+        /// The winning commit's durable position.
+        commit_seq: u64,
+        /// The drain input the winning commit recorded.
+        drain_input: Option<String>,
+    },
+    /// Refused: the cancel disposition already committed at the §4 point
+    /// (W6/W7). The late final may journal nothing — no terminal, no
+    /// position, no drain input — and the caller surfaces the typed
+    /// cancel-decided error rather than an outcome.
+    CancelDecided {
+        /// The group the row resolved to.
+        group_key: String,
+        /// The position the cancel decision seated the child at.
+        commit_seq: u64,
+    },
+}
+
+/// The arbitration and discharge state of one group child's replay row, read
+/// back for the barrier wait, the §4 admission fence, and recovery's "what is
+/// still owed" question.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredChildArbitration {
+    /// The group this arbitration belongs to.
+    pub group_key: String,
+    /// The row's commit-protocol phase.
+    pub commit_state: EffectCommitState,
+    /// The child's durable position in the group's final-commit order, held
+    /// only under `committed`/`drained` — the CHECK on the column pair makes
+    /// the two disagreeing unrepresentable.
+    pub commit_seq: Option<u64>,
 }
 
 /// A settled child of a group, read back by **rank**.
@@ -280,10 +557,16 @@ pub struct StoredGroupSettlement {
 /// A child of a group whose settlement rank has **not** been allocated, read
 /// back by [`read_unsettled_group_children`](super::effect_replay_driver::EffectReplayRowStore::read_unsettled_group_children).
 ///
-/// "Unsettled" is `settlement_seq IS NULL`, which for a grouped child is the
-/// same set as "non-terminal": a rank is allocated in the same transaction that
-/// writes the terminal (N1), so a child cannot hold one without the other. The
-/// read is the exact complement of the rank read
+/// "Unsettled" is `settlement_seq IS NULL`. Since ADR 0099 §4/§5 (FIG-3409)
+/// that is **not** the same set as "non-terminal": a rank is allocated at
+/// discharge, after the child's drain, so a child whose final record committed
+/// but whose drain has not finished is terminal *and* unsettled — the exact
+/// state a recovery drain exists to finish (W7, W19). The `commit_state` this
+/// row carries is what lets the reader tell that state apart from the torn
+/// row N1 once made impossible: terminal with no rank and no `committed`
+/// state is corrupt; `committed` with no rank is a live recovery obligation.
+///
+/// The read is the exact complement of the rank read
 /// ([`StoredGroupSettlement`]), whose predicate is `settlement_seq IS NOT
 /// NULL` — which is why a group host could not previously ask the question at
 /// all, and had to infer "how much of this group is still outstanding" by
@@ -296,29 +579,52 @@ pub struct StoredGroupSettlement {
 ///   state is bounded by close **and** completion, and completion is a durable
 ///   fact rather than a count this process kept.
 /// * The group-drain driver (FIG-1536) uses the same rows as its queue: the
-///   journal's own non-terminal grouped children *are* the drain queue, so the
-///   row carries what re-executing or cancelling a child needs — the child's
-///   journal identity, its recorded canonical envelope, and the lease boundary
-///   that says whether the drain may take it over.
+///   journal's own unranked grouped children *are* the drain queue, so the
+///   row carries what re-executing, cancelling or discharging a child needs —
+///   the child's journal identity, its recorded canonical envelope, the lease
+///   boundary that says whether the drain may take it over, and its §4
+///   arbitration state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnsettledGroupChild {
     /// Durable journal identity of the scope the child was claimed under; one
     /// half of its `(scope_id, replay_key)` key.
     pub scope_id: String,
+    /// The child's accepted position in the group — its index into the
+    /// declared membership, and the ordinal the cancelled terminal's message
+    /// carries.
+    pub position: u64,
     /// The child's replay key, unique within its scope. A host that opened the
     /// group maps it back to a position through the children it holds.
     pub replay_key: String,
-    /// The recorded canonical envelope JSON, so a drain can rebuild the child's
-    /// effect without reconstructing the caller's frame.
+    /// The recorded accepted envelope JSON — the raw `RuntimeEffectEnvelope`,
+    /// so a drain can rebuild the child's effect without reconstructing the
+    /// caller's frame. Sourced from the retained membership row, so it is
+    /// present for a never-claimed child too; the canonical `{json, hash}`
+    /// form is captured from the decoded envelope when a write needs it.
     pub envelope_json: String,
-    /// The status and payload columns, decoded once by the store. Always
-    /// [`EffectRowState::InProgress`] on a healthy journal, since a terminal
-    /// and a rank are written together; any other state is reported rather
-    /// than filtered, so corruption stays visible to the reader.
-    pub state: EffectRowState,
+    /// The status and payload columns, decoded once by the store — `None` for
+    /// a child that never claimed a replay row, which is a normal pre-claim
+    /// state rather than corruption. On a healthy journal a `Some` value is
+    /// [`EffectRowState::InProgress`] or a terminal under a `committed`
+    /// state awaiting its drain; anything else is reported rather than
+    /// filtered, so corruption stays visible to the reader.
+    pub state: Option<EffectRowState>,
     /// Lease expiry of the child's current claim, against which a drain decides
     /// whether the child is still owned by a live driver.
     pub lease_expires_at_ms: u64,
+    /// The replay row's commit-protocol phase, `None` for a child that never
+    /// claimed a replay row. `committed` is the undrained-commit case a
+    /// recovery drain discharges; `pending` and `None` are the work the
+    /// disposition decides over.
+    pub commit_state: Option<EffectCommitState>,
+    /// The child's position in the group's final-commit order — `Some` only
+    /// under `commit_state = 'committed'` here, since a `drained` child holds
+    /// a rank and is no longer unsettled.
+    pub commit_seq: Option<u64>,
+    /// The command format version the retained envelope was minted under —
+    /// the membership row's own fact, carried so a drain refuses a command
+    /// encoding it cannot read rather than guessing at the envelope.
+    pub command_version: u16,
 }
 
 #[cfg(test)]
@@ -379,7 +685,7 @@ mod tests {
         assert_eq!(record.group_key, group.group_key());
         assert_eq!(record.wake, group.wake());
         assert_eq!(record.loser_disposition, group.loser_disposition());
-        assert_eq!(record.children, group.children().len());
+        assert_eq!(record.expected_children, group.children().len());
         assert_eq!(record.scope_id, "scope-journal-key");
         assert_eq!(record.session_id.as_deref(), Some("session"));
         assert_eq!(record.created_at_ms, 1_700_000_000_000);
@@ -406,8 +712,8 @@ mod tests {
         assert_eq!(second.wake, GroupWakePolicy::All);
         assert_eq!(first.loser_disposition, LoserPolicy::RunToCompletion);
         assert_eq!(second.loser_disposition, LoserPolicy::Cancel);
-        assert_eq!(first.children, 1);
-        assert_eq!(second.children, 2);
+        assert_eq!(first.expected_children, 1);
+        assert_eq!(second.expected_children, 2);
         assert!(
             first.session_id.is_none(),
             "a session-free scope writes NULL"
@@ -483,9 +789,7 @@ mod tests {
     fn a_fence_miss_is_distinguishable_from_an_ungrouped_write() {
         assert_ne!(
             EffectFinalizeOutcome::FenceMoved,
-            EffectFinalizeOutcome::Written {
-                settlement_seq: None,
-            }
+            EffectFinalizeOutcome::Written { commit_seq: None }
         );
     }
 }

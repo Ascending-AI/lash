@@ -371,6 +371,29 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
             .close_effect_group(handle, disposition)
             .await
     }
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner
+            .controller()
+            .commit_group_child_final(commit)
+            .await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .controller()
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
 }
 
 fn surface_operation_id(key: u8) -> String {

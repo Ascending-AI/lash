@@ -90,6 +90,9 @@ const LEAF_BILLED: &str = "tool:law_billed";
 /// The leaf whose spend precedes a cancellation: §13 keeps a cancelled
 /// attempt's known usage on the settlement its outcome never completes.
 const LEAF_SPEND_CANCEL: &str = "tool:law_spend_cancel";
+/// The leaf the commit-boundary laws run: returns a terminal that declares a
+/// process start and an event, so the §5 drain is observable intent writes.
+const LEAF_COMMIT: &str = "tool:law_commit";
 
 /// One host over the substrate under test, plus the drain it hands out.
 pub struct ToolChildWorld {
@@ -228,6 +231,13 @@ struct LawObservation {
     parked_keys: std::sync::Mutex<HashMap<String, crate::AwaitEventKey>>,
     /// Signalled whenever `parked_keys` gains an entry.
     parked: Notify,
+    /// Call ids the law marked as held before opening; a commit leaf waits
+    /// for its release before returning its terminal.
+    held: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Call ids whose release has been published.
+    released: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Signalled whenever `released` or `held` changes.
+    released_changed: Notify,
 }
 
 impl LawObservation {
@@ -279,6 +289,37 @@ impl LawObservation {
             panic!("the deferred leaf under `{call_id}` never parked on a completion key")
         })
     }
+
+    /// Marks `call_id` held before the group opens: the commit leaf under it
+    /// parks in `await_released` until `release` publishes it.
+    fn hold(&self, call_id: &str) {
+        self.held.lock_recover().insert(call_id.to_string());
+        self.released_changed.notify_waiters();
+    }
+
+    /// Publishes `call_id`'s release.
+    fn release(&self, call_id: &str) {
+        self.released.lock_recover().insert(call_id.to_string());
+        self.released_changed.notify_waiters();
+    }
+
+    /// What a commit leaf's body waits on: returns immediately for a call id
+    /// nobody holds, and parks until `release` for one that is held.
+    async fn await_released(&self, call_id: &str) {
+        loop {
+            let notified = self.released_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let released = self.released.lock_recover();
+                let held = self.held.lock_recover();
+                if released.contains(call_id) || !held.contains(call_id) {
+                    return;
+                }
+            }
+            notified.await;
+        }
+    }
 }
 
 /// One definition per leaf lane, plus the retry policy the retry leaf needs.
@@ -294,6 +335,7 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_SPEND_DEFERRED,
         LEAF_BILLED,
         LEAF_SPEND_CANCEL,
+        LEAF_COMMIT,
     ]
     .into_iter()
     .map(|id| {
@@ -478,6 +520,39 @@ impl crate::ToolProvider for LawLeafProvider {
                             process_id: self.intent_target.clone(),
                             event_type: "law.intent-event".to_string(),
                             payload: serde_json::json!({ "leaf": "intents" }),
+                        }),
+                    ]),
+                )
+            }
+            name if name == LEAF_COMMIT.trim_start_matches("tool:") => {
+                let call_id = context
+                    .tool_call_id()
+                    .unwrap_or("missing-call-id")
+                    .to_string();
+                // The gate the law orders commits through: a held call id
+                // parks its body until the law releases it.
+                self.observation.await_released(&call_id).await;
+                crate::ToolAttemptOutcome::done(
+                    crate::ToolOutcomeDone::ok(
+                        serde_json::json!({ "leaf": "commit", "call_id": call_id }),
+                    ),
+                    crate::ToolIntents::v3(vec![
+                        crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+                            session_id: self.session_id.clone(),
+                            declaration: crate::ProcessStartDeclaration::external(
+                                crate::ProcessOriginator::host(),
+                                serde_json::json!({ "leaf": "commit", "call_id": call_id }),
+                                crate::ProcessLifecyclePolicy::new(
+                                    crate::ParentScope::Host,
+                                    crate::OnParentEnd::Abandon,
+                                ),
+                            ),
+                        })),
+                        crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                            session_id: self.session_id.clone(),
+                            process_id: self.intent_target.clone(),
+                            event_type: "law.intent-event".to_string(),
+                            payload: serde_json::json!({ "leaf": "commit", "call_id": call_id }),
                         }),
                     ]),
                 )
@@ -820,6 +895,474 @@ fn opener_dispatch(
         .borrowed_effect_controller(controller)
         .build()
         .dispatch
+}
+
+/// The same dispatch context with the process service the caller supplies —
+/// how a law installs a [`GatedProcessService`] over the tier's registry.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn opener_dispatch_with_processes(
+    host: &Arc<dyn crate::EffectHost>,
+    admitted: &crate::AdmittedScope,
+    provider: Arc<dyn crate::ToolProvider>,
+    processes: Arc<dyn crate::ProcessService>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) -> Arc<crate::tool_dispatch::ToolDispatchContext<'static>> {
+    let controller = host
+        .scoped_static(admitted.clone())
+        .expect("the host lends a scoped controller")
+        .expect("this host hands out owned scoped controllers");
+    let tool_registry = crate::ToolRegistry::from_tool_provider_with_orchestrating_tools(
+        Arc::clone(&provider),
+        vec![law_orchestrating_tool()],
+    )
+    .expect("the law's leaf provider and orchestrating tool register disjoint ids");
+    let mut definitions = leaf_definitions();
+    definitions.push(crate::ToolDefinition::raw(
+        LEAF_ORCHESTRATING,
+        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
+        "conformance orchestrating leaf",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    ));
+    crate::testing::TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
+        .tool_registry(Arc::new(tool_registry))
+        .processes(processes)
+        .direct_completions(crate::DirectCompletionClient::from_fn(
+            |_request, _source| Ok(law_direct_completion()),
+        ))
+        .process_env_store(process_env_store)
+        .borrowed_effect_controller(controller)
+        .build()
+        .dispatch
+}
+
+/// [`register_opener`] with the process service the caller supplies.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn register_opener_with_processes(
+    host: &Arc<dyn crate::EffectHost>,
+    scope: &crate::ExecutionScope,
+    provider: Arc<dyn crate::ToolProvider>,
+    processes: Arc<dyn crate::ProcessService>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    opener: crate::EffectOpener,
+    cooperative: tokio_util::sync::CancellationToken,
+) -> crate::runtime::effect::LiveOpenerGuard {
+    let installed = install_child_host(host, &process_env_store);
+    let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
+        .expect("the opener's scope and incarnation agree");
+    let dispatch =
+        opener_dispatch_with_processes(host, &admitted, provider, processes, process_env_store);
+    let lent_controller = host
+        .scoped_static(admitted)
+        .expect("the host lends a scoped controller")
+        .expect("this host hands out owned scoped controllers");
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
+    let context = crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(
+        &dispatch,
+        lent_controller,
+        event_tx,
+        cooperative,
+    );
+    let (guard, ended) = installed.openers().register(opener, context);
+    crate::task::spawn(async move {
+        tokio::select! {
+            _ = ended.cancelled() => {}
+            _ = async { while event_rx.recv().await.is_some() {} } => {}
+        }
+    });
+    guard
+}
+
+/// The intent-admission gate a commit-boundary law installs around the tier's
+/// process service: which call ids' recorded-intent writes may land, what is
+/// parked inside `admit`, and what has landed — in order.
+#[derive(Default)]
+struct IntentSink {
+    /// When set, every intent write parks until `release_all`.
+    held_all: std::sync::atomic::AtomicBool,
+    /// Call ids individually held.
+    held: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Call ids parked inside `admit` right now — the "past its §4 commit,
+    /// inside its drain" observation the laws wait on.
+    blocked: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// `(call_id, kind)` in the order the writes landed.
+    landed: std::sync::Mutex<Vec<(String, &'static str)>>,
+    /// Signalled on every hold/release/block change.
+    changed: Notify,
+}
+
+impl IntentSink {
+    fn hold_all(&self) {
+        self.held_all
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.changed.notify_waiters();
+    }
+
+    fn hold(&self, call_id: &str) {
+        self.held.lock_recover().insert(call_id.to_string());
+        self.changed.notify_waiters();
+    }
+
+    fn release(&self, call_id: &str) {
+        self.held.lock_recover().remove(call_id);
+        self.changed.notify_waiters();
+    }
+
+    fn release_all(&self) {
+        self.held_all
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        self.held.lock_recover().clear();
+        self.changed.notify_waiters();
+    }
+
+    fn landed(&self) -> Vec<(String, &'static str)> {
+        self.landed.lock_recover().clone()
+    }
+
+    /// The gate every recorded-intent write crosses: parks while `call_id` is
+    /// held, recording itself in `blocked` for the law to observe.
+    async fn admit(&self, call_id: &str) {
+        loop {
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let held_all = self.held_all.load(std::sync::atomic::Ordering::SeqCst);
+                let held = self.held.lock_recover();
+                if !held_all && !held.contains(call_id) {
+                    if self.blocked.lock_recover().remove(call_id) {
+                        self.changed.notify_waiters();
+                    }
+                    return;
+                }
+            }
+            if self.blocked.lock_recover().insert(call_id.to_string()) {
+                self.changed.notify_waiters();
+            }
+            notified.await;
+        }
+    }
+
+    /// Waits until `call_id` is parked inside `admit` — the child is past its
+    /// §4 commit and inside its drain.
+    async fn await_blocked(&self, call_id: &str) {
+        tokio::time::timeout(SETTLE_BUDGET, async {
+            loop {
+                let notified = self.changed.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if self.blocked.lock_recover().contains(call_id) {
+                    return;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the drain under `{call_id}` never reached its first intent"))
+    }
+
+    /// Waits until at least `n` intent writes have landed.
+    async fn await_landed_len(&self, n: usize) {
+        tokio::time::timeout(SETTLE_BUDGET, async {
+            loop {
+                let notified = self.changed.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if self.landed.lock_recover().len() >= n {
+                    return;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("fewer than {n} intent writes landed"))
+    }
+
+    fn record_landed(&self, call_id: &str, kind: &'static str) {
+        self.landed.lock_recover().push((call_id.to_string(), kind));
+        self.changed.notify_waiters();
+    }
+}
+
+/// A [`ProcessService`] whose recorded-intent writes pass through an
+/// [`IntentSink`] first: `admit` gates them, `landed` records them. Every
+/// other method is the inner service's, unchanged.
+struct GatedProcessService {
+    inner: Arc<dyn crate::ProcessService>,
+    sink: Arc<IntentSink>,
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessService for GatedProcessService {
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &crate::SessionId,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
+        let call_id = match &request.input {
+            crate::ProcessInput::External { metadata } => metadata["call_id"]
+                .as_str()
+                .unwrap_or("<unlabelled>")
+                .to_string(),
+            _ => "<unlabelled>".to_string(),
+        };
+        self.sink.admit(&call_id).await;
+        self.sink.record_landed(&call_id, "start");
+        self.inner
+            .start_from_recorded_intent(session_id, request, scope)
+            .await
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let call_id = payload["call_id"]
+            .as_str()
+            .unwrap_or("<unlabelled>")
+            .to_string();
+        self.sink.admit(&call_id).await;
+        self.sink.record_landed(&call_id, "event");
+        self.inner
+            .emit_event_recorded_intent(
+                session_id, process_id, event_type, replay_key, payload, scope,
+            )
+            .await
+    }
+
+    async fn list_visible_for_attempt(
+        &self,
+        session_id: &crate::SessionId,
+        mode: crate::ProcessListMode,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        self.inner.list_visible_for_attempt(session_id, mode).await
+    }
+
+    async fn start_from_request(
+        &self,
+        session_id: &crate::SessionId,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
+        self.inner
+            .start_from_request(session_id, request, scope)
+            .await
+    }
+
+    async fn recorded_max_attempts(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+    ) -> Result<Option<u32>, crate::PluginError> {
+        self.inner
+            .recorded_max_attempts(session_id, process_id)
+            .await
+    }
+
+    async fn start(
+        &self,
+        session_id: &crate::SessionId,
+        registration: crate::ProcessRegistration,
+        options: crate::ProcessStartOptions,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .start(session_id, registration, options, scope)
+            .await
+    }
+
+    async fn complete_external(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+        await_output: crate::ProcessAwaitOutput,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        self.inner
+            .complete_external(session_id, process_id, await_output, scope)
+            .await
+    }
+
+    async fn report_caller_departure(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .report_caller_departure(session_id, process_id)
+            .await
+    }
+
+    async fn await_process(
+        &self,
+        process_id: &crate::ProcessId,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        self.inner.await_process(process_id, scope).await
+    }
+
+    async fn await_process_ref(
+        &self,
+        process_ref: &crate::ProcessRef,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        self.inner.await_process_ref(process_ref, scope).await
+    }
+
+    async fn attach_process_terminal(
+        &self,
+        process_ref: &crate::ProcessRef,
+        key: &crate::AwaitEventKey,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.inner
+            .attach_process_terminal(process_ref, key, scope)
+            .await
+    }
+
+    async fn list_visible(
+        &self,
+        session_id: &crate::SessionId,
+        mode: crate::ProcessListMode,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        self.inner.list_visible(session_id, mode, scope).await
+    }
+
+    async fn validate_visible(
+        &self,
+        session_id: &crate::SessionId,
+        process_ids: &[crate::ProcessId],
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.inner
+            .validate_visible(session_id, process_ids, scope)
+            .await
+    }
+
+    async fn validate_visible_refs(
+        &self,
+        session_id: &crate::SessionId,
+        process_refs: &[crate::ProcessRef],
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.inner
+            .validate_visible_refs(session_id, process_refs, scope)
+            .await
+    }
+
+    async fn cancel(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner.cancel(session_id, process_id, scope).await
+    }
+
+    async fn cancel_recorded_intent(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+        identity: crate::ToolIntentIdentity,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .cancel_recorded_intent(session_id, process_id, identity, scope)
+            .await
+    }
+
+    async fn cancel_all_visible(
+        &self,
+        session_id: &crate::SessionId,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<Vec<crate::ProcessCancelReceipt>, crate::PluginError> {
+        self.inner.cancel_all_visible(session_id, scope).await
+    }
+
+    async fn signal_recorded_intent(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.inner
+            .signal_recorded_intent(
+                session_id,
+                process_id,
+                signal_name,
+                signal_id,
+                payload,
+                scope,
+            )
+            .await
+    }
+
+    async fn emit_event(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.inner
+            .emit_event(
+                session_id, process_id, event_type, replay_key, payload, scope,
+            )
+            .await
+    }
+
+    async fn signal_possessed(
+        &self,
+        session_id: &crate::SessionId,
+        process_id: &crate::ProcessId,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.inner
+            .signal_possessed(
+                session_id,
+                process_id,
+                signal_name,
+                signal_id,
+                payload,
+                scope,
+            )
+            .await
+    }
+
+    async fn transfer(
+        &self,
+        from_session_id: &crate::SessionId,
+        to_session_id: &crate::SessionId,
+        process_ids: Vec<crate::ProcessId>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.inner
+            .transfer(from_session_id, to_session_id, process_ids, scope)
+            .await
+    }
 }
 
 /// One child envelope: a `ToolInvocation` command whose request reconstructs
@@ -1253,7 +1796,10 @@ where
             .await;
             phase(world).await;
         });
-        drop(runtime);
+        // A killed worker does not shut down gracefully: bound the teardown so
+        // a task parked mid-drain — which is exactly the state a crash leaves —
+        // cannot hold the worker threads open.
+        runtime.shutdown_timeout(std::time::Duration::from_secs(10));
     })
     .join()
     .expect("the crashing process runs its phase before dying");
@@ -1300,6 +1846,7 @@ async fn until_claims_lapse(world: &ToolChildWorld, group_key: &str) {
 // =============================================================================
 
 mod capture;
+mod commit_boundary;
 mod driver;
 mod foreign_opener;
 mod incarnation;
@@ -1307,6 +1854,7 @@ mod recovery;
 mod usage;
 
 pub use capture::*;
+pub use commit_boundary::*;
 pub use driver::*;
 pub use foreign_opener::*;
 pub use incarnation::*;

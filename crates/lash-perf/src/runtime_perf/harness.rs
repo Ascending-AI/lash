@@ -1125,6 +1125,25 @@ impl lash_core::RuntimeEffectController for RetryingStartGateController {
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.delegate.close_effect_group(handle, disposition).await
     }
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.delegate.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.delegate
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
 }
 
 struct BenchmarkWorkbenchTriggerPluginFactory;

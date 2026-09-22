@@ -547,6 +547,65 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         handle: EffectGroupHandle,
         disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError>;
+
+    /// Commit one group child's final record at the §4 linearization point —
+    /// the durable half of the child's final-attempt boundary.
+    ///
+    /// This is the write ADR 0099 §5's commit order rides on: the CAS that
+    /// moves the child `pending → committed`, the allocation of its durable
+    /// `commit_seq`, and the persistence of `drain_input` — the sealed data a
+    /// recovery needs to finish the drain and projection rather than re-run
+    /// the attempt — as **one decision under the substrate's own
+    /// serialization**. Store backends run it inside a transaction fenced on
+    /// the claiming lease; the native controller runs it under the per-group
+    /// mutex; the Restate substrate runs it inside the serialized group index
+    /// handler. There is deliberately **no read-then-write on this side of
+    /// the boundary**: the substrate's serialization is the fence, so a
+    /// cancel decision can never slip between an advisory read and the commit
+    /// it was supposed to guard.
+    ///
+    /// Returns [`EffectGroupChildCommitOutcome::Committed`] with the allocated
+    /// position, [`AlreadyCommitted`] with the recorded winner's position and
+    /// drain input on an idempotent retry, or [`CancelDecided`] when the
+    /// cancel disposition owns the point — in which case the caller writes
+    /// nothing of its own.
+    ///
+    /// [`AlreadyCommitted`]: super::super::group_journal::EffectGroupChildCommitOutcome::AlreadyCommitted
+    /// [`CancelDecided`]: super::super::group_journal::EffectGroupChildCommitOutcome::CancelDecided
+    ///
+    /// The default refuses rather than inventing an arbitration: a controller
+    /// that cannot serialize the decision cannot host grouped tool children,
+    /// and silently succeeding would be a fence that does not exist.
+    async fn commit_group_child_final(
+        &self,
+        commit: super::super::group_journal::GroupChildFinalCommit,
+    ) -> Result<
+        super::super::group_journal::EffectGroupChildCommitOutcome,
+        RuntimeEffectControllerError,
+    > {
+        let _ = commit;
+        Err(super::effect_groups_unsupported(
+            "durable group-child commit boundary",
+        ))
+    }
+
+    /// Whether a committed sibling below `commit_seq` in `group_key` still
+    /// owes its drain — the durable §5 barrier drains wait behind.
+    ///
+    /// Drains are admitted in final-commit order: a `true` answer means the
+    /// caller waits and retries rather than emitting its nested semantic
+    /// commands ahead of a lower-commit sibling. The default refuses on the
+    /// same grounds as [`commit_group_child_final`](Self::commit_group_child_final):
+    /// a controller that cannot answer the durable barrier cannot order
+    /// drains either.
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let _ = (group_key, commit_seq);
+        Err(super::effect_groups_unsupported("durable drain barrier"))
+    }
 }
 
 #[cfg(test)]

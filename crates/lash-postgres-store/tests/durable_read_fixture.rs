@@ -64,10 +64,13 @@ const SLIPPING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-91-45dbe5ab2/postgres-expected.json",
 ];
 const RECEDING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-92-c5610bd22/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-92-eef96581a/postgres-expected.json",
 ];
 const SUBSIDING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-93-47ab59286/postgres-expected.json",
+];
+const LAPSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-94-b66a55237/postgres-expected.json",
 ];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
@@ -213,7 +216,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 109);
+    assert_eq!(PostgresStorage::schema_version(), 110);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -445,6 +448,76 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("create the affected-input child table from the authoritative DDL");
+    // The effect-group arbitration columns and guards land on the catalog as a
+    // delta rather than a rebuild: the refusal fixture's membership rows are
+    // evidence the refresh must keep.
+    sqlx::raw_sql(
+        "ALTER TABLE lash_runtime_effect_group
+             ADD COLUMN IF NOT EXISTS next_commit_seq BIGINT NOT NULL DEFAULT 0,
+             ADD COLUMN IF NOT EXISTS lifecycle JSONB NOT NULL DEFAULT '{\"type\":\"live\"}';
+         ALTER TABLE lash_runtime_effect_group
+             DROP CONSTRAINT IF EXISTS ck_runtime_effect_group_lifecycle;
+         ALTER TABLE lash_runtime_effect_group
+             ADD CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (
+                 lifecycle->>'type' IN ('live', 'closing', 'settled')
+             );
+         DO $$
+         BEGIN
+             IF EXISTS (
+                 SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'lash_runtime_effect_group'
+                   AND column_name = 'children'
+             ) THEN
+                 ALTER TABLE lash_runtime_effect_group
+                     RENAME COLUMN children TO expected_children;
+             END IF;
+             IF EXISTS (
+                 SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'lash_runtime_effect_group_child'
+                   AND column_name = 'request_version'
+             ) THEN
+                 ALTER TABLE lash_runtime_effect_group_child
+                     RENAME COLUMN request_version TO command_version;
+             END IF;
+         END $$;
+         ALTER TABLE lash_runtime_effect_group_child
+             DROP COLUMN IF EXISTS decision,
+             DROP COLUMN IF EXISTS commit_seq,
+             DROP COLUMN IF EXISTS decided_at_ms,
+             DROP COLUMN IF EXISTS drained_at_ms;
+         DROP INDEX IF EXISTS uq_lash_runtime_effect_group_child_commit_seq;
+         ALTER TABLE lash_runtime_effect_replay
+             ADD COLUMN IF NOT EXISTS commit_state TEXT NOT NULL DEFAULT 'pending',
+             ADD COLUMN IF NOT EXISTS commit_seq BIGINT,
+             ADD COLUMN IF NOT EXISTS drain_input TEXT;
+         ALTER TABLE lash_runtime_effect_replay
+             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_commit_state;
+         ALTER TABLE lash_runtime_effect_replay
+             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_commit_seq;
+         ALTER TABLE lash_runtime_effect_replay
+             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_drain_input;
+         ALTER TABLE lash_runtime_effect_replay
+             ADD CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (
+                 commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')
+             ),
+             ADD CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK (
+                 commit_seq IS NULL OR commit_state IN ('committed', 'drained')
+             ),
+             ADD CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (
+                 drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))
+             );
+         DROP INDEX IF EXISTS idx_lash_runtime_effect_replay_group_unsettled;
+         CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_commit_seq
+             ON lash_runtime_effect_replay(group_key, commit_seq)
+             WHERE commit_seq IS NOT NULL;
+         CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_group_child_replay_key
+             ON lash_runtime_effect_group_child(group_key, replay_key);",
+    )
+    .execute(&pool)
+    .await
+    .expect("refresh refusal fixture with the component-110 effect-group arbitration catalog");
     // The trigger subscription table cut over to the lifecycle column shape
     // with no migration, so the refusal fixture discards its pre-cutover rows
     // and takes the current catalog.

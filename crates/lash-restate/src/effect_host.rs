@@ -657,196 +657,30 @@ impl RuntimeEffectController for FencedRestateController {
             .close_effect_group(handle, disposition)
             .await
     }
-}
-#[derive(Clone)]
-struct RestateAwaitEventIngress {
-    ingress: RestateIngressClient,
-}
 
-async fn resolve_restate_await_event_via_ingress(
-    ingress: &RestateAwaitEventIngress,
-    key: &AwaitEventKey,
-    resolution: Resolution,
-) -> Result<ResolveOutcome, RuntimeError> {
-    let address = RestateDurableWaitAddress::for_key(key);
-    let request = RestateDurableWaitResolveRequest {
-        key: key.clone(),
-        resolution,
-    };
-    let index_key = durable_wait_index_object_key(&address);
-    let outcome = ingress
-        .ingress
-        .call_object_json::<_, ResolveOutcome>(
-            "LashDurableWaitIndex",
-            &index_key,
-            "resolve",
-            &request,
-        )
-        .await;
-    outcome.map_err(|err| {
-        RuntimeError::new(
-            lash_core::RuntimeErrorCode::RestateAwaitEventResolve,
-            err.to_string(),
-        )
-    })
-}
-
-async fn update_restate_session_waits_via_ingress(
-    ingress: &RestateAwaitEventIngress,
-    session_id: &SessionId,
-    revoke: bool,
-) -> Result<(), RuntimeError> {
-    let handler = if revoke { "revoke_all" } else { "cancel_all" };
-    ingress
-        .ingress
-        .call_object_empty("LashDurableWaitIndex", session_id, handler)
-        .await
-        .map_err(|err| {
-            RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
-                err.to_string(),
-            )
-        })
-}
-
-/// Whether the `LashDurableWaitIndex` object at `index_key` (a session's, or
-/// a non-session scope's) has been revoked: the durable fence every mint,
-/// resolve, peek, await, effect, and group under it consults.
-async fn restate_index_is_revoked_via_ingress(
-    ingress: &RestateAwaitEventIngress,
-    index_key: &str,
-) -> Result<bool, RuntimeError> {
-    ingress
-        .ingress
-        .call_object_json::<_, bool>("LashDurableWaitIndex", index_key, "is_revoked", &())
-        .await
-        .map_err(|err| {
-            RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead,
-                err.to_string(),
-            )
-        })
-}
-
-async fn ensure_restate_key_access_via_ingress(
-    ingress: &RestateAwaitEventIngress,
-    key: &AwaitEventKey,
-) -> Result<(), RuntimeError> {
-    if !restate_await_event_key_is_valid(key) {
-        return Err(restate_unknown_or_revoked());
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        RuntimeEffectControllerError,
+    > {
+        self.controller.commit_group_child_final(commit).await
     }
-    let index_key = durable_wait_index_object_key(&RestateDurableWaitAddress::for_key(key));
-    if restate_index_is_revoked_via_ingress(ingress, &index_key).await? {
-        return Err(restate_unknown_or_revoked());
-    }
-    Ok(())
-}
 
-fn restate_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
-    RuntimeError::new(
-        RuntimeErrorCode::AwaitEventScopeNotRetirable,
-        format!(
-            "scope `{}` carries a session and is retired through session revocation, not the scope lever",
-            scope.id()
-        ),
-    )
-}
-
-async fn update_restate_scope_waits_via_ingress(
-    ingress: &RestateAwaitEventIngress,
-    scope: &ExecutionScope,
-    handler: &str,
-) -> Result<(), RuntimeError> {
-    let index_key = durable_wait_index_key_for_scope(scope);
-    ingress
-        .ingress
-        .call_object_empty("LashDurableWaitIndex", &index_key, handler)
-        .await
-        .map_err(|err| {
-            RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
-                err.to_string(),
-            )
-        })
-}
-
-async fn retire_restate_scope_via_ingress(
-    ingress: &RestateAwaitEventIngress,
-    scope: &ExecutionScope,
-    only_if_quiescent: bool,
-) -> Result<(), RuntimeError> {
-    let index_key = durable_wait_index_key_for_scope(scope);
-    let handler = if only_if_quiescent {
-        "revoke_all_if_quiescent"
-    } else {
-        "retire_scope"
-    };
-    let retired = ingress
-        .ingress
-        .call_object_json::<_, bool>("LashDurableWaitIndex", &index_key, handler, &())
-        .await
-        .map_err(|error| {
-            RuntimeError::new(
-                RuntimeErrorCode::RestateAwaitEventSessionUpdate,
-                error.to_string(),
-            )
-        })?;
-    if retired {
-        Ok(())
-    } else {
-        Err(
-            lash_core::facade_support::effect_replay_driver::scope_not_quiescent(
-                scope.journal_identity()?.key(),
-            ),
-        )
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.controller
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 
-async fn await_restate_await_event_via_ingress(
-    ingress: &RestateAwaitEventIngress,
-    key: &AwaitEventKey,
-    cancel: tokio_util::sync::CancellationToken,
-    deadline: Option<std::time::Instant>,
-    effect_replay_key: Option<&str>,
-) -> Result<Resolution, RuntimeError> {
-    let request =
-        restate_durable_wait_request(key, deadline, &lash_core::facade_support::SystemClock);
-    let workflow_key = RestateDurableWaitAddress::for_key(&request.key).workflow_key;
-    tokio::select! {
-        result = async {
-            match effect_replay_key {
-                Some(replay_key) => ingress.ingress.call_workflow_json_idempotent::<_, Resolution>(
-                    "LashDurableWaitWorkflow",
-                    &workflow_key,
-                    "await_resolution",
-                    &request,
-                    replay_key,
-                ).await,
-                None => ingress.ingress.call_workflow_json::<_, Resolution>(
-                    "LashDurableWaitWorkflow",
-                    &workflow_key,
-                    "await_resolution",
-                    &request,
-                ).await,
-            }
-        } => result.map_err(|err| {
-            RuntimeError::new(lash_core::RuntimeErrorCode::RestateAwaitEventAwait, err.to_string())
-        }),
-        _ = cancel.cancelled() => {
-            let outcome = resolve_restate_await_event_via_ingress(
-                ingress,
-                key,
-                Resolution::Cancelled,
-            ).await?;
-            Ok(match outcome {
-                ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => {
-                    Resolution::Cancelled
-                }
-                ResolveOutcome::AlreadyResolved { terminal } => terminal,
-            })
-        },
-    }
-}
+mod ingress;
+use ingress::*;
 struct RestateEffectHostController {
     await_event_ingress: RestateAwaitEventIngress,
     authority_id: RestateAuthorityId,
@@ -1303,8 +1137,6 @@ impl RuntimeEffectController for RestateEffectHostController {
                         "run",
                         &EffectGroupDispatchRequest {
                             group_key: group_key.clone(),
-                            shape: shape.clone(),
-                            children: group.children().to_vec(),
                         },
                     )
                     .await
@@ -1525,6 +1357,111 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "effect group {group_key} is retired"
             ))),
         }
+    }
+
+    /// The §4 boundary over ingress — the same route the ctx-based
+    /// controller takes, with the durable membership record resolving which
+    /// group's index owns this replay key. The serialized index handler is
+    /// the linearization point; `drain_input` is deliberately not retained
+    /// on this tier because the committed-but-unseated index state plus the
+    /// dispatch workflow's redrive is the resumable publication obligation.
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        RuntimeEffectControllerError,
+    > {
+        use lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome as Outcome;
+        let scope = ExecutionScope::from_journal_key(&commit.scope_id).ok_or_else(|| {
+            group_shape_error(format!(
+                "group-child commit scope id `{}` does not decode to an execution scope",
+                commit.scope_id
+            ))
+        })?;
+        let ingress = &self.await_event_ingress.ingress;
+        let index_key = durable_wait_index_key_for_scope(&scope);
+        let membership: Option<String> = ingress
+            .call_object_json::<_, Option<String>>(
+                "LashDurableWaitIndex",
+                &index_key,
+                "group_child_membership",
+                &crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest {
+                    replay_key: commit.replay_key.clone(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                ingress_group_error("LashDurableWaitIndex/group_child_membership", error)
+            })?;
+        let Some(group_key) = membership else {
+            return Ok(Outcome::Ungrouped);
+        };
+        let response = ingress
+            .call_object_json::<_, crate::effect_group::EffectGroupCommitChildResponse>(
+                "EffectGroupIndex",
+                &group_key,
+                "commit_child",
+                &crate::effect_group::EffectGroupCommitChildRequest {
+                    replay_key: commit.replay_key.clone(),
+                },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/commit_child", error))?;
+        Ok(match response {
+            crate::effect_group::EffectGroupCommitChildResponse::Committed {
+                commit_seq, ..
+            } => Outcome::Committed {
+                group_key,
+                commit_seq,
+            },
+            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
+                commit_seq,
+                ..
+            } => Outcome::AlreadyCommitted {
+                group_key,
+                commit_seq,
+                drain_input: None,
+            },
+            crate::effect_group::EffectGroupCommitChildResponse::CancelDecided { rank } => {
+                Outcome::CancelDecided {
+                    group_key,
+                    commit_seq: rank,
+                }
+            }
+            crate::effect_group::EffectGroupCommitChildResponse::UnknownChild => {
+                return Err(group_shape_error(format!(
+                    "effect group {group_key} membership names replay key `{}` but its \
+                     index holds no such child; the two durable records disagree",
+                    commit.replay_key
+                )));
+            }
+            crate::effect_group::EffectGroupCommitChildResponse::UnknownGroup
+            | crate::effect_group::EffectGroupCommitChildResponse::Retired => {
+                return Err(group_shape_error(format!(
+                    "effect group {group_key} carries membership for replay key `{}` but \
+                     its index is gone or retired; the two durable records disagree",
+                    commit.replay_key
+                )));
+            }
+        })
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.await_event_ingress
+            .ingress
+            .call_object_json::<_, bool>(
+                "EffectGroupIndex",
+                group_key,
+                "drain_blocked",
+                &crate::effect_group::EffectGroupDrainBlockedRequest { commit_seq },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blocked", error))
     }
 
     async fn runtime_effect_failure_disposition(

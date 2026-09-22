@@ -11,9 +11,11 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use lash_core::{EffectHost, GroupExecutors};
-use lash_sqlite_store::SqliteEffectHost;
+use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
 
 /// Blocks on `future` from a synchronous context.
 ///
@@ -255,6 +257,300 @@ async fn open_race_group(
         lash_core::LoserPolicy::RunToCompletion,
     )?;
     view.controller().open_effect_group(group).await
+}
+
+/// The lease window a "crashed" process leaves behind: short enough that a
+/// test waits it out, long enough that the claim is observed first.
+const CRASH_LEASE_MS: u64 = 900;
+
+/// One host over `path` with the drain suite's lease window, so a killed
+/// process's claims lapse on a scale a test can wait out.
+fn host_with_lease(path: &std::path::Path, executors: Arc<dyn GroupExecutors>) -> SqliteEffectHost {
+    let path = path.to_path_buf();
+    let host = sync_await(async move {
+        let ttl = Duration::from_millis(CRASH_LEASE_MS);
+        SqliteEffectHost::open_with_options(
+            &path,
+            SqliteEffectReplayOptions {
+                lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
+                    .expect("the ttl is at least three renew intervals wide"),
+            },
+        )
+        .await
+        .expect("SQLite effect-group host")
+    });
+    host.register_group_executors(executors)
+        .expect("a freshly opened host has no resolver yet");
+    host
+}
+
+/// A resolver that answers every child with a runner that enters and then
+/// parks forever — process A's half of the crash fixture.
+struct ParkingExecutors {
+    entered: Arc<AtomicUsize>,
+}
+
+impl GroupExecutors for ParkingExecutors {
+    fn executor_for(
+        &self,
+        _envelope: &lash_core::RuntimeEffectEnvelope,
+    ) -> Option<lash_core::RuntimeEffectLocalExecutor<'static>> {
+        let entered = Arc::clone(&self.entered);
+        Some(lash_core::RuntimeEffectLocalExecutor::testing(move |_| {
+            let entered = Arc::clone(&entered);
+            async move {
+                entered.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+                unreachable!("a parked child is never polled to completion")
+            }
+        }))
+    }
+}
+
+/// A resolver with exactly one answer: its first `executor_for` returns a
+/// runner that records the replay key it executed and settles; every later
+/// call answers `None`. `asked` counts resolutions, `executed` counts runs.
+#[derive(Default)]
+struct OneShotExecutors {
+    asked: Arc<std::sync::Mutex<Vec<String>>>,
+    executed: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl GroupExecutors for OneShotExecutors {
+    fn executor_for(
+        &self,
+        envelope: &lash_core::RuntimeEffectEnvelope,
+    ) -> Option<lash_core::RuntimeEffectLocalExecutor<'static>> {
+        let mut asked = self.asked.lock().expect("asked");
+        asked.push(envelope.invocation.replay_key().to_string());
+        if asked.len() != 1 {
+            return None;
+        }
+        let executed = Arc::clone(&self.executed);
+        Some(lash_core::RuntimeEffectLocalExecutor::testing(
+            move |envelope| {
+                let key = envelope.invocation.replay_key().to_string();
+                let executed = Arc::clone(&executed);
+                async move {
+                    executed.lock().expect("executed").push(key);
+                    Ok(lash_core::RuntimeEffectOutcome::LanguageRuntimeValue {
+                        value: serde_json::json!("settled"),
+                    })
+                }
+            },
+        ))
+    }
+}
+
+/// A one-child `RunToCompletion` group over `scope`, keyed `key`.
+fn one_child_group(scope: &lash_core::ExecutionScope, key: &str) -> lash_core::RuntimeEffectGroup {
+    let child = lash_core::RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scope.clone(), format!("{key}:child:0"))
+                .expect("an admitted scope and replay key"),
+            lash_core::RuntimeAttribution::none(),
+            "settle",
+        ),
+        lash_core::RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "settle".to_string(),
+        },
+    );
+    lash_core::RuntimeEffectGroup::try_new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scope.clone(), format!("{key}:group"))
+                .expect("an admitted scope and replay key"),
+            lash_core::RuntimeAttribution::none(),
+            "effect-group",
+        ),
+        key.to_string(),
+        vec![child],
+        lash_core::GroupWakePolicy::All,
+        lash_core::LoserPolicy::RunToCompletion,
+    )
+    .expect("a one-child group assembles")
+}
+
+/// FIG-3409 finding 8: a reopened group lends the resolve-time runner to a
+/// retained child when canonical identity matches, even though the retained
+/// membership row's `envelope_json` bytes were reformatted in place.
+///
+/// Process A opens a one-child group whose executor parks forever, is observed
+/// holding the claim, and dies with its Tokio runtime. The retained row is
+/// then rewritten as pretty-printed JSON — the same `serde_json::Value`,
+/// different bytes. Process B reopens the identical honest group with a
+/// one-shot resolver: its resolve-time answer must be the runner the retained
+/// child is lent. A rule that compared raw retained bytes instead of the
+/// canonical identity would refuse the match, ask the resolver again, get
+/// `None`, and dispatch nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_formatted_differently()
+{
+    const KEY: &str = "canonical-reopen";
+    const CHILD_KEY: &str = "canonical-reopen:child:0";
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("canonical-reopen.db");
+
+    // Process A: open the group, observe the claim row, die with the runtime.
+    let crash_path = path.clone();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("process A's runtime");
+        runtime.block_on(async move {
+            let entered = Arc::new(AtomicUsize::new(0));
+            let host = host_with_lease(
+                &crash_path,
+                Arc::new(ParkingExecutors {
+                    entered: Arc::clone(&entered),
+                }),
+            );
+            let scoped = host
+                .scoped(lash_core::AdmittedScope::runtime_operation(KEY))
+                .expect("a scope binds");
+            let group = one_child_group(scoped.execution_scope(), KEY);
+            let _handle = scoped
+                .controller()
+                .open_effect_group(group)
+                .await
+                .expect("the group opens");
+            let conn = rusqlite::Connection::open(&crash_path).expect("the effect journal");
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                let claimed = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM runtime_effect_replay
+                         WHERE replay_key = ?1 AND status = 'in_progress'",
+                        [CHILD_KEY],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .expect("count the claim row");
+                if claimed == 1 && entered.load(Ordering::SeqCst) == 1 {
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    let mut stmt = conn
+                        .prepare("SELECT replay_key, status, group_key FROM runtime_effect_replay")
+                        .expect("dump");
+                    let rows: Vec<(String, String, Option<String>)> = stmt
+                        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                        .expect("dump")
+                        .collect::<Result<_, _>>()
+                        .expect("dump");
+                    panic!(
+                        "the parked child's claim row never appeared: entered={}, rows={rows:?}",
+                        entered.load(Ordering::SeqCst)
+                    );
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        });
+        // The runtime — and with it the host's tasks and connections — is
+        // dropped here: what a killed process leaves behind.
+    })
+    .join()
+    .expect("process A runs its phase before dying");
+
+    // Reformat the retained membership row: same JSON value, different bytes.
+    let conn = rusqlite::Connection::open(&path).expect("the effect journal");
+    let retained: String = conn
+        .query_row(
+            "SELECT envelope_json FROM runtime_effect_group_child WHERE group_key = ?1",
+            [KEY],
+            |row| row.get(0),
+        )
+        .expect("the retained membership row");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&retained).expect("the retained row parses");
+    let reformatted = serde_json::to_string_pretty(&parsed).expect("pretty-printed JSON");
+    assert_ne!(
+        retained, reformatted,
+        "pretty-printing must change the retained bytes"
+    );
+    assert_eq!(
+        parsed,
+        serde_json::from_str::<serde_json::Value>(&reformatted).expect("the rewrite parses"),
+        "the rewrite is the same envelope"
+    );
+    conn.execute(
+        "UPDATE runtime_effect_group_child SET envelope_json = ?1
+         WHERE group_key = ?2 AND replay_key = ?3",
+        rusqlite::params![reformatted, KEY, CHILD_KEY],
+    )
+    .expect("rewrite the retained row");
+
+    // Wait out the dead process's lease.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let expires: i64 = conn
+            .query_row(
+                "SELECT lease_expires_at_ms FROM runtime_effect_replay WHERE replay_key = ?1",
+                [CHILD_KEY],
+                |row| row.get(0),
+            )
+            .expect("the claim's lease");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_millis() as i64;
+        if expires < now {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the dead process's lease never lapsed"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // Process B: a fresh host over the same file, a one-shot resolver, and the
+    // identical honest group.
+    let executors = Arc::new(OneShotExecutors::default());
+    let host = host_with_lease(&path, Arc::clone(&executors) as Arc<dyn GroupExecutors>);
+    let scoped = host
+        .scoped(lash_core::AdmittedScope::runtime_operation(KEY))
+        .expect("a scope binds");
+    let group = one_child_group(scoped.execution_scope(), KEY);
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(group)
+        .await
+        .expect("the honest reopen opens");
+
+    // The retained child settles through the runner the resolve-time answer
+    // staged — lent on canonical identity despite the reformatted row.
+    let settlement = tokio::time::timeout(
+        Duration::from_secs(30),
+        scoped
+            .controller()
+            .await_next_settlement(&mut handle, lash_core::CancellationToken::new()),
+    )
+    .await
+    .expect("the retained child settles inside the budget")
+    .expect("the settlement is not a host error");
+    assert_eq!(settlement.position, 0);
+    assert!(
+        settlement.outcome.is_ok(),
+        "the lent runner settled the child: {:?}",
+        settlement.outcome
+    );
+    assert_eq!(
+        executors.executed.lock().expect("executed").as_slice(),
+        &[CHILD_KEY.to_string()],
+        "exactly the retained child's replay key ran"
+    );
+    assert_eq!(
+        executors.asked.lock().expect("asked").len(),
+        1,
+        "the resolver answered once: a byte-matched reopen would have asked again"
+    );
+    scoped
+        .controller()
+        .close_effect_group(handle, lash_core::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group closes");
 }
 
 // A quiescence-gated retirement leaves a draining scope's rows alone and

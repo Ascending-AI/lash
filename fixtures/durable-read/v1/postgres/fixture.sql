@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
+-- Dumped from database version 16.15
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -516,9 +516,12 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group (
     session_id text,
     wake text NOT NULL,
     loser_disposition text NOT NULL,
-    children bigint NOT NULL,
+    expected_children bigint NOT NULL,
     next_seq bigint DEFAULT 0 NOT NULL,
+    next_commit_seq bigint DEFAULT 0 NOT NULL,
+    lifecycle jsonb DEFAULT '{"type": "live"}'::jsonb NOT NULL,
     created_at_ms bigint NOT NULL,
+    CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (((lifecycle ->> 'type'::text) = ANY (ARRAY['live'::text, 'closing'::text, 'settled'::text]))),
     CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK ((loser_disposition = ANY (ARRAY['run_to_completion'::text, 'cancel'::text]))),
     CONSTRAINT ck_runtime_effect_group_wake CHECK ((wake = ANY (ARRAY['first'::text, 'first_success'::text, 'all'::text])))
 );
@@ -533,7 +536,7 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group_child (
     "position" bigint NOT NULL,
     replay_key text NOT NULL,
     envelope_json text NOT NULL,
-    request_version bigint NOT NULL,
+    command_version bigint NOT NULL,
     created_at_ms bigint NOT NULL
 );
 
@@ -557,8 +560,14 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
     due_at_ms bigint,
     group_key text,
     settlement_seq bigint,
+    commit_state text DEFAULT 'pending'::text NOT NULL,
+    commit_seq bigint,
+    drain_input text,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL,
+    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((((commit_seq IS NULL) OR ((group_key IS NOT NULL) AND (commit_state = ANY (ARRAY['committed'::text, 'drained'::text])))) AND ((group_key IS NULL) OR (NOT (commit_state = ANY (ARRAY['committed'::text, 'drained'::text]))) OR (commit_seq IS NOT NULL)))),
+    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK ((commit_state = ANY (ARRAY['pending'::text, 'committed'::text, 'drained'::text, 'cancel_decided'::text]))),
+    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (((drain_input IS NULL) OR ((group_key IS NOT NULL) AND (commit_state = ANY (ARRAY['committed'::text, 'drained'::text]))))),
     CONSTRAINT ck_runtime_effect_replay_status CHECK ((status = ANY (ARRAY['in_progress'::text, 'completed'::text, 'failed'::text])))
 );
 
@@ -1137,7 +1146,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=109', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=110', 1700000000000);
 
 
 --
@@ -1156,7 +1165,7 @@ INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-de
 -- Data for Name: lash_runtime_effect_replay; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', 'e1b50a744e098e19bf8e2e8cc221e130592ac10da1c12ca5b8653d32b402d500', '{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\"},\"replay_key\":\"durable-read-exec-replay\"},\"effect_id\":\"durable-read-exec-effect\",\"attribution\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"e1b50a744e098e19bf8e2e8cc221e130592ac10da1c12ca5b8653d32b402d500"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":[{"text":"durable read effect","projection":{"truncated":false,"original_chars":19,"projected_chars":19,"original_lines":1,"projected_lines":1,"limit":51200,"limit_mode":"bytes","max_lines":2000}}],"calls":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 1700000000000, 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', 'e1b50a744e098e19bf8e2e8cc221e130592ac10da1c12ca5b8653d32b402d500', '{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\"},\"replay_key\":\"durable-read-exec-replay\"},\"effect_id\":\"durable-read-exec-effect\",\"attribution\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"e1b50a744e098e19bf8e2e8cc221e130592ac10da1c12ca5b8653d32b402d500"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":[{"text":"durable read effect","projection":{"truncated":false,"original_chars":19,"projected_chars":19,"original_lines":1,"projected_lines":1,"limit":51200,"limit_mode":"bytes","max_lines":2000}}],"calls":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 'committed', NULL, NULL, 1700000000000, 1700000000000);
 
 
 --
@@ -1173,7 +1182,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 109);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 110);
 
 
 --
@@ -2081,13 +2090,6 @@ CREATE INDEX idx_lash_runtime_effect_group_session ON lash_durable_read_fixture.
 
 
 --
--- Name: idx_lash_runtime_effect_replay_group_unsettled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_runtime_effect_replay_group_unsettled ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (group_key, replay_key) WHERE ((group_key IS NOT NULL) AND (settlement_seq IS NULL));
-
-
---
 -- Name: idx_lash_runtime_effect_replay_lease; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2190,6 +2192,20 @@ CREATE INDEX idx_lash_wake_deliveries_group_sequence ON lash_durable_read_fixtur
 --
 
 CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_process_wake_deliveries USING btree (next_attempt_at_ms, target_session_id, process_id, sequence) WHERE (state = ANY (ARRAY['pending'::text, 'enqueuing'::text]));
+
+
+--
+-- Name: uq_lash_runtime_effect_group_child_replay_key; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_lash_runtime_effect_group_child_replay_key ON lash_durable_read_fixture.lash_runtime_effect_group_child USING btree (group_key, replay_key);
+
+
+--
+-- Name: uq_lash_runtime_effect_replay_commit_seq; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_commit_seq ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (group_key, commit_seq) WHERE (commit_seq IS NOT NULL);
 
 
 --

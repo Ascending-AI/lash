@@ -367,6 +367,29 @@ fn version_mismatch_refusal_derives_direction_and_catalog() {
     }
 }
 
+/// A recreate-boundary catalog row is a refusal arm, not an upgrade path: the
+/// forward-migration sentence must never name it as something Lash-managed
+/// provisioning could apply (ADR 0081, FIG-3172).
+#[test]
+fn recreate_boundary_components_advertise_no_forward_migration() {
+    let sentence = forward_migration_sentence(SCHEMA_VERSION - 1);
+    assert!(
+        sentence.contains(&format!(
+            "This build declares no forward migration into component {SCHEMA_VERSION}"
+        )),
+        "a recreate-only source must be told there is no upgrade path: {sentence}"
+    );
+    assert!(
+        !sentence.contains("re-open with Lash-managed provisioning enabled"),
+        "a recreate boundary cannot be applied by re-opening with provisioning: {sentence}"
+    );
+    let older = version_mismatch_error(Some(SCHEMA_VERSION - 1), None).to_string();
+    assert!(
+        !older.contains("re-open with Lash-managed provisioning enabled"),
+        "the rendered refusal must not advertise an upgrade that cannot execute: {older}"
+    );
+}
+
 /// The version-bump companion classifies a refusal by a marker only one error
 /// carries, and counts anything but exactly one match as a failure. The shared
 /// recreate remedy must therefore not carry the version-mismatch marker into the

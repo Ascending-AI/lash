@@ -402,6 +402,7 @@ pub enum RemoteToolIntentRefusalReason {
         code: String,
         message: String,
     },
+    MintingGroupChildCancelled,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

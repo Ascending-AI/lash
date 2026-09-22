@@ -27,6 +27,7 @@ mod directives;
 mod intent_drain;
 mod internal_activation;
 mod orchestrating;
+mod protocol_version_refusal;
 mod rebind_checklist;
 mod retry_effect_controllers;
 mod retry_turn_cancel_gate;
@@ -488,6 +489,16 @@ impl crate::RuntimeEffectController for IntentReplayController {
         _disposition: crate::LoserPolicy,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("IntentReplayController"))
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: crate::runtime::effect::GroupChildFinalCommit,
+    ) -> Result<
+        crate::runtime::effect::EffectGroupChildCommitOutcome,
+        crate::RuntimeEffectControllerError,
+    > {
+        Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
     }
 }
 
@@ -2478,30 +2489,6 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
             .iter()
             .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
     );
-}
-
-#[tokio::test]
-async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_protocol_refusal() {
-    let context = dispatch_context();
-    for recorded in [0, 1, 2, 4] {
-        let outcomes = execute_final_tool_intents(
-            &context,
-            Some("empty-version-call"),
-            &crate::ToolIntents {
-                protocol_version: recorded,
-                intents: Vec::new(),
-            },
-            None,
-        )
-        .await
-        .expect("empty unsupported batch is refused");
-        assert_eq!(
-            outcomes,
-            vec![crate::ToolIntentExecutionOutcome::ProtocolRefused {
-                refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded },
-            }]
-        );
-    }
 }
 
 #[cfg(test)]

@@ -877,8 +877,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
             .await
     }
 
-    // The diagnostic lease read inherits the delegating default deliberately:
-    // observation is non-mutating and must never become a crash point.
+    // The diagnostic lease read inherits the delegating default deliberately.
 
     async fn claim_leading_ready_session_command(
         &self,
@@ -1329,6 +1328,25 @@ impl RuntimeEffectController for SeamEffectController {
             )
             .await
     }
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
 }
 
 #[derive(Clone)]
@@ -1447,6 +1465,25 @@ impl RuntimeEffectController for StoreOwnedTurnControlController {
         disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.close_effect_group(handle, disposition).await
+    }
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 
@@ -1576,6 +1613,25 @@ impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
         disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.close_effect_group(handle, disposition).await
+    }
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 
@@ -1941,10 +1997,8 @@ async fn seed_reference_ingress(
     scenario: &str,
 ) {
     super::bind_conformance_session(store, &identity.session_id).await;
-    // FIG-1573: one scenario deliberately seeds no next-turn row, so that after
-    // the crash a recovering drain claims no next-turn input and therefore
-    // evaluates the drain-time orphan backstop - with the active-turn row still
-    // pinned to the turn it is about to resume.
+    // FIG-1573: one scenario deliberately seeds no next-turn row, so a recovering
+    // drain evaluates the drain-time orphan backstop.
     if !scenario.starts_with("peer-reclaim-pinned-active-input-") {
         store
             .enqueue_pending_turn_input(PendingTurnInputDraft::new(

@@ -171,7 +171,13 @@ fn staged_executor(
 #[derive(Default)]
 struct WitnessExecutors {
     staged: Mutex<HashMap<String, WitnessRoute>>,
-    resolutions: AtomicUsize,
+    /// Every replay key `executor_for` was asked to resolve, in order. The
+    /// registry is process-wide for the life of the witness deployment, so a
+    /// bare counter is not usable as a per-group assertion: a child from
+    /// another group whose runner is absent retries resolution indefinitely
+    /// and lands counts in any window. The key list is what lets a guard
+    /// assert on *this* group's children alone.
+    resolved: Mutex<Vec<String>>,
 }
 
 #[derive(Clone)]
@@ -202,7 +208,10 @@ impl GroupExecutors for WitnessExecutors {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        self.resolutions.fetch_add(1, Ordering::SeqCst);
+        self.resolved
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(envelope.invocation.replay_key().to_owned());
         let route = self
             .staged
             .lock()
@@ -817,8 +826,6 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
     assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
     let request = EffectGroupDispatchRequest {
         group_key: group_key.clone(),
-        shape: shape.clone(),
-        children: vec![child.clone()],
     };
     let (first, second) = tokio::join!(
         ingress.send_workflow_json("EffectGroupDispatch", &group_key, "run", &request),
@@ -869,7 +876,11 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
     println!("EFFECT_GROUP_WITNESS h dispatcher-convergence PASS");
     println!("EFFECT_GROUP_WITNESS l workflow-exactly-once-key PASS");
 
-    let resolutions_before_guard = witness_executors.resolutions.load(Ordering::SeqCst);
+    let resolved_before_guard = witness_executors
+        .resolved
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .len();
     ingress
         .call_workflow_json::<_, ()>(
             "EffectGroupDispatch",
@@ -879,10 +890,17 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         )
         .await
         .expect("stale dispatcher reaches its index guard");
-    assert_eq!(
-        witness_executors.resolutions.load(Ordering::SeqCst),
-        resolutions_before_guard,
-        "Ready probe guard exits before preflight or sends"
+    let resolved_during_guard = witness_executors
+        .resolved
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .split_off(resolved_before_guard);
+    assert!(
+        resolved_during_guard
+            .iter()
+            .all(|key| !key.starts_with(&format!("{group_key}:"))),
+        "Ready probe guard exits before preflight or sends; this group's \
+         children resolved during the window: {resolved_during_guard:?}"
     );
     assert_eq!(executions.load(Ordering::SeqCst), 1);
     println!("EFFECT_GROUP_WITNESS k dispatcher-probe-guard PASS");
@@ -956,7 +974,10 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         )
         .await
         .expect("admission witness adopts dispatcher");
-    assert_eq!(adopted, EffectGroupProbeAdoptResponse::Adopted);
+    assert!(
+        matches!(adopted, EffectGroupProbeAdoptResponse::Adopted { .. }),
+        "admission witness adopts the dispatcher: {adopted:?}"
+    );
     let admission_executions = Arc::new(AtomicUsize::new(0));
     witness_executors.stage(
         &admission_child,
@@ -1103,7 +1124,6 @@ fn witness_key(label: &str) -> String {
 
 fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectGroupShape {
     EffectGroupShape {
-        children: children.len(),
         wake: GroupWakePolicy::All,
         loser_disposition: LoserPolicy::RunToCompletion,
         replay_keys: children

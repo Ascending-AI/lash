@@ -158,35 +158,72 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         now_ms: u64,
         cancel: &CancellationToken,
     ) -> Result<ChildDrainOutcome, RuntimeEffectControllerError> {
-        // The unsettled read promises a decoded state and promises not to
-        // filter a wrong one, which is only worth promising if somebody checks.
-        // A row holding a terminal or corrupt state with no settlement rank
-        // breaks N1's one-transaction pairing, and re-executing it would be the
-        // drain running an effect that already produced or contradicts an
-        // outcome nobody can read: the pass would attempt it, the confirm read
-        // would find it unsettled still, and it would report a contest that
-        // never resolves.
-        //
-        // Reported per child rather than raised as the pass's error, because a
-        // torn row is one row. Failing the pass would make every healthy
-        // sibling of that group undrainable for as long as the corruption
-        // lasted — the group would be exactly as stuck as if nothing had been
-        // detected, with the detection as the cause.
-        match &child.state {
-            EffectRowState::InProgress => {}
-            state => {
+        // Classify on the §4 commit state first — it is the durable fact every
+        // other column answers to. The pairings below are the ones the
+        // arbitration transaction writes atomically, so anything else is a
+        // torn journal: reported per child rather than raised as the pass's
+        // error, because a torn row is one row. Failing the pass would make
+        // every healthy sibling of that group undrainable for as long as the
+        // corruption lasted — the group would be exactly as stuck as if
+        // nothing had been detected, with the detection as the cause.
+        match (child.commit_state, &child.state) {
+            // Committed but undrained: the crash window between the §4 point
+            // and the §5 discharge. The child's declared intents are durable by
+            // the time its commit lands — they journal inside the attempt
+            // that produces the final record — so the discharge owed here is
+            // the rank write behind the commit-order barrier, not a
+            // re-execution.
+            (Some(EffectCommitState::Committed), Some(EffectRowState::Settled(_))) => {
+                return self.discharge_committed_child(record, child).await;
+            }
+            // Boundary-committed mid-attempt: the §4 commit journaled the
+            // decision, the position and the drain input while the terminal is
+            // still owed. This is the committed-before-discharge crash window,
+            // not corruption, and it is resumed by re-execution below — the
+            // journaled intents replay and the settle path's `AlreadyCommitted`
+            // answer finishes the discharge with the fresh terminal. A
+            // committed child is protected in both directions: the cancel
+            // disposition cannot decide it, and the rank write must not run
+            // ahead of the terminal its `drain_input` still owes.
+            (Some(EffectCommitState::Committed), Some(EffectRowState::InProgress)) => {
+                if child.lease_expires_at_ms > now_ms {
+                    return Ok(ChildDrainOutcome::LeaseLive {
+                        expires_at_ms: child.lease_expires_at_ms,
+                    });
+                }
+            }
+            // Undecided and unraced: a never-claimed child (no replay row, no
+            // commit state) or a claimed one still in flight (`pending`) — the
+            // work the disposition and the lease rule below decide over.
+            (None | Some(EffectCommitState::Pending), None | Some(EffectRowState::InProgress)) => {
+                if record.loser_disposition == LoserPolicy::Cancel {
+                    // §4: the cancel decision is a durable journal write, not a
+                    // signal the child's own process must still be alive to act
+                    // on — the drain exists precisely for an opener that
+                    // declared the disposition and never journaled it. A live
+                    // lease does not stop the decision: it races the claim's
+                    // finalize at the commit-state CAS, which is the
+                    // linearization point that decides it.
+                    return self.decide_cancel_child(record, child).await;
+                }
+                if child.lease_expires_at_ms > now_ms {
+                    return Ok(ChildDrainOutcome::LeaseLive {
+                        expires_at_ms: child.lease_expires_at_ms,
+                    });
+                }
+            }
+            // Everything else pairs facts no arbitration transaction commits:
+            // a commit state with no matching replay state, a terminal row
+            // whose state never moved off pending, a `drained` or
+            // `cancel_decided` row holding no rank.
+            (_, state) => {
                 return Ok(ChildDrainOutcome::Corrupt {
-                    status: state.status_column().to_string(),
+                    status: match state {
+                        Some(state) => state.status_column().to_string(),
+                        None => "<no replay row>".to_string(),
+                    },
                 });
             }
-        }
-        if record.loser_disposition == LoserPolicy::Cancel {
-            return Ok(ChildDrainOutcome::CancelDeclared);
-        }
-        if child.lease_expires_at_ms > now_ms {
-            return Ok(ChildDrainOutcome::LeaseLive {
-                expires_at_ms: child.lease_expires_at_ms,
-            });
         }
         let envelope = self.decode_drained_child(&record.group_key, child)?;
         let scope = ExecutionScope::from_journal_key(&child.scope_id).ok_or_else(|| {
@@ -250,26 +287,109 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         Ok(())
     }
 
+    /// Journals the cancel disposition's decision for one undecided child —
+    /// the durable half of a `Cancel` drain, and the reason a cancelled child
+    /// needs no live process to reach its terminal.
+    ///
+    /// A `FinalCommitted` answer means the child's own final record won the
+    /// §4 point while this pass ran; the child is then exactly the
+    /// committed-but-undrained case this same pass discharges.
+    async fn decide_cancel_child(
+        &self,
+        record: &EffectGroupRecord,
+        child: &UnsettledGroupChild,
+    ) -> Result<ChildDrainOutcome, RuntimeEffectControllerError> {
+        let cancelled = child_cancelled_error(&record.group_key, child.position as usize);
+        let canonical = CanonicalRuntimeEffectEnvelope::capture(
+            &self.decode_drained_child(&record.group_key, child)?,
+        )?;
+        let outcome = self
+            .row_store
+            .decide_cancel(&EffectCancelRequest {
+                group_key: record.group_key.clone(),
+                replay_key: child.replay_key.clone(),
+                terminal: EffectTerminal::Failed {
+                    error_json: serde_json::to_string(&cancelled)
+                        .map_err(|err| self.vocabulary().encode_error(err))?,
+                },
+                envelope_json: serde_json::to_string(&canonical)
+                    .map_err(|err| self.vocabulary().encode_error(err))?,
+                envelope_hash: canonical.hash().to_string(),
+            })
+            .await?;
+        match outcome {
+            EffectCancelOutcome::Decided { .. } | EffectCancelOutcome::AlreadyDecided { .. } => {
+                Ok(ChildDrainOutcome::Decided)
+            }
+            EffectCancelOutcome::FinalCommitted { .. } => {
+                self.discharge_committed_child(record, child).await
+            }
+        }
+    }
+
+    /// Seats one committed child at its settlement rank — the §5 discharge the
+    /// crash window between the §4 decision and the rank write can leave owed.
+    ///
+    /// `Blocked` reports as [`ChildDrainOutcome::Contested`]: a lower-commit
+    /// sibling's drain is still in flight on some host, which is the same
+    /// "stays queued, a later pass finishes it" fact a contested claim reports.
+    async fn discharge_committed_child(
+        &self,
+        record: &EffectGroupRecord,
+        child: &UnsettledGroupChild,
+    ) -> Result<ChildDrainOutcome, RuntimeEffectControllerError> {
+        let outcome = self
+            .row_store
+            .discharge_child(&EffectDischargeRequest {
+                group_key: record.group_key.clone(),
+                scope_id: child.scope_id.clone(),
+                replay_key: child.replay_key.clone(),
+                terminal: None,
+            })
+            .await?;
+        Ok(match outcome {
+            EffectDischargeOutcome::Discharged { .. }
+            | EffectDischargeOutcome::AlreadyDischarged { .. } => ChildDrainOutcome::Decided,
+            EffectDischargeOutcome::Blocked => ChildDrainOutcome::Contested,
+        })
+    }
+
     /// Rebuilds the effect a journaled child records.
     ///
-    /// The column holds the canonical envelope — the exact bytes the child's
-    /// `envelope_hash` was taken over — so decoding it and handing the result
-    /// back to `execute_effect` reproduces the same hash and passes the same
-    /// replay fence. A pass that rebuilt the envelope from anything else would
-    /// be refused by that fence, which is the correct refusal and a useless one.
+    /// The membership column holds the accepted envelope itself — the whole
+    /// `RuntimeEffectEnvelope` the opener declared, retained so a successor
+    /// that never saw it can still run the child. Decoding it and handing the
+    /// result back to `execute_effect` reproduces the same canonical envelope
+    /// and the same hash — `capture` normalizes the bytes the hash is taken
+    /// over — so the rebuilt child passes the same replay fence. A pass that
+    /// rebuilt the envelope from anything else would be refused by that
+    /// fence, which is the correct refusal and a useless one.
     fn decode_drained_child(
         &self,
         group_key: &str,
         child: &UnsettledGroupChild,
     ) -> Result<RuntimeEffectEnvelope, RuntimeEffectControllerError> {
         let vocabulary = self.vocabulary();
-        let canonical = CanonicalRuntimeEffectEnvelope::decode(&child.envelope_json)?;
-        serde_json::from_str(canonical.json()).map_err(|err| {
+        if child.command_version != super::super::TOOL_CHILD_REQUEST_VERSION {
+            return Err(vocabulary.error(
+                EffectReplayFailure::CorruptRow,
+                format!(
+                    "child `{}` of durable effect group {group_key} was minted \
+                     under command version {} but this build reconstructs \
+                     version {}; a request that cannot be read is corruption, \
+                     not a guess",
+                    child.replay_key,
+                    child.command_version,
+                    super::super::TOOL_CHILD_REQUEST_VERSION,
+                ),
+            ));
+        }
+        serde_json::from_str(&child.envelope_json).map_err(|err| {
             vocabulary.error(
                 EffectReplayFailure::CorruptRow,
                 format!(
-                    "child `{}` of durable effect group {group_key} records a \
-                     canonical envelope this build cannot decode: {err}",
+                    "child `{}` of durable effect group {group_key} records an \
+                     accepted envelope this build cannot decode: {err}",
                     child.replay_key
                 ),
             )
@@ -291,8 +411,10 @@ fn downgrade_unconfirmed(
     still_unsettled: &std::collections::BTreeSet<String>,
 ) {
     for child in children.iter_mut() {
-        if child.outcome == ChildDrainOutcome::Settled
-            && still_unsettled.contains(&child.replay_key)
+        if matches!(
+            child.outcome,
+            ChildDrainOutcome::Settled | ChildDrainOutcome::Decided
+        ) && still_unsettled.contains(&child.replay_key)
         {
             child.outcome = ChildDrainOutcome::Contested;
         }
@@ -310,22 +432,23 @@ mod tests {
         }
     }
 
-    /// Only an unconfirmed *claimed settlement* is downgraded, and the journal's
-    /// answer is what decides it.
+    /// Only an unconfirmed *settled-or-decided* claim is downgraded, and the
+    /// journal's answer is what decides it.
     ///
     /// The three ways to get this wrong are all here: downgrading a settlement
     /// the journal does confirm (which loses a real settlement from the count),
     /// leaving an unconfirmed one alone (which reports a settlement the pass
-    /// cannot see), and rewriting an outcome that was never a claim in the first
-    /// place — a skipped, cancel-declared, interrupted, or torn child says
-    /// something the journal read has no bearing on.
+    /// cannot see), and rewriting an outcome that never claimed a journal write
+    /// in the first place — a skipped, interrupted, or torn child says something
+    /// the journal read has no bearing on.
     #[test]
     fn only_an_unconfirmed_claimed_settlement_becomes_a_contest() {
         let mut children = vec![
             drained("confirmed", ChildDrainOutcome::Settled),
             drained("unconfirmed", ChildDrainOutcome::Settled),
+            drained("decided", ChildDrainOutcome::Decided),
+            drained("undecided", ChildDrainOutcome::Decided),
             drained("skipped", ChildDrainOutcome::LeaseLive { expires_at_ms: 1 }),
-            drained("declared", ChildDrainOutcome::CancelDeclared),
             drained("stopped", ChildDrainOutcome::Interrupted),
             drained(
                 "torn",
@@ -334,9 +457,10 @@ mod tests {
                 },
             ),
         ];
-        // Every child except the one that did settle is still in the journal's
-        // unsettled set, so anything the pass rewrites here it rewrote wrongly.
-        let still_unsettled = ["unconfirmed", "skipped", "declared", "stopped", "torn"]
+        // Every child except the ones whose writes did commit is still in the
+        // journal's unsettled set, so anything the pass rewrites here it
+        // rewrote wrongly.
+        let still_unsettled = ["unconfirmed", "undecided", "skipped", "stopped", "torn"]
             .into_iter()
             .map(str::to_string)
             .collect();
@@ -345,14 +469,15 @@ mod tests {
 
         assert_eq!(children[0].outcome, ChildDrainOutcome::Settled);
         assert_eq!(children[1].outcome, ChildDrainOutcome::Contested);
+        assert_eq!(children[2].outcome, ChildDrainOutcome::Decided);
+        assert_eq!(children[3].outcome, ChildDrainOutcome::Contested);
         assert_eq!(
-            children[2].outcome,
+            children[4].outcome,
             ChildDrainOutcome::LeaseLive { expires_at_ms: 1 }
         );
-        assert_eq!(children[3].outcome, ChildDrainOutcome::CancelDeclared);
-        assert_eq!(children[4].outcome, ChildDrainOutcome::Interrupted);
+        assert_eq!(children[5].outcome, ChildDrainOutcome::Interrupted);
         assert_eq!(
-            children[5].outcome,
+            children[6].outcome,
             ChildDrainOutcome::Corrupt {
                 status: "completed".to_string()
             }
