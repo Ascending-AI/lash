@@ -12,13 +12,14 @@
 //! are never minted. The gated process service records nothing and the
 //! definition registry holds no slot.
 //!
-//! The typed evidence is then the bound controller itself: the law asks the
-//! host for the controller the child would have minted its remaining writes
-//! through — `scoped_for_group_child`, the same seam `ToolChildHost` drives —
-//! and pushes a `RegisterDefinition` admission through it. The substrate
-//! answers with `RuntimeEffectGroupChildCancelDecided`: the SQL claim refuses
-//! the insert inside its transaction, the native controller refuses under the
-//! group mutex, and a handler-bound Restate controller would ask the index's
+//! The typed evidence is then the bound controller itself: the law mints it
+//! through `scoped_for_group_child` — the same seam `ToolChildHost` drives —
+//! while the group is still live, exactly as the real child's controller
+//! exists from dispatch, and pushes a `RegisterDefinition` admission through
+//! it after the cancel decision commits. The substrate answers with
+//! `RuntimeEffectGroupChildCancelDecided`: the SQL claim refuses the insert
+//! inside its transaction, the native controller refuses under the group
+//! mutex, and a handler-bound Restate controller would ask the index's
 //! `admit_semantic`. A tier that cannot mint an owned bound controller outside
 //! a handler (the Restate ingress host) skips the probe.
 
@@ -60,6 +61,18 @@ impl crate::ProcessEngine for LawFenceEngine {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         unreachable!("the fence law registers a definition; it never runs one")
     }
+}
+
+/// The substrate's answer is typed: a live group whose decision is committed
+/// refuses `cancel_decided`, and a native group already reaped after close
+/// refuses as closed — both are the §4 fence, never an admission.
+fn assert_fence_refusal(error: &crate::RuntimeEffectControllerError) {
+    assert!(
+        error.code.as_str() == "runtime_effect_group_child_cancel_decided"
+            || (error.code.as_str() == "runtime_effect_group_shape"
+                && error.to_string().contains("closed to its caller")),
+        "the refusal is the substrate's typed admission fence: {error}"
+    );
 }
 
 /// The orchestrating body the law's child runs: one nested call to the held
@@ -270,9 +283,9 @@ fn fence_group(
 /// the gated process service records nothing and the definition registry
 /// holds no slot.
 ///
-/// The fence is then probed directly: the controller the child's remaining
-/// writes would have minted through — `scoped_for_group_child` — refuses a
-/// `RegisterDefinition` admission with the typed
+/// The fence is then probed directly: the bound controller minted before the
+/// close — `scoped_for_group_child`, the child's own controller shape —
+/// refuses a `RegisterDefinition` admission with the typed
 /// `RuntimeEffectGroupChildCancelDecided`. On a durable tier the reopen half
 /// serves rank 0 as the cancelled terminal the close committed; on the
 /// in-memory and Restate tiers the group's ranks are unreadable by contract
@@ -339,6 +352,13 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
         .await
         .expect("the group opens under the live opener");
 
+    // Mint the controller the child's remaining writes run through while the
+    // group is still live — the real child's shape: its bound controller
+    // exists from dispatch, before any cancel decision lands. The write below
+    // executes through it after the decision commits, which is exactly the
+    // "cancel commits between the read and the sink" case §4 fences.
+    let bound = host.scoped_for_group_child(child_admitted, binding);
+
     // The nested leaf's body is parked on the gate: its attempt claim was
     // admitted under the orchestrator's binding while the child was still
     // undecided.
@@ -360,13 +380,12 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
         .expect("the caller closes under Cancel");
     scenario.observation.release(FENCE_NESTED_CALL);
 
-    // The typed evidence: mint the controller the child's remaining writes
-    // would have run through and push a semantic admission through it. The
-    // substrate answers `RuntimeEffectGroupChildCancelDecided` — the decision
-    // is committed, so nothing the child still owes may mint. A tier that
-    // cannot mint an owned bound controller outside a handler (the Restate
-    // ingress host) reports no controller and skips the probe.
-    match host.scoped_for_group_child(child_admitted, binding) {
+    // The typed evidence: the pre-minted bound controller refuses every
+    // semantic admission it is still owed — the decision is committed, so
+    // nothing minted under the child may land. A tier that cannot mint an
+    // owned bound controller outside a handler (the Restate ingress host)
+    // reports no controller and skips the probe.
+    match bound {
         Ok(Some(bound)) => {
             let envelope = crate::RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(
@@ -401,12 +420,37 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
             // committed refuses `cancel_decided`, and a native group already
             // reaped after close refuses as closed — both are the §4 fence,
             // never an admission.
-            assert!(
-                error.code.as_str() == "runtime_effect_group_child_cancel_decided"
-                    || (error.code.as_str() == "runtime_effect_group_shape"
-                        && error.to_string().contains("closed to its caller")),
-                "the refusal is the substrate's typed admission fence: {error}"
+            assert_fence_refusal(&error);
+            // A second admission through the same controller is refused before
+            // the executor runs: the fence is the controller's, not the
+            // command's.
+            let second = crate::RuntimeEffectEnvelope::new(
+                crate::RuntimeEffectInvocation::new(
+                    crate::EffectAddress::new(scope.clone(), format!("{group_key}:fenced-write-2"))
+                        .expect("valid probe address"),
+                    crate::RuntimeAttribution::none(),
+                    format!("{group_key}:fenced-write-2"),
+                ),
+                crate::RuntimeEffectCommand::process(crate::ProcessCommand::RegisterDefinition {
+                    owner_scope: owner_scope.clone(),
+                    name: format!("{group_key}-fenced-definition-2"),
+                    pinned: crate::ProcessDefinitionRef::unclaimed(
+                        LAW_FENCE_ENGINE_KIND,
+                        serde_json::json!({ "program": "law-fence-2" }),
+                    ),
+                    expectation: None,
+                }),
             );
+            let error = bound
+                .execute_effect(
+                    second,
+                    crate::RuntimeEffectLocalExecutor::testing(|_| async {
+                        unreachable!("the fence refuses before the executor runs")
+                    }),
+                )
+                .await
+                .expect_err("a second admission under the cancel-decided child is refused");
+            assert_fence_refusal(&error);
         }
         Ok(None) => {
             // The host mints no owned scoped controller at all — the probe has

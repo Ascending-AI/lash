@@ -1206,6 +1206,12 @@ async fn a_resolved_child_executes_on_the_captured_opener_context() {
         RuntimeEffectCommand::ToolInvocation {
             request: Box::new(request),
         },
+    )
+    .in_effect_group(
+        "group",
+        0,
+        crate::GroupWakePolicy::All,
+        crate::LoserPolicy::Cancel,
     );
     let lent_dispatch = lent();
     let lent_controller = lent_dispatch
