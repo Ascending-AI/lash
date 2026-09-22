@@ -229,7 +229,7 @@ fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
     validate_continuation(&continuation).unwrap();
 
     let wire = serde_json::to_value(&continuation).unwrap();
-    assert_eq!(wire["format_version"], serde_json::json!(16));
+    assert_eq!(wire["format_version"], serde_json::json!(17));
     assert_eq!(
         wire["finally_stack"][0]["completion"]["origin"]["error"],
         serde_json::json!({
@@ -240,7 +240,8 @@ fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
                         "class": "permission_denied",
                         "code": "approval_denied",
                         "source": "policy",
-                        "retry": { "type": "exhausted", "attempts": 3 }
+                        "retry": { "type": "exhausted", "attempts": 3 },
+                        "replay_key": "test-effect-key"
                     }
                 }
             }

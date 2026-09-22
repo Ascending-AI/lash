@@ -459,7 +459,7 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
 
 #[test]
 fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
-    let fixture: serde_json::Value = serde_json::from_slice(BYTECODE_V17_PARKED_LOOP)
+    let mut fixture: serde_json::Value = serde_json::from_slice(BYTECODE_V17_PARKED_LOOP)
         .expect("the version-17 parked-loop fixture is JSON");
     assert_eq!(fixture["bytecode_format_version"], 17);
     assert_eq!(
@@ -486,6 +486,10 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
                 if failure.code == "restate_segment_program_hash_mismatch")
     ));
 
+    // Keep the predecessor capture intact. Only re-envelope its parked VM at
+    // the current continuation version to reach the bytecode identity fence.
+    fixture["segment_state"]["vm"]["format_version"] =
+        serde_json::json!(lashlang::VM_CONTINUATION_FORMAT_VERSION);
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current-envelope continuation");
     assert_eq!(
