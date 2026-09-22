@@ -1,6 +1,4 @@
 use crate::LeaseOwnerIdentity;
-use crate::SessionId;
-use crate::store::queued_work::ClaimIdDialect;
 
 /// Ownership and predecessor identity are distinct states. An interrupted
 /// predecessor is never live, even when abandon restores its token.
@@ -131,74 +129,6 @@ impl ClaimHold {
             HoldState::Unheld { prior_token, .. } => prior_token.as_ref().map(|_| 0),
         }
     }
-}
-
-pub(super) trait InMemoryClaimRow {
-    fn claim(&self) -> &ClaimHold;
-    fn claim_mut(&mut self) -> &mut ClaimHold;
-}
-
-pub(super) struct InMemoryClaimMint<'a> {
-    pub selected_indices: &'a [usize],
-    pub enqueue_seq: u64,
-    pub dialect: ClaimIdDialect,
-    pub fencing_label: &'static str,
-    pub session_id: &'a SessionId,
-    pub owner: &'a LeaseOwnerIdentity,
-    pub generation: u64,
-    pub now: u64,
-}
-
-pub(super) struct MintedInMemoryClaim {
-    pub claim_id: String,
-    pub lease_token: String,
-    pub fencing_token: u64,
-    pub abandon_restore_claim_id: Option<String>,
-    pub abandon_restore_claim_token: Option<String>,
-}
-
-pub(super) fn mint_in_memory_claim<R: InMemoryClaimRow>(
-    rows: &mut [R],
-    mint: InMemoryClaimMint<'_>,
-) -> Result<MintedInMemoryClaim, crate::store::StoreError> {
-    let next_fencing_tokens = mint
-        .selected_indices
-        .iter()
-        .map(|&index| {
-            crate::StoreError::checked_monotonic_increment(
-                mint.fencing_label,
-                rows[index].claim().fencing_token,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let first = rows[mint.selected_indices[0]].claim();
-    let abandon_restore_claim_id = first.id();
-    let abandon_restore_claim_token = first.token();
-    let fencing_token = next_fencing_tokens[0];
-    let claim_id =
-        crate::store::queued_work::derive_claim_id(mint.dialect, mint.enqueue_seq, fencing_token);
-    let lease_token = crate::store::queued_work::derive_claim_lease_token(
-        mint.session_id,
-        mint.owner,
-        &claim_id,
-        mint.now,
-    );
-    for (&index, next_fencing_token) in mint.selected_indices.iter().zip(&next_fencing_tokens) {
-        rows[index].claim_mut().acquire(
-            claim_id.clone(),
-            lease_token.clone(),
-            mint.owner.clone(),
-            mint.generation,
-            *next_fencing_token,
-        );
-    }
-    Ok(MintedInMemoryClaim {
-        claim_id,
-        lease_token,
-        fencing_token,
-        abandon_restore_claim_id,
-        abandon_restore_claim_token,
-    })
 }
 
 #[cfg(test)]

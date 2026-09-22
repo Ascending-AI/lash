@@ -42,8 +42,8 @@ pub(crate) use lash_core_store::process_identity::{
 };
 pub(crate) use lash_core_store::queued_work_vocabulary::{
     DeliveryPolicy, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkEnqueueOutcome,
-    QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
+    QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkEnqueueOutcome, QueuedWorkItem,
+    QueuedWorkKind, QueuedWorkPayload,
 };
 #[cfg(any(test, feature = "testing"))]
 #[allow(unused_imports)]
@@ -109,8 +109,7 @@ pub(crate) use lash_core_store::turn_input_vocabulary::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
     PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, TurnInputApplication,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputState,
-    TurnInputStateKind,
+    TurnInputClaim, TurnInputClaimMode, TurnInputCompletion, TurnInputState, TurnInputStateKind,
 };
 #[cfg(any(test, feature = "testing"))]
 #[allow(unused_imports)]

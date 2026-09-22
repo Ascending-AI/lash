@@ -13,6 +13,7 @@ pub use checkpoint::{
     TOOL_STATE_CHECKPOINT_COMPONENT, ensure_checkpoint_component_encoding_version,
     ensure_checkpoint_component_hash_agreement,
 };
+pub mod claim_plan;
 mod claim_settlement;
 pub mod commit_budget;
 mod commit_identity;
@@ -46,6 +47,15 @@ pub use attachment_manifest::{
     AttachmentManifestEntry, AttachmentOwner, AttachmentOwnerKind, AttachmentWriteFence,
     AttachmentWritePermit, AttachmentWriteToken, decode_attachment_condemnation_record,
     decode_attachment_owner,
+};
+pub use claim_plan::{
+    ClaimPlanDecision, ConsumedProcessWake, QueuedWorkClaimPlan, QueuedWorkClaimRow,
+    QueuedWorkClaimWrite, QueuedWorkSettlementPlan, QueuedWorkSettlementRow,
+    QueuedWorkSettlementRowClaim, QueuedWorkSettlementWrite, SettlementDecision,
+    TurnInputClaimPlan, TurnInputClaimRow, TurnInputClaimWrite, TurnInputSettlementPlan,
+    TurnInputSettlementRegime, TurnInputSettlementRow, TurnInputSettlementRowFacts,
+    TurnInputSettlementStep, classify_empty_claim_scan, plan_queued_work_claim,
+    plan_queued_work_settlement, plan_turn_input_claim, plan_turn_input_settlement,
 };
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{

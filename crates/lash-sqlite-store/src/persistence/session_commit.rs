@@ -531,10 +531,20 @@ impl SessionCommitStore for Store {
                         plan.actual_head_revision(),
                         plan.next_head_revision(),
                     )?;
+                    // Settlement authority is decided here, inside the
+                    // commit's `BEGIN IMMEDIATE` write transaction, and
+                    // returns as shared plans; the plans' ordered writes
+                    // execute below, at the same point in the commit the
+                    // hand-written bodies ran (FIG-1065).
+                    let mut queued_work_plans =
+                        Vec::with_capacity(commit.completed_queue_claims.len());
                     for completed in &commit.completed_queue_claims {
-                        ensure_queued_work_completion_conn(tx, completed)?;
+                        queued_work_plans.push(plan_queued_work_settlement_conn(tx, completed)?);
                     }
+                    let mut turn_input_plans =
+                        Vec::with_capacity(commit.completed_turn_input_claims.len());
                     for completed in &commit.completed_turn_input_claims {
+                        let mut rows = Vec::with_capacity(completed.input_ids.len());
                         for input_id in &completed.input_ids {
                             let observed = tx
                                 .query_row(
@@ -554,41 +564,42 @@ impl SessionCommitStore for Store {
                                 )
                                 .optional()
                                 .map_err(sqlite_error)?;
-                            let observed = observed
+                            let facts = observed
                                 .map(|(claim_id, claim_token, generation, state)| {
-                                    Ok((
-                                        claim_id,
-                                        claim_token,
-                                        u64::try_from(generation).map_err(|_| {
-                                            stored_data_corrupt(
-                                                "PendingTurnInput",
-                                                format!(
-                                                    "claim_session_lease_generation must be non-negative, got {generation}"
-                                                ),
+                                    Ok(
+                                        lash_core::store::claim_plan::TurnInputSettlementRowFacts {
+                                            claim_id,
+                                            claim_token,
+                                            claim_session_lease_generation: u64::try_from(
+                                                generation,
                                             )
-                                        })?,
-                                        state,
-                                    ))
+                                            .map_err(|_| {
+                                                stored_data_corrupt(
+                                                    "PendingTurnInput",
+                                                    format!(
+                                                        "claim_session_lease_generation must be non-negative, got {generation}"
+                                                    ),
+                                                )
+                                            })?,
+                                            state,
+                                        },
+                                    )
                                 })
                                 .transpose()?;
-                            // The shared verdict is the decision. One
-                            // predicate, two regimes: the claim fields only
-                            // strengthen it (ADR 0069 section 5).
-                            lash_core::store_backend_support::require_settleable_turn_input(
-                                completed,
-                                input_id,
-                                observed.as_ref().map(
-                                    |(claim_id, claim_token, generation, state)| {
-                                        lash_core::store_backend_support::TurnInputSettlementFacts {
-                                            claim_id: claim_id.as_deref(),
-                                            claim_token: claim_token.as_deref(),
-                                            claim_session_lease_generation: *generation,
-                                            state: state.as_str(),
-                                        }
-                                    },
-                                ),
-                            )?;
+                            rows.push(lash_core::store::claim_plan::TurnInputSettlementRow {
+                                input_id: input_id.clone(),
+                                facts,
+                            });
                         }
+                        // The shared planner takes the verdict. One
+                        // predicate, two regimes: the claim fields only
+                        // strengthen it (ADR 0069 section 5).
+                        turn_input_plans.push(
+                            lash_core::store::claim_plan::plan_turn_input_settlement(
+                                completed, rows,
+                            )
+                            .into_result()?,
+                        );
                     }
 
                     let stored_checkpoint =
@@ -705,117 +716,125 @@ impl SessionCommitStore for Store {
                     {
                         retire_unreachable_ancestry_conn(tx, old_leaf_node_id)?;
                     }
-                    for completed in &commit.completed_queue_claims {
-                        for batch_id in &completed.batch_ids {
-                            let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-                            tx.execute(
-                                crate::process_registry::sql::process_sql()
-                                    .fence_sqlite
-                                    .insert_from_claimed_batch
-                                    .sql(),
-                                params![
-                                    completed.session_id.as_str(),
-                                    batch_id.as_str(),
-                                    completed.claim_id,
-                                    completed.lease_token
-                                ],
-                            )
-                            .map_err(sqlite_error)?;
-                            let settled = tx
-                                .execute(
-                                    turn_ingress.queued_batches.settle_claimed.sql(),
-                                    params![
-                                        completed.session_id.as_str(),
-                                        batch_id.as_str(),
-                                        completed.claim_id,
-                                        completed.lease_token
-                                    ],
-                                )
-                                .map_err(sqlite_error)?;
-                            // Backstop: `ensure_queued_work_completion_conn`
-                            // already took the verdict over this row earlier in
-                            // the same write transaction, so the predicate
-                            // cannot legitimately miss. A miss is recorded as
-                            // evidence and then fails closed with the same
-                            // supersession this site has always returned.
-                            lash_core::store_backend_support::require_fenced_write_applied(
-                                lash_core::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
-                                crate::SQLITE_BACKEND,
-                                batch_id.as_str(),
-                                u64::try_from(settled).unwrap_or(u64::MAX),
-                                || StoreError::QueuedWorkClaimSuperseded {
-                                    session_id: completed.session_id.clone(),
-                                    claim_id: completed.claim_id.clone(),
-                                    row_id: Some(
-                                        batch_id.as_str().to_string().into_boxed_str(),
-                                    ),
-                                    superseding_claim_id: None,
-                                    superseding_session_lease_generation: None,
-                                },
-                            )?;
+                    {
+                        let turn_ingress = crate::turn_ingress::turn_ingress_sql();
+                        let fence = crate::process_registry::sql::process_sql();
+                        for settlement_plan in &queued_work_plans {
+                            for write in settlement_plan.writes() {
+                                match write {
+                                    // The fence lands before the queue row
+                                    // leaves: a crash between the two would
+                                    // replay a wake the session already
+                                    // consumed (FIG-1065).
+                                    lash_core::store::claim_plan::QueuedWorkSettlementWrite::FenceWakeRedelivery { wake, .. } => {
+                                        tx.execute(
+                                            fence.fence_sqlite.upsert_max.sql(),
+                                            params![
+                                                settlement_plan.session_id().as_str(),
+                                                wake.process_id.as_str(),
+                                                i64::try_from(wake.sequence).map_err(|_| {
+                                                    stored_data_corrupt(
+                                                        "WakeRedeliveryFence",
+                                                        format!(
+                                                            "allocation_floor does not fit SQLite INTEGER: {}",
+                                                            wake.sequence
+                                                        ),
+                                                    )
+                                                })?,
+                                            ],
+                                        )
+                                        .map_err(sqlite_error)?;
+                                    }
+                                    lash_core::store::claim_plan::QueuedWorkSettlementWrite::SettleClaimedBatch { batch_id } => {
+                                        let settled = tx
+                                            .execute(
+                                                turn_ingress.queued_batches.settle_claimed.sql(),
+                                                params![
+                                                    settlement_plan.session_id().as_str(),
+                                                    batch_id.as_str(),
+                                                    settlement_plan.claim_id(),
+                                                    settlement_plan.lease_token()
+                                                ],
+                                            )
+                                            .map_err(sqlite_error)?;
+                                        // Backstop: `plan_queued_work_settlement_conn`
+                                        // already took the verdict over this row earlier in
+                                        // the same write transaction, so the predicate
+                                        // cannot legitimately miss. A miss is recorded as
+                                        // evidence and then fails closed with the same
+                                        // supersession this site has always returned.
+                                        lash_core::store_backend_support::require_fenced_write_applied(
+                                            lash_core::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
+                                            crate::SQLITE_BACKEND,
+                                            batch_id.as_str(),
+                                            u64::try_from(settled).unwrap_or(u64::MAX),
+                                            || settlement_plan.superseded_error(batch_id),
+                                        )?;
+                                    }
+                                }
+                            }
                         }
                     }
-                    for completed in &commit.completed_turn_input_claims {
-                        for input_id in &completed.input_ids {
-                            // One conditional write for both settlement
-                            // regimes: the claim fields are an optional
-                            // predicate strengthener, and either way exactly
-                            // one row must change (ADR 0069 section 5).
-                            let pending_inputs =
-                                &crate::turn_ingress::turn_ingress_sql().pending_inputs;
-                            let settled = match completed.claim.as_ref() {
-                                Some(claim) => tx.execute(
-                                    pending_inputs.settle_claimed.sql(),
-                                    params![
-                                        completed.session_id.as_str(),
-                                        input_id.as_str(),
-                                        lash_core::TurnInputStateKind::Completed.as_str(),
-                                        claim.claim_id,
-                                        claim.lease_token,
-                                    ],
-                                ),
-                                None => tx.execute(
-                                    pending_inputs.settle_unclaimed.sql(),
-                                    params![
-                                        completed.session_id.as_str(),
-                                        input_id.as_str(),
-                                        lash_core::TurnInputStateKind::Completed.as_str(),
-                                    ],
-                                ),
+                    {
+                        let pending_inputs =
+                            &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+                        for settlement_plan in &turn_input_plans {
+                            for step in settlement_plan.steps() {
+                                // One conditional write for both settlement
+                                // regimes: the claim fields are an optional
+                                // predicate strengthener, and either way
+                                // exactly one row must change (ADR 0069
+                                // section 5).
+                                let settled = match (step.regime, settlement_plan.claim()) {
+                                    (
+                                        lash_core::store::claim_plan::TurnInputSettlementRegime::Claimed,
+                                        Some(claim),
+                                    ) => tx.execute(
+                                        pending_inputs.settle_claimed.sql(),
+                                        params![
+                                            settlement_plan.session_id().as_str(),
+                                            step.input_id.as_str(),
+                                            step.settle_state.as_str(),
+                                            claim.claim_id,
+                                            claim.lease_token,
+                                        ],
+                                    ),
+                                    (
+                                        lash_core::store::claim_plan::TurnInputSettlementRegime::Claimed,
+                                        None,
+                                    ) => {
+                                        return Err(StoreError::Backend(
+                                            "claimed turn-input settlement step without a claim"
+                                                .to_string(),
+                                        ));
+                                    }
+                                    (
+                                        lash_core::store::claim_plan::TurnInputSettlementRegime::Unclaimed,
+                                        _,
+                                    ) => tx.execute(
+                                        pending_inputs.settle_unclaimed.sql(),
+                                        params![
+                                            settlement_plan.session_id().as_str(),
+                                            step.input_id.as_str(),
+                                            step.settle_state.as_str(),
+                                        ],
+                                    ),
+                                }
+                                .map_err(sqlite_error)?;
+                                // Backstop: the verdict was already taken over
+                                // this row earlier in the same write transaction,
+                                // so the predicate cannot legitimately miss. A
+                                // miss is recorded as evidence and then fails
+                                // closed with the same supersession this site has
+                                // always returned.
+                                lash_core::store_backend_support::require_fenced_write_applied(
+                                    lash_core::store::claim_plan::TurnInputSettlementPlan::fenced_write(step),
+                                    crate::SQLITE_BACKEND,
+                                    step.input_id.as_str(),
+                                    u64::try_from(settled).unwrap_or(u64::MAX),
+                                    || settlement_plan.superseded_error(step),
+                                )?;
                             }
-                            .map_err(sqlite_error)?;
-                            // Backstop: the verdict was already taken over
-                            // this row earlier in the same write transaction,
-                            // so the predicate cannot legitimately miss. A
-                            // miss is recorded as evidence and then fails
-                            // closed with the same supersession this site has
-                            // always returned.
-                            lash_core::store_backend_support::require_fenced_write_applied(
-                                match completed.claim.as_ref() {
-                                    Some(_) => lash_core::store_backend_support::FencedWrite::TurnInputClaimSettlement,
-                                    None => lash_core::store_backend_support::FencedWrite::UnclaimedTurnInputSettlement,
-                                },
-                                crate::SQLITE_BACKEND,
-                                input_id.as_str(),
-                                u64::try_from(settled).unwrap_or(u64::MAX),
-                                || match completed.claim.as_ref() {
-                                    Some(claim) => StoreError::TurnInputClaimSuperseded {
-                                        session_id: completed.session_id.clone(),
-                                        claim_id: claim.claim_id.clone(),
-                                        row_id: Some(
-                                            input_id.as_str().to_string().into_boxed_str(),
-                                        ),
-                                        superseding_claim_id: None,
-                                        superseding_session_lease_generation: None,
-                                    },
-                                    None => StoreError::UnclaimedTurnInputSettlementSuperseded {
-                                        session_id: completed.session_id.clone(),
-                                        input_id: input_id.clone(),
-                                        observed_state: None,
-                                        superseding_claim_id: None,
-                                    },
-                                },
-                            )?;
                         }
                     }
                     let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();

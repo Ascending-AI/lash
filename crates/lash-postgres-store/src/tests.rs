@@ -935,7 +935,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     // Ownership validation locks the exact claim row. A superseder cannot
     // rewrite it between validation and completion.
     let mut validating = storage.pool().begin().await.expect("begin validating tx");
-    ensure_turn_input_completion_tx(&mut validating, &stale)
+    plan_turn_input_settlement_tx(&mut validating, &stale)
         .await
         .expect("validate and lock stale claim");
     let mut blocked_superseder = storage.pool().begin().await.expect("begin superseder tx");
@@ -987,6 +987,28 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     .expect("old non-locking ownership validation");
     assert_eq!(observed, Some(1));
 
+    // The plan the stale transaction would carry: built over the ownership
+    // row as A observed it before the supersession landed.
+    let stale_plan = match lash_core::store::claim_plan::plan_turn_input_settlement(
+        &stale,
+        vec![lash_core::store::claim_plan::TurnInputSettlementRow {
+            input_id: stale.input_ids[0].clone(),
+            facts: Some(lash_core::store::claim_plan::TurnInputSettlementRowFacts {
+                claim_id: stale.claim_id().map(str::to_string),
+                claim_token: stale.lease_token().map(str::to_string),
+                claim_session_lease_generation: 1,
+                state: lash_core::TurnInputState::DeferredNextTurn
+                    .as_str()
+                    .to_string(),
+            }),
+        }],
+    ) {
+        lash_core::store::claim_plan::SettlementDecision::Complete(plan) => plan,
+        lash_core::store::claim_plan::SettlementDecision::Superseded(error) => {
+            panic!("the observed row still carried A's claim: {error}")
+        }
+    };
+
     let mut superseder = storage
         .pool()
         .begin()
@@ -1014,9 +1036,10 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         .execute(&mut *stale_committer)
         .await
         .expect("tentatively move stale head");
-    let error = complete_turn_input_claims_tx(&mut stale_committer, std::slice::from_ref(&stale))
-        .await
-        .expect_err("zero-row stale completion must trip the atomic fence");
+    let error =
+        complete_turn_input_claims_tx(&mut stale_committer, std::slice::from_ref(&stale_plan))
+            .await
+            .expect_err("zero-row stale completion must trip the atomic fence");
     assert!(matches!(
         error,
         StoreError::TurnInputClaimSuperseded {
@@ -1468,7 +1491,7 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
         .begin()
         .await
         .expect("begin settlement-order tx");
-    let error = ensure_turn_input_completion_tx(&mut tx, &stale)
+    let error = plan_turn_input_settlement_tx(&mut tx, &stale)
         .await
         .expect_err("the verdict must refuse a superseded claim before any write");
     tx.rollback().await.expect("roll back settlement-order tx");

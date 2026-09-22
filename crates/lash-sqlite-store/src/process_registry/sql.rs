@@ -916,30 +916,17 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `wake_redelivery_fences` statements only SQLite issues.
     pub(crate) struct WakeRedeliveryFenceSqliteStatements @ "wake_redelivery_fence" {
-        /// Raise session `?1`'s consumed floor from the wakes in the claimed
-        /// batch `?2` / `?3` / `?4`.
-        ///
-        /// SQLite derives the floors from the queued rows it is committing, in
-        /// the same statement; PostgreSQL's commit path has already decoded
-        /// them and binds the values.
-        insert_from_claimed_batch = "INSERT INTO wake_redelivery_fences (
-                 session_id, process_id, allocation_floor
-             )
-             SELECT batch.session_id,
-                    json_extract(item.payload_json, '$.wake.process_id'),
-                    json_extract(item.payload_json, '$.wake.sequence')
-             FROM queued_work_batches AS batch
-             JOIN queued_work_items AS item ON item.batch_id = batch.batch_id
-             WHERE batch.session_id = ?1
-               AND batch.batch_id = ?2
-               AND batch.claim_id = ?3
-               AND batch.claim_token = ?4
-               AND json_extract(item.payload_json, '$.type') = 'process_wake'
-             ON CONFLICT(session_id, process_id) DO UPDATE SET
-                 allocation_floor = MAX(
-                     wake_redelivery_fences.allocation_floor,
-                     excluded.allocation_floor
-                 )";
+        /// Raise session `?1`'s consumed floor for process `?2` to `?3`, never
+        /// lowering it. `MAX` over `excluded` is SQLite's spelling of
+        /// PostgreSQL's `GREATEST` over `EXCLUDED`.
+        upsert_max = "INSERT INTO wake_redelivery_fences (
+                session_id, process_id, allocation_floor
+             ) VALUES (?1, ?2, ?3)
+             ON CONFLICT (session_id, process_id) DO UPDATE SET
+                allocation_floor = MAX(
+                    wake_redelivery_fences.allocation_floor,
+                    excluded.allocation_floor
+                )";
     }
 }
 
