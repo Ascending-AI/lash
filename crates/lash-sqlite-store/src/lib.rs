@@ -69,9 +69,8 @@ use lash_core::runtime::{
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, WorkClaimLease, claim_scan_limit, derive_batch_id,
-    select_exact_turn_work_claim_prefix, select_leading_session_command,
-    select_turn_work_claim_prefix,
+    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_exact_turn_work_claim_prefix,
+    select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
@@ -355,19 +354,6 @@ fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreErro
 
 fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError> {
     sql_counter_value("session_lease_generation", value)
-}
-
-fn sql_claim_fencing_tokens(
-    counter: &'static str,
-    currents: impl IntoIterator<Item = u64>,
-) -> Result<Vec<i64>, StoreError> {
-    currents
-        .into_iter()
-        .map(|current| {
-            let next = StoreError::checked_monotonic_increment(counter, current)?;
-            sql_monotonic_counter_value(counter, current, next)
-        })
-        .collect()
 }
 
 fn plugin_sql_monotonic_counter_value(

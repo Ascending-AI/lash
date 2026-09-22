@@ -55,18 +55,6 @@ pub const QUALIFIED_HEAD_CANDIDATE_COLUMNS: &str = "candidate.enqueue_seq AS hea
 /// nothing decodes a row.
 pub const ORDERING_COLUMNS: &str = "enqueued_at_ms, enqueue_seq";
 
-/// The wake identity a settled batch contributes to its redelivery fence, read
-/// out of the batch's own first item.
-///
-/// Narrow because it is an `INSERT … SELECT`'s source list, not a projection
-/// anybody decodes: SQLite writes the fence and the settlement in one statement
-/// under its write lock, so the three values never leave the database.
-/// PostgreSQL reads the payload and decodes it instead, because it must take
-/// the wake source's advisory lock between the read and the write.
-pub const WAKE_FENCE_SOURCE_COLUMNS: &str = "batch.session_id,
-     json_extract(item.payload_json, '$.wake.process_id'),
-     json_extract(item.payload_json, '$.wake.sequence')";
-
 crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
     pub struct QueuedBatchStatements @ "queued_work_batch" {
@@ -126,6 +114,25 @@ crate::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?5
                )";
+
+        /// The first payload of batch `?2` of session `?1`, if claim `?3`/`?4`
+        /// still holds it: the wake identity a settled batch contributes to its
+        /// redelivery fence.
+        ///
+        /// The wake-source key travels in the plan's covered-item list, so the
+        /// payload is the only fact still on the row. Both backends decode it
+        /// the same way; the wake batch carries exactly one wake item
+        /// (`validate_process_wake_source`), so the head payload is the batch's
+        /// whole wake contribution.
+        select_claimed_batch_head_payload = "SELECT item.payload_json
+             FROM queued_work_batches AS batch
+             JOIN queued_work_items AS item ON item.batch_id = batch.batch_id
+             WHERE batch.session_id = ?1
+               AND batch.batch_id = ?2
+               AND batch.claim_id = ?3
+               AND batch.claim_token = ?4
+             ORDER BY item.item_index ASC
+             LIMIT 1";
 
         /// Give up claim `?2`/`?3` on session `?1`, restoring the interrupted
         /// predecessor identity `?4`/`?5` the claim displaced.

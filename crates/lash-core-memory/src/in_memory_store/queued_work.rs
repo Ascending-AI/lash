@@ -412,40 +412,66 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             }
         };
         indices.truncate(selected_len);
-        let enqueue_seq = queued[indices[0]].batch.enqueue_seq;
-        let minted = super::claim_hold::mint_in_memory_claim(
-            queued.as_mut_slice(),
-            super::claim_hold::InMemoryClaimMint {
-                selected_indices: &indices,
-                enqueue_seq,
-                dialect: crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
-                fencing_label: "queued_work_claim_fencing_token",
-                session_id,
-                owner,
-                generation,
-                now,
-            },
-        )?;
-        let batches = indices
+        let observations = indices
             .iter()
-            .map(|&index| queued[index].batch.clone())
-            .collect();
+            .map(|&index| {
+                let entry = &queued[index];
+                crate::store::claim_plan::QueuedWorkClaimRow {
+                    candidate: crate::store::queued_work::ClaimCandidate::from_batch(
+                        &entry.batch,
+                        entry.claim.fencing_token,
+                        entry.claim.id(),
+                        entry.claim.token(),
+                    ),
+                    batch: entry.batch.clone(),
+                    claim_token: entry.claim.token(),
+                    claim_session_lease_generation: entry
+                        .claim
+                        .diagnostic_generation()
+                        .unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>();
+        // The SQL backends validate fencing tokens over the full candidate
+        // span, not just the selected prefix; `candidates` is that span
+        // (FIG-1065).
+        let plan = match crate::store::claim_plan::plan_queued_work_claim(
+            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+            session_id,
+            owner,
+            generation,
+            now,
+            observations,
+            &candidates,
+        )? {
+            // Empty and Defer both report no claim: a row held by this
+            // generation was filtered out of `indices` by `claimable_by`
+            // before selection (FIG-1065).
+            crate::store::claim_plan::ClaimPlanDecision::Empty
+            | crate::store::claim_plan::ClaimPlanDecision::Defer => {
+                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
+            }
+            crate::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        };
+        // Assemble the claim record before mutating: it is the plan's only
+        // remaining fallible step, and this path writes the live rows
+        // directly rather than a staged copy.
+        let writes = plan.writes().to_vec();
+        let claim = plan.into_claim()?;
+        for (&index, write) in indices.iter().zip(&writes) {
+            queued[index].claim.acquire(
+                claim.claim_id.clone(),
+                claim.lease_token.clone(),
+                owner.clone(),
+                generation,
+                write.next_claim_fencing_token,
+            );
+        }
         Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-            Some(crate::QueuedWorkClaim {
-                session_id: SessionId::from(session_id.to_string()),
-                claim_id: minted.claim_id,
-                owner: owner.clone(),
-                lease_token: minted.lease_token,
-                fencing_token: minted.fencing_token,
-                session_lease_generation: generation,
-                data: crate::QueuedWorkClaimData {
-                    batches,
-                    abandon_restore_claim_id: minted.abandon_restore_claim_id,
-                    abandon_restore_claim_token: minted
-                        .abandon_restore_claim_token
-                        .map(String::into_boxed_str),
-                },
-            }),
+            Some(claim),
             already_satisfied_batch_ids,
         ))
     }

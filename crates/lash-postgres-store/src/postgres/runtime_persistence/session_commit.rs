@@ -609,11 +609,17 @@ impl SessionCommitStore for PostgresSessionStore {
             plan.actual_head_revision(),
             plan.next_head_revision(),
         )?;
+        // Settlement authority is decided here, under `FOR UPDATE` row
+        // locks, and returns as shared plans; the plans' ordered writes
+        // execute below, at the same point in the commit the hand-written
+        // bodies ran (FIG-1065).
+        let mut queued_work_plans = Vec::with_capacity(commit.completed_queue_claims.len());
         for completed in &commit.completed_queue_claims {
-            ensure_queued_work_completion_tx(&mut tx, completed).await?;
+            queued_work_plans.push(plan_queued_work_settlement_tx(&mut tx, completed).await?);
         }
+        let mut turn_input_plans = Vec::with_capacity(commit.completed_turn_input_claims.len());
         for completed in &commit.completed_turn_input_claims {
-            ensure_turn_input_completion_tx(&mut tx, completed).await?;
+            turn_input_plans.push(plan_turn_input_settlement_tx(&mut tx, completed).await?);
         }
         for entry in &commit.usage_deltas {
             let entry_ordinal = i64::try_from(entry.identity.entry_ordinal).map_err(|_| {
@@ -736,8 +742,8 @@ impl SessionCommitStore for PostgresSessionStore {
         {
             retire_unreachable_ancestry_tx(&mut tx, old_leaf_node_id).await?;
         }
-        complete_queued_work_claims_tx(&mut tx, &commit.completed_queue_claims).await?;
-        complete_turn_input_claims_tx(&mut tx, &commit.completed_turn_input_claims).await?;
+        complete_queued_work_claims_tx(&mut tx, &queued_work_plans).await?;
+        complete_turn_input_claims_tx(&mut tx, &turn_input_plans).await?;
         let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
         if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
             let cancellation = commit.interrupted_turn_input_cancellation.as_ref();

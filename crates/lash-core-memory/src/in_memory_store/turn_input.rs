@@ -9,28 +9,6 @@ use super::{InMemoryPendingTurnInput, InMemorySessionStore};
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
-pub(super) fn settlement_mismatch<'a, R, I: AsRef<str>>(
-    rows: &'a [R],
-    row_ids: &'a [I],
-    session_id: &SessionId,
-    identity: impl Fn(&R) -> (&str, &str),
-    matches: impl Fn(&R) -> bool,
-) -> Option<(Option<&'a I>, Option<&'a R>)> {
-    if rows.iter().filter(|row| matches(row)).count() == row_ids.len() {
-        return None;
-    }
-    let row_id = row_ids.iter().find(|id| {
-        !rows
-            .iter()
-            .any(|row| identity(row).1 == id.as_ref() && matches(row))
-    });
-    let current = row_id.and_then(|id| {
-        rows.iter()
-            .find(|row| identity(row) == (session_id.as_str(), id.as_ref()))
-    });
-    Some((row_id, current))
-}
-
 /// The in-memory store's turn-input settlement predicate.
 ///
 /// One predicate, two regimes: the claim fields only strengthen it. A claimed

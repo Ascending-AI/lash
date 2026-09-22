@@ -213,19 +213,6 @@ pub(crate) fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError
     sql_counter_value("session_lease_generation", value)
 }
 
-pub(crate) fn sql_claim_fencing_tokens(
-    counter: &'static str,
-    currents: impl IntoIterator<Item = u64>,
-) -> Result<Vec<i64>, StoreError> {
-    currents
-        .into_iter()
-        .map(|current| {
-            let next = StoreError::checked_monotonic_increment(counter, current)?;
-            sql_monotonic_counter_value(counter, current, next)
-        })
-        .collect()
-}
-
 pub(crate) fn plugin_sql_monotonic_counter_value(
     counter: &'static str,
     current: u64,
