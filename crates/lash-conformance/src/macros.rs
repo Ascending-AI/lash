@@ -2197,7 +2197,7 @@ macro_rules! tool_child_invocation_tests {
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
-            $crate::__tool_child_invocation_register!($attrs $fixture; $law, $label);
+            $crate::__tool_child_invocation_register!($attrs $fixture; ($law, $label));
         )*
     };
 }
@@ -2205,7 +2205,7 @@ macro_rules! tool_child_invocation_tests {
 /// Register one shared tool-child invocation law.
 #[macro_export]
 macro_rules! __tool_child_invocation_register {
-    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal) => {
+    ([$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
@@ -2236,8 +2236,10 @@ macro_rules! tool_batch_group_tests {
     };
     (@catalogue $attrs:tt $fixture:block) => {
         $crate::__tool_child_invocation_register!($attrs $fixture;
-            an_all_group_of_tool_children_yields_the_batch_replies,
-            "tool-batch-group-differential"
+            (
+                an_all_group_of_tool_children_yields_the_batch_replies,
+                "tool-batch-group-differential"
+            )
         );
     };
 }
