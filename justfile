@@ -358,21 +358,24 @@ seal:
   cargo test --workspace --locked --test ui
 
 # The pre-push floor over the Kiln fork: the dev and feature-lane test and
-# clippy partitions on the shared pool plus the quick script gates, all run
-# concurrently and reported as one table. Run it on a COMMITTED head —
+# clippy partitions on the shared pool plus the quick script gates. Frontend
+# dependencies are installed first so npm does not replace node_modules while
+# Bazel scans the example package; the remaining gates run concurrently and
+# are reported as one table. Run it on a COMMITTED head —
 # check_version_bumps.py reads committed state, so work that exists only in
 # the worktree is invisible to that leg.
 floor:
   #!/usr/bin/env bash
   set -euo pipefail
   cd "{{repo}}"
+  npm --prefix examples/workflow-graph-roundtrip/frontend ci
   printf '%s\n' \
     'kiln test //:dev_tests //:feature_lane_tests //:workspace_clippy //:feature_lane_clippy' \
     'kiln fmt -- --check' \
     'git diff --check' \
     'scripts/ci/repository-gates.sh' \
     'python3 scripts/generate-workflow-schemas.py --check' \
-    'npm --prefix examples/workflow-graph-roundtrip/frontend ci && npm --prefix examples/workflow-graph-roundtrip/frontend run check:types' \
+    'npm --prefix examples/workflow-graph-roundtrip/frontend run check:types' \
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
     | scripts/gate-table.sh

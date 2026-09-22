@@ -1,4 +1,4 @@
-/* Generated from the example Rust WorkflowDocument DTO by npm run generate:types. Do not edit directly. */
+/* Generated from the example Rust HTTP DTOs by npm run generate:types. Do not edit directly. */
 
 /**
  * A node's display name together with the one fact that decides whether the host may throw it away: who chose it.

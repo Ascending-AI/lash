@@ -5,6 +5,7 @@
 // @ts-check
 
 /** @typedef {import('../generated/workflow-document').WorkflowDocument} WorkflowDocument */
+/** @typedef {import('../generated/error-response').ErrorBody} ErrorBody */
 
 /** @returns {Promise<WorkflowDocument>} */
 export async function fetchWorkflow() {
@@ -57,9 +58,10 @@ export async function saveWorkflow(/** @type {WorkflowDocument} */ document) {
     }
     return { ok: true, document: body, idMap: null };
   }
+  /** @type {ErrorBody | null} */
   let body = null;
   try {
-    body = await res.json();
+    body = /** @type {ErrorBody} */ (await res.json());
   } catch {
     body = null;
   }

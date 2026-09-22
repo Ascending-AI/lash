@@ -1,7 +1,7 @@
 //! The lens's editable fields, as this example's HTTP surface sees them.
 //!
 //! Everything here turns one flow node's editable text into IR and back
-//! through `lash_typescript`'s workflow-graph doors, so the example carries no
+//! through Lash's TypeScript workflow-graph doors, so the example carries no
 //! grammar of its own.
 
 use std::collections::{BTreeMap, BTreeSet};

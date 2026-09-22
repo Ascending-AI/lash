@@ -16,6 +16,10 @@ const documents = [
     '../../examples/workflow-graph-roundtrip/frontend/src/generated/workflow-document.schema.json',
     'workflow-document.d.ts',
   ],
+  [
+    '../../examples/workflow-graph-roundtrip/frontend/src/generated/error-response.schema.json',
+    'error-response.d.ts',
+  ],
 ];
 
 const stale = [];
@@ -27,7 +31,7 @@ for (const [schemaName, outputName] of documents) {
   const output = path.join(generated, outputName);
   const contents = await compileFromFile(schema, {
     bannerComment: schemaName.startsWith('../')
-      ? '/* Generated from the example Rust WorkflowDocument DTO by npm run generate:types. Do not edit directly. */'
+      ? '/* Generated from the example Rust HTTP DTOs by npm run generate:types. Do not edit directly. */'
       : '/* Generated from schemas/host by npm run generate:types. Do not edit directly. */',
     style: { singleQuote: true },
   });

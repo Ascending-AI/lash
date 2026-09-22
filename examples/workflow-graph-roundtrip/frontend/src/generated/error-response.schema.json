@@ -1,0 +1,33 @@
+{
+  "$id": "https://lash.dev/examples/workflow-graph-roundtrip/error-response",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ErrorDetail": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": true,
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "details",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "error": {
+      "$ref": "#/definitions/ErrorDetail"
+    }
+  },
+  "required": [
+    "error"
+  ],
+  "title": "ErrorBody",
+  "type": "object"
+}
