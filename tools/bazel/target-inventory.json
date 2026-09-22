@@ -19234,6 +19234,7 @@
         "reqwest",
         "serde",
         "serde_json",
+        "sha2",
         "tokio",
         "tracing",
         "tracing-subscriber"
