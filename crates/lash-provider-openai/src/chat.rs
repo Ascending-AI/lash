@@ -160,7 +160,7 @@ impl OpenAiCompatibleProvider {
                             "type": "function",
                             "function": {
                                 "name": tool_name,
-                                "arguments": input_json,
+                                "arguments": tool_call_input_replay_string(input_json),
                             },
                         }));
                         if let Some(opaque) =
