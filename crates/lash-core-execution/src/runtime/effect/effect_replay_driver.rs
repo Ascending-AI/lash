@@ -2297,6 +2297,11 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     };
                 Ok(RuntimeEffectOutcome::Process { result })
             }
+            RuntimeEffectCommand::Trigger { command } => {
+                local_executor
+                    .execute_trigger(envelope.invocation, *command)
+                    .await
+            }
             _ => local_executor.execute(envelope).await,
         }
     }

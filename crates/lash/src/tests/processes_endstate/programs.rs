@@ -5,6 +5,51 @@
 
 use lashlang::testing::ast_builders as b;
 
+use super::LinkedTestProcess;
+
+impl LinkedTestProcess {
+    pub(super) async fn new_with_catalog(
+        artifact_store: &dyn lash_lashlang_runtime::LashlangArtifactStore,
+        program: lashlang::Program,
+        process_name: &str,
+        catalog: lashlang::LashlangHostCatalog,
+    ) -> Self {
+        let linked = lashlang::LinkedModule::link(
+            program,
+            lashlang::LashlangHostEnvironment::new(
+                catalog,
+                lashlang::LashlangAbilities::default().with_sleep(),
+            ),
+        )
+        .expect("link lashlang process");
+        artifact_store
+            .publish_module_artifact(
+                &lash_core::ArtifactOwner::host(format!("process-test:{process_name}")),
+                &linked.artifact,
+            )
+            .await
+            .expect("store lashlang process artifact");
+        let process_ref = linked
+            .artifact
+            .process_ref(process_name)
+            .unwrap_or_else(|| panic!("missing process ref `{process_name}`"))
+            .clone();
+        let signal_event_types = linked
+            .artifact
+            .canonical_ir
+            .process(process_name)
+            .map(lash_lashlang_runtime::lashlang_process_signal_event_types)
+            .unwrap_or_default();
+        Self {
+            module_ref: linked.module_ref,
+            host_requirements_ref: linked.host_requirements_ref,
+            process_ref,
+            process_name: process_name.to_string(),
+            signal_event_types,
+        }
+    }
+}
+
 /// `process main() signals { ready: <ty> } { value = wait_signal("ready")
 /// finish <finish> }`
 ///

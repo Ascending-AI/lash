@@ -260,7 +260,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 106;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 107;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -298,6 +298,17 @@ const TRIGGER_KEY: &str = "durable-read-trigger";
 const TRIGGER_REGISTER_OPERATION: &str = "durable-read-trigger-register";
 const QUEUE_SOURCE_KEY: &str = "durable-read-queue-source";
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
+
+fn fixture_effect_outcome() -> lash_core::ProcessEffectSummaryOccurrence {
+    lash_core::ProcessEffectSummaryOccurrence::new(
+        "durable-read-tool-node",
+        1,
+        "fixture.tool",
+        lash_core::ProcessEffectOutcomeClass::Success,
+        None,
+        "durable-read-tool-effect:1",
+    )
+}
 
 #[allow(dead_code)]
 pub async fn assert_prior_component_encoding_is_refused(store: &dyn RuntimePersistence) {
@@ -552,6 +563,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::FIG_3484_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             105,
+            106,
+        ),
+        (
+            crate::EFFECT_OUTCOME_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            106,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -784,10 +800,19 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .set_process_wait_with_authority(
             &ProcessId::from(PROCESS_ID),
             fixture_wait_state(),
-            &ProcessExecutionWriteAuthority::lease(lease),
+            &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
         .await
         .expect("persist fixture process wait state");
+    handles
+        .processes
+        .append_event_with_authority(
+            &ProcessId::from(PROCESS_ID),
+            fixture_effect_outcome().append_request(),
+            &ProcessExecutionWriteAuthority::lease(lease),
+        )
+        .await
+        .expect("persist fixture effect outcome");
     handles
         .continuations
         .put_segment_handover(&ProcessId::from(PROCESS_ID), fixture_handover())
@@ -1389,7 +1414,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .full_event_window(&ProcessId::from(PROCESS_ID), 0)
         .await
         .expect("durable fixture drift: waiting-process event read failed");
-    assert_eq!(process_events.len(), 2);
+    assert_eq!(process_events.len(), 3);
     assert_eq!(process_events[0].sequence, 1);
     assert_eq!(process_events[0].event_type, "process.observer_added");
     assert_eq!(
@@ -1406,6 +1431,15 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         process_events[1].payload,
         serde_json::json!({"wait": fixture_wait_state()}),
         "durable fixture semantic drift: waiting-process event payload changed"
+    );
+    assert_eq!(
+        process_events[2].event_type,
+        lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
+    );
+    assert_eq!(
+        lash_core::ProcessEffectSummaryOccurrence::decode(process_events[2].payload.clone())
+            .expect("decode durable fixture effect outcome"),
+        fixture_effect_outcome()
     );
     assert_eq!(
         handles

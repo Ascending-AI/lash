@@ -253,6 +253,89 @@ async fn terminal_sequence(
 pub async fn durable_effect_outcome_event_crash_windows(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
+    let owned_id = ProcessId::from("durable-effect-outcome-execution-authority");
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                owned_id.clone(),
+                ProcessInput::Engine {
+                    kind: "conformance-effect-engine".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                RecoveryContract::Rerunnable,
+                ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+                "conformance-effect-env",
+            )))
+            .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::for_definition(
+                    crate::ProcessDefinitionRef::unclaimed(
+                        "conformance-effect-engine",
+                        serde_json::Value::Null,
+                    ),
+                    Some(owned_id.as_str()),
+                ),
+            )),
+        )
+        .await
+        .expect("register execution-owned effect process");
+    let lease = registry
+        .claim_process_lease(
+            &owned_id,
+            &crate::LeaseOwnerIdentity::opaque("effect-worker", "effect-worker:1"),
+            60_000,
+        )
+        .await
+        .expect("claim execution lease")
+        .acquired()
+        .expect("execution lease available");
+    let authority = crate::ProcessExecutionWriteAuthority::lease(lease);
+    let owned_outcome = lash_core::ProcessEffectSummaryOccurrence::new(
+        "owned-tool-node",
+        1,
+        "fixture.tool",
+        lash_core::ProcessEffectOutcomeClass::Failure,
+        Some(lash_sansio::FailureCode::from_foreign_wire(
+            "fixture:refused",
+        )),
+        "lashlang:owned-effect:1",
+    );
+    let owned_insert = registry
+        .append_event_with_authority(&owned_id, owned_outcome.append_request(), &authority)
+        .await
+        .expect("append recorded outcome under execution authority");
+    let owned_replay = registry
+        .append_event_with_authority(&owned_id, owned_outcome.append_request(), &authority)
+        .await
+        .expect("recover lost append acknowledgement under execution authority");
+    assert_eq!(owned_insert.event.sequence, owned_replay.event.sequence);
+    assert_eq!(owned_insert.event.payload, owned_replay.event.payload);
+    assert_eq!(
+        registry
+            .full_event_window(&owned_id, 0)
+            .await
+            .expect("read execution-owned outcomes")
+            .len(),
+        1
+    );
+    let mut changed_owned = owned_outcome;
+    changed_owned.code = Some(lash_sansio::FailureCode::from_foreign_wire(
+        "fixture:changed",
+    ));
+    assert!(
+        registry
+            .append_event_with_authority(&owned_id, changed_owned.append_request(), &authority)
+            .await
+            .expect_err("changed replay under execution authority must conflict")
+            .to_string()
+            .contains("conflicts with an existing event")
+    );
+
     let process_id = ProcessId::from("durable-effect-outcome-crash-windows");
     registry
         .register_process(registration(process_id.as_str()))
