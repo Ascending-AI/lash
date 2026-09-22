@@ -88,6 +88,7 @@ mod tool_intent_runtime;
 mod trigger_store;
 mod turn_control;
 mod turn_crash_matrix;
+mod turn_runner;
 mod wake_delivery;
 
 pub use artifact_store::*;
@@ -135,4 +136,5 @@ pub use tool_intent_runtime::*;
 pub use trigger_store::*;
 pub use turn_control::*;
 pub use turn_crash_matrix::*;
+pub use turn_runner::*;
 pub use wake_delivery::*;

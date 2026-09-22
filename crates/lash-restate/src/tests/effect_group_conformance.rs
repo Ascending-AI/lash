@@ -26,6 +26,7 @@ use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::http_server::HttpServer;
 use restate_sdk::serde::Json;
 
+use super::live_turn_probe::ConformanceTurnProbe as _;
 use crate::durable_wait::arm_wait_registration_witness;
 use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
@@ -288,6 +289,7 @@ impl LiveConformanceHarness {
             .expect("bind Restate effect-group endpoint");
         let mut endpoint = Endpoint::builder()
             .bind(ScopeLivenessProbeImpl.serve())
+            .bind(super::live_turn_probe::ConformanceTurnProbeImpl.serve())
             .bind(services.index)
             .bind(services.payload)
             .bind(services.dispatch)
@@ -367,6 +369,26 @@ impl LiveConformanceHarness {
             }),
             deferrable_routing: lash_conformance::ToolChildDeferrableRouting::Durable,
         }
+    }
+
+    /// The endpoint's own host, for a law that builds a runtime on it: the
+    /// runtime installs its `ToolChildHost` here, which is the resolver the
+    /// endpoint's dispatch invocations route tool children through.
+    pub(super) fn endpoint_host(&self) -> Arc<dyn lash_core::EffectHost> {
+        Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>
+    }
+
+    /// A per-run discriminator for law identities: the Restate server's
+    /// state outlives a test run, so a fixed session or group key would
+    /// reopen the previous run's retired state.
+    pub(super) fn run_nonce(&self) -> u128 {
+        nonce()
+    }
+
+    /// Runs a law's turn inside a `ConformanceTurnProbe` handler on this
+    /// endpoint.
+    pub(super) fn turn_runner(&self) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
+        super::live_turn_probe::LiveTurnRunner::new(self.ingress_url.clone())
     }
 
     pub(super) fn effect_host_factory(
