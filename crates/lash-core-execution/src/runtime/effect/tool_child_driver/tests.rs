@@ -541,8 +541,10 @@ fn a_child_whose_opener_is_not_registered_here_is_not_routed() {
     );
 }
 
-/// A command that is not a tool child is honestly not this resolver's, and it
-/// says so rather than refusing the group on someone else's behalf.
+/// A command this resolver does not run is honestly not its child, and it
+/// says so rather than refusing the group on someone else's behalf. `Sleep`
+/// and `AwaitEvent` children are this resolver's too (FIG-3397), so the
+/// probe uses `SyncExecutionEnvironment` — a kind no group child can be.
 #[test]
 fn the_resolver_answers_only_for_tool_children() {
     let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
@@ -552,13 +554,13 @@ fn the_resolver_answers_only_for_tool_children() {
     );
     let envelope = crate::RuntimeEffectEnvelope::new(
         crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "sleep")
+            crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "env-sync")
                 .expect("a valid effect address"),
             crate::RuntimeAttribution::for_session("child-session"),
-            "sleep",
+            "env-sync",
         ),
-        RuntimeEffectCommand::Sleep {
-            spec: crate::SleepSpec::For { duration_ms: 1 },
+        RuntimeEffectCommand::SyncExecutionEnvironment {
+            update_machine_config: false,
         },
     );
     assert!(
