@@ -1086,39 +1086,41 @@ async fn resolve_model_return(
     // never re-runs a step (ADR 0099 §6, FIG-3420).
     let replay_key = format!("{}:present", request.call.call_id);
     let scoped = dispatch.effect_controller.scoped();
-    let invocation = crate::RuntimeEffectInvocation::new(
-        crate::EffectAddress::new(scoped.execution_scope().clone(), replay_key.clone())
-            .expect("child tool presentation carries an admitted effect scope"),
-        dispatch.parentless_attribution(),
-        replay_key,
-    );
-    let presented = scoped
-        .execute_effect(
-            crate::RuntimeEffectEnvelope::new(
-                invocation,
-                crate::RuntimeEffectCommand::PresentToolResult {
-                    call_id: request.call.call_id.clone(),
-                    tool_name: outcome.record.tool.clone(),
-                    args: outcome.record.args.clone(),
-                    output: Box::new(outcome.record.output.clone()),
-                    duration_ms: outcome.record.duration_ms,
-                },
-            ),
-            crate::RuntimeEffectLocalExecutor::presentation(
-                Arc::clone(&dispatch.plugins),
-                settlement,
-                Arc::clone(&dispatch.attachment_store),
-                (*dispatch
-                    .execution_env_spec
-                    .policy
-                    .model
-                    .capability
-                    .attachment_acceptance)
-                    .clone(),
-            ),
-        )
-        .await
-        .and_then(crate::RuntimeEffectOutcome::into_tool_presentation);
+    let presented =
+        match crate::EffectAddress::new(scoped.execution_scope().clone(), replay_key.clone()) {
+            Ok(address) => scoped
+                .execute_effect(
+                    crate::RuntimeEffectEnvelope::new(
+                        crate::RuntimeEffectInvocation::new(
+                            address,
+                            dispatch.parentless_attribution(),
+                            replay_key,
+                        ),
+                        crate::RuntimeEffectCommand::PresentToolResult {
+                            call_id: request.call.call_id.clone(),
+                            tool_name: outcome.record.tool.clone(),
+                            args: outcome.record.args.clone(),
+                            output: Box::new(outcome.record.output.clone()),
+                            duration_ms: outcome.record.duration_ms,
+                        },
+                    ),
+                    crate::RuntimeEffectLocalExecutor::presentation(
+                        Arc::clone(&dispatch.plugins),
+                        settlement,
+                        Arc::clone(&dispatch.attachment_store),
+                        (*dispatch
+                            .execution_env_spec
+                            .policy
+                            .model
+                            .capability
+                            .attachment_acceptance)
+                            .clone(),
+                    ),
+                )
+                .await
+                .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
+            Err(error) => Err(error.into()),
+        };
     let mut model_return = match presented {
         Ok(presentation) => presentation.model_return,
         Err(error) => crate::ModelToolReturn::text(
