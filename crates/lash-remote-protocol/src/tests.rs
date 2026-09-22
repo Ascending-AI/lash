@@ -950,12 +950,12 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     assert_eq!(decoded, event);
 
     let process = RemoteSessionObservationEventPayload::ProcessChanged {
-        kind: RemoteSessionProcessEventKind::Cancelled,
+        kind: RemoteSessionProcessEventKind::Cancelled { sequence: 7 },
         process_ids: vec![ProcessId::from("process-1".to_string())],
     };
     let value = serde_json::to_value(&process).expect("serialize process payload");
     assert!(
-        value.to_string().contains("\"kind\":\"cancelled\""),
+        value.to_string().contains("\"type\":\"cancelled\""),
         "process kind should serialize as snake_case: {value}"
     );
     let decoded: RemoteSessionObservationEventPayload =

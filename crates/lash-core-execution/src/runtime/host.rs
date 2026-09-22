@@ -274,6 +274,10 @@ impl crate::plugin::ProcessEngineContributionTarget for RuntimeHostConfig {
         &self.tracing.trace_context
     }
 
+    fn process_engine_trace_sink(&self) -> Option<Arc<dyn TraceSink>> {
+        self.tracing.trace_sink.clone()
+    }
+
     fn install_contributed_process_engine(
         &mut self,
         registration: crate::ProcessEngineRegistration,

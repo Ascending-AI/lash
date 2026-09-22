@@ -748,6 +748,18 @@ finish(value);"#,
             .any(|graph| graph.entry_name == running.label())
     );
 
+    let process_ref = lash_core::ProcessRef::new(running.process_id.clone(), running.incarnation);
+    let mut subscription = core.processes().subscribe_observation(&process_ref, None);
+    let Some(crate::process::ProcessObservationItem::Snapshot { projection, .. }) =
+        subscription.recv().await
+    else {
+        panic!("facade process subscription must start with a graph snapshot");
+    };
+    assert_eq!(
+        projection.graph.as_ref().map(|graph| &graph.graph_key),
+        Some(&graph_key)
+    );
+
     release_tx.send(()).expect("release tool provider");
     let _ = turn.await.expect("turn task")?;
     Ok(())

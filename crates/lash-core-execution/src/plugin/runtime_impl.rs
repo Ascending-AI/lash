@@ -9,6 +9,7 @@ use super::*;
 
 pub trait ProcessEngineContributionTarget {
     fn process_engine_trace_context(&self) -> &lash_trace::TraceContext;
+    fn process_engine_trace_sink(&self) -> Option<Arc<dyn lash_trace::TraceSink>>;
     fn install_contributed_process_engine(
         &mut self,
         registration: crate::ProcessEngineRegistration,
@@ -154,11 +155,13 @@ impl PluginHost {
         process_lifecycle_available: bool,
     ) -> Result<T, PluginError> {
         let trace_context = runtime_host.process_engine_trace_context().clone();
+        let trace_sink = runtime_host.process_engine_trace_sink();
         let ctx = super::ProcessEngineContributionContext::new(
             &self.extensions,
             &trace_context,
             process_lifecycle_available,
-        );
+        )
+        .with_trace_sink(trace_sink);
         for factory in self.factories() {
             for engine in factory.process_engine_contributions(&ctx)? {
                 runtime_host.install_contributed_process_engine(engine)?;

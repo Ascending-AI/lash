@@ -292,7 +292,7 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
         revision,
         None,
         SessionObservationEventPayload::ProcessChanged {
-            kind: SessionProcessEventKind::Started,
+            kind: SessionProcessEventKind::Started { sequence: 1 },
             process_ids: vec![ProcessId::from("proc-b".to_string())],
         },
     )

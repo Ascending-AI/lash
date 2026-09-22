@@ -47,6 +47,8 @@ pub mod formats;
 mod plugin_binding;
 pub mod preflight;
 pub(crate) mod process_admin;
+mod process_lifecycle;
+mod process_observation;
 mod prompt_layer;
 pub mod recoverable_chat;
 #[cfg(feature = "rlm")]
@@ -609,8 +611,10 @@ pub mod remote {
     /// replay gaps.
     pub mod observations {
         pub use lash_remote_protocol::observations::{
-            RemoteLiveReplayGap, RemoteLiveReplayGapReason, RemoteSessionCursor,
-            RemoteSessionObservation, RemoteSessionObservationEvent,
+            RemoteLiveReplayGap, RemoteLiveReplayGapReason, RemoteProcessObservationCompleteness,
+            RemoteProcessObservationGapReason, RemoteProcessObservationItem,
+            RemoteProcessObservationProjection, RemoteProcessObservationRequest,
+            RemoteSessionCursor, RemoteSessionObservation, RemoteSessionObservationEvent,
             RemoteSessionObservationEventPayload, RemoteSessionProcessEventKind,
             RemoteSessionQueueEventKind, RemoteTurnInputApplication, RemoteTurnInputCheckpoint,
         };
@@ -729,6 +733,11 @@ pub mod remote {
 pub mod process {
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::process_admin::Processes;
+    pub use crate::process_observation::{
+        ProcessObservationCompleteness, ProcessObservationConfig, ProcessObservationCursor,
+        ProcessObservationGapReason, ProcessObservationHub, ProcessObservationItem,
+        ProcessObservationProjection, ProcessObservationSubscription,
+    };
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
     pub use lash_core::runtime::publish_process_execution_env;

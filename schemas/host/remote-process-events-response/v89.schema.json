@@ -1,0 +1,1309 @@
+{
+  "$id": "https://lash.dev/schemas/remote-process-events-response/v89",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "CancelOrigin": {
+      "description": "The runtime or actor decision that requested cancellation of a process.",
+      "enum": [
+        "turn_stopped",
+        "parent_ended",
+        "operator_requested",
+        "model_requested",
+        "start_failed"
+      ],
+      "type": "string"
+    },
+    "EffectAddress": {
+      "description": "Canonical address of one admitted runtime effect.",
+      "properties": {
+        "execution_scope": {
+          "$ref": "#/definitions/ExecutionScope"
+        },
+        "replay_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_scope",
+        "replay_key"
+      ],
+      "type": "object"
+    },
+    "ExecutionScope": {
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic work begins. Its journal encoding is an existing durable contract; effect addresses compose it with a replay key without changing those bytes.",
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "drain_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "queue_drain"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "drain_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "session_delete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "runtime_operation"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProcessEventHistoryRetention": {
+      "description": "Why the exact process history named by a page read is no longer retained.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The process was pruned and its payload-free tombstone is still present.",
+          "properties": {
+            "pruned_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "enum": [
+                "pruned"
+              ],
+              "type": "string"
+            },
+            "terminal_label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pruned_at_ms",
+            "reason",
+            "terminal_label"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The reusable process id now names a later incarnation.",
+          "properties": {
+            "current_incarnation": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "enum": [
+                "retired"
+              ],
+              "type": "string"
+            },
+            "requested_incarnation": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "current_incarnation",
+            "reason",
+            "requested_incarnation"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProcessEventLite": {
+      "additionalProperties": false,
+      "description": "Event metadata returned by the payload-free SQL projection.",
+      "properties": {
+        "event_type": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_type",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "ProcessEventPageEvents_for_RemoteProcessEvent_and_ProcessEventLite": {
+      "description": "Projection-specific contents of one bounded event page.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "events": {
+              "items": {
+                "$ref": "#/definitions/RemoteProcessEvent"
+              },
+              "type": "array"
+            },
+            "mode": {
+              "enum": [
+                "full"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "events",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "events": {
+              "items": {
+                "$ref": "#/definitions/ProcessEventLite"
+              },
+              "type": "array"
+            },
+            "mode": {
+              "enum": [
+                "lite"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "events",
+            "mode"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProcessEventPageMore": {
+      "description": "Whether a bounded event page completed the retained history.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "enum": [
+                "complete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "continuation": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "more"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "continuation",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite": {
+      "additionalProperties": false,
+      "description": "One bounded page from a retained process-event history.",
+      "properties": {
+        "events": {
+          "$ref": "#/definitions/ProcessEventPageEvents_for_RemoteProcessEvent_and_ProcessEventLite"
+        },
+        "more": {
+          "$ref": "#/definitions/ProcessEventPageMore"
+        }
+      },
+      "required": [
+        "events",
+        "more"
+      ],
+      "type": "object"
+    },
+    "ProcessEventReadOutcome_for_ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite": {
+      "description": "Result of reading a process-event history without collapsing retention into an empty page.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "retention": {
+              "enum": [
+                "retained"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite"
+            }
+          },
+          "required": [
+            "retention",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "retention": {
+              "enum": [
+                "no_longer_retained"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/ProcessEventHistoryRetention"
+            }
+          },
+          "required": [
+            "retention",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteAbandonEvidence": {
+      "description": "Wire mirror of Abandoned-terminal evidence.",
+      "properties": {
+        "epoch_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteLeaseOwnerIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "writer": {
+          "$ref": "#/definitions/RemoteAbandonWriter"
+        }
+      },
+      "required": [
+        "epoch_ms",
+        "writer"
+      ],
+      "type": "object"
+    },
+    "RemoteAbandonWriter": {
+      "description": "Wire mirror of the writer that established an Abandoned terminal.",
+      "enum": [
+        "owner_drain",
+        "sweep",
+        "reconciled_request",
+        "engine_gave_up"
+      ],
+      "type": "string"
+    },
+    "RemoteCausalRef": {
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/EffectAddress"
+            },
+            "type": {
+              "enum": [
+                "effect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "address",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_call"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "process_event"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "occurrence_id": {
+              "type": "string"
+            },
+            "subscription_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_incarnation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "trigger_occurrence"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "occurrence_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "node_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "session_node"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteLeaseOwnerIdentity": {
+      "description": "Wire mirror of one lease holder incarnation. Fencing identity is the full `(owner_id, incarnation_id)` pair; neither component may be erased into an untyped JSON carrier.",
+      "properties": {
+        "incarnation_id": {
+          "type": "string"
+        },
+        "owner_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "incarnation_id",
+        "owner_id"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessAwaitOutput": {
+      "oneOf": [
+        {
+          "properties": {
+            "output": {
+              "$ref": "#/definitions/RemoteProcessToolCallOutput"
+            },
+            "type": {
+              "enum": [
+                "settled"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "output",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "control": true,
+            "evidence": {
+              "$ref": "#/definitions/RemoteAbandonEvidence"
+            },
+            "type": {
+              "enum": [
+                "abandoned"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "pruned_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "terminal_label": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "no_longer_retained"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "pruned_at_ms",
+            "terminal_label",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_type": {
+          "type": "string"
+        },
+        "invocation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteRuntimeInvocation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurred_at_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "payload": {
+          "default": null
+        },
+        "process_id": {
+          "type": "string"
+        },
+        "process_incarnation": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "semantics": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteProcessEventSemantics"
+            }
+          ],
+          "default": {}
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_type",
+        "occurred_at_ms",
+        "process_id",
+        "process_incarnation",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessEventSemantics": {
+      "properties": {
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProcessTerminalSemantics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wake": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProcessWake"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RemoteProcessStatus": {
+      "oneOf": [
+        {
+          "enum": [
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled",
+            "abandoned"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably distinguishable, deliberately never terminal.",
+          "enum": [
+            "caller_departed"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "RemoteProcessTerminalSemantics": {
+      "properties": {
+        "outcome": {
+          "$ref": "#/definitions/RemoteProcessAwaitOutput"
+        },
+        "status": {
+          "$ref": "#/definitions/RemoteProcessStatus"
+        }
+      },
+      "required": [
+        "outcome",
+        "status"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolCallOutcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "payload": true,
+            "status": {
+              "enum": [
+                "success"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "payload",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "payload": {
+              "$ref": "#/definitions/RemoteProcessToolFailure"
+            },
+            "status": {
+              "enum": [
+                "failure"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "payload",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "payload": {
+              "$ref": "#/definitions/RemoteProcessToolCancellation"
+            },
+            "status": {
+              "enum": [
+                "cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "payload",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessToolCallOutput": {
+      "properties": {
+        "control": true,
+        "outcome": {
+          "$ref": "#/definitions/RemoteProcessToolCallOutcome"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolCancellation": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CancelOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": true,
+        "source": {
+          "$ref": "#/definitions/RemoteProcessToolFailureSource"
+        }
+      },
+      "required": [
+        "message",
+        "source"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolFailure": {
+      "properties": {
+        "class": {
+          "$ref": "#/definitions/RemoteToolFailureClass"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "raw": true,
+        "retry": {
+          "$ref": "#/definitions/RemoteProcessToolRetryStatus"
+        },
+        "source": {
+          "$ref": "#/definitions/RemoteProcessToolFailureSource"
+        }
+      },
+      "required": [
+        "class",
+        "code",
+        "message",
+        "retry",
+        "source"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolFailureSource": {
+      "enum": [
+        "runtime",
+        "tool",
+        "plugin",
+        "policy",
+        "cancellation",
+        "unknown_legacy"
+      ],
+      "type": "string"
+    },
+    "RemoteProcessToolRetryStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "never"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "after_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "safe"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attempts": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "exhausted"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempts",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "unknown_legacy"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessWake": {
+      "properties": {
+        "input": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "RemoteRuntimeAttribution": {
+      "properties": {
+        "protocol_iteration": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_index": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RemoteRuntimeInvocation": {
+      "properties": {
+        "attribution": {
+          "$ref": "#/definitions/RemoteRuntimeAttribution"
+        },
+        "caused_by": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteCausalRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteRuntimeReplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/definitions/RemoteRuntimeSubject"
+        }
+      },
+      "required": [
+        "attribution",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "RemoteRuntimeReplay": {
+      "properties": {
+        "attribution": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteRuntimeReplayAttribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "RemoteRuntimeReplayAttribution": {
+      "oneOf": [
+        {
+          "properties": {
+            "identity": {
+              "$ref": "#/definitions/RemoteToolIntentIdentity"
+            },
+            "kind": {
+              "enum": [
+                "tool_intent"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "identity",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteRuntimeSubject": {
+      "oneOf": [
+        {
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/EffectAddress"
+            },
+            "effect_id": {
+              "type": "string"
+            },
+            "replay_attribution": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RemoteRuntimeReplayAttribution"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "enum": [
+                "effect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "address",
+            "effect_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "process_event"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "event_type",
+            "process_id",
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "occurrence_id": {
+              "type": "string"
+            },
+            "subscription_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_incarnation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "trigger_occurrence"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "occurrence_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "node_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "session_node"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteToolFailureClass": {
+      "enum": [
+        "invalid_request",
+        "io",
+        "unavailable",
+        "permission_denied",
+        "timeout",
+        "execution",
+        "external",
+        "resource_limit",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "RemoteToolIntentIdentity": {
+      "properties": {
+        "execution_scope_id": {
+          "type": "string"
+        },
+        "intent_index": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "minting_emission_replay_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replay_key": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool_call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_scope_id",
+        "intent_index",
+        "replay_key",
+        "session_id",
+        "tool_call_id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "incarnation": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "outcome": {
+      "$ref": "#/definitions/ProcessEventReadOutcome_for_ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite"
+    },
+    "process_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "incarnation",
+    "outcome",
+    "process_id"
+  ],
+  "title": "RemoteProcessEventsResponse",
+  "type": "object",
+  "x-lash-schema-version": 89,
+  "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
+}

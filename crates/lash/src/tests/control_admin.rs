@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::{
-    ProcessEventLogTestSupport as _, ProcessObserverRegistry as _, SessionCommitStore as _,
+    ProcessEventLog as _, ProcessEventLogTestSupport as _, ProcessObserverRegistry as _,
+    SessionCommitStore as _,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -660,20 +661,30 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
         panic!("recent cursor should replay process observation events");
     };
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
-            if *kind == SessionProcessEventKind::Started
-                && process_ids.len() == 1
-                && process_ids[0] == process_id
-    )));
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
-            if *kind == SessionProcessEventKind::Cancelled
-                && process_ids.len() == 1
-                && process_ids[0] == process_id
-    )));
+    let durable = registry
+        .recent_events(&ProcessId::from(process_id), 128)
+        .await?;
+    let lifecycle = durable
+        .iter()
+        .filter_map(|event| {
+            SessionProcessEventKind::from_durable_event(&event.event_type, event.sequence)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !lifecycle.is_empty(),
+        "cancel must append a lifecycle event"
+    );
+    for expected in lifecycle {
+        assert!(
+            events.iter().any(|event| matches!(
+                &event.payload,
+                lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
+                    if *kind == expected
+                        && process_ids.as_slice() == [ProcessId::from(process_id)]
+            )),
+            "missing journaled lifecycle {expected:?}"
+        );
+    }
     Ok(())
 }
 

@@ -229,6 +229,39 @@ pub struct Processes {
 }
 
 impl Processes {
+    /// Subscribe to this core's live observations for one exact process incarnation.
+    pub fn subscribe_observation(
+        &self,
+        process_ref: &lash_core::ProcessRef,
+        cursor: Option<&crate::process_observation::ProcessObservationCursor>,
+    ) -> crate::process_observation::ProcessObservationSubscription {
+        self.core.process_observation_hub.subscribe(
+            &process_ref.process_id,
+            process_ref.incarnation.registration_sequence(),
+            cursor,
+        )
+    }
+
+    /// Decode an exact-version remote request into this core's local route.
+    pub fn subscribe_observation_remote(
+        &self,
+        request: &lash_remote_protocol::RemoteProcessObservationRequest,
+    ) -> std::result::Result<
+        crate::process_observation::ProcessObservationSubscription,
+        lash_remote_protocol::RemoteProtocolError,
+    > {
+        request.validate()?;
+        let cursor = request
+            .cursor
+            .as_ref()
+            .map(crate::process_observation::ProcessObservationCursor::from_token);
+        Ok(self.core.process_observation_hub.subscribe(
+            &request.process_id,
+            request.incarnation,
+            cursor.as_ref(),
+        ))
+    }
+
     fn registry(&self) -> Result<Arc<dyn lash_core::ProcessRegistry>> {
         self.core.env.process_registry().cloned().ok_or_else(|| {
             EmbedError::Plugin(lash_core::PluginError::Session(

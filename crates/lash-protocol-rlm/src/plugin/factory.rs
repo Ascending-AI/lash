@@ -319,12 +319,23 @@ impl PluginFactory for RlmProtocolPluginFactory {
         let surface = rlm_lashlang_surface(&config, process_lifecycle)
             .with_plugin_extensions(ctx.extensions())
             .map_err(|err| PluginError::Registration(err.to_string()))?;
+        let execution_sink = match (
+            self.lashlang_execution_trace_config.sink.clone(),
+            ctx.trace_sink().cloned(),
+        ) {
+            (Some(configured), Some(runtime)) => {
+                Some(
+                    Arc::new(lash_trace::TeeTraceSink::new([configured, runtime]))
+                        as Arc<dyn TraceSink>,
+                )
+            }
+            (Some(configured), None) => Some(configured),
+            (None, Some(runtime)) => Some(runtime),
+            (None, None) => None,
+        };
         let engine = LashlangProcessEngine::new(Arc::clone(&self.artifact_store), surface)
             .with_execution_bounds(config.execution_bounds().into_engine())
-            .with_execution_trace(
-                self.lashlang_execution_trace_config.sink.clone(),
-                ctx.trace_context().clone(),
-            );
+            .with_execution_trace(execution_sink, ctx.trace_context().clone());
         Ok(vec![
             lash_lashlang_runtime::lashlang_process_engine_registration(engine),
         ])

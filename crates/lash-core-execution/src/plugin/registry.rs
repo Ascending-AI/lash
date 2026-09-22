@@ -585,6 +585,7 @@ pub trait PluginFactory: Send + Sync {
 pub struct ProcessEngineContributionContext<'a> {
     extensions: &'a PluginExtensions,
     trace_context: &'a crate::TraceContext,
+    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     process_lifecycle_available: bool,
 }
 
@@ -597,6 +598,7 @@ impl<'a> ProcessEngineContributionContext<'a> {
         Self {
             extensions,
             trace_context,
+            trace_sink: None,
             process_lifecycle_available,
         }
     }
@@ -607,6 +609,15 @@ impl<'a> ProcessEngineContributionContext<'a> {
 
     pub fn trace_context(&self) -> &crate::TraceContext {
         self.trace_context
+    }
+
+    pub fn with_trace_sink(mut self, sink: Option<Arc<dyn lash_trace::TraceSink>>) -> Self {
+        self.trace_sink = sink;
+        self
+    }
+
+    pub fn trace_sink(&self) -> Option<&Arc<dyn lash_trace::TraceSink>> {
+        self.trace_sink.as_ref()
     }
 
     /// Tells plugin factories whether the host supplied the lifecycle services required to

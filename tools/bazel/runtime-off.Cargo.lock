@@ -1119,6 +1119,7 @@ dependencies = [
  "base64",
  "lash-internal-core",
  "lash-internal-sansio",
+ "lash-internal-trace",
  "schemars",
  "serde",
  "serde_json",

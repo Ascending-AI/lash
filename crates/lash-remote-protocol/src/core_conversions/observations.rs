@@ -153,8 +153,28 @@ impl From<lash_core::SessionQueueEventKind> for RemoteSessionQueueEventKind {
 impl From<lash_core::SessionProcessEventKind> for RemoteSessionProcessEventKind {
     fn from(value: lash_core::SessionProcessEventKind) -> Self {
         match value {
-            lash_core::SessionProcessEventKind::Started => Self::Started,
-            lash_core::SessionProcessEventKind::Cancelled => Self::Cancelled,
+            lash_core::SessionProcessEventKind::Started { sequence } => Self::Started { sequence },
+            lash_core::SessionProcessEventKind::Waiting { sequence } => Self::Waiting { sequence },
+            lash_core::SessionProcessEventKind::Resumed { sequence } => Self::Resumed { sequence },
+            lash_core::SessionProcessEventKind::CancelRequested { sequence } => {
+                Self::CancelRequested { sequence }
+            }
+            lash_core::SessionProcessEventKind::AbandonRequested { sequence } => {
+                Self::AbandonRequested { sequence }
+            }
+            lash_core::SessionProcessEventKind::CallerDeparted { sequence } => {
+                Self::CallerDeparted { sequence }
+            }
+            lash_core::SessionProcessEventKind::Completed { sequence } => {
+                Self::Completed { sequence }
+            }
+            lash_core::SessionProcessEventKind::Failed { sequence } => Self::Failed { sequence },
+            lash_core::SessionProcessEventKind::Cancelled { sequence } => {
+                Self::Cancelled { sequence }
+            }
+            lash_core::SessionProcessEventKind::Abandoned { sequence } => {
+                Self::Abandoned { sequence }
+            }
         }
     }
 }

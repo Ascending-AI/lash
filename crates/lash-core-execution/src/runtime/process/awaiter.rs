@@ -22,13 +22,11 @@ pub use event_sink::ProcessEventSink;
 /// mutation (so native process waits wake without polling) and, when a
 /// [`ProcessEventSink`] is installed, emits each appended event to it.
 ///
-/// The sink is installed once at wrap time via
-/// [`watch_process_registry_with_sink`]; there is no post-hoc mutation and no
-/// double-wrapping.
+/// Sinks share the same watched handle used by the process port.
 struct WatchedProcessRegistry {
     inner: Arc<dyn ProcessRegistry>,
     hub: ProcessChangeHub,
-    sink: Option<Arc<dyn ProcessEventSink>>,
+    sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
     event_paths: Mutex<HashMap<ProcessId, Weak<tokio::sync::Mutex<()>>>>,
 }
 
@@ -40,18 +38,24 @@ struct WatchedProcessRegistry {
 pub struct WatchedRegistry {
     registry: Arc<dyn ProcessRegistry>,
     hub: ProcessChangeHub,
+    sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
 }
 
 impl WatchedRegistry {
     fn new(inner: Arc<dyn ProcessRegistry>, sink: Option<Arc<dyn ProcessEventSink>>) -> Self {
         let hub = ProcessChangeHub::new();
+        let sinks = Arc::new(Mutex::new(sink.into_iter().collect()));
         let registry: Arc<dyn ProcessRegistry> = Arc::new(WatchedProcessRegistry {
             inner: Arc::clone(&inner),
             hub: hub.clone(),
-            sink: sink.clone(),
+            sinks: Arc::clone(&sinks),
             event_paths: Mutex::new(HashMap::new()),
         });
-        Self { registry, hub }
+        Self {
+            registry,
+            hub,
+            sinks,
+        }
     }
 
     /// The watched registry handle.
@@ -62,6 +66,11 @@ impl WatchedRegistry {
     /// The change hub paired with this watched registry.
     pub fn hub(&self) -> &ProcessChangeHub {
         &self.hub
+    }
+
+    /// Attach a live event observer to this watched registry and its bound port.
+    pub fn add_event_sink(&self, sink: Arc<dyn ProcessEventSink>) {
+        self.sinks.lock_recover().push(sink);
     }
 }
 
@@ -162,7 +171,7 @@ impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
             Arc::new(Self {
                 inner,
                 hub: self.hub.clone(),
-                sink: self.sink.clone(),
+                sinks: Arc::clone(&self.sinks),
                 event_paths: Mutex::new(HashMap::new()),
             }) as Arc<dyn ProcessRegistry>
         })

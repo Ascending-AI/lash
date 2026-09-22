@@ -59,12 +59,12 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                     MODULE.subprocess, "run", return_value=completed
                 ),
             ):
-                self.assertEqual(MODULE.generate(False, Path("generator")), 0)
+                self.assertEqual(MODULE.generate(False, [Path("generator")]), 0)
                 generated = output / "workflow/v7.schema.json"
                 self.assertTrue(generated.is_file())
                 generated.write_text("drift\n", encoding="utf-8")
                 with unittest.mock.patch("sys.stderr", new=io.StringIO()):
-                    self.assertEqual(MODULE.generate(True, Path("generator")), 1)
+                    self.assertEqual(MODULE.generate(True, [Path("generator")]), 1)
 
 
     def test_generated_documents_detect_missing_changed_and_obsolete_files(self) -> None:

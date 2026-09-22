@@ -221,6 +221,7 @@ filegroup(
 schema_documents(
     name = "host_schema_documents",
     generator = "//crates/lashlang:workflow_schema_generator__bin",
+    extra_generator = "//crates/lash-remote-protocol:remote_schema_generator__bin",
     script = "scripts/generate-workflow-schemas.py",
 )
 

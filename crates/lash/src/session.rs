@@ -423,6 +423,7 @@ impl SessionBuilder {
             runtime,
             Arc::clone(&self.core.live_replay_store),
         );
+        self.core.process_lifecycle_feed.register(&handle);
         let recorded_parent_session_id =
             crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
         Ok(LashSession {

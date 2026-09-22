@@ -1444,6 +1444,37 @@ fn remote_activity_preserves_semantic_fields() {
 }
 
 #[test]
+fn journaled_process_lifecycle_kinds_keep_their_sequence_on_the_wire() {
+    for event_type in [
+        "process.first_started",
+        "process.waiting",
+        "process.resumed",
+        "process.cancel_requested",
+        "process.abandon_requested",
+        "process.caller_departed",
+        "process.completed",
+        "process.failed",
+        "process.cancelled",
+        "process.abandoned",
+    ] {
+        let local = lash_core::SessionProcessEventKind::from_durable_event(event_type, 17)
+            .expect("journaled lifecycle maps to session observation");
+        let remote = RemoteSessionProcessEventKind::from(local);
+        let value = serde_json::to_value(remote).expect("encode lifecycle kind");
+        assert_eq!(value["sequence"], 17);
+        assert_eq!(
+            serde_json::from_value::<RemoteSessionProcessEventKind>(value.clone())
+                .expect("decode lifecycle kind"),
+            remote,
+        );
+        let mut unknown = value;
+        unknown["retired"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<RemoteSessionProcessEventKind>(unknown).is_err());
+    }
+    assert!(lash_core::SessionProcessEventKind::from_durable_event("custom.event", 1).is_none());
+}
+
+#[test]
 fn remote_activity_preserves_typed_tool_intent_refusal_payload() {
     let activity = lash_core::TurnActivity::independent(lash_core::TurnEvent::ToolIntentOutcome {
         call_id: "call-1".to_string(),
@@ -1959,7 +1990,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         event(
             None,
             lash_core::SessionObservationEventPayload::ProcessChanged {
-                kind: lash_core::SessionProcessEventKind::Started,
+                kind: lash_core::SessionProcessEventKind::Started { sequence: 1 },
                 process_ids: vec![ProcessId::from("process-1".to_string())],
             },
         ),
@@ -1969,7 +2000,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     assert!(matches!(
         remote.event,
         RemoteSessionObservationEventPayload::ProcessChanged { kind, process_ids }
-            if kind == RemoteSessionProcessEventKind::Started
+            if kind == RemoteSessionProcessEventKind::Started { sequence: 1 }
                 && process_ids == vec!["process-1".to_string()]
     ));
 }
