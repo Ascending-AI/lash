@@ -259,4 +259,39 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
             .expect_err("vacuum must preserve admission tombstone"),
         &deleted_request.session_id,
     );
+
+    // Error precedence (FIG-1282): the tombstone is checked before the
+    // handle's own binding, so a handle bound to a live session that is asked
+    // to admit a *deleted* id answers SessionDeleted rather than
+    // SessionBindingMismatch.
+    let precedence_request = session_store_request(
+        &SessionId::from("admission-precedence-live"),
+        "admission-model",
+        crate::SessionRelation::Root,
+    );
+    let precedence_store = factory
+        .create_store(&precedence_request)
+        .await
+        .expect("create precedence live fixture");
+    assert_session_id_was_used_and_deleted(
+        precedence_store
+            .admit_and_bind_session(&deleted_binding)
+            .await
+            .expect_err("admission of a deleted id through a handle bound elsewhere must report the tombstone"),
+        &deleted_request.session_id,
+    );
+    // The precedence does not mask a real mismatch in the other direction: a
+    // handle bound to the deleted session asked to admit a live id still
+    // answers SessionBindingMismatch.
+    assert!(matches!(
+        deleted_store
+            .admit_and_bind_session(&crate::SessionBinding::from_create_request(
+                &precedence_request
+            ))
+            .await
+            .expect_err(
+                "admission of a live id through a deleted-bound handle must report the mismatch"
+            ),
+        crate::StoreError::SessionBindingMismatch { .. }
+    ));
 }
