@@ -67,7 +67,10 @@ use crate::db::AppDb;
 #[cfg(feature = "restate")]
 use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
 #[cfg(feature = "restate")]
-use crate::effect_groups::{AgentServiceEffectGroupWorkflow, AgentServiceEffectGroupWorkflowImpl};
+use crate::effect_groups::{
+    AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
+    AgentServiceEffectGroupWorkflowImpl,
+};
 use crate::raw_activities::stream_raw_activities;
 #[cfg(feature = "restate")]
 use crate::restate::{AgentServiceTurnWorkflow, AgentServiceTurnWorkflowImpl};
@@ -377,13 +380,20 @@ async fn async_main() -> anyhow_like::Result<()> {
                 // controller per turn via `.stream_to_with_effects(..., &controller)`. The
                 // Restate ingress runner is the sole executor of
                 // out-of-turn/background processes.
+                let effect_host = turn_deployment
+                    .as_ref()
+                    .expect("turn deployment configured for Restate")
+                    .effect_host();
+                // The worked example keeps its Sleep-only resolver as the
+                // deployment's one answer, so `RuntimeHostConfig::new`
+                // installs no tool-child host here — the same shape the
+                // conformance suites use. A deployment that routes tool
+                // children registers nothing and lets the default install win.
+                effect_host
+                    .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
+                    .map_err(|err| err.to_string())?;
                 core_builder
-                    .effect_host(
-                        turn_deployment
-                            .as_ref()
-                            .expect("turn deployment configured for Restate")
-                            .effect_host(),
-                    )
+                    .effect_host(effect_host)
                     .process_work(
                         process_deployment
                             .as_ref()
@@ -468,6 +478,11 @@ async fn async_main() -> anyhow_like::Result<()> {
         let restate_endpoint = if durability == AgentServiceDurability::Restate {
             let process_deployment = process_deployment.expect("process deployment configured");
             let effect_groups = crate::effect_groups::effect_group_services(
+                turn_deployment
+                    .as_ref()
+                    .expect("turn deployment configured for Restate")
+                    .effect_host()
+                    .as_ref(),
                 state
                     .restate_ingress_url()
                     .expect("Restate durability configures ingress"),

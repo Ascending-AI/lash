@@ -89,13 +89,17 @@ use restate_sdk::prelude::Endpoint;
 fn endpoint(
     worker: lash_core::DurableProcessWorker,
     registry: Arc<dyn lash_core::ProcessRegistry>,
-    group_executors: Arc<dyn lash_core::GroupExecutors>,
+    host: &lash_restate::RestateEffectHost,
     ingress: lash_restate::RestateIngressClient,
 ) -> restate_sdk::endpoint::Endpoint
 {
     let runner = Arc::new(RestateCoreProcessRunner::new(worker));
+    // The endpoint routes grouped children through the resolver registered on
+    // the deployment host — the runtime's `ToolChildHost` when it installs
+    // one, or the embedder's own `register_group_executors` answer — so there
+    // is one resolver and one authority by construction.
     let groups = RestateEffectGroupServices::new(
-        group_executors,
+        host,
         ingress,
         RestateEffectGroupRetryPolicy::infinite(),
     );

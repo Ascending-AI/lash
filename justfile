@@ -241,16 +241,23 @@ effect-group-conformance-e2e:
   cargo test -p lash-internal-restate --locked \
     live_effect_group_sdk_preconditions -- --ignored --nocapture --test-threads=1
 
+  receipts="${LASH_LAW_RECEIPTS:-$(mktemp -t effect-group-law-receipts.XXXXXX)}"
   RESTATE_INGRESS_URL="$ingress_url" \
   RESTATE_ADMIN_URL="$admin_url" \
   EG_RESTATE_ENDPOINT_BIND="$endpoint_bind" \
   EG_RESTATE_ENDPOINT_URL="$endpoint_url" \
+  LASH_LAW_RECEIPTS="$receipts" \
   cargo test -p lash-internal-restate --locked \
     tests::conformance_and_poison:: -- --ignored --nocapture --test-threads=1
 
   python3 "{{repo}}/scripts/check_law_execution_receipts.py" \
     --deferred effect-group-conformance-e2e \
-    --receipts "$LASH_LAW_RECEIPTS"
+    --receipts "$receipts"
+
+  # The executed-law census for the run: one `law<TAB>label` line per law the
+  # generated tests actually reached the end of.
+  echo "law execution receipts:"
+  sort "$receipts"
 
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"

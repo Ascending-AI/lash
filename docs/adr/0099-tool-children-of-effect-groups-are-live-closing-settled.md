@@ -246,9 +246,10 @@ one-way sends. **Implicit cancellation therefore covers zero group children
 today**, and it never becomes the sole close protocol once it does cover them
 (§4).
 
-*Status.* The resolver seam and the recorded-body rule **hold today**. The
-handler-level driver, `call`-child dispatch and idempotency-keyed identity are
-**new** (FIG-2266).
+*Status.* The resolver seam and the recorded-body rule **hold today**, and the
+handler-level driver now holds on all four tiers — in-process (FIG-2266 C1)
+and Restate (C2) — with `call`-child dispatch and idempotency-keyed identity
+holding alongside it.
 
 ---
 

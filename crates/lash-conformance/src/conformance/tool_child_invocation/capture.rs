@@ -72,8 +72,10 @@ fn capture_group(
 /// settled before the crash is served its journaled outcome unchanged: the
 /// replayed child touched nothing beside its own row.
 ///
-/// Durable tiers only: on the in-memory host the process is the substrate, so
-/// nothing outlives the crash to be drained — the edge does not exist there.
+/// Drain-bearing tiers only: on a drain-less tier — the in-memory host,
+/// where the process is the substrate and nothing outlives the crash, and
+/// Restate, which redrives the child invocation itself — the edge is not
+/// reachable through this law.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

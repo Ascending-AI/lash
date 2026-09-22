@@ -61,8 +61,16 @@ fn live_context() -> LiveOpenerContext {
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
     };
-    LiveOpenerContext::capture(&dispatch, tokio_util::sync::CancellationToken::new())
-        .expect("a shared controller lends a 'static context")
+    let lent_controller = dispatch
+        .effect_controller
+        .scoped()
+        .to_static()
+        .expect("the test controller lends itself 'static");
+    LiveOpenerContext::capture(
+        &dispatch,
+        lent_controller,
+        tokio_util::sync::CancellationToken::new(),
+    )
 }
 
 fn process_opener(name: &str, incarnation: u64) -> EffectOpener {

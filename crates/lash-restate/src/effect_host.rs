@@ -8,16 +8,17 @@
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, Resolution,
-    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    ScopedEffectController, ToolIntentOutcomeSink, ToolIntentPreparation, TurnControlParticipation,
-    facade_support::RuntimeAwaitEventOptions,
+    EffectGroupHandle, EffectHost, ExecutionScope, GroupExecutors, GroupSettlement, LoserPolicy,
+    Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
+    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    RuntimeErrorCode, ScopedEffectController, ToolIntentOutcomeSink, ToolIntentPreparation,
+    TurnControlParticipation,
+    facade_support::{RuntimeAwaitEventOptions, ToolChildHost},
 };
 
 use crate::durable_wait::{
@@ -48,6 +49,16 @@ use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient
 #[derive(Clone)]
 pub struct RestateEffectHost {
     controller: Arc<RestateEffectHostController>,
+    /// This host's one tool-child wiring (ADR 0099 §2), shared across clones.
+    ///
+    /// Beside the controller's `group_executors` rather than inside it,
+    /// because the two answer different questions: that cell holds whatever
+    /// resolver was registered, and this one holds the live-opener registry a
+    /// turn or process must register its opener in. A get-or-init, so a host
+    /// backing several runtimes hands them all the same registry — two
+    /// registries on one host would mean a turn registering in one while the
+    /// resolver read the other.
+    tool_children: Arc<OnceLock<Arc<ToolChildHost>>>,
     turn_attach: Arc<crate::turn::RestateTurnAttach>,
     turn_control_binding_id: Arc<str>,
 }
@@ -64,7 +75,9 @@ impl RestateEffectHost {
                 },
                 authority_id,
                 registrations: std::sync::Mutex::new(None),
+                group_executors: OnceLock::new(),
             }),
+            tool_children: Arc::new(OnceLock::new()),
             turn_attach: Arc::new(crate::turn::RestateTurnAttach::new(
                 connection,
                 turn_attach_authority_id,
@@ -83,6 +96,63 @@ impl RestateEffectHost {
 
     pub(crate) fn turn_attach_handle(&self) -> Arc<crate::turn::RestateTurnAttach> {
         Arc::clone(&self.turn_attach)
+    }
+
+    /// The deployment's durable-authority identity: what the endpoint binds a
+    /// tool child's handler-scoped controller with, and what await-event keys
+    /// and cancellation bindings derive from.
+    pub fn authority_id(&self) -> &RestateAuthorityId {
+        &self.controller.authority_id
+    }
+
+    /// Register this host's envelope→executor resolver, once.
+    ///
+    /// One host has one answer to "what code runs this journaled grouped
+    /// child", so a second registration of a *different* resolver is refused
+    /// and re-registering the resolver already held is a no-op. Until a
+    /// resolver is registered the endpoint's dispatch routes nothing it is
+    /// asked to execute — the lazy handle [`group_executors`] hands out reads
+    /// the same cell at call time.
+    ///
+    /// [`group_executors`]: RestateEffectHost::group_executors
+    pub fn register_group_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.controller.register_group_executors(executors)
+    }
+
+    /// This host's resolver as the endpoint sees it: a handle that reads the
+    /// registration cell at call time, so services built before wiring — or a
+    /// tool-child host installed later by `install_tool_child_host` — resolve
+    /// through the one answer the host holds. `None` from `executor_for`
+    /// while nothing is registered is the routing fact "not mine", not a
+    /// failure.
+    pub fn group_executors(&self) -> Arc<dyn GroupExecutors> {
+        Arc::new(RestateHostGroupExecutors {
+            controller: Arc::clone(&self.controller),
+        })
+    }
+}
+
+/// The deployment host's registered resolver, read at call time.
+///
+/// The endpoint's `EffectGroupDispatch` holds this from construction: it must
+/// not capture a resolver snapshot, because the one registration a
+/// `ToolChildHost` install performs can land after the services were built.
+struct RestateHostGroupExecutors {
+    controller: Arc<RestateEffectHostController>,
+}
+
+impl GroupExecutors for RestateHostGroupExecutors {
+    fn executor_for(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+        self.controller
+            .group_executors
+            .get()?
+            .executor_for(envelope)
     }
 }
 
@@ -249,6 +319,17 @@ impl EffectHost for RestateEffectHost {
             self.fenced_controller(admitted.scope().clone()),
             admitted,
         )?))
+    }
+
+    fn install_tool_child_host(&self, candidate: Arc<ToolChildHost>) -> Option<Arc<ToolChildHost>> {
+        let installed = self.tool_children.get_or_init(|| candidate);
+        // A resolver already registered by something else wins, and this host
+        // then routes no tool children: one host has one answer to what runs a
+        // grouped child, and quietly replacing that answer would make it depend
+        // on which runtime was built last.
+        self.register_group_executors(Arc::clone(installed) as Arc<dyn GroupExecutors>)
+            .ok()?;
+        Some(Arc::clone(installed))
     }
 
     async fn prepare_tool_intent(
@@ -517,6 +598,13 @@ impl RuntimeEffectController for FencedRestateController {
         self.controller.turn_control_participation().await
     }
 
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.controller.register_group_executors(executors)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -767,6 +855,13 @@ struct RestateEffectHostController {
     /// so a revoked index on a registered process is stale and is reinstated
     /// on first use.
     registrations: std::sync::Mutex<Option<Arc<dyn lash_core::ProcessRegistrationProbe>>>,
+    /// This host's one answer to "what code runs a journaled grouped child".
+    ///
+    /// Registered once — by `install_tool_child_host` or by an embedder
+    /// keeping its own resolver — and read by the endpoint's dispatch through
+    /// the lazy handle [`RestateHostGroupExecutors`], so the open, a redriven
+    /// child and preflight all consult the same cell.
+    group_executors: OnceLock<Arc<dyn GroupExecutors>>,
 }
 
 fn ingress_group_error(
@@ -1109,6 +1204,45 @@ impl RuntimeEffectController for RestateEffectHostController {
 
     fn supports_concurrent_effects(&self) -> bool {
         false
+    }
+
+    /// Register this host's envelope→executor resolver, once.
+    ///
+    /// One host has one answer to "what code runs this journaled grouped
+    /// child", so this is set once and then read by the endpoint's dispatch
+    /// through [`RestateHostGroupExecutors`]. A second registration of a
+    /// *different* resolver is refused rather than allowed to win: two
+    /// resolvers on one deployment means two answers for one child, and which
+    /// one a given path got would depend on when it asked. Re-registering the
+    /// resolver already held is a no-op, so a host handed out repeatedly need
+    /// not track whether it has been wired yet.
+    ///
+    /// [`OnceLock::set`] is the arbiter rather than a preceding `get`: a
+    /// get-then-set pair leaves a window in which two threads both read `None`,
+    /// both write, and the loser is told `Ok` while its resolver was dropped on
+    /// the floor — the exact drift this refusal exists to prevent. `set` decides,
+    /// and its `Err` hands back the rejected resolver so the same-resolver case
+    /// stays a no-op.
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let Err(rejected) = self.group_executors.set(executors) else {
+            return Ok(());
+        };
+        // A rejected `set` means the cell is already initialized; an absent
+        // held resolver is unreachable, so it takes the conflicting-resolver
+        // answer rather than a panic.
+        match self.group_executors.get() {
+            Some(held) if Arc::ptr_eq(held, &rejected) => Ok(()),
+            _ => Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectGroupShape,
+                "this effect host already has a different registered group \
+                 executor resolver; one host has one answer to what runs a \
+                 journaled grouped child, and a second answer would make which \
+                 one a path got depend on when it asked",
+            )),
+        }
     }
 
     async fn open_effect_group(

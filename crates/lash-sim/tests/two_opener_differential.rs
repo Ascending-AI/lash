@@ -318,10 +318,17 @@ impl OpenerDeployment {
             .expect("the host lends a scoped controller")
             .expect("this host hands out owned scoped controllers");
         let dispatch = self.build_dispatch(provider, controller);
+        let lent_controller = host
+            .scoped_static(self.admitted_scope.clone())
+            .expect("the host lends a scoped controller")
+            .expect("this host hands out owned scoped controllers");
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
-        let context =
-            LiveOpenerContext::capture_with_event_sender(&dispatch, event_tx, cooperative.clone())
-                .expect("the side's dispatch context is 'static");
+        let context = LiveOpenerContext::capture_with_event_sender(
+            &dispatch,
+            lent_controller,
+            event_tx,
+            cooperative.clone(),
+        );
         let (guard, ended) = installed
             .openers()
             .register(self.opener.clone(), context.clone());

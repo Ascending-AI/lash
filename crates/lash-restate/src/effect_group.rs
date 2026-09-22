@@ -103,8 +103,16 @@ impl RestateEffectGroupRetryPolicy {
 }
 
 impl RestateEffectGroupServices {
+    /// `host` is the deployment's `RestateEffectHost`: the endpoint routes
+    /// children through the resolver registered on it — its `ToolChildHost`
+    /// when the runtime installs one, or the embedder's own registered
+    /// resolver — and binds each child handler's controller with the host's
+    /// authority. By construction there is one resolver and one authority:
+    /// await-event keys and the cancellation binding a tool child's recorded
+    /// request is validated against derive from the same id the deployment's
+    /// turn/process controllers use.
     pub fn new(
-        executors: Arc<dyn GroupExecutors>,
+        host: &crate::RestateEffectHost,
         ingress: RestateIngressClient,
         infinite_retry_policy: RestateEffectGroupRetryPolicy,
     ) -> Self {
@@ -112,8 +120,9 @@ impl RestateEffectGroupServices {
             index: EffectGroupIndex,
             payload: EffectGroupPayload,
             dispatch: EffectGroupDispatch {
-                executors,
+                executors: host.group_executors(),
                 ingress,
+                authority_id: host.authority_id().clone(),
                 infinite_retry_policy: infinite_retry_policy.0,
             },
             wait: RestateEffectGroupWaitServices::default(),

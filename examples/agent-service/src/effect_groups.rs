@@ -4,8 +4,6 @@
 )]
 #![cfg(feature = "restate")]
 
-use std::sync::Arc;
-
 use axum::Json;
 use axum::extract::{Path as AxumPath, State};
 use lash::CancellationToken;
@@ -132,9 +130,12 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
     }
 }
 
-pub(crate) fn effect_group_services(ingress_url: impl Into<String>) -> RestateEffectGroupServices {
+pub(crate) fn effect_group_services(
+    host: &lash_restate::RestateEffectHost,
+    ingress_url: impl Into<String>,
+) -> RestateEffectGroupServices {
     RestateEffectGroupServices::new(
-        Arc::new(AgentServiceEffectGroupExecutors),
+        host,
         RestateIngressClient::new(ingress_url.into()),
         RestateEffectGroupRetryPolicy::infinite(),
     )

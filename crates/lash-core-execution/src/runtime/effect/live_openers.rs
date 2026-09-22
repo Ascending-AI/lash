@@ -89,7 +89,11 @@ use crate::EffectOpener;
 /// `RuntimeExecutionContext<'run>` cannot outlive the frame that made it, and a
 /// child under [`LoserPolicy::RunToCompletion`](super::group::LoserPolicy::RunToCompletion)
 /// must be able to outlive the caller that opened it. What is stored is the
-/// opener's own dispatch context taken to `'static`.
+/// opener's own dispatch context taken to `'static`, with its controller slots
+/// lent the deployment host's owned controller for the opener's admitted
+/// scope — never the opener's live handler-bound controller, which a Restate
+/// handler cannot lend past its handler and which the driver's rebind
+/// replaces anyway, so no child executes under it.
 ///
 /// # Why the whole dispatch context rather than a hand-picked subset
 ///
@@ -123,27 +127,30 @@ pub struct LiveOpenerContext {
 impl LiveOpenerContext {
     /// Captures an opener's dispatch context for the children it will open.
     ///
+    /// `lent_controller` is what fills the captured context's controller
+    /// slots: the deployment host's owned controller for the opener's admitted
+    /// scope ([`EffectHost::scoped_static`](crate::EffectHost::scoped_static)),
+    /// never the opener's live handler-bound controller — a Restate handler
+    /// cannot lend its `ctx`-bound controller past its handler, and the
+    /// group-child driver replaces both slots at its rebind anyway
+    /// (`rebind_child_dispatch`), so no child ever executes under the lent
+    /// controller. A host that hands out no owned controller answers
+    /// `scoped_static` with `None` and the opener registers nothing.
+    ///
     /// `cancellation` is the opener's own cooperative token — the turn's, or
     /// the process runner's — not a fresh one, because the child token the
     /// driver mints is a child of it and an orphan parent would make the
     /// child's cooperative cancel unsignalable.
-    ///
-    /// Returns `None` when the context cannot be taken to `'static`, which is
-    /// the same condition
-    /// [`ToolDispatchContext::to_static`](crate::tool_dispatch::ToolDispatchContext::to_static)
-    /// already reports: a controller or completion client that is borrowed for
-    /// one frame cannot lend itself to a child that outlives it. A caller that
-    /// meets it must not register, because a half-captured opener would be a
-    /// registry entry whose children could never actually run.
     #[must_use]
     pub fn capture(
         dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
+        lent_controller: crate::ScopedEffectController<'static>,
         cancellation: CancellationToken,
-    ) -> Option<Self> {
-        dispatch.to_static().map(|dispatch| Self {
-            dispatch: Arc::new(dispatch),
+    ) -> Self {
+        Self {
+            dispatch: Arc::new(dispatch.lend_static(lent_controller)),
             cancellation,
-        })
+        }
     }
 
     /// Captures the context with its event sender replaced.
@@ -154,19 +161,21 @@ impl LiveOpenerContext {
     /// whole life and the phase forwarder would wait on a channel that never
     /// closes. The sender lent to children is therefore a channel whose
     /// lifetime is the registration's, owned by whoever registered the opener.
+    ///
+    /// `lent_controller` is the same lend [`Self::capture`] takes.
     #[must_use]
     pub fn capture_with_event_sender(
         dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
+        lent_controller: crate::ScopedEffectController<'static>,
         event_tx: tokio::sync::mpsc::Sender<crate::SessionStreamEvent>,
         cancellation: CancellationToken,
-    ) -> Option<Self> {
-        dispatch.to_static().map(|mut dispatch| {
-            dispatch.event_tx = event_tx;
-            Self {
-                dispatch: Arc::new(dispatch),
-                cancellation,
-            }
-        })
+    ) -> Self {
+        let mut dispatch = dispatch.lend_static(lent_controller);
+        dispatch.event_tx = event_tx;
+        Self {
+            dispatch: Arc::new(dispatch),
+            cancellation,
+        }
     }
 
     /// The opener's dispatch context, for the driver to rebind against one

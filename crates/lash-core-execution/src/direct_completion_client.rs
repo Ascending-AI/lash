@@ -191,15 +191,15 @@ impl<'run> DirectCompletionClient<'run> {
     /// A service that cannot prove it executes under the recorded session and
     /// environment makes this a typed refusal rather than a silent authority
     /// leak.
-    pub fn bind_tool_child(
+    pub fn bind_tool_child<'child>(
         &self,
         session_id: &crate::SessionId,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'static>,
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'child>,
         turn_id: Option<crate::TurnId>,
         parent_invocation: Option<crate::RuntimeInvocation>,
         usage_ledger: crate::runtime::ToolUsageLedger,
-    ) -> Result<DirectCompletionClient<'static>, crate::runtime::RuntimeEffectControllerError> {
+    ) -> Result<DirectCompletionClient<'child>, crate::runtime::RuntimeEffectControllerError> {
         let source = match &self.source {
             DirectCompletionSource::Runtime(source) => {
                 let service = source
@@ -272,6 +272,48 @@ impl<'run> DirectCompletionClient<'run> {
             inside_tool_attempt: self.inside_tool_attempt,
             usage_ledger: self.usage_ledger.clone(),
         })
+    }
+
+    /// This client taken to `'static` with its controller slot lent
+    /// `effect_controller` — the same conversion as [`Self::to_static`], but
+    /// for an opener whose own controller cannot be taken static (a Restate
+    /// handler's context-bound one) and so lends the deployment host's owned
+    /// controller for its admitted scope instead.
+    ///
+    /// The lent controller never executes the child: the group-child driver
+    /// rebinds `direct_completions` through [`Self::bind_tool_child`] with the
+    /// child's own recorded authority before any call can ride it.
+    pub(crate) fn lend_static(
+        &self,
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'static>,
+    ) -> DirectCompletionClient<'static> {
+        let source = match &self.source {
+            DirectCompletionSource::Runtime(source) => {
+                DirectCompletionSource::Runtime(RuntimeDirectSource {
+                    service: Arc::clone(&source.service),
+                    effect_controller: effect_controller.clone(),
+                    turn_id: source.turn_id.clone(),
+                })
+            }
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::Unavailable(message) => {
+                DirectCompletionSource::Unavailable(message.clone())
+            }
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::TestFn(invoke) => {
+                DirectCompletionSource::TestFn(Arc::clone(invoke))
+            }
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::TestLlmFn(invoke) => {
+                DirectCompletionSource::TestLlmFn(Arc::clone(invoke))
+            }
+        };
+        DirectCompletionClient {
+            source,
+            parent_invocation: self.parent_invocation.clone(),
+            inside_tool_attempt: self.inside_tool_attempt,
+            usage_ledger: self.usage_ledger.clone(),
+        }
     }
 
     /// Classifies where a direct call sits relative to the journal.

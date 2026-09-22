@@ -268,6 +268,7 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
             &self.host,
             &self.context,
             &request,
+            self.host.child_controller(&request.scope.admitted_scope)?,
             self.context.cancellation().child_token(),
         ))
         .await
@@ -288,6 +289,10 @@ struct ToolChildRunner {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for ToolChildRunner {
+    fn tool_child_driver(&self) -> Option<&dyn ToolChildDriver> {
+        Some(self)
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
@@ -305,6 +310,52 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
             &self.host,
             &self.live,
             &request,
+            self.host.child_controller(&request.scope.admitted_scope)?,
+            self.live.cancellation().child_token(),
+        ))
+        .await
+    }
+}
+
+/// The handler-level driving seam a tool child's resolver hands to a tier that
+/// supplies the admitted controller itself (ADR 0099 §2, FIG-2266).
+///
+/// On the in-process tiers the runner is self-contained: `execute` builds the
+/// child's controller from the host and runs to a terminal in one call. A tier
+/// whose admitted controller is bound to a live handler context — Restate,
+/// where only a `ctx`-bound controller journals steps in the child's own
+/// invocation — cannot use that shape, so it resolves the same runner through
+/// `executor_for` and calls [`drive`](Self::drive) with the controller *it*
+/// built. The driver inside is identical either way: the controller is the
+/// only tier-specific input.
+///
+/// `controller` is deliberately a borrow-bounded [`ScopedEffectController`]
+/// rather than the `'static` one the in-process path builds: a handler-bound
+/// controller is valid exactly as long as the handler drives it.
+#[async_trait::async_trait]
+pub trait ToolChildDriver: Send {
+    /// Runs the child to a terminal on `controller`, returning its settlement
+    /// outcome. Cancellation comes from the captured live opener's token, the
+    /// same parent the in-process `execute` mints the child token from.
+    async fn drive<'run>(
+        &self,
+        request: &ToolChildRequest,
+        controller: ScopedEffectController<'run>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
+}
+
+#[async_trait::async_trait]
+impl ToolChildDriver for ToolChildRunner {
+    async fn drive<'run>(
+        &self,
+        request: &ToolChildRequest,
+        controller: ScopedEffectController<'run>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        Box::pin(run_tool_child(
+            &self.host,
+            &self.live,
+            request,
+            controller,
             self.live.cancellation().child_token(),
         ))
         .await
@@ -325,13 +376,13 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
 /// and its source policy, the event sender, the turn context and the clock.
 /// Those are deployment wiring and live channels, and §3 puts both on the lent
 /// side of the split.
-pub(crate) fn rebind_child_dispatch(
+pub(crate) fn rebind_child_dispatch<'run>(
     lent: &ToolDispatchContext<'static>,
     request: &ToolChildRequest,
-    controller: ScopedEffectController<'static>,
+    controller: ScopedEffectController<'run>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     usage_ledger: &ToolUsageLedger,
-) -> Result<ToolDispatchContext<'static>, RuntimeEffectControllerError> {
+) -> Result<ToolDispatchContext<'run>, RuntimeEffectControllerError> {
     let mut child = lent.clone();
     // A child may be attributed to a session the lending opener is not: a
     // process opener has no session of its own (ADR 0094) and still does tool
@@ -439,10 +490,11 @@ fn admitted_catalog(
 /// source order, and waits on no sibling. There is no cross-child order here
 /// and none is invented — the group's rank order is the group's, and the
 /// durable per-group commit order is FIG-3409's.
-pub(crate) async fn run_tool_child(
+pub(crate) async fn run_tool_child<'run>(
     host: &ToolChildHost,
     live: &LiveOpenerContext,
     request: &ToolChildRequest,
+    controller: ScopedEffectController<'run>,
     cancel: CancellationToken,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     // Refused here as well as at decode: a request this build cannot
@@ -465,14 +517,15 @@ pub(crate) async fn run_tool_child(
         )
     })?;
 
-    // The controller is built directly from the request's recorded admitted
-    // pair: the claim scope *and* the incarnation it was admitted under, one
-    // checked value. There is no post-construction pin step — the pair was
-    // checked when the request was decoded (`AdmittedScope::new` is the only
+    // The controller arrives bound to the request's recorded admitted pair:
+    // the claim scope *and* the incarnation it was admitted under, one checked
+    // value. Who builds it is the tier's business — the in-process runner asks
+    // this host for a `'static` one, a handler-bound tier scopes its own — and
+    // there is no post-construction pin step either way: the pair was checked
+    // when the request was decoded (`AdmittedScope::new` is the only
     // construction), and `enclosing_process` is never it: that field is tool
     // execution context, which `ToolChildRequest::validate` has already
     // reconciled with the opener.
-    let controller = host.child_controller(&request.scope.admitted_scope)?;
     validate_recorded_authorities(host, &controller, request).await?;
 
     let usage_ledger = ToolUsageLedger::new();
@@ -551,7 +604,7 @@ pub(crate) async fn run_tool_child(
 ///   registry is unresolvable here and a fresh one would double dispatch.
 async fn validate_recorded_authorities(
     host: &ToolChildHost,
-    controller: &ScopedEffectController<'static>,
+    controller: &ScopedEffectController<'_>,
     request: &ToolChildRequest,
 ) -> Result<(), RuntimeEffectControllerError> {
     use crate::runtime::effect::TurnControlParticipation;
@@ -659,7 +712,7 @@ async fn validate_recorded_authorities(
 /// so an orchestrating child runs its body directly and is classified by the
 /// commands it issued, never by an invented outer attempt (§4).
 async fn drive(
-    dispatch: &Arc<ToolDispatchContext<'static>>,
+    dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
     orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
@@ -735,12 +788,12 @@ async fn drive(
 /// the situation §6 quotes from `process_handles.rs`: a child holds no runtime
 /// execution context, so the facts a context would have recorded are captured
 /// into the child's outcome instead.
-fn child_tool_context(
-    dispatch: &Arc<ToolDispatchContext<'static>>,
+fn child_tool_context<'run>(
+    dispatch: &Arc<ToolDispatchContext<'run>>,
     request: &ToolChildRequest,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
     orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
-) -> crate::ToolContext<'static> {
+) -> crate::ToolContext<'run> {
     let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch))
         .prepared_call(&request.call)
         .cancellation_token(Some(turn_cancel_wait.cancellation().clone()))
@@ -760,7 +813,7 @@ fn child_tool_context(
 /// an opener whose controller participates in turn control locally has no
 /// durable address to signal, so there is nothing for a child of it to observe.
 fn child_turn_cancel_wait(
-    dispatch: &Arc<ToolDispatchContext<'static>>,
+    dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
     cancel: &CancellationToken,
 ) -> crate::runtime::TurnCancelWait {
@@ -780,7 +833,7 @@ fn child_turn_cancel_wait(
 /// Arms the resolver the parked call named, then parks on the child's own
 /// journaled await.
 async fn await_child_completion(
-    dispatch: &Arc<ToolDispatchContext<'static>>,
+    dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,

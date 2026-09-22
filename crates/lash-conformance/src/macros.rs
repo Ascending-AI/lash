@@ -2053,13 +2053,20 @@ macro_rules! tool_batch_parallelism_tests {
 /// The fixture hands back a guard, a session prefix and a
 /// [`ToolChildLawFixture`]: a world factory over one substrate (a law calls it
 /// from a runtime it is about to destroy), a process-registry factory, and the
-/// completion routing the tier records for a deferrable child. Restate is
-/// deliberately absent for the same reason it is absent from the batch law:
-/// it is serial today, and there is no expected-failure mechanism here.
+/// completion routing the tier records for a deferrable child. Restate
+/// registers through the live e2e recipe (`conformance_and_poison.rs`) and its
+/// world has no Lash-owned drain — Restate redrives the child invocation
+/// itself — so the laws take their open-time shape there.
 #[macro_export]
 macro_rules! tool_child_invocation_tests {
     ($fixture:block) => {
-        $crate::tool_child_invocation_tests!(@catalogue $fixture; [
+        $crate::tool_child_invocation_tests!(@catalogue [] $fixture);
+    };
+    ($(#[$attr:meta])+ $fixture:block) => {
+        $crate::tool_child_invocation_tests!(@catalogue [$(#[$attr])*] $fixture);
+    };
+    (@catalogue [$($attr:tt)*] $fixture:block) => {
+        $crate::tool_child_invocation_tests!(@expand [$($attr)*] $fixture; [
             (
                 tool_children_run_through_the_invocation_driver,
                 "tool-child-invocation-driver"
@@ -2086,15 +2093,24 @@ macro_rules! tool_child_invocation_tests {
             ),
         ]);
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, prefix, fixture) = $fixture;
-                $crate::registration_macro_support::$law(&fixture, prefix).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
+            $crate::__tool_child_invocation_register!($attrs $fixture; $law, $label);
         )*
+    };
+}
+
+/// Register one shared tool-child invocation law.
+#[macro_export]
+macro_rules! __tool_child_invocation_register {
+    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, fixture) = $fixture;
+            $crate::registration_macro_support::$law(&fixture, prefix).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
     };
 }
 

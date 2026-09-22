@@ -1,4 +1,6 @@
 use super::*;
+use crate::controller::RestateRuntimeEffectController;
+use lash_core::RuntimeEffectCommand;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupDispatchRequest {
@@ -28,6 +30,7 @@ enum EffectGroupChildRunOutcome {
 pub struct EffectGroupDispatch {
     pub(super) executors: Arc<dyn GroupExecutors>,
     pub(super) ingress: RestateIngressClient,
+    pub(super) authority_id: crate::ingress::RestateAuthorityId,
     pub(super) infinite_retry_policy: RunRetryPolicy,
 }
 
@@ -284,6 +287,84 @@ impl EffectGroupDispatch {
             }
         }
 
+        let cancel_key = group_wait_key(
+            &request.shape.wait_scope,
+            &request.group_key,
+            EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
+        )?;
+        let cancel_address = RestateDurableWaitAddress::for_key(&cancel_key);
+        let cancel_request = RestateDurableWaitAwaitRequest {
+            key: cancel_key,
+            deadline: None,
+        };
+        let cancel_watch = self.ingress.call_workflow_json::<_, Resolution>(
+            "LashDurableWaitWorkflow",
+            &cancel_address.workflow_key,
+            "await_resolution",
+            &cancel_request,
+        );
+        tokio::pin!(cancel_watch);
+
+        if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
+            // ADR 0099 §2: a tool child is a handler-level invocation driver,
+            // not a recorded body. Its replayable work — retries, deferred
+            // completion, intent orchestration, completion-key derivation —
+            // runs as journaled steps of *this* invocation; only the atomic
+            // `ToolAttempt` executions it emits enter `ctx.run`. Resolving the
+            // driver uses the same `GroupExecutors` answer first dispatch and
+            // recovery both take (ADR 0065): there is no second route and no
+            // caller closure.
+            let Some(executor) = self.executors.executor_for(&request.envelope) else {
+                return Err(std::io::Error::other(format!(
+                    "no executor currently routes effect group {} tool child {}; retry on a carrying deployment",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let Some(driver) = executor.tool_child_driver() else {
+                return Err(TerminalError::new(format!(
+                    "effect group {} tool child {} resolved to an executor with no handler-level driver",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+            // The child's own admitted controller: the recorded pair — claim
+            // scope and the incarnation it was admitted under — never the
+            // dispatching scope and never fresh admission (ADR 0099 §3).
+            let scoped = controller
+                .scoped_effect_controller(child.scope.admitted_scope.clone())
+                .map_err(TerminalError::from_error)?;
+            let mut drive = driver.drive(child, scoped);
+            let outcome = tokio::select! {
+                biased;
+                cancel = &mut cancel_watch => {
+                    cancel.map_err(|error| std::io::Error::other(format!(
+                        "observe effect-group child cancellation: {error}"
+                    )))?;
+                    // Dropping the drive is the leaf path's cancellation
+                    // lifted to handler level: whatever step the child was
+                    // parked on is abandoned, and the settlement recorded is
+                    // Cancelled — a CancelDecided loser writes no payload, the
+                    // index-serialized seam #1857's finalization handler owns
+                    // on the journaled tiers.
+                    drop(drive);
+                    EffectGroupChildRunOutcome::Cancelled
+                }
+                outcome = &mut drive => {
+                    drop(drive);
+                    EffectGroupChildRunOutcome::Completed { outcome }
+                }
+            };
+            return record_child_settlement(
+                controller.context(),
+                &request.group_key,
+                request.position,
+                outcome,
+            )
+            .await;
+        }
+
         let cancellation = tokio_util::sync::CancellationToken::new();
         let run_cancellation = cancellation.clone();
         let envelope = request.envelope.clone();
@@ -313,23 +394,6 @@ impl EffectGroupDispatch {
             ))
             .retry_policy(self.infinite_retry_policy.clone()),
         );
-        let cancel_key = group_wait_key(
-            &request.shape.wait_scope,
-            &request.group_key,
-            EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
-        )?;
-        let cancel_address = RestateDurableWaitAddress::for_key(&cancel_key);
-        let cancel_request = RestateDurableWaitAwaitRequest {
-            key: cancel_key,
-            deadline: None,
-        };
-        let cancel_watch = self.ingress.call_workflow_json::<_, Resolution>(
-            "LashDurableWaitWorkflow",
-            &cancel_address.workflow_key,
-            "await_resolution",
-            &cancel_request,
-        );
-        tokio::pin!(cancel_watch);
         let Json(outcome) = tokio::select! {
             biased;
             cancel = &mut cancel_watch => {
@@ -342,62 +406,7 @@ impl EffectGroupDispatch {
             outcome = &mut run => outcome?,
         };
 
-        let terminal = match outcome {
-            EffectGroupChildRunOutcome::Cancelled => EffectGroupSettlementTerminal::Cancelled,
-            EffectGroupChildRunOutcome::Completed {
-                outcome: Err(error),
-            } => EffectGroupSettlementTerminal::Failed { error },
-            EffectGroupChildRunOutcome::Completed {
-                outcome: Ok(outcome),
-            } => {
-                let bytes = serde_json::to_vec(&outcome).map_err(|error| {
-                    TerminalError::new(format!(
-                        "serialize effect group {} child {} outcome: {error}",
-                        request.group_key, request.position
-                    ))
-                })?;
-                let Json(put) = ctx
-                    .object_client::<EffectGroupPayloadClient>(payload_key(
-                        &request.group_key,
-                        request.position,
-                    ))
-                    .put(Json(EffectGroupPayloadPutRequest { bytes }))
-                    .call()
-                    .await?;
-                match put {
-                    EffectGroupPayloadPutResponse::Written
-                    | EffectGroupPayloadPutResponse::Duplicate => {
-                        EffectGroupSettlementTerminal::StoredPayload
-                    }
-                    EffectGroupPayloadPutResponse::Retired => return Ok(Json(())),
-                    EffectGroupPayloadPutResponse::Conflict => {
-                        return Err(TerminalError::new(format!(
-                            "payload byte fence conflict for effect group {} child {}",
-                            request.group_key, request.position
-                        ))
-                        .into());
-                    }
-                }
-            }
-        };
-        let Json(recorded) = ctx
-            .object_client::<EffectGroupIndexClient>(request.group_key.clone())
-            .record_settlement(Json(EffectGroupRecordSettlementRequest {
-                position: request.position,
-                terminal,
-            }))
-            .call()
-            .await?;
-        match recorded {
-            EffectGroupRecordSettlementResponse::Recorded { .. }
-            | EffectGroupRecordSettlementResponse::Duplicate { .. }
-            | EffectGroupRecordSettlementResponse::Retired => Ok(Json(())),
-            other => Err(TerminalError::new(format!(
-                "record settlement protocol defect for {} child {}: {other:?}",
-                request.group_key, request.position
-            ))
-            .into()),
-        }
+        record_child_settlement(&ctx, &request.group_key, request.position, outcome).await
     }
 
     #[handler]
@@ -507,5 +516,74 @@ impl EffectGroupDispatch {
             ))
             .into()),
         }
+    }
+}
+
+/// Records one child's terminal in the index, writing its payload first when
+/// the outcome carries one.
+///
+/// The context is a parameter because the two callers hold it differently: an
+/// atomic child's `ctx` is still free after its `ctx.run` completes, while a
+/// tool child's `ctx` lives inside the runtime controller the driver was
+/// bound to and comes back through `context()` once the drive is over. The
+/// protocol is identical either way — and a `Cancelled` terminal deliberately
+/// writes no payload: settlement is the index-serialized arbitration point,
+/// so a loser cancelled before its outcome landed leaves nothing for the
+/// group to read.
+async fn record_child_settlement(
+    ctx: &SharedWorkflowContext<'_>,
+    group_key: &str,
+    position: usize,
+    outcome: EffectGroupChildRunOutcome,
+) -> HandlerResult<Json<()>> {
+    let terminal = match outcome {
+        EffectGroupChildRunOutcome::Cancelled => EffectGroupSettlementTerminal::Cancelled,
+        EffectGroupChildRunOutcome::Completed {
+            outcome: Err(error),
+        } => EffectGroupSettlementTerminal::Failed { error },
+        EffectGroupChildRunOutcome::Completed {
+            outcome: Ok(outcome),
+        } => {
+            let bytes = serde_json::to_vec(&outcome).map_err(|error| {
+                TerminalError::new(format!(
+                    "serialize effect group {group_key} child {position} outcome: {error}"
+                ))
+            })?;
+            let Json(put) = ctx
+                .object_client::<EffectGroupPayloadClient>(payload_key(group_key, position))
+                .put(Json(EffectGroupPayloadPutRequest { bytes }))
+                .call()
+                .await?;
+            match put {
+                EffectGroupPayloadPutResponse::Written
+                | EffectGroupPayloadPutResponse::Duplicate => {
+                    EffectGroupSettlementTerminal::StoredPayload
+                }
+                EffectGroupPayloadPutResponse::Retired => return Ok(Json(())),
+                EffectGroupPayloadPutResponse::Conflict => {
+                    return Err(TerminalError::new(format!(
+                        "payload byte fence conflict for effect group {group_key} child {position}"
+                    ))
+                    .into());
+                }
+            }
+        }
+    };
+    let Json(recorded) = ctx
+        .object_client::<EffectGroupIndexClient>(group_key.to_owned())
+        .record_settlement(Json(EffectGroupRecordSettlementRequest {
+            position,
+            terminal,
+        }))
+        .call()
+        .await?;
+    match recorded {
+        EffectGroupRecordSettlementResponse::Recorded { .. }
+        | EffectGroupRecordSettlementResponse::Duplicate { .. }
+        | EffectGroupRecordSettlementResponse::Retired => Ok(Json(())),
+        other => Err(TerminalError::new(format!(
+            "record settlement protocol defect for {group_key} child {position}: {other:?}"
+        ))
+        .into()),
     }
 }
