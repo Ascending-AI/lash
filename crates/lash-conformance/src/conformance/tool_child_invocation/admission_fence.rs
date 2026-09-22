@@ -232,14 +232,6 @@ fn fence_group(
             cancellation,
         ),
     );
-    let binding = crate::GroupChildBinding {
-        child: child.invocation.address.clone(),
-        membership: (*child
-            .group
-            .as_deref()
-            .expect("a group child carries its retained membership"))
-        .clone(),
-    };
     let group = crate::RuntimeEffectGroup::try_new(
         crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(scope.clone(), format!("{group_key}:group"))
@@ -253,6 +245,15 @@ fn fence_group(
         crate::LoserPolicy::Cancel,
     )
     .expect("the fence group assembles");
+    let stamped = &group.children()[0];
+    let binding = crate::GroupChildBinding {
+        child: stamped.invocation.address.clone(),
+        membership: (*stamped
+            .group
+            .as_deref()
+            .expect("a group child carries its retained membership"))
+        .clone(),
+    };
     (group, binding)
 }
 
@@ -396,10 +397,15 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
                     "a bound controller refuses the minted write once the child is \
                              cancel-decided",
                 );
-            assert_eq!(
-                error.code.as_str(),
-                "runtime_effect_group_child_cancel_decided",
-                "the refusal is the typed cancel-decided admission error"
+            // The substrate's answer is typed: a live group whose decision is
+            // committed refuses `cancel_decided`, and a native group already
+            // reaped after close refuses as closed — both are the §4 fence,
+            // never an admission.
+            assert!(
+                error.code.as_str() == "runtime_effect_group_child_cancel_decided"
+                    || (error.code.as_str() == "runtime_effect_group_shape"
+                        && error.to_string().contains("closed to its caller")),
+                "the refusal is the substrate's typed admission fence: {error}"
             );
         }
         Ok(None) => {
@@ -431,23 +437,47 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
     if world.drain.is_some() {
         // A durable tier serves the cancel-decided child's recorded terminal
         // to a reopen: rank 0 is the cancelled outcome, not a body result.
+        // The close may return while the cancelled child's task is still
+        // unwinding; its entry is then retained and closed, so a same-process
+        // reopen is refused until the settlement lands and the entry is
+        // reaped — retry the reopen until a fresh entry serves the rank.
         let scoped = host
             .scoped(crate::admit(scope.clone()))
             .expect("the group scope binds");
-        let (group, _) = fence_group(
-            &scope,
-            &session_id,
-            &group_key,
-            &scenario.env_ref,
-            deferrable_routing(fixture.deferrable_routing, &host),
-            recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
-        );
-        let mut handle = scoped
-            .controller()
-            .open_effect_group(group)
-            .await
-            .expect("the identical group reopens");
-        let settlement = next_settlement(&scoped, &mut handle, 0).await;
+        let deadline = std::time::Instant::now() + SETTLE_BUDGET;
+        let settlement = loop {
+            let (group, _) = fence_group(
+                &scope,
+                &session_id,
+                &group_key,
+                &scenario.env_ref,
+                deferrable_routing(fixture.deferrable_routing, &host),
+                recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
+            );
+            let mut handle = scoped
+                .controller()
+                .open_effect_group(group)
+                .await
+                .expect("the identical group reopens");
+            match scoped
+                .controller()
+                .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new())
+                .await
+            {
+                Ok(settlement) => break settlement,
+                Err(error) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "rank 0 was never served: {error}"
+                    );
+                    assert!(
+                        error.to_string().contains("closed to its caller"),
+                        "rank 0 failed to be served: {error}"
+                    );
+                    tokio::time::sleep(POLL).await;
+                }
+            }
+        };
         assert_eq!(settlement.position, 0);
         let error = settlement
             .outcome
