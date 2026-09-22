@@ -7,7 +7,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    TRACE_SCHEMA_VERSION, TraceEvent, TraceLanguageExecution,
+    TRACE_SCHEMA_VERSION, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity as LanguageIdentity,
     TraceLanguageExecutionMap as LanguageExecutionMap, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord, TraceSink,
@@ -515,7 +515,7 @@ fn materialize_graph(
                 node_kind,
                 label,
                 occurrence,
-                error,
+                failure,
                 ..
             } => {
                 nodes
@@ -533,7 +533,7 @@ fn materialize_graph(
                     ))
                     .or_default()
                     .explicit_terminal =
-                    Some(OccurrenceTerminal::Failed(item.timestamp, error.clone()));
+                    Some(OccurrenceTerminal::Failed(item.timestamp, failure.clone()));
             }
             TraceLanguageExecutionPayload::BranchSelected {
                 node_id,
@@ -630,7 +630,7 @@ type OccurrenceKey = (String, String, u64, Option<u32>, Option<u64>);
 
 enum OccurrenceTerminal {
     Completed(DateTime<Utc>),
-    Failed(DateTime<Utc>, String),
+    Failed(DateTime<Utc>, TraceLanguageExecutionFailure),
 }
 
 fn apply_occurrences(
@@ -694,15 +694,17 @@ fn apply_occurrences(
                     .start
                     .map(|start| end.signed_duration_since(start).num_milliseconds().max(0)),
             },
-            Some(OccurrenceTerminal::Failed(end, error)) => TraceLashlangNodeObservation::Failed {
-                occurrence: *occurrence,
-                start: folded.start,
-                end: end.to_owned(),
-                duration_ms: folded
-                    .start
-                    .map(|start| end.signed_duration_since(start).num_milliseconds().max(0)),
-                error: error.clone(),
-            },
+            Some(OccurrenceTerminal::Failed(end, failure)) => {
+                TraceLashlangNodeObservation::Failed {
+                    occurrence: *occurrence,
+                    start: folded.start,
+                    end: end.to_owned(),
+                    duration_ms: folded
+                        .start
+                        .map(|start| end.signed_duration_since(start).num_milliseconds().max(0)),
+                    failure: failure.clone(),
+                }
+            }
             None => folded
                 .start
                 .map(|start| TraceLashlangNodeObservation::Running {
@@ -903,7 +905,7 @@ fn merge_late_retained_event(
                     TraceLashlangNodeObservation::Failed {
                         occurrence,
                         end,
-                        error,
+                        failure,
                         ..
                     } => TraceLashlangNodeObservation::Failed {
                         occurrence: *occurrence,
@@ -912,7 +914,7 @@ fn merge_late_retained_event(
                         duration_ms: Some(
                             end.signed_duration_since(start).num_milliseconds().max(0),
                         ),
-                        error: error.clone(),
+                        failure: failure.clone(),
                     },
                     TraceLashlangNodeObservation::Unobserved => return,
                 };
@@ -948,7 +950,7 @@ fn merge_late_retained_event(
                         }),
                     },
                 ),
-                TraceLanguageExecutionPayload::NodeFailed { error, .. } => (
+                TraceLanguageExecutionPayload::NodeFailed { failure, .. } => (
                     LanguageExecutionStatus::Failed,
                     TraceLashlangNodeObservation::Failed {
                         occurrence: *occurrence,
@@ -960,7 +962,7 @@ fn merge_late_retained_event(
                                 .num_milliseconds()
                                 .max(0)
                         }),
-                        error: error.clone(),
+                        failure: failure.clone(),
                     },
                 ),
                 _ => unreachable!(),

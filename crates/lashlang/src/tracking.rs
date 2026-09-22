@@ -127,6 +127,34 @@ pub struct LashlangExecutionCallSite {
     pub occurrence: u64,
 }
 
+/// Typed provenance for a failed external effect.
+///
+/// This is transient VM/host coordination, not part of the durable VM
+/// continuation: the host records it while resolving the effect and the VM
+/// consumes it before emitting the node terminal observation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LashlangEffectFailure {
+    pub class: lash_sansio::ToolFailureClass,
+    pub code: String,
+    pub message: String,
+    pub replay_key: String,
+    pub retry_policy: lash_sansio::ToolRetryPolicy,
+}
+
+/// Why one observed Lashlang node failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LashlangExecutionFailure {
+    /// A host effect returned a typed tool failure.
+    Effect(LashlangEffectFailure),
+    /// The VM itself refused or failed the operation.
+    Runtime {
+        /// Stable [`crate::RuntimeError::code`] value (or `ProcessFailed` for
+        /// the explicit process `fail` terminal).
+        code: String,
+        message: String,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashlangBranchSite {
     pub then_edge_id: String,
@@ -163,7 +191,7 @@ pub enum LashlangExecutionObservation {
     NodeFailed {
         site: LashlangExecutionSite,
         occurrence: u64,
-        error: String,
+        failure: LashlangExecutionFailure,
     },
     BranchSelected {
         site: LashlangExecutionSite,

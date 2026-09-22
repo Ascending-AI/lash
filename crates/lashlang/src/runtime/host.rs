@@ -1,4 +1,6 @@
-use crate::{HostRequirementsRef, LashlangExecutionCallSite, ModuleRef, ProcessRef};
+use crate::{
+    HostRequirementsRef, LashlangEffectFailure, LashlangExecutionCallSite, ModuleRef, ProcessRef,
+};
 
 use super::{
     ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeFailure, Value,
@@ -481,6 +483,18 @@ pub trait ExecutionHost: Sync {
     fn observe_profile(&self, _profile: ProfileReport) {}
 
     fn observe_lashlang_execution(&self, _observation: LashlangExecutionObservation) {}
+
+    /// Takes typed failure provenance recorded while resolving `call_site`.
+    ///
+    /// The default covers hosts with no external tool bridge. Production tool
+    /// bridges override it with a remove-on-read map so completed and handled
+    /// calls cannot leak provenance into a later observation.
+    fn take_lashlang_effect_failure(
+        &self,
+        _call_site: &LashlangExecutionCallSite,
+    ) -> Option<LashlangEffectFailure> {
+        None
+    }
 }
 
 pub struct ExecutionEnvironment<'host, H: ExecutionHost> {
@@ -614,6 +628,13 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
 
     fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
         self.host.observe_lashlang_execution(observation);
+    }
+
+    fn take_lashlang_effect_failure(
+        &self,
+        call_site: &LashlangExecutionCallSite,
+    ) -> Option<LashlangEffectFailure> {
+        self.host.take_lashlang_effect_failure(call_site)
     }
 }
 

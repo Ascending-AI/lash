@@ -98,8 +98,21 @@ must_cover = [
   "TraceDurableWaitResolution",
   "TraceDurableTimerStatus",
   "TraceAttemptUsageDisposition",
+  "TraceLanguageExecutionPayload",
   "TraceLashlangGraph",
 ]
+
+# The NodeFailed carrier embeds these Serde enums from lash-sansio. The trace
+# shape sweep does not follow references into another crate.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/tool_output.rs"]
+symbols = ["ToolFailureClass"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/tool_contract.rs"]
+symbols = ["ToolRetryPolicy"]
 
 [[surface.guard]]
 kind = "rust_items"
@@ -110,6 +123,16 @@ symbols = ["WorkflowExecutionSite"]
 kind = "rust_items"
 paths = ["crates/lash-trace/src/lashlang_graph.rs"]
 symbols = ["fold_lashlang_graph"]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-trace/src/lashlang_graph/model.rs"]
+must_cover = ["TraceLashlangNodeObservation"]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-trace/src/language_execution_failure.rs"]
+must_cover = ["TraceLanguageExecutionFailure"]
 
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility

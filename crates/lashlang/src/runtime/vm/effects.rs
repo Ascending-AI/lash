@@ -51,13 +51,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Box::pin(self.resolve_effect_inner(effect, active.as_ref(), instruction_ip)).await;
         match (&result, active.as_ref()) {
             (Ok(Some(VmOutcome::ProcessFailed(value))), Some(active)) => {
-                self.fail_lashlang_execution(active, value.to_string());
+                self.fail_lashlang_execution(active, "ProcessFailed", value.to_string());
             }
             (Ok(_), Some(active)) => {
                 self.complete_lashlang_execution(active);
             }
             (Err(error), Some(active)) => {
-                self.fail_lashlang_execution(active, error.to_string());
+                self.fail_lashlang_execution(active, error.code(), error.to_string());
             }
             _ => {}
         }
@@ -497,7 +497,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         error: RuntimeError,
     ) -> RuntimeError {
         for active in active_nodes.iter().flatten() {
-            self.fail_lashlang_execution(active, error.to_string());
+            self.fail_lashlang_execution_runtime(active, &error);
         }
         error
     }
@@ -533,7 +533,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     if unwrap {
                         unwrapped_errors[leaf_index] = Some((error.clone(), source_span));
                         if let Some(active) = active {
-                            self.fail_lashlang_execution(active, error.to_string());
+                            self.fail_lashlang_execution(
+                                active,
+                                "UnwrappedModuleOperationFailed",
+                                error.to_string(),
+                            );
                         }
                         leaf_values.push(Value::Null);
                     } else {

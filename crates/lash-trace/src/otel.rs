@@ -1317,6 +1317,86 @@ fn language_execution_attributes(
             ));
         }
     }
+    if let Payload::NodeFailed { failure, .. } = &event.payload {
+        use crate::TraceLanguageExecutionFailure as Failure;
+        let (kind, code, message) = match failure {
+            Failure::Effect { code, message, .. } => ("effect", code, message),
+            Failure::Runtime { code, message } => ("runtime", code, message),
+        };
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_FAILURE_KIND,
+            kind,
+        ));
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_FAILURE_CODE,
+            code.clone(),
+        ));
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_FAILURE_MESSAGE,
+            message.clone(),
+        ));
+        if let Failure::Effect {
+            class,
+            replay_key,
+            retry_policy,
+            ..
+        } = failure
+        {
+            let class = match class {
+                lash_sansio::ToolFailureClass::InvalidRequest => "invalid_request",
+                lash_sansio::ToolFailureClass::Io => "io",
+                lash_sansio::ToolFailureClass::Unavailable => "unavailable",
+                lash_sansio::ToolFailureClass::PermissionDenied => "permission_denied",
+                lash_sansio::ToolFailureClass::Timeout => "timeout",
+                lash_sansio::ToolFailureClass::Execution => "execution",
+                lash_sansio::ToolFailureClass::External => "external",
+                lash_sansio::ToolFailureClass::ResourceLimit => "resource_limit",
+                lash_sansio::ToolFailureClass::Internal => "internal",
+            };
+            attrs.push(KeyValue::new(
+                attr::LASH_LANGUAGE_EXECUTION_FAILURE_CLASS,
+                class,
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_LANGUAGE_EXECUTION_FAILURE_REPLAY_KEY,
+                replay_key.clone(),
+            ));
+            let (policy, limits) = match retry_policy {
+                lash_sansio::ToolRetryPolicy::Never => ("never", None),
+                lash_sansio::ToolRetryPolicy::Safe {
+                    max_attempts,
+                    base_delay_ms,
+                    max_delay_ms,
+                } => ("safe", Some((*max_attempts, *base_delay_ms, *max_delay_ms))),
+                lash_sansio::ToolRetryPolicy::Idempotent {
+                    max_attempts,
+                    base_delay_ms,
+                    max_delay_ms,
+                } => (
+                    "idempotent",
+                    Some((*max_attempts, *base_delay_ms, *max_delay_ms)),
+                ),
+            };
+            attrs.push(KeyValue::new(
+                attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_POLICY,
+                policy,
+            ));
+            if let Some((max_attempts, base_delay_ms, max_delay_ms)) = limits {
+                attrs.push(KeyValue::new(
+                    attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_MAX_ATTEMPTS,
+                    i64::from(max_attempts),
+                ));
+                attrs.push(KeyValue::new(
+                    attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_BASE_DELAY_MS,
+                    base_delay_ms as i64,
+                ));
+                attrs.push(KeyValue::new(
+                    attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_MAX_DELAY_MS,
+                    max_delay_ms as i64,
+                ));
+            }
+        }
+    }
 }
 
 fn usage_attributes(attrs: &mut Vec<KeyValue>, prefix: &str, usage: &TraceTokenUsage) {
@@ -1471,8 +1551,8 @@ fn error_status(record: &TraceRecord) -> Status {
         TraceEvent::DurableTimerResolved { .. } => Status::error("durable timer failed"),
         TraceEvent::StoreErrorObserved { message, .. } => Status::error(message.clone()),
         TraceEvent::LanguageExecution { event, .. } => match &event.payload {
-            crate::TraceLanguageExecutionPayload::NodeFailed { error, .. } => {
-                Status::error(error.clone())
+            crate::TraceLanguageExecutionPayload::NodeFailed { failure, .. } => {
+                Status::error(failure.message().to_owned())
             }
             crate::TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => Status::error(
                 error

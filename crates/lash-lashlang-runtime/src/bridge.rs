@@ -93,6 +93,25 @@ pub fn protocol_tool_output_to_lashlang_value(
     }
 }
 
+/// The typed failure fact the VM may attach to a failed node observation.
+/// Read from the terminal output before the guest-facing error is projected.
+pub fn observed_effect_failure(
+    output: &lash_core::ToolCallOutput,
+    replay_key: &str,
+    retry_policy: lash_core::ToolRetryPolicy,
+) -> Option<lashlang::LashlangEffectFailure> {
+    let ToolCallOutcome::Failure(failure) = &output.outcome else {
+        return None;
+    };
+    Some(lashlang::LashlangEffectFailure {
+        class: failure.class.clone(),
+        code: failure.code.clone(),
+        message: failure.message.clone(),
+        replay_key: replay_key.to_owned(),
+        retry_policy,
+    })
+}
+
 /// Ends the execution and names the cancellation, in that order: the error is
 /// what the trace records, and the cancelled scope is what actually stops the
 /// guest — `is_cancelled` refuses the next effect whatever a handler does with
@@ -256,6 +275,33 @@ mod tests {
         assert!(
             !cancellation.is_cancelled(),
             "a failed tool call is catchable: it must not end the execution"
+        );
+    }
+
+    #[test]
+    fn observed_failure_keeps_recorded_policy_and_replay_key_before_projection() {
+        let output =
+            ToolCallOutput::failure(policy_failure(ToolRetryStatus::Exhausted { attempts: 3 }));
+        let declared_policy = lash_core::ToolRetryPolicy::Safe {
+            max_attempts: 3,
+            base_delay_ms: 10,
+            max_delay_ms: 100,
+        };
+        let observed = observed_effect_failure(&output, "stable-effect-key", declared_policy)
+            .expect("failed tool output has typed provenance");
+        assert_eq!(observed.class, ToolFailureClass::PermissionDenied);
+        assert_eq!(observed.code, "approval_denied");
+        assert_eq!(observed.message, "approval was denied");
+        assert_eq!(observed.replay_key, "stable-effect-key");
+        assert_eq!(observed.retry_policy, declared_policy);
+        assert_eq!(
+            observed_effect_failure(
+                &ToolCallOutput::success(serde_json::json!("ok")),
+                "stable-effect-key",
+                declared_policy,
+            ),
+            None,
+            "a completed effect must not leave a failure fact"
         );
     }
 

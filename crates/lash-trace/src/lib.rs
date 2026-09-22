@@ -34,13 +34,14 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod jsonl_records;
+mod language_execution_failure;
 mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
 
 use jsonl_records::truncate_torn_tail;
 pub use jsonl_records::{JsonlTraceReadError, parse_jsonl_records};
-
+pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
@@ -1629,7 +1630,7 @@ pub enum TraceLanguageExecutionPayload {
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<String>,
-        error: String,
+        failure: TraceLanguageExecutionFailure,
     },
     BranchSelected {
         node_id: String,

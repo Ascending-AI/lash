@@ -239,9 +239,16 @@ impl RunHost {
                     *current = None;
                 }
             }
-            TraceLanguageExecutionPayload::NodeFailed { node_id, error, .. } => {
+            TraceLanguageExecutionPayload::NodeFailed {
+                node_id, failure, ..
+            } => {
                 let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
-                self.emit(node_id, RunStatus::Failed, delta, Some(error));
+                self.emit(
+                    node_id,
+                    RunStatus::Failed,
+                    delta,
+                    Some(failure.message().to_owned()),
+                );
             }
             TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => {
                 self.emit(

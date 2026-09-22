@@ -47,6 +47,63 @@ impl ExecutionHost for SlowToolHost {
 }
 
 #[derive(Default)]
+struct FailedSleepObservationHost {
+    observations: Mutex<Vec<crate::LashlangExecutionObservation>>,
+}
+
+impl ExecutionHost for FailedSleepObservationHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::Sleep(_) => Err(ExecutionHostError::new("sleep refused")),
+            other => Host.perform(other).await,
+        }
+    }
+
+    fn observe_lashlang_execution(&self, observation: crate::LashlangExecutionObservation) {
+        self.observations.lock_recover().push(observation);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn failed_vm_effect_without_tool_fact_is_a_runtime_failure() {
+    let program = compile_labeled_process_program(
+        builders::module(
+            vec![builders::process(
+                "main",
+                Vec::new(),
+                builders::block(vec![
+                    builders::labelled(
+                        builders::label("sleep", None),
+                        builders::sleep_for(builders::num(1.0)),
+                    ),
+                    builders::finish(builders::null()),
+                ]),
+            )],
+            Vec::new(),
+        ),
+        "main",
+    );
+    let host = FailedSleepObservationHost::default();
+    let mut state = State::new();
+    let error = execute_compiled(&program, &mut state, &host)
+        .await
+        .expect_err("host refuses the sleep");
+    assert_eq!(error.code(), "SleepFailed");
+    assert!(
+        host.observations
+            .lock_recover()
+            .iter()
+            .any(|observation| matches!(
+                observation,
+                crate::LashlangExecutionObservation::NodeFailed {
+                    failure: crate::LashlangExecutionFailure::Runtime { code, message },
+                    ..
+                } if code == "SleepFailed" && message.contains("sleep refused")
+            ))
+    );
+}
+
+#[derive(Default)]
 struct RecordingProcessHost {
     events: Mutex<Vec<ProcessEvent>>,
     sleeps: Mutex<Vec<Sleep>>,

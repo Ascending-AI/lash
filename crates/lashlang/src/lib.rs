@@ -110,8 +110,9 @@ pub use span::Span;
 pub const BYTECODE_FORMAT_VERSION: u32 = 18;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
-    LashlangBranchSite, LashlangExecutionCallSite, LashlangExecutionChild,
-    LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection, process_ref_key,
+    LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,
+    LashlangExecutionFailure, LashlangExecutionObservation, LashlangExecutionSite,
+    ProcessBranchSelection, process_ref_key,
 };
 pub use trigger::{
     HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, TRIGGER_MODULE_ALIAS,

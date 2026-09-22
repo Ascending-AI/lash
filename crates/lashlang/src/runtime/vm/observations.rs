@@ -1,4 +1,5 @@
 use super::*;
+use crate::{LashlangExecutionCallSite, LashlangExecutionFailure};
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn record_instruction_profile(
@@ -107,6 +108,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 
     pub(super) fn complete_lashlang_execution(&self, active: &ActiveLashlangExecutionNode) {
+        let _ = self
+            .host
+            .take_lashlang_effect_failure(&LashlangExecutionCallSite {
+                site: active.site.clone(),
+                occurrence: active.occurrence,
+            });
         self.host
             .observe_lashlang_execution(LashlangExecutionObservation::NodeCompleted {
                 site: active.site.clone(),
@@ -117,13 +124,50 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn fail_lashlang_execution(
         &self,
         active: &ActiveLashlangExecutionNode,
-        error: impl Into<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
     ) {
+        let call_site = LashlangExecutionCallSite {
+            site: active.site.clone(),
+            occurrence: active.occurrence,
+        };
+        let failure = self
+            .host
+            .take_lashlang_effect_failure(&call_site)
+            .map(LashlangExecutionFailure::Effect)
+            .unwrap_or_else(|| LashlangExecutionFailure::Runtime {
+                code: code.into(),
+                message: message.into(),
+            });
         self.host
             .observe_lashlang_execution(LashlangExecutionObservation::NodeFailed {
                 site: active.site.clone(),
                 occurrence: active.occurrence,
-                error: error.into(),
+                failure,
+            });
+    }
+
+    /// A batch shape or VM validation failure is not the failure of any one
+    /// dispatched leaf. Drop pending leaf facts before emitting this terminal.
+    pub(super) fn fail_lashlang_execution_runtime(
+        &self,
+        active: &ActiveLashlangExecutionNode,
+        error: &RuntimeError,
+    ) {
+        let _ = self
+            .host
+            .take_lashlang_effect_failure(&LashlangExecutionCallSite {
+                site: active.site.clone(),
+                occurrence: active.occurrence,
+            });
+        self.host
+            .observe_lashlang_execution(LashlangExecutionObservation::NodeFailed {
+                site: active.site.clone(),
+                occurrence: active.occurrence,
+                failure: LashlangExecutionFailure::Runtime {
+                    code: error.code().to_owned(),
+                    message: error.to_string(),
+                },
             });
     }
 

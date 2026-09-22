@@ -70,6 +70,62 @@ fn immediate_predecessor_trace_schema_28_is_refused_before_event_decode() {
 }
 
 #[test]
+fn node_failure_requires_typed_provenance_and_preserves_effect_policy() {
+    let legacy = json!({
+        "kind": "node_failed",
+        "node_id": "node-1",
+        "node_kind": "resource_operation",
+        "label": "read",
+        "occurrence": 1,
+        "error": "permission denied"
+    });
+    let refusal = serde_json::from_value::<TraceLanguageExecutionPayload>(legacy)
+        .expect_err("the former string-only node failure must be refused");
+    assert!(refusal.to_string().contains("failure"), "{refusal}");
+
+    let payload = TraceLanguageExecutionPayload::NodeFailed {
+        node_id: "node-1".to_owned(),
+        node_kind: "resource_operation".to_owned(),
+        label: "read".to_owned(),
+        occurrence: 1,
+        call_id: Some("effect-1".to_owned()),
+        failure: lash_trace::TraceLanguageExecutionFailure::Effect {
+            class: lash_sansio::ToolFailureClass::PermissionDenied,
+            code: "approval_denied".to_owned(),
+            message: "permission denied".to_owned(),
+            replay_key: "effect-1".to_owned(),
+            retry_policy: lash_sansio::ToolRetryPolicy::Safe {
+                max_attempts: 3,
+                base_delay_ms: 10,
+                max_delay_ms: 100,
+            },
+        },
+    };
+    let wire = serde_json::to_value(&payload).expect("encode typed failure");
+    assert_eq!(
+        wire["failure"],
+        json!({
+            "kind": "effect",
+            "class": "permission_denied",
+            "code": "approval_denied",
+            "message": "permission denied",
+            "replay_key": "effect-1",
+            "retry_policy": {
+                "type": "safe",
+                "max_attempts": 3,
+                "base_delay_ms": 10,
+                "max_delay_ms": 100
+            }
+        })
+    );
+    assert!(wire.get("error").is_none());
+    assert_eq!(
+        serde_json::from_value::<TraceLanguageExecutionPayload>(wire).expect("decode failure"),
+        payload
+    );
+}
+
+#[test]
 fn schema_14_trace_is_refused_before_typed_cell_failure_decode() {
     assert_eq!(
         lash_trace::TRACE_SCHEMA_VERSION,
@@ -1739,7 +1795,13 @@ fn language_execution_all_seven_payload_variants_round_trip() {
             label: "read_file".to_string(),
             occurrence: 1,
             call_id: Some("call-1".to_string()),
-            error: "failed to read file".to_string(),
+            failure: lash_trace::TraceLanguageExecutionFailure::Effect {
+                class: lash_sansio::ToolFailureClass::Io,
+                code: "read_failed".to_string(),
+                message: "failed to read file".to_string(),
+                replay_key: "call-1".to_string(),
+                retry_policy: lash_sansio::ToolRetryPolicy::Never,
+            },
         },
         TraceLanguageExecutionPayload::BranchSelected {
             node_id: "b1".to_string(),

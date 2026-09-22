@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     TraceBranchSelection, TraceLabelMetadata, TraceLanguageExecution,
-    TraceLanguageExecutionGeneration, TraceLanguageExecutionMap as LanguageExecutionMap,
+    TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
+    TraceLanguageExecutionMap as LanguageExecutionMap,
     TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRuntimeScope,
     TraceRuntimeSubject, ensure_trace_schema_version,
 };
@@ -195,7 +196,7 @@ pub enum TraceLashlangNodeObservation {
         end: DateTime<Utc>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_ms: Option<i64>,
-        error: String,
+        failure: TraceLanguageExecutionFailure,
     },
 }
 
