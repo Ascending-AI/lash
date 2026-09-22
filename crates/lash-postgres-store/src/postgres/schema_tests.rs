@@ -374,15 +374,11 @@ fn version_mismatch_refusal_derives_direction_and_catalog() {
 /// provisioning could apply (ADR 0081, FIG-3172).
 #[test]
 fn recreate_boundary_components_advertise_no_forward_migration() {
-    // A boundary two generations back: the current component's only executable
-    // arm leaves from the immediate predecessor, so an older stamp must be told
-    // there is no path rather than pointed at provisioning.
+    // The current queued-run cutover has no executable migration arm.
     let sentence = forward_migration_sentence(SCHEMA_VERSION - 2);
     assert!(
         sentence.contains(&format!(
-            "only from component {}, so component {} has no upgrade path",
-            SCHEMA_VERSION - 1,
-            SCHEMA_VERSION - 2
+            "no forward migration into component {SCHEMA_VERSION}"
         )),
         "a recreate-only source must be told there is no upgrade path: {sentence}"
     );
@@ -397,18 +393,15 @@ fn recreate_boundary_components_advertise_no_forward_migration() {
     );
 }
 
-/// The immediate predecessor's arm is real: its forward-migration sentence must
-/// name the path, and the version-mismatch refusal built from it must offer the
-/// provisioning re-open the arm can actually serve.
+/// Even the immediate predecessor is a recreate boundary at queued-run cutover.
 #[test]
-fn the_migratable_predecessor_advertises_its_forward_migration() {
+fn the_immediate_predecessor_advertises_no_forward_migration() {
     let sentence = forward_migration_sentence(SCHEMA_VERSION - 1);
     assert!(
         sentence.contains(&format!(
-            "does declare a forward migration from component {} into {SCHEMA_VERSION}",
-            SCHEMA_VERSION - 1
-        )) && sentence.contains("re-open with Lash-managed provisioning enabled"),
-        "the migratable predecessor must be told the upgrade path exists: {sentence}"
+            "no forward migration into component {SCHEMA_VERSION}"
+        )) && !sentence.contains("re-open with Lash-managed provisioning enabled"),
+        "the immediate predecessor must be told to recreate: {sentence}"
     );
 }
 

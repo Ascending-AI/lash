@@ -1,8 +1,8 @@
 //! Admission and physical-commit recovery in independently opened worker processes.
 use super::*;
 use lash_core::store::{
-    BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunProgress,
-    QueuedRunRequest, QueuedRunTerminal,
+    BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunOrigin,
+    QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal,
 };
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 
@@ -60,10 +60,12 @@ pub async fn queued_run_cold_process_driver(
             )
             .await
             .unwrap();
+        let mut expected = witness.admission.clone();
+        expected.origin = QueuedRunOrigin::Explicit;
         assert_eq!(
             serde_json::to_value(&resumed).unwrap(),
-            serde_json::to_value(&witness.admission).unwrap(),
-            "cold reopen preserves every admission field"
+            serde_json::to_value(&expected).unwrap(),
+            "cold reopen preserves admission and records explicit reentry"
         );
         if let (Some(mut commit), Some(mut receipt)) = (witness.commit, witness.receipt) {
             commit.session_execution_lease_fence = Some(lease.authority());

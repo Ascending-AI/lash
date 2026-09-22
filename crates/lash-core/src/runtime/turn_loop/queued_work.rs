@@ -349,14 +349,14 @@ impl LashRuntime {
         }
         let preparation = async {
             let opts = queued_opts.bind(admission.scope.clone())?;
+            self.defer_orphaned_turn_inputs_before_drain(
+                &store,
+                &fence,
+                &TurnId::from(admission.scope.id()),
+                &opts.scoped_effect_controller(),
+            )
+            .await?;
             if admission.members.is_none() {
-                self.defer_orphaned_turn_inputs_before_drain(
-                    &store,
-                    &fence,
-                    &TurnId::from(admission.scope.id()),
-                    &opts.scoped_effect_controller(),
-                )
-                .await?;
                 let commands_first = selected.is_some()
                     || self
                         .session_commands_precede_pending_turn_input(store.as_ref())
