@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{Span, WorkflowNodeId};
-use crate::ast::{AstPath, TypeExpr};
+use crate::ast::{AstPath, AstString, Expr, TypeExpr};
 use crate::linker::{LinkError, WorkflowLinkAnalysis};
 
 /// Version of the optional, derived workflow type-facet contract.
@@ -25,8 +25,121 @@ pub struct WorkflowTypedVariable {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowExpectedArgument {
-    pub slot: String,
+    pub slot: WorkflowSlotPath,
     pub ty: TypeExpr,
+}
+
+/// An unambiguous address for one input location inside a workflow node.
+///
+/// The serialized list is authoritative. [`Display`](std::fmt::Display) is a
+/// derived spelling for text-only host contracts; field names use JSON string
+/// quoting so they cannot collide with structural indexes or separators.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct WorkflowSlotPath(pub Vec<WorkflowSlotPathSegment>);
+
+impl WorkflowSlotPath {
+    pub fn argument(index: u32) -> Self {
+        Self(vec![WorkflowSlotPathSegment::Arg(index)])
+    }
+
+    pub fn call_argument(call: u32, argument: u32) -> Self {
+        Self(vec![
+            WorkflowSlotPathSegment::Call(call),
+            WorkflowSlotPathSegment::Arg(argument),
+        ])
+    }
+
+    pub fn push(&mut self, segment: WorkflowSlotPathSegment) {
+        self.0.push(segment);
+    }
+
+    pub fn segments(&self) -> &[WorkflowSlotPathSegment] {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for WorkflowSlotPath {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (index, segment) in self.0.iter().enumerate() {
+            match segment {
+                WorkflowSlotPathSegment::Call(call) => write!(formatter, "call[{call}]")?,
+                WorkflowSlotPathSegment::Arg(argument) => {
+                    if index != 0 {
+                        formatter.write_str(".")?;
+                    }
+                    write!(formatter, "arg[{argument}]")?;
+                }
+                WorkflowSlotPathSegment::Field(field) => {
+                    let quoted =
+                        serde_json::to_string(field.as_str()).map_err(|_| std::fmt::Error)?;
+                    write!(formatter, "[{quoted}]")?;
+                }
+                WorkflowSlotPathSegment::Index(item) => write!(formatter, "[{item}]")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One structural step in a [`WorkflowSlotPath`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowSlotPathSegment {
+    Call(u32),
+    Arg(u32),
+    Field(AstString),
+    Index(u32),
+}
+
+/// Resolves a typed slot address against the authoritative expression IR.
+///
+/// A path without a `call` segment is valid only when the expression contains
+/// exactly one receiver call. A path with a `call` segment uses depth-first IR
+/// walk order, matching facet derivation.
+pub fn workflow_slot_value<'a>(expression: &'a Expr, path: &WorkflowSlotPath) -> Option<&'a Expr> {
+    let mut segments = path.segments().iter();
+    let first = segments.next()?;
+    let mut calls = Vec::new();
+    receiver_calls(expression, &mut calls);
+    let call = match first {
+        WorkflowSlotPathSegment::Call(index) => calls.get(*index as usize).copied()?,
+        WorkflowSlotPathSegment::Arg(_) if calls.len() == 1 => calls[0],
+        _ => return None,
+    };
+    let argument_segment = match first {
+        WorkflowSlotPathSegment::Call(_) => segments.next()?,
+        WorkflowSlotPathSegment::Arg(_) => first,
+        _ => return None,
+    };
+    let WorkflowSlotPathSegment::Arg(argument) = argument_segment else {
+        return None;
+    };
+    let Expr::ReceiverCall { args, .. } = call else {
+        return None;
+    };
+    let mut value = args.get(*argument as usize)?;
+    for segment in segments {
+        value = match (segment, value) {
+            (WorkflowSlotPathSegment::Field(field), Expr::Record(entries)) => entries
+                .iter()
+                .find_map(|(name, value)| (name == field).then_some(value))?,
+            (WorkflowSlotPathSegment::Index(index), Expr::List(items) | Expr::Tuple(items)) => {
+                items.get(*index as usize)?
+            }
+            _ => return None,
+        };
+    }
+    Some(value)
+}
+
+fn receiver_calls<'a>(expression: &'a Expr, calls: &mut Vec<&'a Expr>) {
+    if matches!(expression, Expr::ReceiverCall { .. }) {
+        calls.push(expression);
+    }
+    for child in expression.children() {
+        receiver_calls(child, calls);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +148,7 @@ pub struct WorkflowTypeDiagnostic {
     pub kind: WorkflowDiagnosticKind,
     pub class: WorkflowDiagnosticClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slot: Option<String>,
+    pub slot: Option<WorkflowSlotPath>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
@@ -329,11 +442,7 @@ pub fn projected_node_type_facets(
                 node_id: id.clone(),
                 kind: WorkflowDiagnosticKind::from_link_error(&diagnostic.error),
                 class: WorkflowDiagnosticKind::from_link_error(&diagnostic.error).class(),
-                slot: diagnostic_slot(
-                    &diagnostic.error,
-                    &diagnostic.path,
-                    &facts.expected_arguments,
-                ),
+                slot: diagnostic_slot(&diagnostic.path, &facts.expected_arguments),
                 message: diagnostic.error.to_string(),
                 span: diagnostic.span,
             })
@@ -342,38 +451,13 @@ pub fn projected_node_type_facets(
 }
 
 fn diagnostic_slot(
-    error: &LinkError,
     error_path: &AstPath,
     arguments: &[crate::linker::WorkflowLinkExpectedArgument],
-) -> Option<String> {
-    if let Some(argument) = arguments
+) -> Option<WorkflowSlotPath> {
+    arguments
         .iter()
         .find(|argument| argument.path == *error_path)
-    {
-        return Some(argument.slot.clone());
-    }
-    let named = match error {
-        LinkError::IncompatibleProcessArgument { arg, .. } => Some(arg.as_ref()),
-        LinkError::UnknownObjectField { field, .. } => Some(field.as_str()),
-        _ => None,
-    };
-    if let Some(name) = named
-        && let Some(argument) = arguments.iter().find(|argument| {
-            argument.slot.ends_with(&format!(".{name}"))
-                || argument.slot.ends_with(&format!("[{name}]"))
-        })
-    {
-        return Some(argument.slot.clone());
-    }
-    matches!(
-        error,
-        LinkError::IncompatibleConstructorInput { .. }
-            | LinkError::IncompatibleOperationInput { .. }
-            | LinkError::IncompatibleExpectedLiteral { .. }
-            | LinkError::ProcessLiteralOutsideProcessSlot { .. }
-    )
-    .then(|| arguments.first().map(|argument| argument.slot.clone()))
-    .flatten()
+        .map(|argument| argument.slot.clone())
 }
 
 #[cfg(test)]

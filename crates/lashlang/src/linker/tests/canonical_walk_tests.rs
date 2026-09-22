@@ -641,7 +641,8 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
             .expected_arguments
             .iter()
             .filter(|argument| {
-                argument.slot.ends_with("arg[0].expr") && argument.ty == TypeExpr::Str
+                argument.slot.to_string().ends_with("arg[0][\"expr\"]")
+                    && argument.ty == TypeExpr::Str
             })
             .count(),
         2

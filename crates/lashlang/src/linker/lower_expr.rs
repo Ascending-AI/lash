@@ -803,6 +803,7 @@ impl<'module> Linker<'module> {
                 )?;
                 let actual_ty = binding_type(&input_binding);
                 if !self.is_type_assignable(&actual_ty, &constructor.input_ty) {
+                    self.workflow_error_path.replace(Some(path.child(1)));
                     return Err(LinkError::IncompatibleConstructorInput {
                         path: module_path_key(&module_path),
                         expected: format_type_expr(
@@ -924,8 +925,16 @@ impl<'module> Linker<'module> {
             lowered_args.push(arg);
             arg_types.push(binding_type(&binding));
         }
-        let actual_input = call_input_type(arg_types);
+        let actual_input = call_input_type(arg_types.clone());
         if !self.is_type_assignable(&actual_input, &operation_binding.input_ty) {
+            let failing_argument = arg_types.iter().enumerate().find_map(|(index, actual)| {
+                let expected = expected_call_arg_type(&operation_binding.input_ty, args.len())?;
+                (!self.is_type_assignable(actual, expected)).then_some(index)
+            });
+            if let Some(index) = failing_argument {
+                self.workflow_error_path
+                    .replace(Some(path.child(index as u32 + 1)));
+            }
             return Err(LinkError::IncompatibleOperationInput {
                 operation: operation.to_string(),
                 expected: format_type_expr(&self.resolve_type_aliases(&operation_binding.input_ty)),

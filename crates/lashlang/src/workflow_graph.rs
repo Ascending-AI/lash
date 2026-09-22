@@ -200,11 +200,10 @@ pub enum WorkflowNodeKind {
 
 /// One call or effect argument in graph order.
 ///
-/// Positional argument `N` has slot path `arg[N]`. A record argument is
-/// represented as `Named`; its field `name` has slot path `arg[N].name`.
-/// Nested record fields append `.field`, list items append `[N]`, and when a
-/// node contains more than one receiver call the prefix is `call[N].` in
-/// depth-first IR walk order. These are the same paths used by type facets.
+/// Type facets address these values with a serialized [`WorkflowSlotPath`].
+/// Its typed call, argument, field, and index segments cannot collide when a
+/// field contains punctuation. Nodes with several nested receiver calls add a
+/// call segment in depth-first IR walk order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkflowArgument {

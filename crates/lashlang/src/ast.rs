@@ -1587,6 +1587,7 @@ impl fmt::Display for TypeExpr {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TypeField {
     pub name: AstString,
     pub ty: TypeExpr,

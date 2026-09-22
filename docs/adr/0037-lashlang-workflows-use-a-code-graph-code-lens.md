@@ -49,14 +49,19 @@ computation expressions and bindings, `if` and `while` conditions, `for`
 iterables, and list-comprehension iterable and filter clauses. Call nodes store
 their receiver and positional or named arguments separately. Effect nodes store
 their exact effect kind and the same structured IR argument list. Their slot
-paths use `arg[N]`, `.field`, and `[N]`; nodes with several nested receiver
-calls add the depth-first `call[N]` prefix used by the type facets. Rendering
-consumes the IR directly and parses no expression text.
+paths are serialized lists of typed `call`, `arg`, `field`, and `index`
+segments. Nodes with several nested receiver calls add a `call` segment using
+depth-first IR walk order. A text-only host may derive paths such as
+`call[1].arg[0]["a.b"][0]`; field segments use JSON string quoting, so dots,
+brackets, quotes, and empty field names cannot collide with structural
+segments. Rendering consumes the IR directly and parses no expression text.
 
 Facet diagnostics carry an optional slot path, a closed diagnostic kind, and a
 serialized `definite` or `advisory` class. `definite` diagnostics block a save
-under ADR 0073. `TypeExpr` is closed: a host refuses an unknown variant after
-accepting the graph or facet carrier version.
+under ADR 0073. A diagnostic carries a slot only when its exact AST path
+matches a projected slot. `TypeExpr` is closed: a host refuses an unknown
+variant or an unknown field inside a variant payload after accepting the graph
+or facet carrier version.
 
 Canonical text belongs to a dialect and is derived, non-authoritative output.
 A host text edit enters through that dialect's existing fragment parser, which

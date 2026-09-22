@@ -649,6 +649,120 @@ class VersionBumpFixtureTest(unittest.TestCase):
             {"TOOL_SETTLEMENT_VERSION", "TOOL_ATTEMPT_CAPTURE_VERSION"},
         )
 
+    def test_nested_workflow_payload_changes_demand_each_carrier_bump(self) -> None:
+        """A shared nested type payload must trip both documents that embed it."""
+        surfaces = {
+            surface.constant: surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant
+            in {"WORKFLOW_GRAPH_SCHEMA_VERSION", "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"}
+        }
+        ast_path = "crates/lashlang/src/ast.rs"
+
+        def ast_symbols(constant: str) -> tuple[str, ...]:
+            return next(
+                guard.symbols
+                for guard in surfaces[constant].guards
+                if guard.kind == "rust_items" and guard.paths == (ast_path,)
+            )
+
+        graph_symbols = ast_symbols("WORKFLOW_GRAPH_SCHEMA_VERSION")
+        facet_symbols = ast_symbols("WORKFLOW_TYPE_FACET_SCHEMA_VERSION")
+        all_symbols = set(graph_symbols) | set(facet_symbols)
+
+        def toml_strings(symbols: tuple[str, ...]) -> str:
+            return ", ".join(f'"{symbol}"' for symbol in symbols)
+
+        config = f"""
+        [[surface]]
+        constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
+        constant_path = "src/graph.rs"
+        description = "fixture graph carrier"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/ast.rs"]
+        symbols = [{toml_strings(graph_symbols)}]
+
+        [[surface]]
+        constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
+        constant_path = "src/facets.rs"
+        description = "fixture facet carrier"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/ast.rs"]
+        symbols = [{toml_strings(facet_symbols)}]
+        """
+        fixture = FixtureRepository(config)
+        self.addCleanup(fixture.close)
+        fixture.write_file(
+            "src/graph.rs", "pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 11;\n"
+        )
+        fixture.write_file(
+            "src/facets.rs",
+            "pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 3;\n",
+        )
+        declarations = []
+        for symbol in sorted(all_symbols):
+            if symbol == "TypeField":
+                declarations.append("pub struct TypeField { pub optional: bool }")
+            else:
+                declarations.append(f"pub struct {symbol};")
+        base_source = "\n".join(declarations) + "\n"
+        fixture.write_file("src/ast.rs", base_source)
+        base = fixture.commit("workflow carrier base")
+        fixture.write_file(
+            "src/ast.rs",
+            base_source.replace(
+                "pub struct TypeField { pub optional: bool }",
+                "pub struct TypeField { pub optional: bool, pub future: bool }",
+            ),
+        )
+        head = fixture.commit("change nested TypeField without carrier bumps")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(
+            {failure.surface.constant for failure in result.failures},
+            {"WORKFLOW_GRAPH_SCHEMA_VERSION", "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"},
+        )
+
+    def test_rust_impl_guard_detects_custom_serializer_changes(self) -> None:
+        config = """
+        [[surface]]
+        constant = "WIRE_VERSION"
+        constant_path = "src/lib.rs"
+        description = "fixture custom serializer"
+
+        [[surface.guard]]
+        kind = "rust_impls"
+        paths = ["src/wire.rs"]
+        symbols = ["Serialize for WireValue"]
+        """
+        fixture = FixtureRepository(config)
+        self.addCleanup(fixture.close)
+        fixture.write_file("src/lib.rs", "pub const WIRE_VERSION: u32 = 1;\n")
+        fixture.write_file(
+            "src/wire.rs",
+            "impl Serialize for WireValue { fn serialize(&self) { write(1); } }\n",
+        )
+        base = fixture.commit("custom serializer base")
+        fixture.write_file(
+            "src/wire.rs",
+            "impl Serialize for WireValue { fn serialize(&self) { write(2); } }\n",
+        )
+        head = fixture.commit("change custom serializer without version bump")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(
+            {failure.surface.constant for failure in result.failures},
+            {"WIRE_VERSION"},
+        )
+
     def test_the_vm_abi_surface_covers_every_ability_leaf_host_rs_declares(
         self,
     ) -> None:

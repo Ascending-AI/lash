@@ -228,9 +228,9 @@ impl<'module> Linker<'module> {
             };
             for (argument_index, argument) in args.iter().enumerate() {
                 let slot = if multiple_calls {
-                    format!("call[{call_index}].arg[{argument_index}]")
+                    crate::WorkflowSlotPath::call_argument(call_index as u32, argument_index as u32)
                 } else {
-                    format!("arg[{argument_index}]")
+                    crate::WorkflowSlotPath::argument(argument_index as u32)
                 };
                 collect_expected_slots(
                     argument,
@@ -319,7 +319,7 @@ pub(super) fn recover_workflow_binding(expr: &Expr, scope: &mut Scope) {
 fn collect_expected_slots(
     expr: &Expr,
     path: &AstPath,
-    slot: String,
+    slot: crate::WorkflowSlotPath,
     expected: &BTreeMap<AstPath, TypeExpr>,
     arguments: &mut Vec<WorkflowLinkExpectedArgument>,
 ) {
@@ -336,10 +336,12 @@ fn collect_expected_slots(
         }
         Expr::Record(entries) => {
             for (index, (name, value)) in entries.iter().enumerate() {
+                let mut field_slot = slot.clone();
+                field_slot.push(crate::WorkflowSlotPathSegment::Field(name.clone()));
                 collect_expected_slots(
                     value,
                     &path.child(index as u32),
-                    format!("{slot}.{}", name.as_str()),
+                    field_slot,
                     expected,
                     arguments,
                 );
@@ -347,10 +349,12 @@ fn collect_expected_slots(
         }
         Expr::List(items) | Expr::Tuple(items) => {
             for (index, item) in items.iter().enumerate() {
+                let mut item_slot = slot.clone();
+                item_slot.push(crate::WorkflowSlotPathSegment::Index(index as u32));
                 collect_expected_slots(
                     item,
                     &path.child(index as u32),
-                    format!("{slot}[{index}]"),
+                    item_slot,
                     expected,
                     arguments,
                 );

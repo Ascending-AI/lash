@@ -79,7 +79,7 @@ pub(crate) struct WorkflowLinkDiagnostic {
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkflowLinkExpectedArgument {
-    pub(crate) slot: String,
+    pub(crate) slot: crate::WorkflowSlotPath,
     pub(crate) ty: TypeExpr,
     pub(crate) path: AstPath,
 }

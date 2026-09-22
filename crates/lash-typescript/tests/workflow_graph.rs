@@ -20,10 +20,11 @@ use lashlang::{
     LashlangAbilities, LashlangExecutionSite, LashlangHostCatalog, LashlangHostEnvironment,
     TypeExpr, TypeField, VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION,
     WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument, WorkflowContainer, WorkflowDeclaration,
-    WorkflowDiagnosticClass, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowGraph,
-    WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSubgraph, WorkflowTypeDiagnostic,
-    node_id_for_execution_site,
+    WorkflowDiagnosticClass, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind,
+    WorkflowExpectedArgument, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets,
+    WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTypeDiagnostic,
+    node_id_for_execution_site, workflow_call_to_ir, workflow_slot_value,
 };
 
 /// The one process a fixture lifts.
@@ -239,6 +240,32 @@ fn workflow_graph_ir_json_golden_is_exact() {
 }
 
 #[test]
+fn workflow_type_facet_slot_json_golden_is_exact() {
+    let argument = WorkflowExpectedArgument {
+        slot: WorkflowSlotPath(vec![
+            WorkflowSlotPathSegment::Call(1),
+            WorkflowSlotPathSegment::Arg(0),
+            WorkflowSlotPathSegment::Field("a.b".into()),
+            WorkflowSlotPathSegment::Index(2),
+        ]),
+        ty: TypeExpr::Str,
+    };
+
+    assert_eq!(
+        serde_json::to_value(argument).expect("facet argument serializes"),
+        serde_json::json!({
+            "slot": [
+                { "call": 1 },
+                { "arg": 0 },
+                { "field": "a.b" },
+                { "index": 2 }
+            ],
+            "ty": "Str"
+        })
+    );
+}
+
+#[test]
 fn workflow_graph_refuses_unknown_type_expr_variant() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
@@ -273,6 +300,50 @@ fn facet_reader_refuses_unknown_type_expr_variant() {
     let error = serde_json::from_value::<WorkflowNodeTypeFacets>(value)
         .expect_err("an unknown TypeExpr variant must be refused");
     assert!(error.to_string().contains("unknown variant `FutureType`"));
+}
+
+#[test]
+fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
+    let graph = WorkflowGraph {
+        schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        facet_schema_version: None,
+        declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
+            name: "Record".into(),
+            ty: TypeExpr::Object(vec![TypeField {
+                name: "value".into(),
+                ty: TypeExpr::Str,
+                optional: false,
+            }]),
+        })],
+        main: WorkflowSubgraph::default(),
+    };
+    let mut value = serde_json::to_value(graph).expect("graph serializes");
+    value["declarations"][0]["ty"]["Object"][0]["future"] = serde_json::json!(true);
+
+    let error = serde_json::from_value::<WorkflowGraph>(value)
+        .expect_err("an unknown TypeField member must be refused inside the graph carrier");
+    assert!(error.to_string().contains("unknown field `future`"));
+}
+
+#[test]
+fn facet_reader_refuses_unknown_fields_inside_type_expr_payloads() {
+    let facets = WorkflowNodeTypeFacets {
+        available_variables: vec![lashlang::WorkflowTypedVariable {
+            name: "value".to_string(),
+            ty: TypeExpr::Object(vec![TypeField {
+                name: "field".into(),
+                ty: TypeExpr::Str,
+                optional: false,
+            }]),
+        }],
+        ..WorkflowNodeTypeFacets::default()
+    };
+    let mut value = serde_json::to_value(facets).expect("facets serialize");
+    value["available_variables"][0]["ty"]["Object"][0]["future"] = serde_json::json!(true);
+
+    let error = serde_json::from_value::<WorkflowNodeTypeFacets>(value)
+        .expect_err("an unknown TypeField member must be refused inside the facet carrier");
+    assert!(error.to_string().contains("unknown field `future`"));
 }
 
 #[test]
@@ -1120,7 +1191,153 @@ fn slot_path_environment() -> LashlangHostEnvironment {
             TypeExpr::Str,
         )
         .expect("compose operation is unique");
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "address",
+            "address",
+            TypeExpr::Object(vec![
+                TypeField {
+                    name: "a.b".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                },
+                TypeField {
+                    name: "a".into(),
+                    ty: TypeExpr::Object(vec![TypeField {
+                        name: "b".into(),
+                        ty: TypeExpr::Str,
+                        optional: false,
+                    }]),
+                    optional: false,
+                },
+                TypeField {
+                    name: "items[0]".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                },
+                TypeField {
+                    name: "items".into(),
+                    ty: TypeExpr::List(Box::new(TypeExpr::Str)),
+                    optional: false,
+                },
+                TypeField {
+                    name: "\"".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                },
+                TypeField {
+                    name: "".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                },
+            ]),
+            TypeExpr::Str,
+        )
+        .expect("address operation is unique");
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "pair_text",
+            "pair_text",
+            TypeExpr::Object(vec![
+                TypeField {
+                    name: "first".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                },
+                TypeField {
+                    name: "second".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                },
+            ]),
+            TypeExpr::Str,
+        )
+        .expect("pair-text operation is unique");
     LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
+}
+
+#[test]
+fn facet_slot_paths_are_injective_for_hostile_record_keys() {
+    let source = r#"await tools.address({
+  "a.b": "literal dot",
+  a: { b: "nested" },
+  "items[0]": "literal brackets",
+  items: ["indexed"],
+  "\"": "quote",
+  "": "empty"
+});
+"#;
+    let graph = workflow_graph_from_source_with_facets(source, Some(&slot_path_environment()))
+        .expect("hostile record keys project with facets");
+    let arguments = &graph.main.nodes[0]
+        .type_facets
+        .as_ref()
+        .expect("call has facets")
+        .expected_arguments;
+    let slots = arguments
+        .iter()
+        .map(|argument| argument.slot.clone())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(arguments.len(), 9, "fixture covers every nested location");
+    assert_eq!(
+        slots.len(),
+        arguments.len(),
+        "dots, brackets, quotes, empty keys, and nested records need unique addresses"
+    );
+    assert!(slots.contains(&WorkflowSlotPath(vec![
+        WorkflowSlotPathSegment::Arg(0),
+        WorkflowSlotPathSegment::Field("a.b".into()),
+    ])));
+    assert!(slots.contains(&WorkflowSlotPath(vec![
+        WorkflowSlotPathSegment::Arg(0),
+        WorkflowSlotPathSegment::Field("a".into()),
+        WorkflowSlotPathSegment::Field("b".into()),
+    ])));
+    assert_eq!(
+        serde_json::to_value(WorkflowSlotPath(vec![
+            WorkflowSlotPathSegment::Call(1),
+            WorkflowSlotPathSegment::Arg(0),
+            WorkflowSlotPathSegment::Field("a.b".into()),
+            WorkflowSlotPathSegment::Index(2),
+        ]))
+        .expect("slot path serializes"),
+        serde_json::json!([
+            { "call": 1 },
+            { "arg": 0 },
+            { "field": "a.b" },
+            { "index": 2 }
+        ])
+    );
+
+    let WorkflowNodeKind::Call {
+        receiver,
+        operation,
+        arguments: call_arguments,
+        result_steps,
+        ..
+    } = &graph.main.nodes[0].kind
+    else {
+        panic!("fixture projects as a call node");
+    };
+    let expression = workflow_call_to_ir(receiver, operation, call_arguments, result_steps);
+    let resolved = arguments
+        .iter()
+        .map(|argument| {
+            workflow_slot_value(&expression, &argument.slot)
+                .map(|value| std::ptr::from_ref(value).addr())
+                .expect("every projected slot resolves")
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        resolved.len(),
+        arguments.len(),
+        "each slot resolves to one distinct IR location"
+    );
 }
 
 #[test]
@@ -1144,7 +1361,7 @@ finish(second);
         first
             .expected_arguments
             .iter()
-            .any(|slot| slot.slot == "arg[0]")
+            .any(|slot| slot.slot.to_string() == "arg[0]")
     );
 
     let second = graph.main.nodes[1]
@@ -1154,9 +1371,14 @@ finish(second);
     let slots = second
         .expected_arguments
         .iter()
-        .map(|slot| slot.slot.as_str())
+        .map(|slot| slot.slot.to_string())
         .collect::<BTreeSet<_>>();
-    for expected in ["arg[0]", "arg[0].query", "arg[0].items", "arg[0].items[0]"] {
+    for expected in [
+        "arg[0]",
+        "arg[0][\"query\"]",
+        "arg[0][\"items\"]",
+        "arg[0][\"items\"][0]",
+    ] {
         assert!(
             slots.contains(expected),
             "missing slot {expected}: {slots:?}"
@@ -1170,9 +1392,13 @@ finish(second);
     let nested_slots = nested
         .expected_arguments
         .iter()
-        .map(|slot| slot.slot.as_str())
+        .map(|slot| slot.slot.to_string())
         .collect::<BTreeSet<_>>();
-    for expected in ["call[0].arg[0]", "call[0].arg[0].text", "call[1].arg[0]"] {
+    for expected in [
+        "call[0].arg[0]",
+        "call[0].arg[0][\"text\"]",
+        "call[1].arg[0]",
+    ] {
         assert!(
             nested_slots.contains(expected),
             "missing nested slot {expected}: {nested_slots:?}"
@@ -1199,7 +1425,60 @@ fn type_diagnostic_carries_slot_kind_and_class() {
         WorkflowDiagnosticKind::IncompatibleExpectedLiteral
     );
     assert_eq!(diagnostic.class, WorkflowDiagnosticClass::Definite);
-    assert_eq!(diagnostic.slot.as_deref(), Some("arg[0].query"));
+    assert_eq!(
+        diagnostic.slot.as_ref().map(ToString::to_string).as_deref(),
+        Some("arg[0][\"query\"]")
+    );
+}
+
+#[test]
+fn nested_call_diagnostic_identifies_the_inner_failing_argument() {
+    let graph = workflow_graph_from_source_with_facets(
+        "await tools.shape_text({ text: await tools.echo(42) });\n",
+        Some(&slot_path_environment()),
+    )
+    .expect("a nested mismatch remains projectable");
+    let diagnostic = graph.main.nodes[0]
+        .type_facets
+        .as_ref()
+        .expect("call has facets")
+        .diagnostics
+        .first()
+        .expect("inner mismatch produces a diagnostic");
+
+    assert_eq!(
+        diagnostic.slot.as_ref().map(ToString::to_string).as_deref(),
+        Some("call[1].arg[0]")
+    );
+}
+
+#[test]
+fn multi_call_diagnostic_identifies_only_the_later_failing_call() {
+    let graph = workflow_graph_from_source_with_facets(
+        concat!(
+            "await tools.pair_text({ ",
+            "first: await tools.echo(\"ok\"), ",
+            "second: await tools.echo(42) ",
+            "});\n"
+        ),
+        Some(&slot_path_environment()),
+    )
+    .expect("a later nested mismatch remains projectable");
+    let diagnostics = &graph.main.nodes[0]
+        .type_facets
+        .as_ref()
+        .expect("call has facets")
+        .diagnostics;
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0]
+            .slot
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("call[2].arg[0]")
+    );
 }
 
 #[test]
@@ -1239,12 +1518,9 @@ finish(1);
             .iter()
             .any(|variable| variable.name == "query")
     );
-    assert!(
-        call_facets
-            .expected_arguments
-            .iter()
-            .any(|argument| { argument.slot == "arg[0].query" && argument.ty == TypeExpr::Str })
-    );
+    assert!(call_facets.expected_arguments.iter().any(|argument| {
+        argument.slot.to_string() == "arg[0][\"query\"]" && argument.ty == TypeExpr::Str
+    }));
 
     let loop_facets = process.body.nodes[2]
         .type_facets

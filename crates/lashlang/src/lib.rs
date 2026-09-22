@@ -128,11 +128,12 @@ pub use workflow_graph::{
     WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
     WorkflowExpectedArgument, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode,
     WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets,
-    WorkflowProcess, WorkflowResultStep, WorkflowSubgraph, WorkflowTerminalKind,
-    WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path, execution_sites,
-    node_id_for_execution_site, projected_node_type_facets,
+    WorkflowProcess, WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment,
+    WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable,
+    child_path, execution_sites, node_id_for_execution_site, projected_node_type_facets,
     runtime_execution_site_for_workflow_site, workflow_call_from_ir, workflow_call_to_ir,
     workflow_effect_from_ir, workflow_effect_to_ir, workflow_slot_accepts_value,
+    workflow_slot_value,
 };
 
 /// Internals the workflow-graph projector needs.

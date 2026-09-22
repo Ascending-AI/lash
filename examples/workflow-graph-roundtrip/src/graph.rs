@@ -648,7 +648,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                     .expected_arguments
                     .iter()
                     .map(|argument| ExpectedArgumentType {
-                        slot: argument.slot.clone(),
+                        slot: argument.slot.to_string(),
                         expected_type: format_type_expr(&argument.ty),
                     })
                     .collect()
@@ -665,7 +665,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                         node_id: diagnostic.node_id.to_string(),
                         kind: diagnostic_kind_text(diagnostic.kind),
                         class: diagnostic_class_text(diagnostic.class),
-                        slot: diagnostic.slot.clone(),
+                        slot: diagnostic.slot.as_ref().map(ToString::to_string),
                         message: diagnostic.message.clone(),
                         span: diagnostic.span,
                     })
