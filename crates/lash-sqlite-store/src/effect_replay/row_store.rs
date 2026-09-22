@@ -1522,10 +1522,10 @@ pub(super) fn minting_child_cancel_decided(
             params![minting.scope_id.as_str(), minting.replay_key.as_str()],
             |row| {
                 let group_key: Option<String> = row.get(2)?;
-                Ok(group_key
+                group_key
                     .as_deref()
                     .map(|group_key| decode_child_arbitration(row, group_key))
-                    .transpose()?)
+                    .transpose()
             },
         )
         .optional()?

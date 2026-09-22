@@ -1,4 +1,4 @@
--- lash-postgres-store teardown, component version 109.
+-- lash-postgres-store teardown, component version 110.
 --
 -- Generated artifact. These bytes are exactly the DDL a host applies to drop
 -- everything this component owns at the reject-and-recreate boundary;
