@@ -15,6 +15,7 @@
 
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::workflow_graph_from_program;
+use lashlang::testing::ast_builders as b;
 use lashlang::testing::harness::{
     EchoHost, compile_labeled_program, compiled_execution_sites, link_labeled,
 };
@@ -589,6 +590,82 @@ while (false) {
         ]
     );
     assert_eq!(graph, compiler);
+}
+
+#[test]
+fn reassigned_conditional_resource_sites_are_projected() {
+    let source = r#"let selected = 0;
+selected = true
+  ? await tools.echo({ value: "then" })
+  : await tools.err({ value: "else" });
+finish(selected);
+"#;
+    let linked = link_labeled(parse_program(source));
+    let compiled = compile_labeled_program(linked.program().clone());
+    let graph = workflow_graph_from_program(linked.program());
+    let graph_ids = graph
+        .nodes()
+        .map(|node| node.id.to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    for site in compiled_execution_sites(&compiled) {
+        assert!(
+            graph_ids.contains(&site.node_id),
+            "runtime site must name a projected graph node: {site:?}"
+        );
+    }
+
+    let resource_labels = graph
+        .nodes()
+        .flat_map(|node| node.execution_sites.iter())
+        .filter(|site| site.kind == "resource_operation")
+        .map(|site| site.label.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        resource_labels,
+        std::collections::BTreeSet::from(["echo", "err"]),
+        "both conditional arms must be present in the projected graph"
+    );
+}
+
+#[test]
+fn direct_ir_process_sites_are_children_of_the_process_root() {
+    let program = b::module(
+        vec![b::process(
+            "direct",
+            Vec::new(),
+            b::finish(b::module_call(
+                &["tools"],
+                "echo",
+                vec![b::record(vec![("value", b::string("done"))])],
+            )),
+        )],
+        Vec::new(),
+    );
+    let linked = link_labeled(program);
+    let compiled = lashlang::compile_linked_process(&linked, "direct")
+        .expect("direct IR process should compile");
+    let graph = workflow_graph_from_program(linked.program());
+    let process = graph.process("direct").expect("projected process");
+    let graph_ids = graph
+        .nodes()
+        .map(|node| node.id.to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for site in compiled_execution_sites(&compiled) {
+        assert!(
+            graph_ids.contains(&site.node_id),
+            "runtime site must name a projected graph node: {site:?}"
+        );
+        assert_ne!(
+            site.node_id,
+            process.id.as_str(),
+            "the process root is a non-executable container"
+        );
+        assert!(
+            !site.workflow_site.path.is_empty(),
+            "an executable process site must have a child path"
+        );
+    }
 }
 
 fn descriptor_pairs(compiled: &lashlang::CompiledProgram) -> Vec<(String, String)> {

@@ -1460,16 +1460,15 @@ fn existing_execution_site_ids_are_unchanged() {
         compiled_site_descriptors(&historical),
         "only the recorded execution context may differ"
     );
-    // Re-pinned by FIG-2999: the fixture's `wake result` statement went with
-    // the retired special forms. The resource operation ahead of it keeps its
-    // id, which is the stability this pin is about; the terminal behind it sat
-    // at a statement index the deleted `wake` used to occupy, so its id moved
-    // with the program, not with the id scheme.
+    // Re-pinned by FIG-3460 because the empty path is now reserved for the
+    // non-executable process container. Direct process bodies begin at `[0]`,
+    // so both executable child ids move together while remaining independent
+    // of the recorded module and process context above.
     assert_eq!(
         execution_site_ids(&historical),
         [
-            "node:8809e666597048f13b47b03e",
-            "node:62755d33fb8029e763a0e290",
+            "node:20b7fff7062b8c5ed89e1c96",
+            "node:20adcad7b99b68a910628f1a",
         ]
     );
 }

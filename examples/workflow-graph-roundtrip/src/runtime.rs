@@ -4,13 +4,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
-use lash::rlm::lang::{
-    AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-    LashlangAbilities, LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment,
-    LashlangLanguageFeatures, LinkedModule, OperationContract, ResourceOperation,
-    ResourceOperationBatchResult, ResourceOperationResult, Sleep, State, Value, WorkflowGraph,
-    compile_linked_process, from_json,
+use lash::rlm::{
+    LanguageTraceHost,
+    lang::{
+        AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+        LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
+        LinkedModule, OperationContract, ResourceOperation, ResourceOperationBatchResult,
+        ResourceOperationResult, Sleep, State, Value, WorkflowGraph, compile_linked_process,
+        from_json,
+    },
 };
+use lash::tracing::TraceLanguageExecutionPayload;
 use tokio::sync::mpsc;
 
 use crate::{DisplayDelta, DisplayState, RunEvent, RunStatus};
@@ -60,12 +64,15 @@ impl PreparedRun {
     }
 
     pub(crate) async fn execute(self, sender: mpsc::Sender<RunEvent>, timing: RunTiming) {
-        let host = RunHost::new(sender, self.run_id, self.workflow_version, timing);
+        let host = LanguageTraceHost::new(
+            RunHost::new(sender, self.run_id, self.workflow_version, timing),
+            RunHost::project_language_trace,
+        );
         let environment = ExecutionEnvironment::new(&host).process();
         let result =
             lash::rlm::lang::execute(&self.compiled, &mut State::new(), &environment).await;
         if let Err(error) = result {
-            host.emit_current_failure(error.to_string());
+            host.host().emit_current_failure(error.to_string());
         }
     }
 }
@@ -217,6 +224,39 @@ impl RunHost {
         tokio::time::sleep(requested.min(self.timing.sleep_cap)).await;
         Ok(AbilityResult::Value(Value::Null))
     }
+
+    fn project_language_trace(&self, payload: TraceLanguageExecutionPayload) {
+        match payload {
+            TraceLanguageExecutionPayload::NodeStarted { node_id, .. } => {
+                *self.current_node.lock_recover() = Some(node_id.clone());
+                self.emit(node_id, RunStatus::Started, DisplayDelta::default(), None);
+            }
+            TraceLanguageExecutionPayload::NodeCompleted { node_id, .. } => {
+                let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
+                self.emit(node_id.clone(), RunStatus::Succeeded, delta, None);
+                let mut current = self.current_node.lock_recover();
+                if current.as_deref() == Some(node_id.as_str()) {
+                    *current = None;
+                }
+            }
+            TraceLanguageExecutionPayload::NodeFailed { node_id, error, .. } => {
+                let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
+                self.emit(node_id, RunStatus::Failed, delta, Some(error));
+            }
+            TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => {
+                self.emit(
+                    node_id.clone(),
+                    RunStatus::Started,
+                    DisplayDelta::default(),
+                    None,
+                );
+                self.emit(node_id, RunStatus::Succeeded, DisplayDelta::default(), None);
+            }
+            TraceLanguageExecutionPayload::ChildStarted { .. }
+            | TraceLanguageExecutionPayload::ExecutionStarted { .. }
+            | TraceLanguageExecutionPayload::ExecutionFinished { .. } => {}
+        }
+    }
 }
 
 impl ExecutionHost for RunHost {
@@ -250,40 +290,6 @@ impl ExecutionHost for RunHost {
             _ => Err(ExecutionHostError::new(
                 "the toy workflow host does not support this ability",
             )),
-        }
-    }
-
-    fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
-        match observation {
-            LashlangExecutionObservation::NodeStarted { site, .. } => {
-                let node_id = site.node_id;
-                *self.current_node.lock_recover() = Some(node_id.clone());
-                self.emit(node_id, RunStatus::Started, DisplayDelta::default(), None);
-            }
-            LashlangExecutionObservation::NodeCompleted { site, .. } => {
-                let node_id = site.node_id;
-                let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
-                self.emit(node_id.clone(), RunStatus::Succeeded, delta, None);
-                let mut current = self.current_node.lock_recover();
-                if current.as_deref() == Some(node_id.as_str()) {
-                    *current = None;
-                }
-            }
-            LashlangExecutionObservation::NodeFailed { site, error, .. } => {
-                let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
-                self.emit(site.node_id, RunStatus::Failed, delta, Some(error));
-            }
-            LashlangExecutionObservation::BranchSelected { site, .. } => {
-                let node_id = site.node_id;
-                self.emit(
-                    node_id.clone(),
-                    RunStatus::Started,
-                    DisplayDelta::default(),
-                    None,
-                );
-                self.emit(node_id, RunStatus::Succeeded, DisplayDelta::default(), None);
-            }
-            LashlangExecutionObservation::ChildStarted { .. } => {}
         }
     }
 }

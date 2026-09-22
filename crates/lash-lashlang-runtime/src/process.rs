@@ -71,11 +71,13 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// hand over, so the boundary is a version rather than a defaulted field — a
 /// defaulted empty ledger would let the successor incorporate the same
 /// settlement twice and double-charge its spend.
+/// v14 replaces runtime occurrence-counter keys with the shared workflow node
+/// identity and reserves the process root for the process declaration.
 /// v6 carries run-local child possession across execution segments. A segment
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 13;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 14;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -1436,6 +1438,9 @@ impl LashlangProcessExecutionTrace {
     }
 
     fn record_resource_call(&self, call_site: &lashlang::LashlangExecutionCallSite, call_id: &str) {
+        if self.sink.is_none() {
+            return;
+        }
         let key = (call_site.site.node_id.clone(), call_site.occurrence);
         self.resource_call_ids
             .lock_recover()

@@ -548,7 +548,7 @@ export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
   main: WorkflowSubgraph;
-  schema_version: 13;
+  schema_version: 14;
   /**
    * Content identity of the projected definition.
    *
@@ -594,7 +594,7 @@ export interface WorkflowNode {
   type_facets?: WorkflowNodeTypeFacets | null;
 }
 /**
- * Stable source-level location carried by runtime sites for workflow-graph joins.
+ * Stable source-level location of one runtime site under a workflow node.
  */
 export interface WorkflowExecutionSite {
   kind: string;

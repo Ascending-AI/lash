@@ -1,0 +1,56 @@
+{
+  "version": 12,
+  "vm": {
+    "format_version": 16,
+    "reference_semantics": false,
+    "instruction_pointer": 4,
+    "active_function": null,
+    "operand_stack": [
+      {
+        "kind": "string",
+        "value": "predecessor"
+      }
+    ],
+    "pending_tools": {},
+    "execution_nonce": 0,
+    "last_value": {
+      "kind": "unset"
+    },
+    "slots": [
+      {
+        "kind": "unset"
+      }
+    ],
+    "globals": {
+      "kind": "record",
+      "value": []
+    },
+    "iterator_stack": [],
+    "frame_stack": [],
+    "handler_stack": [],
+    "finally_stack": [],
+    "occurrence_counters": {
+      "resource_operation:f5157b6682a34e8b5f1fccdc": 1
+    },
+    "mode": "Process",
+    "profile": null,
+    "pending_error_span": null,
+    "instructions_executed": 4,
+    "active_execution_elapsed": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "heap": {
+      "next_id": 2,
+      "allocation_counter": 1,
+      "live_logical_bytes": 0,
+      "size_schedule_version": 2,
+      "objects": []
+    }
+  },
+  "sleep_sequence": 0,
+  "event_sequence": 0,
+  "signal_wait_ordinals": {},
+  "started_process_ids": [],
+  "child_max_attempts": 5
+}

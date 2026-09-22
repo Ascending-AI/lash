@@ -10,6 +10,7 @@ use super::{
     process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
     resolve_child_max_attempts, validate_lashlang_program_hash,
 };
+use lash_sansio::sync::MutexExt;
 
 /// `finish null`
 fn finish_null() -> lashlang::Program {
@@ -54,6 +55,58 @@ fn process_trace_session_attribution_comes_only_from_a_session_originator() {
         Some(lash_sansio::SessionId::from("actual-session"))
     );
 }
+
+#[test]
+fn untraced_completed_resource_calls_retain_no_correlation_state() {
+    let hash = lashlang::ContentHash::new("untraced-resource-correlation");
+    let trace = LashlangProcessExecutionTrace::new(
+        None,
+        lash_trace::TraceContext::default(),
+        LashlangProcessTraceIdentity {
+            session_id: None,
+            process_id: lash_core::ProcessId::from("process"),
+            source_identity: "source-identity".to_string(),
+            module_ref: lashlang::ModuleRef::new(&hash),
+            process_ref: lashlang::ProcessRef::new(hash, 0),
+            process_name: "main".to_string(),
+            restate_invocation_id: None,
+        },
+    );
+    assert!(trace.sink.is_none(), "the witness must run without tracing");
+
+    for occurrence in 1..=8 {
+        let site = lashlang::LashlangExecutionSite {
+            node_id: "node:resource".to_string(),
+            node_kind: lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND.to_string(),
+            label: "echo".to_string(),
+            branch: None,
+            workflow_site: lashlang::WorkflowExecutionSite::new(
+                "main",
+                [0],
+                lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND,
+                "echo",
+            ),
+        };
+        trace.emit_observation(lashlang::LashlangExecutionObservation::NodeStarted {
+            site: site.clone(),
+            occurrence,
+        });
+        trace.record_resource_call(
+            &lashlang::LashlangExecutionCallSite {
+                site: site.clone(),
+                occurrence,
+            },
+            &format!("call-{occurrence}"),
+        );
+        trace.emit_observation(lashlang::LashlangExecutionObservation::NodeCompleted {
+            site,
+            occurrence,
+        });
+    }
+
+    assert!(trace.resource_call_ids.lock_recover().is_empty());
+    assert!(trace.pending_resource_starts.lock_recover().is_empty());
+}
 use std::sync::atomic::Ordering;
 
 const UNVERSIONED_SEGMENT_STATE: &[u8] =
@@ -62,6 +115,11 @@ const VM_V10_SEGMENT_STATE: &[u8] =
     include_bytes!("../fixtures/lashlang_segment_state_vm_v10.json");
 const BYTECODE_V17_PARKED_LOOP: &[u8] =
     include_bytes!("../fixtures/lashlang_bytecode_v17_parked_loop.json");
+// Captured by the real predecessor writer at
+// f0bdb98f6567e94d41b28a7404a8920e2f9966eb after one observed `tools.echo`
+// effect parked. Only nondeterministic elapsed time and nonce were normalized.
+const SEGMENT_V12_PARKED_OLD_IDS: &[u8] =
+    include_bytes!("../fixtures/lashlang_segment_v12_parked_old_ids.json");
 
 struct SegmentFixtureHost;
 
@@ -394,42 +452,15 @@ fn durable_exhaustion_has_a_typed_process_failure_surface() {
 
 #[test]
 fn predecessor_segment_with_old_node_id_occurrence_counters_is_refused() {
-    let program = lashlang::compile_ast(&finish_null()).expect("compile predecessor program");
-    let mut state = lashlang::State::new();
-    let host = SegmentFixtureHost;
-    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
-    let mut vm = lashlang::Vm::from_state(&program, &mut state, &environment)
-        .expect("construct predecessor VM");
-    let mut continuation = vm.suspend().expect("capture predecessor VM continuation");
-    continuation
-        .occurrence_counters
-        .insert("resource_operation:old-node-id".to_string(), 7);
-    let segment_state = LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: continuation,
-        ordinals: ReplayOrdinalsState {
-            sleep_sequence: 0,
-            event_sequence: 0,
-            signal_wait_ordinals: Default::default(),
-        },
-        started_process_ids: Vec::new(),
-        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
-        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
-    };
-    let mut wire = serde_json::to_value(segment_state).expect("serialize predecessor writer");
-    wire.as_object_mut()
-        .expect("segment state is a JSON object")
-        .insert(
-            "version".to_string(),
-            serde_json::json!(LASHLANG_SEGMENT_STATE_VERSION - 1),
-        );
+    let wire: serde_json::Value = serde_json::from_slice(SEGMENT_V12_PARKED_OLD_IDS)
+        .expect("the real v12 predecessor segment is JSON");
+    assert_eq!(wire["version"], 12, "the fixture must remain literal v12");
     assert_eq!(
-        wire["vm"]["occurrence_counters"]["resource_operation:old-node-id"], 7,
-        "the predecessor witness must carry a counter keyed by the retired node-id family"
+        wire["vm"]["occurrence_counters"]["resource_operation:f5157b6682a34e8b5f1fccdc"], 1,
+        "the predecessor bytes must retain their real old-family occurrence counter"
     );
-    let encoded = serde_json::to_vec(&wire).expect("serialize predecessor");
 
-    let Err(error) = decode_lashlang_segment_state(&encoded) else {
+    let Err(error) = decode_lashlang_segment_state(SEGMENT_V12_PARKED_OLD_IDS) else {
         panic!("an old-id handover must not decode against the new node-id generation");
     };
     assert!(
@@ -438,7 +469,7 @@ fn predecessor_segment_with_old_node_id_occurrence_counters_is_refused() {
             LashlangSegmentStateError::VersionMismatch {
                 expected: LASHLANG_SEGMENT_STATE_VERSION,
                 found,
-            } if *found == LASHLANG_SEGMENT_STATE_VERSION - 1
+            } if *found == 12
         ),
         "unexpected error: {error}"
     );

@@ -22,7 +22,8 @@ use crate::ast::{
     JavaScriptLogicalOp, LabelMetadata, ListComprehensionClause, Program, TypeExpr, UnaryOp,
 };
 use crate::span::Span;
-use crate::tracking::{LashlangAstPath, LashlangExecutionContext, LashlangExecutionSite};
+use crate::tracking::{LashlangExecutionContext, LashlangExecutionSite};
+use crate::workflow_graph::WorkflowOwnership;
 
 use super::record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};
 use super::schema::{SchemaScalarKind, ValidationPlan, compile_schema_value};
@@ -89,7 +90,7 @@ struct LashlangExecutionCompileContext {
     /// execution site below them.
     /// Declaration bodies carry no sites, so only [`AstRoot::Main`] paths are
     /// populated.
-    node_paths: FxHashMap<AstPath, LashlangAstPath>,
+    node_paths: WorkflowOwnership,
     sites: Vec<Option<LashlangExecutionSite>>,
 }
 

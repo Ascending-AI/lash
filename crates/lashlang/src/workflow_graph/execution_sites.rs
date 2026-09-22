@@ -1,10 +1,10 @@
-use crate::ast::{Expr, LabelMetadata, ListComprehensionClause};
+use crate::ast::{AstPath, Expr, LabelMetadata};
 use crate::runtime::{
     STEP_EXECUTION_SITE_KIND, execution_site_descriptor, label_attaches_to_concrete_node,
 };
 use lash_sansio::WorkflowExecutionSite;
 
-use super::child_path;
+use super::{WorkflowNodePath, WorkflowOwnership};
 
 /// Every typed execution site a workflow node contributes, keyed by the
 /// node's owner and AST path plus site kind.
@@ -15,11 +15,17 @@ use super::child_path;
 pub fn execution_sites(
     expression: &Expr,
     owner: &str,
-    path: &[u32],
+    ast_path: &AstPath,
+    ownership: &WorkflowOwnership,
     label: Option<&LabelMetadata>,
 ) -> Vec<WorkflowExecutionSite> {
     let mut sites = Vec::new();
-    collect_execution_sites(expression, owner, path, path, label, &mut sites);
+    let Some(node_path) = ownership.path_for_ast(ast_path) else {
+        panic!("projected execution-site expression must have workflow ownership");
+    };
+    collect_execution_sites(
+        expression, owner, ast_path, node_path, ownership, label, &mut sites,
+    );
     sites.sort();
     sites.dedup();
     sites
@@ -28,21 +34,27 @@ pub fn execution_sites(
 fn collect_execution_sites(
     expression: &Expr,
     owner: &str,
-    node_path: &[u32],
-    path: &[u32],
+    ast_path: &AstPath,
+    node_path: &WorkflowNodePath,
+    ownership: &WorkflowOwnership,
     label: Option<&LabelMetadata>,
     sites: &mut Vec<WorkflowExecutionSite>,
 ) {
+    if ownership.path_for_ast(ast_path) != Some(node_path) {
+        return;
+    }
     if let Some(label) = label
         && !label_attaches_to_concrete_node(expression)
     {
         sites.push(WorkflowExecutionSite::new(
             owner,
-            node_path,
+            node_path.indices(),
             STEP_EXECUTION_SITE_KIND,
             label.title.as_str(),
         ));
-        collect_execution_sites(expression, owner, node_path, path, None, sites);
+        collect_execution_sites(
+            expression, owner, ast_path, node_path, ownership, None, sites,
+        );
         return;
     }
     match expression {
@@ -55,76 +67,30 @@ fn collect_execution_sites(
             collect_execution_sites(
                 expr,
                 owner,
+                &ast_path.child(value_index),
                 node_path,
-                &child_path(path, value_index),
+                ownership,
                 label,
                 sites,
             );
         }
         Expr::Await(expr) | Expr::ResultUnwrap(expr) if label.is_some() => {
-            collect_execution_sites(expr, owner, node_path, &child_path(path, 0), label, sites);
-        }
-        Expr::ReceiverCall { .. }
-        | Expr::SleepFor(_)
-        | Expr::SleepUntil(_)
-        | Expr::WaitSignal { .. }
-        | Expr::Finish(_)
-        | Expr::Fail(_)
-        | Expr::Yield(_)
-        | Expr::Call { .. } => {
-            push_execution_site_descriptor(expression, owner, node_path, sites);
-            collect_child_execution_sites(expression, owner, node_path, path, sites);
-        }
-        Expr::If { condition, .. } => {
-            push_execution_site_descriptor(expression, owner, node_path, sites);
             collect_execution_sites(
-                condition,
+                expr,
                 owner,
+                &ast_path.child(0),
                 node_path,
-                &child_path(path, 0),
-                None,
+                ownership,
+                label,
                 sites,
             );
         }
-        Expr::For { iterable, .. } => {
-            push_execution_site_descriptor(expression, owner, node_path, sites);
-            collect_execution_sites(
-                iterable,
-                owner,
-                node_path,
-                &child_path(path, 0),
-                None,
-                sites,
-            );
-        }
-        Expr::While { condition, .. } => {
-            push_execution_site_descriptor(expression, owner, node_path, sites);
-            collect_execution_sites(
-                condition,
-                owner,
-                node_path,
-                &child_path(path, 0),
-                None,
-                sites,
-            );
-        }
-        Expr::ListComprehension { clauses, .. } => {
-            for (index, clause) in clauses.iter().enumerate() {
-                let expression = match clause {
-                    ListComprehensionClause::For { iterable, .. } => iterable,
-                    ListComprehensionClause::If { condition } => condition,
-                };
-                collect_execution_sites(
-                    expression,
-                    owner,
-                    node_path,
-                    &child_path(path, index as u32),
-                    None,
-                    sites,
-                );
+        _ => {
+            if execution_site_descriptor(expression).is_some() {
+                push_execution_site_descriptor(expression, owner, node_path.indices(), sites);
             }
+            collect_child_execution_sites(expression, owner, ast_path, node_path, ownership, sites);
         }
-        _ => collect_child_execution_sites(expression, owner, node_path, path, sites),
     }
 }
 
@@ -146,16 +112,18 @@ fn push_execution_site_descriptor(
 fn collect_child_execution_sites(
     expression: &Expr,
     owner: &str,
-    node_path: &[u32],
-    path: &[u32],
+    ast_path: &AstPath,
+    node_path: &WorkflowNodePath,
+    ownership: &WorkflowOwnership,
     sites: &mut Vec<WorkflowExecutionSite>,
 ) {
     for (index, child) in expression.children().enumerate() {
         collect_execution_sites(
             child,
             owner,
+            &ast_path.child(index as u32),
             node_path,
-            &child_path(path, index as u32),
+            ownership,
             None,
             sites,
         );

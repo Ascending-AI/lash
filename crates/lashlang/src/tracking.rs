@@ -1,7 +1,7 @@
 use lash_sansio::{ProcessId, WorkflowExecutionSite};
 use serde::{Deserialize, Serialize};
 
-use crate::{ModuleRef, ProcessRef, workflow_node_id};
+use crate::{ModuleRef, ProcessRef, WorkflowNodePath, workflow_node_id};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LashlangExecutionContext {
@@ -43,19 +43,6 @@ impl LashlangExecutionEntry {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct LashlangAstPath(Vec<u32>);
-
-impl LashlangAstPath {
-    pub(crate) fn from_indices(indices: &[u32]) -> Self {
-        Self(indices.to_vec())
-    }
-
-    fn indices(&self) -> &[u32] {
-        &self.0
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct LashlangExecutionSiteBuilder<'context> {
     context: &'context LashlangExecutionContext,
@@ -64,7 +51,7 @@ pub(crate) struct LashlangExecutionSiteBuilder<'context> {
 impl LashlangExecutionSiteBuilder<'_> {
     pub(crate) fn node_site(
         &self,
-        node_path: &LashlangAstPath,
+        node_path: &WorkflowNodePath,
         kind: impl Into<String>,
         label: impl Into<String>,
     ) -> LashlangExecutionSite {
@@ -85,7 +72,7 @@ impl LashlangExecutionSiteBuilder<'_> {
         }
     }
 
-    pub(crate) fn branch_site(&self, node_path: &LashlangAstPath) -> LashlangExecutionSite {
+    pub(crate) fn branch_site(&self, node_path: &WorkflowNodePath) -> LashlangExecutionSite {
         LashlangExecutionSite {
             node_id: workflow_node_id(&self.context.entry.workflow_owner(), node_path.indices())
                 .to_string(),
@@ -106,7 +93,7 @@ impl LashlangExecutionSiteBuilder<'_> {
 
     pub(crate) fn branch_edge_id(
         &self,
-        path: &LashlangAstPath,
+        path: &WorkflowNodePath,
         selection: ProcessBranchSelection,
     ) -> String {
         let label = match selection {

@@ -27,9 +27,14 @@ use crate::span::Span;
 
 mod execution_sites;
 mod facets;
+mod ownership;
 
 pub use execution_sites::execution_sites;
 pub use facets::*;
+pub(crate) use ownership::main_workflow_projection;
+pub use ownership::{
+    WorkflowNodePath, WorkflowOwnership, WorkflowProjection, process_workflow_projection,
+};
 
 /// Version of the serialized workflow graph contract.
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 14;

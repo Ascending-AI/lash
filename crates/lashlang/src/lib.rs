@@ -131,12 +131,13 @@ pub use workflow_graph::{
     WorkflowGraphReconcilePair, WorkflowGraphReconcileSide, WorkflowGraphReconciliation,
     WorkflowGraphStructuralLocation, WorkflowGraphStructuralRoot, WorkflowGraphStructuralSlot,
     WorkflowGraphUnmatchedNode, WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowProcess,
-    WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
-    WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path,
-    execution_sites, projected_node_type_facets, reconcile, workflow_call_from_ir,
-    workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id,
-    workflow_slot_accepts_value, workflow_slot_value,
+    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets,
+    WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
+    WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
+    WorkflowTypedVariable, child_path, execution_sites, process_workflow_projection,
+    projected_node_type_facets, reconcile, workflow_call_from_ir, workflow_call_to_ir,
+    workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id, workflow_slot_accepts_value,
+    workflow_slot_value,
 };
 
 /// Internals the workflow-graph projector needs.

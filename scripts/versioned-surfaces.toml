@@ -100,6 +100,11 @@ must_cover = [
   "TraceAttemptUsageDisposition",
 ]
 
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/workflow.rs"]
+symbols = ["WorkflowExecutionSite"]
+
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility
 # boundary: it reaches an existing file on its next open, and a file that already
@@ -1300,6 +1305,52 @@ kind = "rust_items"
 paths = ["crates/lash-lashlang-runtime/src/process.rs"]
 symbols = ["LashlangSegmentState"]
 
+# Runtime observations persist owner-relative node paths in occurrence-counter
+# keys. Any owner, path-assignment, or mint change therefore changes both the
+# graph identity contract and the parked-segment handover contract.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/workflow_graph.rs"]
+symbols = ["workflow_node_id"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = [
+  "crates/lashlang/src/workflow_graph/execution_sites.rs",
+  "crates/lashlang/src/workflow_graph/ownership.rs",
+  "crates/lashlang/src/tracking.rs",
+]
+symbols = [
+  "from_indices",
+  "indices",
+  "path_for_ast",
+  "for_main",
+  "visible_expression",
+  "ast_root",
+  "ownership_map",
+  "into_ownership_map",
+  "main_workflow_projection",
+  "process_workflow_projection",
+  "workflow_projection",
+  "process_execution_body_path",
+  "push_child_index",
+  "collect_workflow_block_paths",
+  "collect_workflow_statement_paths",
+  "collect_workflow_node_paths",
+  "map_workflow_node_subtree",
+  "workflow_block_wrapper_inner",
+  "authored_workflow_statement",
+  "is_lowered_member_assignment",
+  "execution_sites",
+  "collect_execution_sites",
+  "push_execution_site_descriptor",
+  "collect_child_execution_sites",
+  "workflow_owner",
+  "node_site",
+  "branch_site",
+  "branch_edge_id",
+]
+
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-core-execution/src/runtime/process/engine.rs"]
@@ -1391,8 +1442,46 @@ symbols = ["workflow_node_id"]
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lashlang/src/tracking.rs"]
-symbols = ["LashlangExecutionSiteBuilder"]
+paths = [
+  "crates/lashlang/src/workflow_graph/execution_sites.rs",
+  "crates/lashlang/src/workflow_graph/ownership.rs",
+  "crates/lashlang/src/tracking.rs",
+]
+symbols = [
+  "from_indices",
+  "indices",
+  "path_for_ast",
+  "for_main",
+  "visible_expression",
+  "ast_root",
+  "ownership_map",
+  "into_ownership_map",
+  "main_workflow_projection",
+  "process_workflow_projection",
+  "workflow_projection",
+  "process_execution_body_path",
+  "push_child_index",
+  "collect_workflow_block_paths",
+  "collect_workflow_statement_paths",
+  "collect_workflow_node_paths",
+  "map_workflow_node_subtree",
+  "workflow_block_wrapper_inner",
+  "authored_workflow_statement",
+  "is_lowered_member_assignment",
+  "execution_sites",
+  "collect_execution_sites",
+  "push_execution_site_descriptor",
+  "collect_child_execution_sites",
+  "workflow_owner",
+  "node_site",
+  "branch_site",
+  "branch_edge_id",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/workflow.rs"]
+symbols = ["WorkflowExecutionSite"]
 
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"

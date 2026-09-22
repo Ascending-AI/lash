@@ -1,7 +1,19 @@
 use serde::{Deserialize, Serialize};
 
 /// Stable source-level location of one runtime site under a workflow node.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 pub struct WorkflowExecutionSite {
     pub owner: String,
     #[serde(default)]

@@ -45,7 +45,8 @@ impl Compiler {
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
-            node_paths: workflow_node_paths(program),
+            node_paths: crate::workflow_graph::main_workflow_projection(program)
+                .into_ownership_map(),
             sites: Vec::new(),
         });
         compiler.expression_source_spans = expression_source_spans(program);
@@ -68,7 +69,11 @@ impl Compiler {
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
-            node_paths: workflow_node_paths_for_process(program),
+            node_paths: crate::workflow_graph::process_workflow_projection(
+                &program.main,
+                AstPath::main(Vec::new()),
+            )
+            .into_ownership_map(),
             sites: Vec::new(),
         });
         compiler.expression_source_spans = expression_source_spans(program);
@@ -588,7 +593,7 @@ impl Compiler {
         descriptor_expression: &Expr,
     ) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
-        let path = tracking.node_paths.get(path)?;
+        let path = tracking.node_paths.path_for_ast(path)?;
         let (kind, label) = execution_site_descriptor(descriptor_expression)?;
         Some(if kind == BRANCH_EXECUTION_SITE_KIND {
             tracking.context.builder().branch_site(path)
@@ -603,7 +608,7 @@ impl Compiler {
         label: &str,
     ) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
-        let path = tracking.node_paths.get(path)?;
+        let path = tracking.node_paths.path_for_ast(path)?;
         Some(
             tracking
                 .context
@@ -626,7 +631,7 @@ impl Compiler {
         let Some(tracking) = self.lashlang_execution.as_ref() else {
             return;
         };
-        let Some(path) = tracking.node_paths.get(path) else {
+        let Some(path) = tracking.node_paths.path_for_ast(path) else {
             return;
         };
         let site = tracking

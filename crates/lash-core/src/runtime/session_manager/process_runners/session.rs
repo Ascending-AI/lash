@@ -32,15 +32,17 @@ impl RuntimeSessionServices {
         // Keep that execution authority through the child turn; session and
         // turn ids remain the turn's foreground routing and attribution.
         let child_turn_id = crate::TurnId::from(registration.id.as_str());
-        match Box::pin(self.initialize_session_and_run_turn(
-            create_request,
-            &registration.id,
-            child_turn_id,
-            turn_input,
-            &execution_write_authority,
-            scoped_effect_controller,
-            cancellation,
-        ))
+        match Box::pin(
+            self.initialize_session_and_run_turn(session_init::ProcessSessionTurnInit {
+                create_request,
+                process_id: &registration.id,
+                turn_id: child_turn_id,
+                turn_input,
+                execution_write_authority: &execution_write_authority,
+                scoped_effect_controller,
+                cancellation,
+            }),
+        )
         .await
         {
             Ok(run) => {

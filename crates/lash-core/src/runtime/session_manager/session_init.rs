@@ -61,6 +61,18 @@ pub(in crate::runtime::session_manager) struct InitializedSessionTurn {
     pub turn: AssembledTurn,
 }
 
+/// Inputs for initializing a process-owned child session and running its
+/// first turn.
+pub(in crate::runtime::session_manager) struct ProcessSessionTurnInit<'a> {
+    pub create_request: crate::SessionCreateRequest,
+    pub process_id: &'a crate::ProcessId,
+    pub turn_id: TurnId,
+    pub turn_input: crate::TurnInput,
+    pub execution_write_authority: &'a crate::ProcessExecutionWriteAuthority,
+    pub scoped_effect_controller: crate::ScopedEffectController<'a>,
+    pub cancellation: CancellationToken,
+}
+
 pub(in crate::runtime::session_manager) async fn resolve_session_init(
     current: &CurrentSessionCapability,
     mut request: SessionCreateRequest,
@@ -692,14 +704,17 @@ impl RuntimeSessionServices {
     /// instead of writing a `Cancelled` terminal over an unsettled child.
     pub(in crate::runtime::session_manager) async fn initialize_session_and_run_turn(
         &self,
-        create_request: crate::SessionCreateRequest,
-        process_id: &crate::ProcessId,
-        turn_id: TurnId,
-        turn_input: crate::TurnInput,
-        execution_write_authority: &crate::ProcessExecutionWriteAuthority,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
-        cancellation: CancellationToken,
+        request: ProcessSessionTurnInit<'_>,
     ) -> Result<InitializedSessionTurn, SessionTurnInitError> {
+        let ProcessSessionTurnInit {
+            create_request,
+            process_id,
+            turn_id,
+            turn_input,
+            execution_write_authority,
+            scoped_effect_controller,
+            cancellation,
+        } = request;
         let requested_session_id = create_request.session_id.clone();
         if cancellation.is_cancelled() {
             self.settle_cancelled_process_child_inputs(

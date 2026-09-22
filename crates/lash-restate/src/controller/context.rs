@@ -53,10 +53,10 @@ use crate::process::{
 use crate::process_attach::{LashProcessAttachClient, RestateProcessAttachRequest};
 
 mod wake;
+pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
 pub(crate) use wake::{
     ClosureWakeRelay, guard_restate_context_future, guard_restate_run_future, relay_closure_wakes,
 };
-pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
 
 /// The future every turn-cancel race returns across this seam.
 ///
