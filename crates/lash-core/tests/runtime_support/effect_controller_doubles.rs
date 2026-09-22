@@ -74,172 +74,6 @@ impl StrictReplayJournal {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct SerialOnlyEffectController {
-    pub inner: RecordingEffectController,
-    pub in_flight_tool_attempts: Arc<std::sync::atomic::AtomicUsize>,
-    pub max_in_flight_tool_attempts: Arc<std::sync::atomic::AtomicUsize>,
-}
-
-impl SerialOnlyEffectController {
-    pub fn count_kind(&self, kind: RuntimeEffectKind) -> usize {
-        self.inner.count_kind(kind)
-    }
-
-    pub fn max_in_flight_tool_attempts(&self) -> usize {
-        self.max_in_flight_tool_attempts
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for SerialOnlyEffectController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for SerialOnlyEffectController {
-    fn supports_concurrent_effects(&self) -> bool {
-        false
-    }
-
-    async fn execute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let is_tool_attempt = envelope.command.kind() == RuntimeEffectKind::ToolAttempt;
-        if is_tool_attempt {
-            let current = self
-                .in_flight_tool_attempts
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                + 1;
-            let mut observed = self.max_in_flight_tool_attempts();
-            while current > observed {
-                match self.max_in_flight_tool_attempts.compare_exchange(
-                    observed,
-                    current,
-                    std::sync::atomic::Ordering::SeqCst,
-                    std::sync::atomic::Ordering::SeqCst,
-                ) {
-                    Ok(_) => break,
-                    Err(next) => observed = next,
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        }
-
-        let outcome = self.inner.execute_effect(envelope, local_executor).await;
-
-        if is_tool_attempt {
-            self.in_flight_tool_attempts
-                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-        }
-
-        outcome
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn group_child_drain_blocked(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
-        self.inner
-            .group_child_drain_blocked(group_key, commit_seq)
-            .await
-    }
-}
-
 #[derive(Default)]
 pub struct RejectingEffectController {
     pub native: NativeRuntimeEffectController,
@@ -577,6 +411,9 @@ pub struct RecordingEffectController {
             std::sync::atomic::AtomicBool,
         )>,
     >,
+    /// Get-or-init slot for `EffectHost::install_tool_child_host` when the
+    /// recorder itself is installed as a runtime's effect host.
+    pub tool_children: std::sync::OnceLock<Arc<lash_core::facade_support::ToolChildHost>>,
 }
 
 impl RecordingEffectController {
@@ -1235,33 +1072,38 @@ impl RuntimeEffectController for RecordingEffectController {
         outcome
     }
 
+    // A tool batch is a durable effect group now (FIG-3397), so the recorder
+    // hosts groups on its embedded native substrate: opens and settlements
+    // forward there, and the tool-child resolver registered through
+    // `register_group_executors` lands on the same group map.
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingEffectController",
-        ))
+        self.native.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingEffectController",
-        ))
+        self.native.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingEffectController",
-        ))
+        self.native.close_effect_group(handle, disposition).await
     }
 
     async fn commit_group_child_final(

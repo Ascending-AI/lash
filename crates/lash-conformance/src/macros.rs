@@ -2189,6 +2189,10 @@ macro_rules! tool_child_invocation_tests {
                 a_retained_full_output_is_a_durable_artifact_not_a_path,
                 "tool-child-presentation-artifact"
             ),
+            (
+                timer_and_durable_wait_children_are_admitted_beside_a_tool_child,
+                "tool-child-timer-and-wait-siblings"
+            ),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

@@ -1800,6 +1800,13 @@ impl lash_core::RuntimeEffectController for JournalReplayEffectController {
         self.native.open_effect_group(group).await
     }
 
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,

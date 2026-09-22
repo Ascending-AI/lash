@@ -69,12 +69,20 @@ impl<'run> RuntimeTurnDriver<'run> {
             )
             .map(|context| {
                 self.register_live_opener(context.dispatch(), stream_event_tx);
-                context
+                let context = context
                     .with_turn_cancel_scope(self.turn_cancel_scope())
                     .with_engine_child_max_attempts(
                         self.host.core.control.engine_child_max_attempts,
                     )
-                    .with_turn_phase_probe(self.turn_phase_probe.clone())
+                    .with_turn_phase_probe(self.turn_phase_probe.clone());
+                // The host's binding id is what a group child records as its
+                // `ProcessLifetime` completion-key issuer (ADR 0099 §14).
+                match crate::TurnControlBindingId::new(
+                    self.host.core.control.effect_host.turn_control_binding_id(),
+                ) {
+                    Ok(issuer) => context.with_tool_child_completion_issuer(issuer),
+                    Err(_) => context,
+                }
             })
     }
 

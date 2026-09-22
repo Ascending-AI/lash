@@ -163,11 +163,15 @@ impl RuntimeHostConfig {
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> Self {
+        let clock: Arc<dyn super::Clock> = Arc::new(super::SystemClock);
         let tool_children =
             effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
                 &effect_host,
                 Arc::clone(&process_env_store),
             ));
+        if let Some(tool_children) = &tool_children {
+            tool_children.with_clock(Arc::clone(&clock));
+        }
         Self {
             durability: RuntimeDurabilityConfig {
                 commit_budget,
@@ -203,14 +207,22 @@ impl RuntimeHostConfig {
             },
             process_observation_sink: None,
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-            clock: Arc::new(super::SystemClock),
+            clock,
         }
     }
 
     /// Replace the runtime time source. Hosts that need deterministic replay or
     /// test-driven time inject their own [`Clock`](super::Clock); the default is
     /// [`SystemClock`](super::SystemClock).
+    ///
+    /// Also propagates to the installed tool-child host, whose `Sleep`/
+    /// `AwaitEvent` group-child executors wait on it: the host was installed
+    /// get-or-init before this clock existed, so the update happens in place
+    /// rather than by re-install.
     pub fn with_clock(mut self, clock: Arc<dyn super::Clock>) -> Self {
+        if let Some(tool_children) = &self.control.tool_children {
+            tool_children.with_clock(Arc::clone(&clock));
+        }
         self.clock = clock;
         self
     }
