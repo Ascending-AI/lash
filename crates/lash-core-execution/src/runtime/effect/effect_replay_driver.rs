@@ -1812,6 +1812,14 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         // pays nothing: every effect this driver runs passes through here, and
         // the overwhelming majority can never be cancelled.
         let cancel_membership = cancel.and_then(|_| envelope.group.clone());
+        // The wait a cancellable `AwaitEvent` child is parked on: dropping the
+        // execution future never polls the waiter's own release arm, so the
+        // cancel path below resolves the promise itself (ADR 0099 §12 — the
+        // cancelled child terminal releases the wait, not the process).
+        let cancel_wait_key = cancel.and_then(|_| match &envelope.command {
+            RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
+            _ => None,
+        });
         loop {
             match self
                 .prepare_effect(scope, &envelope, &reconstructed_envelope, binding)
@@ -1873,16 +1881,27 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                                         {
                                             execution.await
                                         }
-                                        _ => Err(child_cancelled_error(
-                                            cancel_membership
-                                                .as_deref()
-                                                .map_or("<ungrouped>", |membership| {
-                                                    membership.group_key.as_str()
-                                                }),
-                                            cancel_membership
-                                                .as_deref()
-                                                .map_or(0, |membership| membership.position),
-                                        )),
+                                        _ => {
+                                            if let Some(key) = &cancel_wait_key {
+                                                let _ = self
+                                                    .await_events
+                                                    .resolve(
+                                                        key,
+                                                        crate::Resolution::Cancelled,
+                                                    )
+                                                    .await;
+                                            }
+                                            Err(child_cancelled_error(
+                                                cancel_membership
+                                                    .as_deref()
+                                                    .map_or("<ungrouped>", |membership| {
+                                                        membership.group_key.as_str()
+                                                    }),
+                                                cancel_membership
+                                                    .as_deref()
+                                                    .map_or(0, |membership| membership.position),
+                                            ))
+                                        }
                                     }
                                 }
                                 result = &mut execution => result,
