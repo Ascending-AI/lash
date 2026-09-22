@@ -20,7 +20,10 @@ LOCK = ROOT / "tools/bazel/runtime-off.Cargo.lock"
 
 
 def cargo(*args: str) -> str:
-    result = subprocess.run(["cargo", *args], cwd=ROOT, text=True, capture_output=True)
+    result = subprocess.run(["cargo", "--color", "never", *args],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,)
     if result.returncode:
         raise RuntimeError(result.stderr)
     return result.stdout
