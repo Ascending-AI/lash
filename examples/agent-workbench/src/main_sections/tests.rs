@@ -178,6 +178,7 @@ fn test_graph(
     children: Vec<TraceLashlangGraphChildLink>,
 ) -> TraceLashlangGraph {
     TraceLashlangGraph {
+        schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
         graph_key: graph_key.to_string(),
         scope: TraceRuntimeScope::new(session_id),
         subject,
@@ -187,9 +188,15 @@ fn test_graph(
         entry_ref: None,
         entry_name: "main".to_string(),
         status: TraceLanguageExecutionStatus::Running,
+        completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
         nodes: Vec::new(),
         edges: Vec::new(),
         children,
+        history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+        node_retention: Vec::new(),
+        conflicts: Vec::new(),
+        history: Vec::new(),
+        execution_map: None,
     }
 }
 
@@ -203,6 +210,7 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         entry_ref: graph.entry_ref.clone(),
         entry_name: graph.entry_name.clone(),
         restate_invocation_id: None,
+        generation: None,
     };
     let context = TraceContext {
         session_id: graph.scope.session_id.clone(),
@@ -316,6 +324,7 @@ fn lashlang_graph_store_builds_graph_state() {
         entry_ref: Some("r1:0".to_string()),
         entry_name: "main".to_string(),
         restate_invocation_id: None,
+        generation: None,
     };
     let append = |event: TraceLanguageExecution| {
         store
@@ -376,9 +385,9 @@ fn lashlang_graph_store_builds_graph_state() {
             occurrence: 1,
             child: TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: ProcessId::from("p2"),
-                },
+                process_id: ProcessId::from("p2"),
+                incarnation: 1,
+                attempt: Some(1),
                 module_ref: Some("m1".to_string()),
                 entry_ref: Some("r2:1".to_string()),
                 entry_name: Some("child".to_string()),
@@ -389,7 +398,10 @@ fn lashlang_graph_store_builds_graph_state() {
     let graph = store.graph("process:p1").expect("graph");
     assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);
     assert_eq!(graph.children.len(), 1);
-    assert_eq!(graph.children[0].child_graph_key, "process:p2");
+    assert_eq!(
+        graph.children[0].child_graph_key.as_deref(),
+        Some("process:p2:incarnation:1:attempt:1")
+    );
     assert_eq!(
         graph
             .edges

@@ -921,13 +921,15 @@ finish(result);
         .iter()
         .find(|child| child.child_entry_name.as_deref() == Some("subagent"))
         .expect("subagent child link");
+    assert!(child.child_graph_key.is_none());
     assert!(
         child
-            .child_graph_key
-            .starts_with("process:process:subagent:"),
-        "unexpected child graph key: {}",
-        child.child_graph_key
+            .child_process_id
+            .as_str()
+            .starts_with("process:subagent:")
     );
+    assert!(child.child_incarnation > 0);
+    assert_eq!(child.child_attempt, None);
 }
 
 #[tokio::test]

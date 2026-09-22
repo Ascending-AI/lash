@@ -1,6 +1,4 @@
-use lash_trace::{
-    TraceBranchSelection, TraceLanguageExecutionPayload, TraceRuntimeScope, TraceRuntimeSubject,
-};
+use lash_trace::{TraceBranchSelection, TraceLanguageExecutionPayload, TraceRuntimeScope};
 
 /// Adapts the VM's internal execution observations to the public language
 /// trace payload consumed by hosts. The wrapped host never receives an
@@ -135,9 +133,9 @@ where
                 occurrence,
                 child: lash_trace::TraceLanguageChildExecution {
                     scope: TraceRuntimeScope::none(),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: child.process_id,
-                    },
+                    process_id: child.process_id,
+                    incarnation: child.incarnation,
+                    attempt: child.attempt,
                     module_ref: Some(child.module_ref.to_string()),
                     entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),
                     entry_name: Some(child.process_name),

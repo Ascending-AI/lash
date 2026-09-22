@@ -21,7 +21,7 @@ fn finish_null() -> lashlang::Program {
 
 #[test]
 fn process_trace_session_attribution_comes_only_from_a_session_originator() {
-    let identity = |originator: lash_core::ProcessOriginator| {
+    let identity = |originator: lash_core::ProcessOriginator, attempt, incarnation| {
         let hash = lashlang::ContentHash::new("trace-provenance");
         LashlangProcessExecutionTrace::new(
             None,
@@ -33,23 +33,37 @@ fn process_trace_session_attribution_comes_only_from_a_session_originator() {
                 module_ref: lashlang::ModuleRef::new(&hash),
                 process_ref: lashlang::ProcessRef::new(hash, 0),
                 process_name: "main".to_string(),
+                attempt,
+                incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
                 restate_invocation_id: None,
             },
         )
         .identity()
     };
 
+    let host_identity = identity(lash_core::ProcessOriginator::host_scoped("operator"), 1, 1);
     assert_eq!(
-        identity(lash_core::ProcessOriginator::host_scoped("operator"))
-            .scope
-            .session_id,
-        None,
+        host_identity.scope.session_id, None,
         "a host namespace and ambient capability are not runtime session attribution"
     );
+    assert_eq!(host_identity.attempt(), Some(1));
+    assert_eq!(host_identity.incarnation(), Some(1));
+    assert_ne!(
+        host_identity.graph_key(),
+        identity(lash_core::ProcessOriginator::host_scoped("operator"), 2, 1,).graph_key(),
+        "attempts partition process trace graphs"
+    );
+    assert_ne!(
+        host_identity.graph_key(),
+        identity(lash_core::ProcessOriginator::host_scoped("operator"), 1, 2,).graph_key(),
+        "incarnations partition process trace graphs"
+    );
     assert_eq!(
-        identity(lash_core::ProcessOriginator::session(
-            lash_core::SessionScope::new("actual-session")
-        ))
+        identity(
+            lash_core::ProcessOriginator::session(lash_core::SessionScope::new("actual-session",)),
+            1,
+            1,
+        )
         .scope
         .session_id,
         Some(lash_sansio::SessionId::from("actual-session"))
@@ -69,6 +83,8 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
             module_ref: lashlang::ModuleRef::new(&hash),
             process_ref: lashlang::ProcessRef::new(hash, 0),
             process_name: "main".to_string(),
+            attempt: 1,
+            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
             restate_invocation_id: None,
         },
     );

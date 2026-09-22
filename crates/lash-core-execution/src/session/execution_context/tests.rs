@@ -542,7 +542,7 @@ async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
 }
 
 #[test]
-fn native_authority_clears_turn_invocation_correlation() {
+fn native_authority_retains_attempt_correlation_without_restate_identity() {
     let process_id = crate::ProcessId::from("native-process");
     let authority = crate::ProcessExecutionWriteAuthority::invocation(
         process_id.clone(),
@@ -559,7 +559,8 @@ fn native_authority_clears_turn_invocation_correlation() {
         fencing_token: 1,
         claimed_at_epoch_ms: 0,
         expires_at_epoch_ms: u64::MAX,
-    });
+    })
+    .bind_attempt(3);
     super::attach_process_invocation_correlation(&mut turn_context, &process_id, &native_authority);
     let context = crate::testing::TestExecutionContextBuilder::new()
         .turn_context(turn_context)
@@ -568,6 +569,7 @@ fn native_authority_clears_turn_invocation_correlation() {
         .into_runtime();
 
     assert_eq!(context.restate_invocation_id(), None);
+    assert_eq!(context.admitted_process_attempt(), Some(3));
 }
 
 /// A queued-work drain admits a host lifecycle parent until FIG-3419 lands the

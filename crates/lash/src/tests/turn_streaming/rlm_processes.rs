@@ -721,10 +721,19 @@ finish(value);"#,
         .iter()
         .find(|process| process.kind() == "lashlang" && !process.terminal())
         .expect("running lashlang process");
+    let attempt = running
+        .first_started
+        .as_ref()
+        .expect("running process has a started fact")
+        .attempt;
+    let graph_key = format!(
+        "process:{}:incarnation:{}:attempt:{attempt}",
+        running.process_id, running.incarnation
+    );
     let graph = graph_store
-        .graph(&format!("process:{}", running.process_id))
+        .graph(&graph_key)
         .expect("Lashlang graph snapshot");
-    assert_eq!(graph.graph_key, format!("process:{}", running.process_id));
+    assert_eq!(graph.graph_key, graph_key);
     assert_eq!(graph.entry_kind, "process");
     assert_eq!(graph.entry_name, running.label());
     assert_eq!(

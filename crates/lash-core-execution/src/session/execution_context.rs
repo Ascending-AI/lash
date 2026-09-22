@@ -86,7 +86,7 @@ pub(crate) fn attach_process_invocation_correlation(
     process_id: &ProcessId,
     authority: &crate::ProcessExecutionWriteAuthority,
 ) {
-    if authority.restate_invocation_id(process_id).is_some() {
+    if authority.attempt_for(process_id).is_some() {
         turn_context.set_runtime_correlation(ProcessInvocationCorrelation {
             process_id: process_id.clone(),
             authority: authority.clone(),
@@ -500,6 +500,22 @@ impl<'run> RuntimeExecutionContext<'run> {
             .scoped()
             .admitted_process()
             .cloned()
+    }
+
+    /// The durable process attempt admitted for this execution, when it runs
+    /// under a process whose engine installed execution authority.
+    pub fn admitted_process_attempt(&self) -> Option<u32> {
+        if let Some(execution) = self.process_execution.as_ref() {
+            return execution
+                .event_context
+                .as_ref()?
+                .execution_write_authority
+                .attempt_for(&execution.process_id);
+        }
+        let correlation = self
+            .turn_context
+            .runtime_correlation::<ProcessInvocationCorrelation>()?;
+        correlation.authority.attempt_for(&correlation.process_id)
     }
 
     /// Returns the exact owner used to stage artifacts produced by this

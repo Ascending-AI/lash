@@ -534,7 +534,7 @@ impl DurableProcessWorker {
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
         let attachment_owner = crate::ProcessRef::from_record(&current);
         let (owner, fencing_token) = match &execution_write_authority {
-            crate::ProcessExecutionWriteAuthority::Lease(lease) => {
+            crate::ProcessExecutionWriteAuthority::Lease { lease, .. } => {
                 (self.config.lease_owner.clone(), lease.fencing_token)
             }
             crate::ProcessExecutionWriteAuthority::Invocation {

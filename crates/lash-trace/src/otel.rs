@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use chrono::{DateTime, Utc};
 use opentelemetry::trace::{
     Span, SpanContext, SpanKind, Status, TraceContextExt, Tracer, TracerProvider,
 };
@@ -1137,6 +1136,18 @@ fn language_execution_attributes(
         attr::LASH_LANGUAGE_EXECUTION_GRAPH_KEY,
         event.identity.graph_key(),
     ));
+    if let Some(attempt) = event.identity.attempt() {
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_ATTEMPT,
+            i64::from(attempt),
+        ));
+    }
+    if let Some(incarnation) = event.identity.incarnation() {
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_INCARNATION,
+            incarnation as i64,
+        ));
+    }
     if let Some(session_id) = &event.identity.scope.session_id {
         attrs.push(KeyValue::new(
             attr::LASH_LANGUAGE_EXECUTION_SESSION_ID,
@@ -1267,31 +1278,25 @@ fn language_execution_attributes(
                 attr::LASH_LANGUAGE_EXECUTION_PARENT_NODE_ID,
                 parent_node_id.clone(),
             ));
+            if let Some(graph_key) = child.graph_key() {
+                attrs.push(KeyValue::new(
+                    attr::LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY,
+                    graph_key,
+                ));
+            }
             attrs.push(KeyValue::new(
-                attr::LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY,
-                child.graph_key(),
+                attr::LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID,
+                child.process_id.to_string(),
             ));
-            match &child.subject {
-                crate::TraceRuntimeSubject::Effect { effect_id, .. } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE,
-                        "effect",
-                    ));
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_ID,
-                        effect_id.clone(),
-                    ));
-                }
-                crate::TraceRuntimeSubject::Process { process_id } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE,
-                        "process",
-                    ));
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID,
-                        process_id.to_string(),
-                    ));
-                }
+            attrs.push(KeyValue::new(
+                attr::LASH_LANGUAGE_EXECUTION_CHILD_INCARNATION,
+                child.incarnation as i64,
+            ));
+            if let Some(attempt) = child.attempt {
+                attrs.push(KeyValue::new(
+                    attr::LASH_LANGUAGE_EXECUTION_CHILD_ATTEMPT,
+                    attempt as i64,
+                ));
             }
         }
         Payload::ExecutionFinished { status, error, .. } => {
@@ -1430,9 +1435,7 @@ fn typed_diagnostic_protocol_payload(event: &TraceEvent) -> Value {
 }
 
 fn record_time(record: &TraceRecord) -> SystemTime {
-    DateTime::parse_from_rfc3339(&record.timestamp)
-        .map(|time| time.with_timezone(&Utc).into())
-        .unwrap_or_else(|_| SystemTime::now())
+    record.timestamp.into()
 }
 
 fn event_type(event: &TraceEvent) -> &'static str {

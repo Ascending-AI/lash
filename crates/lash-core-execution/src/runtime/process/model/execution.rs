@@ -36,7 +36,10 @@ impl ProcessStarted {
 /// authority fences attempt generations rather than individual segments.
 #[derive(Clone, Debug)]
 pub enum ProcessExecutionWriteAuthority {
-    Lease(ProcessLease),
+    Lease {
+        lease: ProcessLease,
+        attempt: Option<u32>,
+    },
     Invocation {
         process_id: ProcessId,
         execution_id: String,
@@ -64,7 +67,10 @@ impl ProcessExecutionWriteAuthority {
     /// Constructs a `ProcessExecutionWriteAuthority` using lease semantics for store and
     /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn lease(lease: ProcessLease) -> Self {
-        Self::Lease(lease)
+        Self::Lease {
+            lease,
+            attempt: None,
+        }
     }
 
     /// Constructs a `ProcessExecutionWriteAuthority` using invocation semantics for store and
@@ -82,7 +88,10 @@ impl ProcessExecutionWriteAuthority {
     /// authority already carries its generation and is unchanged.
     pub fn bind_attempt(&self, attempt: u32) -> Self {
         match self {
-            Self::Lease(lease) => Self::Lease(lease.clone()),
+            Self::Lease { lease, .. } => Self::Lease {
+                lease: lease.clone(),
+                attempt: Some(attempt),
+            },
             Self::Invocation {
                 process_id,
                 execution_id,
@@ -97,11 +106,31 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
+    /// The one-based process attempt this authority was admitted for.
+    pub fn attempt(&self) -> Option<u32> {
+        match self {
+            Self::Lease { attempt, .. } | Self::Invocation { attempt, .. } => *attempt,
+        }
+    }
+
+    /// Returns the bound attempt only when this authority names `process_id`.
+    pub fn attempt_for(&self, process_id: &ProcessId) -> Option<u32> {
+        match self {
+            Self::Lease { lease, attempt } if lease.process_id == process_id => *attempt,
+            Self::Invocation {
+                process_id: authority_process_id,
+                attempt,
+                ..
+            } if authority_process_id == process_id => *attempt,
+            Self::Lease { .. } | Self::Invocation { .. } => None,
+        }
+    }
+
     /// Projects a replay-stable started fact only after invocation authority is attempt-bound,
     /// returning `None` for leases and unbound invocations.
     pub fn invocation_started(&self) -> Option<ProcessStarted> {
         match self {
-            Self::Lease(_) => None,
+            Self::Lease { .. } => None,
             Self::Invocation {
                 process_id,
                 execution_id,
@@ -130,7 +159,7 @@ impl ProcessExecutionWriteAuthority {
                 attempt: Some(_),
                 ..
             } if authority_process_id == process_id => Some(execution_id),
-            Self::Lease(_) | Self::Invocation { .. } => None,
+            Self::Lease { .. } | Self::Invocation { .. } => None,
         }
     }
 
