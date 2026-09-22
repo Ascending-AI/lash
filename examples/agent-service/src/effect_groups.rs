@@ -253,7 +253,7 @@ async fn read_effect_group_report(
                 ))
             })?;
         let settlement = match response {
-            EffectGroupReadRankResponse::Settled { settlement } => settlement,
+            EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
             EffectGroupReadRankResponse::NotSettled => {
                 return Err(AppError::internal(format!(
                     "effect group {group_key} is not terminal: rank {rank} has not settled"

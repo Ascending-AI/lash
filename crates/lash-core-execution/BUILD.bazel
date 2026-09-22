@@ -211,10 +211,6 @@ load(
 
 lash_rust_feature_test(
     name = "effect_model__test__fv_ecbe9667",
-    args = [
-        "effect_model",
-        "process_model",
-    ],
     crate_features = [],
     crate_name = "effect_model",
     crate_root = "tests/effect_model.rs",
@@ -900,43 +896,7 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_test(
-    name = "lash-core-execution__unit_test__fv_ecbe9667",
-    args = [
-        "process_model",
-        "effect_model",
-    ],
-    build_script = None,
-    crate_features = [],
-    crate_name = "lash_core_execution",
-    crate_root = "src/lib.rs",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "testing",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    srcs_patterns = [
-        "src/lib.rs",
-        "src/**/*.rs",
-    ],
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-execution",
-    package_name = "lash-internal-core-execution",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_acf2157d", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_691bdd6c", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
     name = "process_model__test__fv_ecbe9667",
-    args = [
-        "effect_model",
-        "process_model",
-    ],
     crate_features = [],
     crate_name = "process_model",
     crate_root = "tests/process_model.rs",
