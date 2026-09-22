@@ -96,7 +96,7 @@ case "$operation" in
     if (($# == 0)); then
       set -- //:workspace_clippy
     fi
-    "$bazel" build "--config=$config" "$@"
+    python3 scripts/run-bazel-clippy.py "$bazel" "--config=$config" "$@"
     ;;
   doc)
     python3 tools/bazel/generate_build_files.py --check

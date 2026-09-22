@@ -65,7 +65,8 @@ executor reproduction, and focused Bazel labels.
 full compile proof, not Cargo's metadata-only mode). `test` without labels
 builds and executes `//:dev_tests`, the generated developer suite
 (`//:workspace_tests` minus the two dev-deferred binaries); explicit labels
-remain available for a focused edit loop. `clippy` builds a clippy aggregate,
+remain available for a focused edit loop. `clippy` lints the requested Rust
+labels or lint aggregates and defaults to `//:workspace_clippy`,
 `doc` renders the `rust_doc` targets into bazel-bin, `run` compiles a binary on
 the pool and starts it locally, and `fmt` is a local `cargo fmt`.
 
@@ -87,6 +88,9 @@ python3 scripts/dev-test.py
 
 # Lint the `--workspace --all-targets` shape (one clippy action per target).
 kiln clippy
+
+# Lint one integration target with its existing features and crate configuration.
+kiln clippy //crates/lash-core-execution:process_model__test
 
 # Render the workspace API docs into bazel-bin.
 kiln doc
@@ -391,6 +395,13 @@ whose exemption is recorded as `clippy_exempt` in
 and that label exposes no `CrateInfo` for a clippy aspect to attach to. The
 `build.rs` compile behind it is a `rust_binary` of its own,
 `//crates/lash-protocol-rlm:build_script_`, and it is in the partition.
+
+Focused `kiln clippy` applies the same aspect as the aggregates. The driver
+requires a completed lint marker for every requested target and configuration;
+source files, unsupported rules, empty selections, and skipped lint outputs
+fail instead of reporting a successful compile as a lint verdict. Existing
+aggregate labels and Bazel options remain available. Use `kiln analyze` for
+analysis without a compiler verdict.
 
 `tools/bazel/clippy.bzl` wraps the upstream `rules_rust` clippy action for three
 reasons, all about matching Cargo's effective lint set rather than an

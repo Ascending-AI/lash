@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import collections
 import json
+import importlib.util
 import os
 import pathlib
 import re
@@ -1130,6 +1131,62 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertTrue(any(ci_plan.BAZEL_TEST_JOB in problem for problem in problems))
 
+
+
+class FocusedClippyVerdicts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("run_bazel_clippy", ROOT / "scripts/run-bazel-clippy.py")
+        cls.driver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.driver)
+
+    def verdict(self, labels, marked, *, empty=False, incomplete=False):
+        events = []
+        for label, configuration in labels:
+            completed = {"label": label, "configuration": {"id": configuration}}
+            events.append({"id": {"targetConfigured": {"label": label}}, "children": [{"targetCompleted": completed}]})
+        for label, configuration in marked:
+            events.append({"id": {"targetCompleted": {"label": label, "configuration": {"id": configuration}}}, "completed": {"success": True, "outputGroup": [{"name": "clippy_checks", "fileSets": [{"id": "parent"}], "incomplete": incomplete}]}})
+        events.extend([
+            {"id": {"namedSet": {"id": "parent"}}, "namedSetOfFiles": {"fileSets": [{"id": "child"}]}},
+            {"id": {"namedSet": {"id": "child"}}, "namedSetOfFiles": {"files": [] if empty else [{"name": "crate.lash-clippy.ok"}]}},
+        ])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "events.json"
+            path.write_text("\n".join(json.dumps(event) for event in events))
+            self.driver.validate_events(path)
+
+    def test_every_requested_configuration_needs_a_completed_marker(self):
+        first = ("//crate:lib", "default")
+        second = ("//crate:lib", "feature")
+        self.verdict([first, second], [first, second])
+        for requested, marked, kwargs in [
+            ([], [], {}),
+            ([first, second], [first], {}),
+            ([first, ("//:Cargo.toml", "file")], [first], {}),
+            ([first], [first], {"empty": True}),
+            ([first], [first], {"incomplete": True}),
+        ]:
+            with self.subTest(requested=requested, kwargs=kwargs), self.assertRaisesRegex(ValueError, "no Clippy verdict"):
+                self.verdict(requested, marked, **kwargs)
+
+    def test_options_and_event_destination_are_preserved_and_failures_propagate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            fake = directory / "bazel"
+            captured = directory / "arguments.json"
+            fake.write_text("#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\nPath(" + repr(str(captured)) + ").write_text(json.dumps(sys.argv[1:]))\nsys.exit(7)\n")
+            fake.chmod(0o755)
+            event_path = directory / "requested.json"
+            flags = ["--config=shared", "--keep_going", "--output_groups=+custom", "--build_event_json_file", str(event_path), "--", "//crate:lib"]
+            self.assertEqual(7, self.driver.run(str(fake), flags))
+            arguments = json.loads(captured.read_text())
+            self.assertEqual(["build", *flags[:5]], arguments[:6])
+            self.assertIn(str(event_path), arguments)
+            self.assertIn("--output_groups=+clippy_checks", arguments)
+            self.assertIn("--aspects=" + self.driver.ASPECT, arguments)
+            self.assertEqual(["--", "//crate:lib"], arguments[-2:])
+            self.assertFalse(any(arg.startswith("--build_event_json_file=") for arg in arguments))
 
 if __name__ == "__main__":
     unittest.main()

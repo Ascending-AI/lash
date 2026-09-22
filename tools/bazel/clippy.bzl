@@ -86,10 +86,7 @@ def _lash_clippy_aspect_impl(target, ctx):
 
     crate_info = rust_clippy_action.get_clippy_ready_crate_info(target, ctx)
     if not crate_info:
-        # Report the empty group rather than no provider at all: the rule below
-        # turns a target that contributes no marker into an analysis failure,
-        # and a silently absent provider would look the same as a skipped dep.
-        return [OutputGroupInfo(clippy_checks = depset())]
+        fail("target cannot be linted: {}".format(target.label))
 
     marker = ctx.actions.declare_file(
         ctx.label.name + ".lash-clippy.ok",
@@ -172,10 +169,6 @@ lash_clippy_aspect = aspect(
             default = Label("@rules_rust//rust/settings:per_crate_rustc_flag"),
         ),
     },
-    required_providers = [
-        [rust_common.crate_info],
-        [rust_common.test_crate_info],
-    ],
     toolchains = [
         str(Label("@rules_rust//rust:toolchain_type")),
         config_common.toolchain_type(
@@ -203,7 +196,8 @@ def _lash_rust_clippy_impl(ctx):
         markers.append(checks)
     if unlinted:
         fail("clippy produced no marker for: {}".format(", ".join(sorted(unlinted))))
-    return [DefaultInfo(files = depset(transitive = markers))]
+    checks = depset(transitive = markers)
+    return [DefaultInfo(files = checks), OutputGroupInfo(clippy_checks = checks)]
 
 lash_rust_clippy = rule(
     doc = "Runs clippy over the listed first-party crate targets.",
