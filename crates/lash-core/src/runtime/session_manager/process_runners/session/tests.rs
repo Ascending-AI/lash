@@ -481,8 +481,9 @@ async fn cancelled_mid_turn_subagent_retains_durable_rows() {
 /// TTL so a crashed attempt's claim dies quickly.
 struct ParkedSessionTurn {
     // The parent runtime whose services run the child process; it must
-    // stay alive for the fixture's whole span.
-    _runtime: crate::runtime::LashRuntime,
+    // stay alive for the fixture's whole span, and its host core binds the
+    // process scope.
+    runtime: crate::runtime::LashRuntime,
     services: Arc<crate::runtime::RuntimeSessionServices>,
     factory: crate::InMemorySessionStoreFactory,
     process_id: ProcessId,
@@ -556,7 +557,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
         crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     );
     ParkedSessionTurn {
-        _runtime: runtime,
+        runtime,
         services,
         factory,
         process_id,
@@ -575,6 +576,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
 async fn failed_final_child_commit_cancellation_stays_recoverable() {
     let fixture = Box::pin(parked_session_turn("commit-failure")).await;
     let ParkedSessionTurn {
+        runtime,
         services,
         factory,
         process_id,
@@ -671,6 +673,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
 async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     let fixture = Box::pin(parked_session_turn("crash-redelivery")).await;
     let ParkedSessionTurn {
+        runtime,
         services,
         factory,
         process_id,
