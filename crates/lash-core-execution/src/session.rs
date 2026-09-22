@@ -12,6 +12,8 @@ mod fig790_tests;
 mod process_handles;
 mod settlement_incorporation;
 #[cfg(test)]
+mod settlement_incorporation_tests;
+#[cfg(test)]
 mod settlement_latency_tests;
 pub(crate) mod tool_execution;
 
