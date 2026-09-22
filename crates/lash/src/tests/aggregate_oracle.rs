@@ -160,7 +160,11 @@ impl OracleTheatre {
     }
 
     async fn await_started(&self, id: &str) {
-        assert!(self.wait(&format!("started:{id}")).await, "{id} never ran");
+        assert!(
+            self.wait(&format!("started:{id}")).await,
+            "{id} never ran; started so far: {:?}",
+            self.started()
+        );
     }
 
     async fn await_settled(&self, id: &str) {
@@ -875,6 +879,11 @@ async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
     // blocks the later terminal leaf's settlement.
     driven.theatre.await_started("second").await;
     driven.theatre.await_started("first").await;
+    assert!(
+        !driven.turn.is_finished(),
+        "{}: the turn must still be parked on the held leaf",
+        tier.name
+    );
     driven.theatre.await_settled("second").await;
     assert_eq!(
         driven.theatre.settled(),
