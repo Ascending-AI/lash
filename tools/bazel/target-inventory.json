@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 141,
+  "cargo_target_count": 143,
   "feature_lane_units": [
     {
       "features": [],
@@ -15943,6 +15943,238 @@
         "testing"
       ],
       "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_0daaf6ea",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_12f01796",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_3e072c5b",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_701d27d8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_74a71485",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_74a71485",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_75e8391d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_7b5a5885",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_a4a47d28",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_bad23604",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_c32aa56a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_c6aed8b7",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_d320736a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_e91d1324",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_f7509ffe",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_0daaf6ea",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_12f01796",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_3e072c5b",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_701d27d8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_74a71485",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_74a71485",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_75e8391d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_7b5a5885",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_a4a47d28",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_bad23604",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_c32aa56a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_c6aed8b7",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_d320736a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_e91d1324",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_f7509ffe",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
       "label": "//crates/lash:ui__test__fv_0daaf6ea",
       "package": "lash-runtime"
     },
@@ -16601,7 +16833,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 197,
+  "generated_label_count": 199,
   "packages": [
     {
       "declared_features": [
@@ -18911,6 +19143,18 @@
           "tags": []
         },
         {
+          "cargo": "processes_evidence",
+          "kind": "test",
+          "label": "//crates/lash:processes_evidence__test",
+          "tags": []
+        },
+        {
+          "cargo": "processes_evidence_b",
+          "kind": "test",
+          "label": "//crates/lash:processes_evidence_b__test",
+          "tags": []
+        },
+        {
           "cargo": "ui",
           "cargo_only": "uses trybuild and its Cargo-managed compiler fixture cache",
           "kind": "test",
@@ -18925,7 +19169,9 @@
         "label": "//crates/lash:test_batch",
         "members": [
           "//crates/lash:integration__test",
-          "//crates/lash:lash__unit_test"
+          "//crates/lash:lash__unit_test",
+          "//crates/lash:processes_evidence__test",
+          "//crates/lash:processes_evidence_b__test"
         ]
       }
     },
