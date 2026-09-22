@@ -1685,6 +1685,8 @@ async fn retry_ladder_survives_a_later_pending_completion() {
             None,
             pending.duration_ms,
             pending.attempts,
+            pending.captures,
+            pending.triggers,
         )
         .await;
     assert_eq!(completed.attempts.len(), 2);

@@ -418,7 +418,14 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `lash_runtime_effect_group`, the group arity column is renamed
 // `expected_children`, and the membership's `request_version` becomes
 // `command_version`. Component-109 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 110;
+// Version 111 (FIG-3411) is a journaled-encoding cutover with no relational
+// change: the `ToolAttempt` outcome's `ToolAttemptCapture` usage deltas carry
+// the `(source, model)` labels settlement incorporation charges under, and
+// the journaled `ToolInvocation` outcome's `ToolDispatchOutcome` carries the
+// aggregated captures and trigger receipts to the settlement boundary.
+// Component-110 catalogs are rejected and recreated rather than replayed
+// under the old carrier shape.
+const SCHEMA_VERSION: i32 = 111;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

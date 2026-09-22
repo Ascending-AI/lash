@@ -51,6 +51,18 @@ pub trait DirectCompletionService: Send + Sync {
         let _ = (session_id, execution_env_spec);
         None
     }
+
+    /// The opener-side charge a settlement's usage deltas land in
+    /// (FIG-3411): the session token ledger this service's live completions
+    /// charge through `usage_capability.record_token_usage`, offered as the
+    /// narrow [`crate::session::UsageChargeSink`] so an incorporator charges
+    /// under exactly the `(source, model)` the live path would have used —
+    /// without ever naming the ledger type. `None` means this service has no
+    /// session ledger to charge; an incorporator refuses a settlement that
+    /// carries usage it cannot charge.
+    fn usage_charge_sink(&self) -> Option<Arc<dyn crate::session::UsageChargeSink>> {
+        None
+    }
 }
 
 /// Runtime-backed direct completion source.
@@ -115,9 +127,14 @@ pub struct DirectCompletionClient<'run> {
     ///   so a child whose address space is not its opener's carries its usage
     ///   on its settlement instead of losing it.
     ///
-    /// This never replaces the opener's ledger and never changes what is
-    /// merged into it: it is a second reader only.
+    /// While a sink is installed the live charge into the opener's session
+    /// ledger is suppressed: the captured delta is the only carrier, charged
+    /// exactly once at settlement incorporation (FIG-3411).
     usage_ledger: Option<crate::runtime::ToolUsageLedger>,
+    /// A test-installed charge sink: where a settlement's usage deltas land
+    /// when no runtime service backs this client.
+    #[cfg(any(test, feature = "testing"))]
+    usage_charge: Option<Arc<dyn crate::session::UsageChargeSink>>,
 }
 
 impl<'run> DirectCompletionClient<'run> {
@@ -135,6 +152,8 @@ impl<'run> DirectCompletionClient<'run> {
             parent_invocation: None,
             inside_tool_attempt: false,
             usage_ledger: None,
+            #[cfg(any(test, feature = "testing"))]
+            usage_charge: None,
         }
     }
 
@@ -159,15 +178,40 @@ impl<'run> DirectCompletionClient<'run> {
         self.usage_ledger.as_ref()
     }
 
+    /// The charge a settlement's usage deltas land in (FIG-3411): the session
+    /// token ledger behind this client's runtime service, or the sink a test
+    /// installed. `None` means there is nothing to charge, and an
+    /// incorporator refuses a settlement whose usage cannot be charged rather
+    /// than dropping a known spend.
+    pub(crate) fn usage_charge_sink(&self) -> Option<Arc<dyn crate::session::UsageChargeSink>> {
+        match &self.source {
+            DirectCompletionSource::Runtime(source) => source.service.usage_charge_sink(),
+            #[cfg(any(test, feature = "testing"))]
+            _ => self.usage_charge.clone(),
+        }
+    }
+
+    /// Installs the charge sink a test context charges incorporated usage
+    /// into — the stand-in for the session ledger a runtime service lends.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_usage_charge_sink(
+        mut self,
+        sink: Arc<dyn crate::session::UsageChargeSink>,
+    ) -> Self {
+        self.usage_charge = Some(sink);
+        self
+    }
+
     /// Records a completed nested call's sealed spend against the bound
     /// ledger, when this client has one.
     ///
     /// Only the test sources need the client's help — a runtime source feeds
     /// its sink inside the service, before the outcome is projected.
     #[cfg(any(test, feature = "testing"))]
-    fn record_usage(&self, call_record: &crate::LlmCallRecord) {
+    fn record_usage(&self, call_record: &crate::LlmCallRecord, usage_source: &str, model: &str) {
         if let Some(ledger) = self.usage_ledger.as_ref() {
-            ledger.record(call_record);
+            ledger.record(call_record, usage_source, model);
         }
     }
 
@@ -241,6 +285,8 @@ impl<'run> DirectCompletionClient<'run> {
             parent_invocation: parent_invocation.map(Box::new),
             inside_tool_attempt: self.inside_tool_attempt,
             usage_ledger: Some(usage_ledger),
+            #[cfg(any(test, feature = "testing"))]
+            usage_charge: self.usage_charge.clone(),
         })
     }
 
@@ -271,6 +317,8 @@ impl<'run> DirectCompletionClient<'run> {
             parent_invocation: self.parent_invocation.clone(),
             inside_tool_attempt: self.inside_tool_attempt,
             usage_ledger: self.usage_ledger.clone(),
+            #[cfg(any(test, feature = "testing"))]
+            usage_charge: self.usage_charge.clone(),
         })
     }
 
@@ -313,6 +361,8 @@ impl<'run> DirectCompletionClient<'run> {
             parent_invocation: self.parent_invocation.clone(),
             inside_tool_attempt: self.inside_tool_attempt,
             usage_ledger: self.usage_ledger.clone(),
+            #[cfg(any(test, feature = "testing"))]
+            usage_charge: self.usage_charge.clone(),
         }
     }
 
@@ -391,12 +441,13 @@ impl<'run> DirectCompletionClient<'run> {
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestFn(invoke) => {
+                let model = request.model.clone();
                 let completion = invoke(request, usage_source.to_string())?;
                 // The test source answers the call the runtime source would
                 // have made, so it feeds the bound usage ledger the same way:
                 // a fixture asserting capture of managed-LLM spend exercises
                 // the real recording path rather than a second one.
-                self.record_usage(&completion.llm_call);
+                self.record_usage(&completion.llm_call, usage_source, &model);
                 Ok(completion)
             }
             #[cfg(any(test, feature = "testing"))]
@@ -459,8 +510,9 @@ impl<'run> DirectCompletionClient<'run> {
             )),
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestLlmFn(invoke) => {
+                let model = request.model.clone();
                 let completion = invoke(request, usage_source.to_string())?;
-                self.record_usage(&completion.llm_call);
+                self.record_usage(&completion.llm_call, usage_source, &model);
                 Ok(completion)
             }
         }
@@ -473,6 +525,8 @@ impl<'run> DirectCompletionClient<'run> {
             parent_invocation: None,
             inside_tool_attempt: false,
             usage_ledger: None,
+            #[cfg(any(test, feature = "testing"))]
+            usage_charge: None,
         }
     }
 
@@ -489,6 +543,8 @@ impl<'run> DirectCompletionClient<'run> {
             parent_invocation: None,
             inside_tool_attempt: false,
             usage_ledger: None,
+            #[cfg(any(test, feature = "testing"))]
+            usage_charge: None,
         }
     }
 
@@ -507,6 +563,8 @@ impl<'run> DirectCompletionClient<'run> {
             parent_invocation: None,
             inside_tool_attempt: false,
             usage_ledger: None,
+            #[cfg(any(test, feature = "testing"))]
+            usage_charge: None,
         }
     }
 }

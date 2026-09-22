@@ -137,6 +137,8 @@ fn pending_tool() -> crate::tool_dispatch::PendingToolDispatchOutcome {
         pending: crate::PendingCompletion::default(),
         duration_ms: 0,
         attempts: Vec::new(),
+        captures: Vec::new(),
+        triggers: Vec::new(),
     }
 }
 

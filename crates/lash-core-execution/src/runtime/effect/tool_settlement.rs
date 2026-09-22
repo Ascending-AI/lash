@@ -126,16 +126,26 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// so a billed failed attempt and the retry that replaced it each carry their
 /// own spend. Version 3 adds
 /// `ToolIntentRefusalReason::MintingGroupChildCancelled`, the §4 refusal an
-/// intent minted by a cancel-decided group child carries.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 3;
+/// intent minted by a cancel-decided group child carries. Version 4 is the
+/// FIG-3411 incorporation change: [`ToolUsageDelta`] gains `source` and
+/// `model` so a settlement delta charges the session token ledger under
+/// exactly the `(source, model)` the live path would have used, and
+/// [`ToolDispatchOutcome`](crate::tool_dispatch::ToolDispatchOutcome) —
+/// guarded here because it rides the same journaled `ToolInvocation` outcome —
+/// carries the aggregated attempt captures and trigger outcomes the
+/// applicator incorporates.
+pub const TOOL_SETTLEMENT_VERSION: u16 = 4;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
 /// Guarded by `scripts/versioned-surfaces.toml` over [`ToolAttemptCapture`]
 /// and [`ToolUsageDelta`], which the capture's `usage` list is made of.
 /// Version 1 is the shape FIG-2266 minted; version 2 is the same
-/// [`ToolUsageDelta`] rename [`TOOL_SETTLEMENT_VERSION`] records.
-pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 2;
+/// [`ToolUsageDelta`] rename [`TOOL_SETTLEMENT_VERSION`] records; version 3 is
+/// the same `source`/`model` addition [`TOOL_SETTLEMENT_VERSION`] 4 records —
+/// a captured delta is only chargeable at incorporation when it carries the
+/// labels the session ledger keys on.
+pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 3;
 
 /// One provider spend attributable to one attempt of a tool child.
 ///
@@ -167,6 +177,14 @@ pub struct ToolUsageDelta {
     /// the `AttemptRecord`'s own ordinal, so a billed failure and its retry
     /// are distinct facts rather than a summed or lost one.
     pub provider_attempt: u32,
+    /// The usage-source label the live path would have charged under
+    /// (`usage_capability.record_token_usage(source, model, usage)`). Carried
+    /// because incorporation charges the opener's session ledger and a delta
+    /// without its labels could only charge under an invented identity.
+    pub source: String,
+    /// The model label the live path would have charged under, paired with
+    /// [`source`](Self::source).
+    pub model: String,
     /// What the call is known to have spent. Never zero-filled: a provider
     /// attempt reporting no usage contributes no delta at all (§13, ADR 0032).
     pub usage: TokenUsage,
@@ -320,6 +338,65 @@ impl ToolSettlement {
         }
         Ok(())
     }
+
+    /// Aggregates a dispatch outcome into the settlement it settles on.
+    ///
+    /// The one constructor for every caller that owns a terminal
+    /// [`ToolDispatchOutcome`](crate::tool_dispatch::ToolDispatchOutcome):
+    /// the scalar/batch completion path and the group-child driver alike.
+    /// `possession` is read out of the same realized intent outcomes the bound
+    /// value's projection is taken from — the derivation
+    /// `record_processes_started_by_intents` used before the applicator owned
+    /// it — so a possession set assembled from anywhere else could name a
+    /// process the tool's own result never bound. `checkpoint_messages` and
+    /// `usage` are the aggregated per-attempt captures in attempt order;
+    /// `triggers` are the receipts the outcome journaled. `model_return` is
+    /// supplied by the caller because the presentation boundary owns it.
+    pub fn from_dispatch(
+        outcome: &crate::tool_dispatch::ToolDispatchOutcome,
+        model_return: crate::ModelToolReturn,
+    ) -> Self {
+        Self {
+            version: TOOL_SETTLEMENT_VERSION,
+            intent_outcomes: outcome.intent_outcomes.clone(),
+            possession: settlement_possession(&outcome.intent_outcomes),
+            triggers: outcome.triggers.clone(),
+            checkpoint_messages: outcome
+                .captures
+                .iter()
+                .flat_map(|capture| capture.messages.iter().cloned())
+                .collect(),
+            usage: outcome
+                .captures
+                .iter()
+                .flat_map(|capture| capture.usage.iter().cloned())
+                .collect(),
+            model_return,
+        }
+    }
+}
+
+/// The started-process identities a settlement carries: read out of the
+/// realized `StartProcess` intent outcomes exactly as
+/// `record_processes_started_by_intents` read them, so the opener's
+/// incorporation grants possession of nothing the tool's own result did not
+/// bind (ADR 0099 §6).
+pub(crate) fn settlement_possession(
+    intent_outcomes: &[crate::ToolIntentExecutionOutcome],
+) -> Vec<ProcessId> {
+    intent_outcomes
+        .iter()
+        .filter_map(|intent| match intent {
+            crate::ToolIntentExecutionOutcome::Executed { kind, result, .. }
+                if *kind == crate::ToolIntentKind::StartProcess =>
+            {
+                crate::ProcessRef::from_handle_json(result)
+                    .ok()
+                    .map(|process_ref| process_ref.process_id)
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The live accumulator a driver installs on one child's rebound context.
@@ -346,15 +423,15 @@ impl ToolSettlement {
 ///   sees with that attempt's ordinal, so the journaled capture attributes the
 ///   delta to the attempt that made it rather than to the whole invocation.
 ///
-/// # This is a second reader, never a second ledger
+/// # The capture, never a second charge
 ///
-/// The opener's own token ledger is untouched. On an in-process tier a child's
-/// nested call already merges into it exactly once —
-/// `crates/lash-core/src/runtime/session_manager/direct_outcome.rs` records
-/// "into the shared token ledger only … persisted exactly once by the final
-/// turn commit" — and this accumulator only *also* names the spend as the
-/// child's, which is what §13's cross-boundary attribution needs and what an
-/// address space that is not the opener's has no other way to report.
+/// While a sink is installed, the live path does not charge the session
+/// token ledger at all: `direct_outcome.rs` records the sealed record's spend
+/// into this sink *instead* of merging it live (FIG-3411). The journaled
+/// delta is then the only carrier, and the opener charges the session ledger
+/// exactly once at settlement incorporation — a remote child's ledger is not
+/// the parent's ledger (§13), and on an in-process tier the suppression is
+/// what keeps the same spend from being billed twice.
 #[derive(Clone)]
 pub struct ToolUsageLedger {
     facts: Arc<Mutex<Vec<ToolUsageDelta>>>,
@@ -390,7 +467,12 @@ impl ToolUsageLedger {
     /// that reports *zero* is a fact, not a hole: billed-at-zero is a
     /// statement the provider made, and ADR 0032's `Some(0)` is not `None`
     /// (§13).
-    pub fn record(&self, call_record: &crate::LlmCallRecord) {
+    ///
+    /// `source` and `model` are the labels the live path would have charged
+    /// the session token ledger under; the delta carries them so the opener's
+    /// incorporation charges under exactly that identity rather than an
+    /// invented one.
+    pub fn record(&self, call_record: &crate::LlmCallRecord, source: &str, model: &str) {
         let mut facts = self.facts.lock_recover();
         for attempt in &call_record.attempts {
             let Some(usage) = attempt.usage.as_ref() else {
@@ -400,6 +482,8 @@ impl ToolUsageLedger {
                 attempt: self.attempt,
                 llm_call_id: call_record.call_id.clone(),
                 provider_attempt: attempt.ordinal,
+                source: source.to_string(),
+                model: model.to_string(),
                 usage: super::outcome::token_usage_from_llm(usage),
             });
         }

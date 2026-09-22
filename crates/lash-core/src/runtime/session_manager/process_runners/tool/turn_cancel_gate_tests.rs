@@ -263,6 +263,8 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
         pending: crate::PendingCompletion::default(),
         duration_ms: 0,
         attempts: Vec::new(),
+        captures: Vec::new(),
+        triggers: Vec::new(),
     };
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(

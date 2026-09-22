@@ -94,6 +94,14 @@ impl DirectCompletionService for RuntimeSessionServices {
             .await
     }
 
+    /// The session token ledger, lent to settlement incorporation
+    /// (FIG-3411): the same `UsageCapability` the live path records through,
+    /// so a settlement delta charges under exactly the `(source, model)` a
+    /// live call would have used.
+    fn usage_charge_sink(&self) -> Option<Arc<dyn crate::session::UsageChargeSink>> {
+        Some(Arc::new(self.usage.clone()))
+    }
+
     /// Rebinds this service to a tool child's recorded authority.
     ///
     /// The transport — the managed session, the provider registry, the live

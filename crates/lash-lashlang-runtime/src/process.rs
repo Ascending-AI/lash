@@ -67,11 +67,17 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// v7 pins the attempt bound this segment stamps onto the children it starts,
 /// so a redrive after a host config change re-registers the recorded bound
 /// instead of conflicting with the fingerprint the first attempt wrote.
+/// v13 carries the once-only incorporation ledger (FIG-3411, ADR 0099 §6/§13):
+/// which settlements the opener already applied and which usage deltas it
+/// already charged. A segment parked by an older version has no ledger to
+/// hand over, so the boundary is a version rather than a defaulted field — a
+/// defaulted empty ledger would let the successor incorporate the same
+/// settlement twice and double-charge its spend.
 /// v6 carries run-local child possession across execution segments. A segment
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 12;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 13;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -147,6 +153,10 @@ struct LashlangSegmentState {
     /// segment began. Carried forward so every segment of the run, and every
     /// redrive of it, registers children with the same recorded value.
     child_max_attempts: std::num::NonZeroU32,
+    /// The once-only settlement incorporation ledger (FIG-3411): a successor
+    /// segment incorporates against the same set so a redrive cannot
+    /// re-apply a settlement or re-charge a usage delta.
+    incorporation_ledger: lash_core::session::IncorporationLedger,
 }
 
 /// A segment that resumes carries the bound its first segment recorded, so a
@@ -410,6 +420,7 @@ pub async fn run_lashlang_process(
     };
     if let Some(segment_state) = segment_state.as_ref() {
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
+        ctx.restore_incorporation_ledger(segment_state.incorporation_ledger.clone());
     }
     let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
     let child_max_attempts =
@@ -553,6 +564,7 @@ async fn execute_lashlang(
                             ordinals: host.ordinals.snapshot().await,
                             started_process_ids: host.ctx.started_process_ids(),
                             child_max_attempts: host.child_max_attempts,
+                            incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
                         };
                         match serde_json::to_vec(&segment_state) {
                             Ok(engine_state) => {

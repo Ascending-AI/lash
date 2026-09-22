@@ -119,11 +119,11 @@ impl RuntimeSessionServices {
             return Ok(outcome.record.output);
         }
         if dispatch.is_orchestrating_tool(&call.tool_id) {
-            let outcome = crate::tool_dispatch::execute_orchestrating_tool(
+            let outcome = Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
                 dispatch.as_ref(),
                 call,
                 tool_context,
-            )
+            ))
             .await;
             return Ok(outcome.record.output);
         }

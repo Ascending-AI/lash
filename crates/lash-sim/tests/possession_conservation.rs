@@ -474,6 +474,8 @@ fn settled_outcome(
         attempts: Vec::new(),
         intents: ToolIntents::default(),
         intent_outcomes,
+        captures: Vec::new(),
+        triggers: Vec::new(),
     }
 }
 

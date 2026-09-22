@@ -667,7 +667,7 @@ impl RuntimeExecutionContext<'_> {
     ) -> CompletedProtocolToolCall {
         let tool_correlation_id = tool_activity_id(&call_id);
         let attempts = outcome.attempts.clone();
-        let output = outcome.record.output.clone();
+        let mut output = outcome.record.output.clone();
         let projection_output = output.clone();
         let projection_tool_name = outcome.record.tool.clone();
         let projection_args = outcome.record.args.clone();
@@ -695,7 +695,30 @@ impl RuntimeExecutionContext<'_> {
             &output,
             &mut model_return,
         );
-        self.record_processes_started_by_intents(&outcome.intent_outcomes);
+        // ADR 0099 §6/§13: the applicator owns possession, committed messages,
+        // trigger receipts and usage charging, exactly once per source. A
+        // refusal — an unreadable settlement or a spend with no charge sink —
+        // fails the call closed rather than presenting a result whose
+        // recorded facts were dropped.
+        let settlement =
+            crate::runtime::effect::ToolSettlement::from_dispatch(&outcome, model_return.clone());
+        let settlement_source = crate::session::SettlementSource::Invocation {
+            call_id: call_id.clone(),
+            replay_key: call_id.clone(),
+        };
+        if let Err(error) = self.incorporate_tool_settlement(settlement_source, &settlement) {
+            let message = error.message;
+            output = ToolCallOutput::failure(ToolFailure::runtime(
+                ToolFailureClass::Internal,
+                "tool_settlement_incorporation_failed",
+                message.clone(),
+            ));
+            model_return
+                .parts
+                .push(crate::ModelToolReturnPart::text(format!(
+                    "settlement incorporation refused: {message}"
+                )));
+        }
         for intent_outcome in &outcome.intent_outcomes {
             model_return.parts.push(crate::ModelToolReturnPart::text(
                 intent_outcome.model_addendum(),
@@ -794,6 +817,7 @@ impl RuntimeExecutionContext<'_> {
         .await;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn pending_completion_dispatch_outcome(
         &self,
         tool_name: String,
@@ -802,9 +826,25 @@ impl RuntimeExecutionContext<'_> {
         resolver: Option<&crate::PendingResolver>,
         duration_ms: u64,
         attempts: Vec<lash_trace::TraceRetryAttempt>,
+        mut captures: Vec<crate::runtime::ToolAttemptCapture>,
+        mut triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
     ) -> ToolDispatchOutcome {
-        crate::tool_dispatch::settle_completed_pending_tool_call(
-            self.dispatch.as_ref(),
+        // The resume's own producers — the after-tool hook's directives —
+        // write into buffers fresh to this resume, so what they commit is
+        // captured into the outcome rather than into a buffer a sibling
+        // attempt may still be writing into.
+        let mut resumed_dispatch = (*self.dispatch).clone();
+        resumed_dispatch.checkpoint_messages =
+            crate::tool_dispatch::CheckpointMessageBuffer::default();
+        resumed_dispatch.trigger_outcomes =
+            crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
+        let usage_ledger = crate::runtime::ToolUsageLedger::new();
+        resumed_dispatch.direct_completions = resumed_dispatch
+            .direct_completions
+            .clone()
+            .with_usage_ledger(usage_ledger.clone());
+        let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
+            &resumed_dispatch,
             tool_name,
             args,
             resolution,
@@ -812,7 +852,19 @@ impl RuntimeExecutionContext<'_> {
             duration_ms,
             attempts,
         )
-        .await
+        .await;
+        triggers.extend(resumed_dispatch.trigger_outcomes.drain());
+        let capture = crate::runtime::ToolAttemptCapture {
+            version: crate::runtime::TOOL_ATTEMPT_CAPTURE_VERSION,
+            messages: resumed_dispatch.checkpoint_messages.drain(),
+            usage: usage_ledger.take(),
+        };
+        if !capture.is_empty() {
+            captures.push(capture);
+        }
+        outcome.captures = captures;
+        outcome.triggers = triggers;
+        outcome
     }
 
     async fn await_pending_tool_dispatch_outcome(
@@ -935,6 +987,8 @@ impl RuntimeExecutionContext<'_> {
                     attempts,
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
+                    captures: pending.captures,
+                    triggers: pending.triggers,
                 };
             }
         };
@@ -945,6 +999,8 @@ impl RuntimeExecutionContext<'_> {
             resolver.as_ref(),
             pending.duration_ms,
             pending.attempts,
+            pending.captures,
+            pending.triggers,
         )
         .await
     }
@@ -984,6 +1040,8 @@ impl RuntimeExecutionContext<'_> {
             attempts: pending.attempts,
             intents: crate::ToolIntents::default(),
             intent_outcomes: Vec::new(),
+            captures: pending.captures,
+            triggers: pending.triggers,
         }
     }
 
@@ -1091,6 +1149,8 @@ impl RuntimeExecutionContext<'_> {
                 attempts: Vec::new(),
                 intents: crate::ToolIntents::default(),
                 intent_outcomes: Vec::new(),
+                captures: Vec::new(),
+                triggers: Vec::new(),
             };
             return self
                 .complete_undispatched_tool_call(call_id, replay, outcome)
@@ -1145,11 +1205,11 @@ impl RuntimeExecutionContext<'_> {
                             .child_execution_trace_hook(child_execution_trace_hook.clone())
                             .build();
                     ToolCallLaunch::Done(Box::new(
-                        crate::tool_dispatch::execute_orchestrating_tool(
+                        Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
                             &dispatch,
                             *prepared,
                             tool_context,
-                        )
+                        ))
                         .await,
                     ))
                 } else {
@@ -1188,7 +1248,6 @@ impl RuntimeExecutionContext<'_> {
                         },
                     )
                     .await;
-                    self.restore_tool_trigger_outcomes(coordinated.triggers);
                     coordinated.launch
                 }
             }
@@ -1222,6 +1281,8 @@ impl RuntimeExecutionContext<'_> {
                     attempts: Vec::new(),
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
+                    captures: Vec::new(),
+                    triggers: Vec::new(),
                 }
             }
         };
