@@ -427,7 +427,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // under the old carrier shape.
 // Version 112 cuts over message parts, append encoding 5 and standard compaction.
 // Component-111 catalogs are rejected and recreated, including effect payloads.
-const SCHEMA_VERSION: i32 = 112;
+// Version 113 removes implicit fork observer selection and attribution.
+// Hosts persist exact process references; component-112 catalogs are recreated.
+const SCHEMA_VERSION: i32 = 113;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

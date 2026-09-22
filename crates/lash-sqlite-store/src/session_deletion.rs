@@ -196,7 +196,6 @@ pub(super) async fn delete_session_from_catalog(
             // The session-core rows the family owns, named rather than spelled.
             for statement in [
                 session_sql().observer_intents.delete_by_session.sql(),
-                session_sql().fork_inheritance.delete_by_session.sql(),
                 session_sql().meta.delete_by_session.sql(),
             ] {
                 tx.execute(statement, params![session_id.as_str()])

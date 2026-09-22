@@ -1239,27 +1239,23 @@ fn list_session_summaries(
             }
         };
         let parent_session_id = stored.parent_session_id.clone();
-        let deleted = row.get::<_, i64>(21)? != 0;
+        let deleted = row.get::<_, i64>(20)? != 0;
         let durable_relation = if deleted {
             None
         } else {
             Some(
-                crate::session_meta::decode_catalog_relation(
-                    stored,
-                    &row.get::<_, String>(22)?,
-                    &row.get::<_, String>(23)?,
-                )
-                .map_err(sqlite_conversion_error)?,
+                crate::session_meta::decode_catalog_relation(stored, &row.get::<_, String>(21)?)
+                    .map_err(sqlite_conversion_error)?,
             )
         };
         Ok(SessionSummary {
             session_id: SessionId::from(row.get::<_, String>(0)?),
-            created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(18)?)?,
+            created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(17)?)?,
             last_commit_at_ms: row
-                .get::<_, Option<i64>>(19)?
+                .get::<_, Option<i64>>(18)?
                 .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
                 .transpose()?,
-            head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(20)?)?,
+            head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(19)?)?,
             relation,
             durable_relation,
             parent_session_id,

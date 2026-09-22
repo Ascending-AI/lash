@@ -659,7 +659,6 @@ impl SessionGraphScenario {
         let relation = crate::SessionRelation::Fork {
             source_session_id: SessionId::from(source_session_id),
             source_node_id: node_id.clone(),
-            observer_inheritance: crate::ObserverInheritance::default(),
         };
         let request = session_store_request(
             &SessionId::from(physical_id.clone()),
@@ -755,7 +754,6 @@ impl SessionGraphScenario {
         let relation = crate::SessionRelation::Fork {
             source_session_id: SessionId::from(old_model.physical_id.clone()),
             source_node_id: node_id.clone(),
-            observer_inheritance: crate::ObserverInheritance::default(),
         };
         let request = session_store_request(
             &SessionId::from(physical_id.clone()),

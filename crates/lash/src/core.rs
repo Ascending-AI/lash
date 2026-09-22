@@ -367,96 +367,52 @@ impl LashCore {
     /// silently substitutes a different checkpoint. An explicit pin remains
     /// forkable after its source session is deleted because the retained frame
     /// carries the provider and model needed to create the branch.
-    pub async fn fork_at(
-        &self,
-        node_id: impl Into<String>,
-        session_id: impl Into<SessionId>,
-    ) -> Result<lash_core::ForkSessionReceipt> {
-        self.fork_at_with_observer_inheritance(
-            node_id,
-            session_id,
-            lash_core::ObserverInheritance::All,
-        )
-        .await
-    }
-
-    pub async fn fork_at_with_observer_inheritance(
-        &self,
-        node_id: impl Into<String>,
-        session_id: impl Into<SessionId>,
-        observer_inheritance: lash_core::ObserverInheritance,
-    ) -> Result<lash_core::ForkSessionReceipt> {
+    pub async fn fork_at(&self, request: ForkRequest) -> Result<lash_core::ForkSessionReceipt> {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::SessionCatalogUnavailable {
                 operation: "fork_at",
             });
         };
-        let node_id = node_id.into();
-        let session_id = session_id.into();
+        let ForkRequest {
+            session_id,
+            node_id,
+            relation,
+            observed_processes,
+        } = request;
         let point = store_factory
             .fork_points()
             .await?
             .into_iter()
             .find(|point| point.node_id == node_id)
             .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
-                node_id: node_id.clone().into(),
+                node_id: node_id.clone(),
             })?;
-        let inherited = match (&observer_inheritance, self.process_registry()) {
-            (lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),
-            (lash_core::ObserverInheritance::All, Some(process_registry)) => process_registry
-                .list_observed_by(
-                    &point.source_session_id,
-                    &lash_core::ProcessListFilter {
-                        status: lash_core::ProcessStatusFilter::Any,
-                        ..Default::default()
-                    },
-                )
-                .await?
-                .into_iter()
-                .map(|record| record.id)
-                .collect(),
-            (lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {
-                let observed = process_registry
-                    .list_observed_by(
-                        &point.source_session_id,
-                        &lash_core::ProcessListFilter {
-                            status: lash_core::ProcessStatusFilter::Any,
-                            ..Default::default()
-                        },
-                    )
-                    .await?
-                    .into_iter()
-                    .map(|record| record.id)
-                    .collect::<std::collections::HashSet<_>>();
-                let mut seen_inherited = std::collections::HashSet::new();
-                ids.iter()
-                    .filter(|id| observed.contains(*id) && seen_inherited.insert(id.as_str()))
-                    .cloned()
-                    .collect()
-            }
-        };
-        let resolved_observer_inheritance = match observer_inheritance {
-            lash_core::ObserverInheritance::Only(_) => {
-                lash_core::ObserverInheritance::Only(inherited.clone())
-            }
-            selector => selector,
-        };
         let mut fork_policy = self.policy.clone();
         fork_policy.provider_id = point.config.provider_id;
         fork_policy.model = point.config.model;
-        let pending_observer_intents = inherited
-            .iter()
-            .cloned()
-            .map(facade_support::SessionObserverIntent::fork_inherited)
-            .collect();
+        let mut selected = std::collections::HashMap::new();
+        let mut pending_observer_intents = Vec::new();
+        for process_ref in observed_processes {
+            if let Some(incarnation) =
+                selected.insert(process_ref.process_id.clone(), process_ref.incarnation)
+            {
+                if incarnation != process_ref.incarnation {
+                    return Err(lash_core::StoreError::Backend(format!(
+                        "fork observer selection names conflicting incarnations for process `{}`",
+                        process_ref.process_id
+                    ))
+                    .into());
+                }
+                continue;
+            }
+            pending_observer_intents.push(
+                facade_support::SessionObserverIntent::host_requested_ref(process_ref),
+            );
+        }
         let request = lash_core::ForkSessionRequest {
             session_id,
-            node_id: node_id.into(),
-            relation: lash_core::SessionRelation::Fork {
-                source_session_id: point.source_session_id,
-                source_node_id: point.node_id,
-                observer_inheritance: resolved_observer_inheritance,
-            },
+            node_id,
+            relation,
             pending_observer_intents,
             policy: fork_policy,
         };
@@ -1554,4 +1510,16 @@ impl LashCore {
             .await
             .map_err(Into::into)
     }
+}
+
+/// Explicit host selection for a retained-history fork.
+///
+/// Lineage is independent of the history node's writer. Observers are the exact
+/// runs the host selected; an empty list creates a history-only fork.
+#[derive(Clone, Debug)]
+pub struct ForkRequest {
+    pub session_id: SessionId,
+    pub node_id: lash_core::NodeId,
+    pub relation: lash_core::SessionRelation,
+    pub observed_processes: Vec<lash_core::ProcessRef>,
 }

@@ -15,7 +15,6 @@ pub use crate::attachments::{
 pub use crate::plugin::{
     ErasedPluginOperationOutcome, OpenAgentFrameRequest, PluginOperationSpec, RuntimeServices,
     SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
-    SessionObserverIntentAttribution,
 };
 pub use crate::runtime::NormalizedItem;
 pub use crate::runtime::assembly::classify_output_state;

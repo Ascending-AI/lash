@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessQuery as _;
 use lash_core::{
     ProcessEventLog as _, ProcessEventLogTestSupport as _, ProcessObserverRegistry as _,
     ProcessRetention as _, ProcessWakeOutbox as _,
@@ -672,7 +673,15 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         .build(crate::testing::runtime_lease_owner())?;
 
     let collected_error = core
-        .fork_at("collected-fork-point", "collected-fork-branch")
+        .fork_at(crate::ForkRequest {
+            session_id: ("collected-fork-branch").into(),
+            node_id: ("collected-fork-point").into(),
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: ("collected-source").into(),
+                source_node_id: ("collected-fork-point").into(),
+            },
+            observed_processes: Vec::new(),
+        })
         .await
         .expect_err("a collected point must remain classified as not retained");
     assert!(matches!(
@@ -726,7 +735,15 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         .expect("delete pinned source session");
 
     let forked = core
-        .fork_at(&retained_node_id, "orphaned-fork-branch")
+        .fork_at(crate::ForkRequest {
+            session_id: ("orphaned-fork-branch").into(),
+            node_id: (&retained_node_id).into(),
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: ("orphaned-fork-source").into(),
+                source_node_id: (&retained_node_id).into(),
+            },
+            observed_processes: Vec::new(),
+        })
         .await
         .expect("retained graph frame must resolve policy after source deletion");
     assert_eq!(forked.node_id, retained_node_id);
@@ -761,7 +778,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
 }
 
 #[tokio::test]
-async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent() -> Result<()> {
+async fn fork_observer_selection_is_recoverable_selective_and_wake_independent() -> Result<()> {
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -852,15 +869,25 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("observe source process");
 
-    let fork_receipt = core.fork_at(&fork_node_id, "fork-observer-branch").await?;
+    let fork_receipt = core
+        .fork_at(crate::ForkRequest {
+            session_id: ("fork-observer-branch").into(),
+            node_id: (&fork_node_id).into(),
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: ("fork-observer-source").into(),
+                source_node_id: (&fork_node_id).into(),
+            },
+            observed_processes: vec![
+                registry
+                    .resolve_process_ref(&ProcessId::from("fork-visible-process"))
+                    .await?,
+            ],
+        })
+        .await?;
     assert_eq!(fork_receipt.observed_processes.len(), 1);
     assert_eq!(
         fork_receipt.observed_processes[0].process_id,
         "fork-visible-process"
-    );
-    assert_eq!(
-        fork_receipt.observed_processes[0].attribution,
-        lash_core::test_support::SessionObserverIntentAttribution::ForkInherited
     );
     let branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
@@ -898,9 +925,20 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
             "transient fork observer registry failure".to_string(),
         )))
         .await;
-    core.fork_at(&fork_node_id, "fork-transient-branch")
-        .await
-        .expect("transient observer registry failure must not fail fork_at");
+    core.fork_at(crate::ForkRequest {
+        session_id: ("fork-transient-branch").into(),
+        node_id: (&fork_node_id).into(),
+        relation: lash_core::SessionRelation::Fork {
+            source_session_id: ("fork-observer-source").into(),
+            source_node_id: (&fork_node_id).into(),
+        },
+        observed_processes: inherited
+            .iter()
+            .map(lash_core::ProcessRef::from_record)
+            .collect(),
+    })
+    .await
+    .expect("transient observer registry failure must not fail fork_at");
     registry.set_process_read_error(None).await;
     assert!(
         registry
@@ -952,7 +990,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
 
     let mut recovery_meta = published_meta;
     recovery_meta.pending_observer_intents.push(
-        lash_core::facade_support::SessionObserverIntent::fork_inherited("fork-visible-process"),
+        lash_core::facade_support::SessionObserverIntent::host_requested("fork-visible-process"),
     );
     registry
         .register_process(lash_core::ProcessRegistration::new(
@@ -988,7 +1026,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("prune inherited process before recovery");
     recovery_meta.pending_observer_intents.push(
-        lash_core::facade_support::SessionObserverIntent::fork_inherited("fork-pruned-process"),
+        lash_core::facade_support::SessionObserverIntent::host_requested("fork-pruned-process"),
     );
     branch_store
         .save_session_meta(recovery_meta)
@@ -1076,11 +1114,19 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         )
         .await
         .expect("register second observed process");
-    core.fork_at_with_observer_inheritance(
-        &fork_node_id,
-        "fork-only-branch",
-        lash_core::ObserverInheritance::Only(vec![ProcessId::from("fork-selective-process")]),
-    )
+    core.fork_at(crate::ForkRequest {
+        session_id: ("fork-only-branch").into(),
+        node_id: (&fork_node_id).into(),
+        relation: lash_core::SessionRelation::Fork {
+            source_session_id: ("fork-observer-source").into(),
+            source_node_id: (&fork_node_id).into(),
+        },
+        observed_processes: vec![
+            registry
+                .resolve_process_ref(&ProcessId::from("fork-selective-process"))
+                .await?,
+        ],
+    })
     .await?;
     let only = registry
         .list_observed_by(
@@ -1107,7 +1153,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .add_observer(
             &SessionId::from("fork-only-branch"),
             &ProcessId::from("fork-selective-process"),
-            lash_core::ProcessObserverBy::ForkInheritance,
+            lash_core::ProcessObserverBy::host("observer-test"),
         )
         .await
         .expect("reapply fork observer");
@@ -1121,11 +1167,15 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         "double-apply must be an event-log no-op"
     );
 
-    core.fork_at_with_observer_inheritance(
-        &fork_node_id,
-        "fork-none-branch",
-        lash_core::ObserverInheritance::None,
-    )
+    core.fork_at(crate::ForkRequest {
+        session_id: ("fork-none-branch").into(),
+        node_id: (&fork_node_id).into(),
+        relation: lash_core::SessionRelation::Fork {
+            source_session_id: ("fork-observer-source").into(),
+            source_node_id: (&fork_node_id).into(),
+        },
+        observed_processes: Vec::new(),
+    })
     .await?;
     assert!(
         registry
@@ -1232,11 +1282,18 @@ async fn duplicate_only_fork_intents_are_canonical(
         .await?;
 
     let receipt = core
-        .fork_at_with_observer_inheritance(
-            &fork_node_id,
-            &branch_session_id,
-            lash_core::ObserverInheritance::Only(vec![process_id.clone(), process_id.clone()]),
-        )
+        .fork_at(crate::ForkRequest {
+            session_id: (&branch_session_id).into(),
+            node_id: (&fork_node_id).into(),
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: (&source_session_id).into(),
+                source_node_id: (&fork_node_id).into(),
+            },
+            observed_processes: vec![
+                registry.resolve_process_ref(&process_id).await?,
+                registry.resolve_process_ref(&process_id).await?,
+            ],
+        })
         .await?;
 
     assert_eq!(
@@ -1376,8 +1433,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 }
 
 #[tokio::test]
-async fn attributed_session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()>
-{
+async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()> {
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -1413,7 +1469,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
                     lash_core::facade_support::SessionObserverIntent::host_requested(
                         create_process_id.clone(),
                     ),
-                    lash_core::facade_support::SessionObserverIntent::fork_inherited(
+                    lash_core::facade_support::SessionObserverIntent::host_requested(
                         fork_process_id.clone(),
                     ),
                 ],
@@ -1421,7 +1477,6 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
                 relation: lash_core::SessionRelation::Fork {
                     source_session_id: SessionId::from(format!("nested-source-{case}")),
                     source_node_id: format!("nested-source-node-{case}").into(),
-                    observer_inheritance: lash_core::ObserverInheritance::All,
                 },
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
@@ -1488,7 +1543,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
         assert_eq!(fork_events.len(), 1);
         assert_eq!(
             fork_events[0].payload["by"],
-            serde_json::json!({"kind": "fork_inheritance"})
+            serde_json::json!({"kind": "host", "operation_id": format!("session-create:{session_id}")})
         );
     }
     Ok(())
@@ -1769,8 +1824,16 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         .expect("fork source leaf");
     core.pin(&fork_node_id).await?;
 
-    core.fork_at(&fork_node_id, "generation-fork-branch")
-        .await?;
+    core.fork_at(crate::ForkRequest {
+        session_id: ("generation-fork-branch").into(),
+        node_id: (&fork_node_id).into(),
+        relation: lash_core::SessionRelation::Fork {
+            source_session_id: ("generation-fork-source").into(),
+            source_node_id: (&fork_node_id).into(),
+        },
+        observed_processes: Vec::new(),
+    })
+    .await?;
 
     let branch = core.session("generation-fork-branch").open().await?;
     let branch_state = branch.admin().state().persist_current().await?;

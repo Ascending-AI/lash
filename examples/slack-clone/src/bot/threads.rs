@@ -174,7 +174,35 @@ pub async fn open_thread_session(
         core.pin(&fork_node)
             .await
             .with_context(|| format!("retain channel boundary {fork_node} for thread fork"))?;
-        match core.fork_at(&fork_node, &thread_id).await {
+        let parent_id = session_id(&record.channel_id);
+        let observed_processes = if let Some(registry) = core.process_registry() {
+            registry
+                .list_observed_by(
+                    &parent_id.clone().into(),
+                    &lash::process::ProcessListFilter {
+                        status: lash::process::ProcessStatusFilter::Any,
+                        ..Default::default()
+                    },
+                )
+                .await?
+                .iter()
+                .map(lash::process::ProcessRef::from_record)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        match core
+            .fork_at(lash::ForkRequest {
+                session_id: thread_id.clone().into(),
+                node_id: fork_node.clone().into(),
+                relation: lash::persistence::SessionRelation::Fork {
+                    source_session_id: parent_id.into(),
+                    source_node_id: fork_node.clone().into(),
+                },
+                observed_processes,
+            })
+            .await
+        {
             Ok(_) => {}
             Err(lash::EmbedError::Store(StoreError::ForkSessionAlreadyExists { .. })) => {
                 // Another process won the deterministic fork race. Opening the

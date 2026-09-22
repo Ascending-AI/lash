@@ -1047,8 +1047,7 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
         .apply(
             "ALTER TABLE lash_session_meta
                  DROP CONSTRAINT ck_session_meta_relation_kind,
-                 DROP CONSTRAINT ck_session_meta_caused_by_kind,
-                 DROP CONSTRAINT ck_session_meta_observer_inheritance_kind;
+                 DROP CONSTRAINT ck_session_meta_caused_by_kind;
              ALTER TABLE lash_processes
                  DROP CONSTRAINT ck_processes_status;
              ALTER TABLE lash_process_wake_deliveries
@@ -1115,7 +1114,6 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
     .bind(vec![
         "ck_session_meta_relation_kind",
         "ck_session_meta_caused_by_kind",
-        "ck_session_meta_observer_inheritance_kind",
         "ck_processes_status",
         "ck_process_wake_deliveries_state",
         "ck_process_wake_deliveries_discard_reason",

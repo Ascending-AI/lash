@@ -1115,7 +1115,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     ///    unchanged. The relation is a durable fact, so the conflict is
     ///    answered rather than absorbed. [`SessionRelation::Root`] declares no
     ///    lineage — it is what every resume and plain reopen carries — so it
-    ///    always rebinds; causal provenance and observer inheritance are not
+    ///    always rebinds; causal provenance and pending observer intents are not
     ///    compared. Use
     ///    [`store_backend_support::guard_rebind_lineage`](crate::store_backend_support::guard_rebind_lineage)
     ///    so all backends answer identically.
@@ -1133,7 +1133,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// Admission reads [`SessionRelation::Root`] as "no claim" on a rebind
     /// because a resume declares no lineage; a write cannot, because the row
     /// it would record replaces the recorded parent with that root. Causal
-    /// provenance, observer inheritance and the pending observer intents are
+    /// provenance and the pending observer intents are
     /// not lineage and are replaced as given, which is what lets the observer
     /// intent settlement round-trip the metadata it loaded. Use
     /// [`store_backend_support::guard_session_meta_relation_rewrite`](crate::store_backend_support::guard_session_meta_relation_rewrite)

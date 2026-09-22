@@ -110,10 +110,6 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("session_execution_leases", "lash_session_execution_leases"),
     pair("session_meta", "lash_session_meta"),
     pair(
-        "session_meta_fork_inheritance_processes",
-        "lash_session_meta_fork_inheritance_processes",
-    ),
-    pair(
         "session_meta_pending_observer_intents",
         "lash_session_meta_pending_observer_intents",
     ),
@@ -870,10 +866,9 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     use lash_core::facade_support::effect_replay_driver::EffectRowStatus;
     use lash_core::store_backend_support::SessionMetaCodec;
     use lash_core::{
-        CausalRef, DeliveryPolicy, GroupWakePolicy, LoserPolicy, ObserverInheritance,
-        ProcessStatus, QueuedWorkKind, SessionMeta, SessionRelation, ToolIntentKind,
-        TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, TurnInputStateKind,
-        WakeDeliveryState, WakeDiscardReason,
+        CausalRef, DeliveryPolicy, GroupWakePolicy, LoserPolicy, ProcessStatus, QueuedWorkKind,
+        SessionMeta, SessionRelation, ToolIntentKind, TurnInputCheckpointBoundary,
+        TurnInputIngress, TurnInputState, TurnInputStateKind, WakeDeliveryState, WakeDiscardReason,
     };
 
     assert_eq!(
@@ -1042,22 +1037,6 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         .relation_kind,
         "child"
     );
-    let inheritance_kinds = [
-        ObserverInheritance::All,
-        ObserverInheritance::None,
-        ObserverInheritance::Only(vec!["process".into()]),
-    ]
-    .map(|observer_inheritance| {
-        encode(SessionRelation::Fork {
-            source_session_id: SessionId::from("source"),
-            source_node_id: "node".to_string().into(),
-            observer_inheritance,
-        })
-        .observer_inheritance_kind
-        .expect("fork metadata carries an inheritance kind")
-    });
-    assert_eq!(inheritance_kinds, ["all", "none", "only"]);
-
     let causal_kinds = [
         CausalRef::Turn {
             session_id: SessionId::from("session"),
@@ -1194,12 +1173,6 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             | SessionRelation::Fork { .. } => {}
         }
     }
-    fn exhaustive_observer_inheritance(inheritance: &ObserverInheritance) {
-        match inheritance {
-            ObserverInheritance::All | ObserverInheritance::None | ObserverInheritance::Only(_) => {
-            }
-        }
-    }
     fn exhaustive_causal_ref(caused_by: &CausalRef) {
         match caused_by {
             CausalRef::Turn { .. }
@@ -1222,7 +1195,6 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     exhaustive_group_wake_policy(GroupWakePolicy::First);
     exhaustive_loser_policy(LoserPolicy::Cancel);
     exhaustive_session_relation(&SessionRelation::Root);
-    exhaustive_observer_inheritance(&ObserverInheritance::All);
     exhaustive_causal_ref(&CausalRef::Process {
         process_id: ProcessId::from("process"),
     });

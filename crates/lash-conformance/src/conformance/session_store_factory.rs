@@ -1568,26 +1568,6 @@ async fn session_store_factory_round_trips_every_relation_shape(
             crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("declared-missing-session"),
                 source_node_id: "declared-missing-node".into(),
-                observer_inheritance: crate::ObserverInheritance::All,
-            },
-        ),
-        (
-            "fork-only-empty",
-            crate::SessionRelation::Fork {
-                source_session_id: SessionId::from("declared-source"),
-                source_node_id: "declared-node".into(),
-                observer_inheritance: crate::ObserverInheritance::Only(Vec::new()),
-            },
-        ),
-        (
-            "fork-only-processes",
-            crate::SessionRelation::Fork {
-                source_session_id: SessionId::from("declared-source"),
-                source_node_id: "declared-node".into(),
-                observer_inheritance: crate::ObserverInheritance::Only(vec![
-                    ProcessId::from("inherit-a".to_string()),
-                    ProcessId::from("inherit-b".to_string()),
-                ]),
             },
         ),
     ];
@@ -1609,7 +1589,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
         let expected = SessionMeta {
             pending_observer_intents: vec![
                 crate::SessionObserverIntent::host_requested("observer-a"),
-                crate::SessionObserverIntent::fork_inherited("observer-b"),
+                crate::SessionObserverIntent::host_requested("observer-b"),
             ],
             session_id: session_id.clone(),
             relation,
@@ -1969,7 +1949,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
             relation: crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("no-such-session"),
                 source_node_id: "no-such-node".into(),
-                observer_inheritance: crate::ObserverInheritance::default(),
             },
             policy: source_request.policy.clone(),
         })

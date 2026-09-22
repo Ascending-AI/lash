@@ -99,7 +99,7 @@ fn historical_remote_protocol_generation_64_is_refused() {
     ));
 }
 
-/// Captured by main's Envelope writer at 9680a9bd86bd; no hand-edited wire bytes.
+/// Captured by main's Envelope writer at 9680a9bd87bd; no hand-edited wire bytes.
 #[test]
 fn historical_remote_protocol_generation_65_is_refused() {
     const PREDECESSOR: u32 = 65;
@@ -126,7 +126,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 86,
+            expected: 87,
         })
     ));
 }

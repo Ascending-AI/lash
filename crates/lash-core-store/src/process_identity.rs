@@ -224,14 +224,6 @@ impl ProcessStatus {
         }
     }
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ObserverInheritance {
-    #[default]
-    All,
-    None,
-    Only(Vec<ProcessId>),
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

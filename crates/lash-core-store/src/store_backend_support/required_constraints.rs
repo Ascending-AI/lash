@@ -225,26 +225,13 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "session_meta",
-            "ck_session_meta_observer_inheritance_kind",
-            "observer_inheritance_kind IN ('all', 'none', 'only')",
-        ),
-        rendered(
-            "lash_session_meta",
-            "ck_session_meta_observer_inheritance_kind",
-            "observer_inheritance_kind IN ('all', 'none', 'only')",
-        ),
-    ),
-    expected_constraint(
-        &[SqliteConstraintDatabase::DurableCore],
-        rendered(
-            "session_meta",
             "ck_session_meta_relation_family",
-            "(relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL AND observer_inheritance_kind IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL AND observer_inheritance_kind IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL AND observer_inheritance_kind IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))",
+            "(relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))",
         ),
         rendered(
             "lash_session_meta",
             "ck_session_meta_relation_family",
-            "(relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL AND observer_inheritance_kind IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL AND observer_inheritance_kind IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL AND observer_inheritance_kind IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))",
+            "(relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))",
         ),
     ),
     expected_constraint(
@@ -531,19 +518,6 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "lash_fork_lineage",
             "ck_fork_lineage_fork_generation",
             "fork_generation >= 0",
-        ),
-    ),
-    expected_constraint(
-        &[SqliteConstraintDatabase::DurableCore],
-        rendered(
-            "session_meta_pending_observer_intents",
-            "ck_session_meta_pending_observer_intents_attribution",
-            "attribution IN ('host_requested', 'fork_inherited')",
-        ),
-        rendered(
-            "lash_session_meta_pending_observer_intents",
-            "ck_session_meta_pending_observer_intents_attribution",
-            "attribution IN ('host_requested', 'fork_inherited')",
         ),
     ),
     expected_constraint(

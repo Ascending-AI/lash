@@ -152,7 +152,7 @@ fn session_meta_rejects_unknown_fields_in_nested_causal_ref() {
 }
 
 #[test]
-fn session_meta_rejects_extra_observer_inheritance_variants() {
+fn session_meta_rejects_removed_observer_inheritance() {
     let error = serde_json::from_str::<SessionMeta>(
         r#"{
             "session_id":"stored",
@@ -167,11 +167,13 @@ fn session_meta_rejects_extra_observer_inheritance_variants() {
             }
         }"#,
     )
-    .expect_err("externally tagged nested enums must reject extra variants");
+    .expect_err("removed selector must fail closed");
 
     assert!(
-        error.to_string().contains("expected map with a single key"),
-        "externally tagged enum must reject the second variant key: {error}"
+        error
+            .to_string()
+            .contains("unknown field `observer_inheritance`"),
+        "removed selector must be named: {error}"
     );
 }
 

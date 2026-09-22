@@ -119,12 +119,6 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
-        "session_meta_fork_inheritance_processes",
-        LifecycleOwned {
-            scope: "session metadata projection replacement and deletion",
-        },
-    ),
-    (
         "runtime_turn_commits",
         Bounded {
             lever: "SessionStoreFactory::reclaim_retained_evidence(RetentionBound); terminal session",
@@ -399,7 +393,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 52, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 51, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

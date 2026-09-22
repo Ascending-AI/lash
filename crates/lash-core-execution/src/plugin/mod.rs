@@ -95,9 +95,9 @@ pub use session_types::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginOwned, SESSION_PLUGIN_INIT_MAX_BYTES,
     SessionCreateRequest, SessionHandle, SessionLineage, SessionObservedProcessOutcome,
-    SessionObservedProcessReceipt, SessionObserverIntent, SessionObserverIntentAttribution,
-    SessionPluginInit, SessionPluginSource, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    SessionObservedProcessReceipt, SessionObserverIntent, SessionPluginInit, SessionPluginSource,
+    SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess, SessionToolAccessError,
+    SubagentSessionContext,
 };
 pub use state::{
     KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateError,

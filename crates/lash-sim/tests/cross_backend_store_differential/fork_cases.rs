@@ -158,7 +158,6 @@ impl BackendRunner {
                                 self.session_id
                             )),
                             source_node_id: format!("{}:foreign-node", self.session_id).into(),
-                            observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -191,7 +190,6 @@ impl BackendRunner {
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id.clone().into(),
-                            observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -224,7 +222,6 @@ impl BackendRunner {
                             source_session_id: branch_session_id,
                             source_node_id: format!("{}:rewind-source-node", self.session_id)
                                 .into(),
-                            observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -286,5 +283,228 @@ pub(super) fn pin_fork_unpin() -> GeneratedCase {
             StoreOperation::ForkAtLeaf,
             StoreOperation::UnpinLeaf,
         ],
+    }
+}
+
+/// A fork's durable intents keep the host-selected incarnation across a crash
+/// and process-name reuse. Exercise real registry fencing on every backend.
+#[expect(
+    clippy::expect_used,
+    reason = "test fixtures require successful setup and report explicit assertion failures"
+)]
+pub(super) async fn selected_observer_intents(
+    sqlite_root: &Path,
+    postgres: &PostgresStorage,
+    nonce: &str,
+) {
+    use lash_core::ProcessEventLogTestSupport as _;
+    let root = sqlite_root.join("selected-observer-sessions");
+    let path = sqlite_root.join("selected-observer-processes.db");
+    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&path, &root)
+        .await
+        .expect("SQLite observer registry");
+    let backends: Vec<(
+        Arc<dyn SessionStoreFactory>,
+        Arc<dyn lash_core::ProcessRegistry>,
+    )> = vec![
+        (
+            Arc::new(InMemorySessionStoreFactory::new()),
+            Arc::new(lash_core::TestLocalProcessRegistry::default()),
+        ),
+        (
+            Arc::new(
+                lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(root, path),
+            ),
+            Arc::new(sqlite),
+        ),
+        (
+            Arc::new(postgres.session_store_factory()),
+            Arc::new(postgres.process_registry()),
+        ),
+    ];
+    for (index, (factory, registry)) in backends.into_iter().enumerate() {
+        let session_id = SessionId::from(format!("selected-observer-{nonce}-{index}"));
+        let registration = lash_core::ProcessRegistration::new(
+            format!("selected-process-{nonce}-{index}"),
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        );
+        let first = registry
+            .register_process(registration.clone())
+            .await
+            .expect("selected run");
+        let selected = lash_core::ProcessRef::from_record(&first);
+        let intent =
+            lash_core::facade_support::SessionObserverIntent::host_requested_ref(selected.clone());
+        let request = SessionStoreCreateRequest {
+            session_id: session_id.clone(),
+            relation: SessionRelation::Fork {
+                source_session_id: "host-selected-lineage".into(),
+                source_node_id: "foreign-history-provenance".into(),
+            },
+            pending_observer_intents: vec![intent.clone()],
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        };
+        let source_id = SessionId::from(format!("selected-history-{nonce}-{index}"));
+        let source_request = SessionStoreCreateRequest {
+            session_id: source_id.clone(),
+            relation: SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            policy: request.policy.clone(),
+        };
+        let source = factory
+            .create_store(&source_request)
+            .await
+            .expect("history source");
+        let mut state = RuntimeSessionState::new(request.policy.clone());
+        state.session_id = source_id.clone();
+        state.ensure_agent_frame_initialized();
+        source
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .await
+            .expect("commit fork point");
+        let node_id = state
+            .session_graph
+            .leaf_node_id
+            .clone()
+            .expect("forkable node");
+        factory.pin(&node_id).await.expect("retain writer history");
+        factory
+            .delete_session(&source_id)
+            .await
+            .expect("delete original writer");
+        let receipt = factory
+            .fork_at(&ForkSessionRequest {
+                session_id: session_id.clone(),
+                node_id,
+                relation: request.relation.clone(),
+                pending_observer_intents: request.pending_observer_intents.clone(),
+                policy: request.policy.clone(),
+            })
+            .await
+            .expect("fork deleted-writer history with exact intent");
+        assert_eq!(receipt.source_session_id, source_id);
+        let store = factory
+            .open_existing_store(&request)
+            .await
+            .expect("reopen interrupted fork")
+            .expect("fork retained");
+        assert_eq!(
+            store
+                .load_session_meta()
+                .await
+                .expect("load exact intent")
+                .expect("metadata")
+                .pending_observer_intents,
+            vec![intent]
+        );
+        // The first apply happened, but a crash prevented consuming its intent.
+        registry
+            .add_observer_ref(
+                &session_id,
+                &selected,
+                lash_core::ProcessObserverBy::host(format!("session-create:{session_id}")),
+            )
+            .await
+            .expect("first observer publication");
+        let receipts = lash_core::runtime::reconcile_session_process_observer_intents(
+            Some(registry.as_ref()),
+            &session_id,
+            lash_core::runtime::SessionObserverIntentSource::Persisted(store.as_ref()),
+        )
+        .await
+        .expect("reconcile interrupted publication");
+        assert!(
+            matches!(receipts[0].outcome, lash_core::plugin::SessionObservedProcessOutcome::Observed { incarnation } if incarnation == selected.incarnation)
+        );
+        let events = registry
+            .full_event_window(&first.id, 0)
+            .await
+            .expect("observer event window");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.event_type == "process.observer_added")
+                .count(),
+            1
+        );
+        // Old observer authors remain opaque historical audit data, not a
+        // selector that can attach or redirect a live edge.
+        let mut historical = events
+            .iter()
+            .find(|event| event.event_type == "process.observer_added")
+            .expect("observer audit event")
+            .clone();
+        historical.payload["by"] = serde_json::json!({"kind": "fork_inheritance"});
+        let historical: lash_core::ProcessEvent = serde_json::from_slice(
+            &serde_json::to_vec(&historical).expect("encode historical audit event"),
+        )
+        .expect("hydrate opaque historical author");
+        let mut projected = first.clone();
+        lash_core::runtime::apply_process_event_projection(&mut projected, &historical)
+            .expect("historical observer author has no lifecycle projection");
+        assert_eq!(projected.status, first.status);
+        assert_eq!(historical.payload["by"]["kind"], "fork_inheritance");
+        let mut meta = store
+            .load_session_meta()
+            .await
+            .expect("load consumed intent")
+            .expect("metadata");
+        assert!(meta.pending_observer_intents.is_empty());
+        // A second pending selection outlives the process it selected.
+        meta.pending_observer_intents = vec![
+            lash_core::facade_support::SessionObserverIntent::host_requested_ref(selected.clone()),
+        ];
+        store
+            .save_session_meta(meta)
+            .await
+            .expect("persist selection before reuse");
+        let terminal = registry
+            .complete_process(
+                &first.id,
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(serde_json::Value::Null),
+                ),
+                lash_core::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("finish selected run");
+        registry
+            .prune_terminal_processes(
+                terminal.updated_at_ms.saturating_add(1),
+                None,
+                lash_core::ProjectionWatermark::NoProjector,
+            )
+            .await
+            .expect("prune selected run");
+        let newer = registry
+            .register_process(registration)
+            .await
+            .expect("reuse process name");
+        let receipts = lash_core::runtime::reconcile_session_process_observer_intents(
+            Some(registry.as_ref()),
+            &session_id,
+            lash_core::runtime::SessionObserverIntentSource::Persisted(store.as_ref()),
+        )
+        .await
+        .expect("settle stale exact selection");
+        assert!(
+            matches!(receipts[0].outcome, lash_core::plugin::SessionObservedProcessOutcome::IncarnationSuperseded {
+            requested_incarnation, current_incarnation,
+        } if requested_incarnation == selected.incarnation && current_incarnation == newer.incarnation)
+        );
+        assert!(
+            !registry
+                .is_observer(&session_id, &newer.id)
+                .await
+                .expect("new run observer check")
+        );
     }
 }

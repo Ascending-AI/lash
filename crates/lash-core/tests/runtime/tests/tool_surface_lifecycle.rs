@@ -1209,10 +1209,10 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         child.observed_processes[0],
         lash_core::testing::runtime_internals::SessionObservedProcessReceipt {
             process_id: ProcessId::from("named-process"),
-            outcome: lash_core::testing::runtime_internals::SessionObservedProcessOutcome::Observed {
-                incarnation: named_incarnation,
-            },
-            attribution: lash_core::testing::runtime_internals::SessionObserverIntentAttribution::HostRequested,
+            outcome:
+                lash_core::testing::runtime_internals::SessionObservedProcessOutcome::Observed {
+                    incarnation: named_incarnation,
+                },
         }
     );
     assert_eq!(
@@ -1220,7 +1220,6 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         lash_core::testing::runtime_internals::SessionObservedProcessReceipt {
             process_id: ProcessId::from("missing-process"),
             outcome: lash_core::testing::runtime_internals::SessionObservedProcessOutcome::NotFound,
-            attribution: lash_core::testing::runtime_internals::SessionObserverIntentAttribution::HostRequested,
         }
     );
     assert_eq!(child.observed_processes[2].process_id, "pruned-process");

@@ -11,52 +11,30 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-/// Why a session still owes one process-observer edge.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionObserverIntentAttribution {
-    HostRequested,
-    ForkInherited,
-}
 /// One durable, not-yet-settled process-observer edge.
 ///
-/// `process_incarnation` is reserved for the structural process incarnation
-/// identity. Until that identity lands, `None` means the host-facing process
-/// name must be resolved by the settlement boundary.
+/// `Some` pins the selected run. `None` preserves generic host requests that
+/// resolve a process name at the settlement boundary.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionObserverIntent {
     pub process_id: crate::ProcessId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_incarnation: Option<u64>,
-    pub attribution: SessionObserverIntentAttribution,
 }
 impl SessionObserverIntent {
     pub fn host_requested(process_id: impl Into<crate::ProcessId>) -> Self {
         Self {
             process_id: process_id.into(),
             process_incarnation: None,
-            attribution: SessionObserverIntentAttribution::HostRequested,
         }
     }
 
-    pub fn fork_inherited(process_id: impl Into<crate::ProcessId>) -> Self {
+    /// Observe the exact run selected by the host, even if its name is later reused.
+    pub fn host_requested_ref(process_ref: crate::ProcessRef) -> Self {
         Self {
-            process_id: process_id.into(),
-            process_incarnation: None,
-            attribution: SessionObserverIntentAttribution::ForkInherited,
+            process_id: process_ref.process_id,
+            process_incarnation: Some(process_ref.incarnation.registration_sequence()),
         }
     }
 }
@@ -318,13 +296,11 @@ pub enum SessionRelation {
         /// Host-declared source node, persisted alongside
         /// [`Self::Fork::source_session_id`] and equally unvalidated.
         source_node_id: crate::NodeId,
-        #[serde(default)]
-        observer_inheritance: crate::ObserverInheritance,
     },
 }
 /// Durable lineage identity of a [`SessionRelation`].
 ///
-/// Causal provenance (`caused_by`) and observer inheritance are deliberately excluded — they
+/// Causal provenance (`caused_by`) and pending observer intents are deliberately excluded — they
 /// record *why* and *how* a session was created, not what it descends from, and a legitimate
 /// reopen of an existing child carries neither.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -728,7 +704,6 @@ impl SessionStoreCreateRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionObservedProcessReceipt {
     pub process_id: crate::ProcessId,
-    pub attribution: SessionObserverIntentAttribution,
     pub outcome: SessionObservedProcessOutcome,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

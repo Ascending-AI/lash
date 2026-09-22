@@ -825,7 +825,6 @@ pub(crate) async fn delete_session_tx(
     for statement in [
         session_sql().lineage.delete_by_session.sql(),
         session_sql().observer_intents.delete_by_session.sql(),
-        session_sql().fork_inheritance.delete_by_session.sql(),
         session_sql().meta.delete_by_session.sql(),
     ] {
         sqlx::query(statement)

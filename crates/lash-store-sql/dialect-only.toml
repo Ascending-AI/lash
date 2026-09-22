@@ -550,7 +550,6 @@ postgres = ["crates/lash-postgres-store/src/postgres/trigger_store.rs"]
 tables = [
     "session_meta",
     "session_meta_pending_observer_intents",
-    "session_meta_fork_inheritance_processes",
     "session_head",
     "sessions",
     "graph_nodes",
@@ -566,7 +565,6 @@ statement_prefixes = [
     "session_core",
     "session_meta",
     "session_meta_observer_intent",
-    "session_meta_fork_inheritance",
     "session_head",
     "sessions",
     "graph_node",
@@ -585,7 +583,6 @@ shared = [
     "crates/lash-store-sql/src/session/graph_nodes.rs",
     "crates/lash-store-sql/src/session/head.rs",
     "crates/lash-store-sql/src/session/meta.rs",
-    "crates/lash-store-sql/src/session/meta_fork_inheritance_processes.rs",
     "crates/lash-store-sql/src/session/meta_pending_observer_intents.rs",
     "crates/lash-store-sql/src/session/node_anchors.rs",
     "crates/lash-store-sql/src/session/release_stamp.rs",
@@ -682,7 +679,6 @@ trigger_subscriptions = "crates/lash-store-sql/src/trigger/subscriptions.rs"
 [families.session_core.table_modules]
 session_meta = "crates/lash-store-sql/src/session/meta.rs"
 session_meta_pending_observer_intents = "crates/lash-store-sql/src/session/meta_pending_observer_intents.rs"
-session_meta_fork_inheritance_processes = "crates/lash-store-sql/src/session/meta_fork_inheritance_processes.rs"
 session_head = "crates/lash-store-sql/src/session/head.rs"
 sessions = "crates/lash-store-sql/src/session/sessions.rs"
 graph_nodes = "crates/lash-store-sql/src/session/graph_nodes.rs"

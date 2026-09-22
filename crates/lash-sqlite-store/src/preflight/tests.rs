@@ -82,7 +82,7 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // generation: nothing older than 45 may ever open, whatever the target is.
     // The 43→44 in-place upgrade arm is deleted, so a generation-43 stamp is
     // refused outright rather than folded forward first.
-    assert_eq!(expected, 72, "the pinned durable-core target changed");
+    assert_eq!(expected, 73, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 

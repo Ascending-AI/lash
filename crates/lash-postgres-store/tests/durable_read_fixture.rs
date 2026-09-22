@@ -32,6 +32,9 @@ const SETTLEMENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-f9e0aa07d/postgres-expected.json",
 ];
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const OBSERVER_SELECTION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-98-observer-predecessor/postgres-expected.json",
+];
 const MESSAGE_BODY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-4883e7a46/postgres-expected.json",
 ];
@@ -231,7 +234,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 112);
+    assert_eq!(PostgresStorage::schema_version(), 113);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -532,7 +535,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     )
     .execute(&pool)
     .await
-    .expect("refresh refusal fixture with the component-112 ordered-parts catalog");
+    .expect("refresh refusal fixture with the component-113 explicit-observer catalog");
     // The trigger subscription table cut over to the lifecycle column shape
     // with no migration, so the refusal fixture discards its pre-cutover rows
     // and takes the current catalog.
@@ -544,6 +547,14 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the trigger subscription catalog from the authoritative DDL");
+    sqlx::raw_sql(
+        "DROP TABLE IF EXISTS lash_session_meta_fork_inheritance_processes;
+         ALTER TABLE lash_session_meta DROP COLUMN IF EXISTS observer_inheritance_kind;
+         ALTER TABLE lash_session_meta_pending_observer_intents DROP COLUMN IF EXISTS attribution;",
+    )
+    .execute(&pool)
+    .await
+    .expect("remove retired observer selection from the refusal fixture catalog");
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
     for constraint in lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS

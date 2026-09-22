@@ -2,8 +2,7 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use crate::{
-    CausalRef, ObserverInheritance, SessionLineage, SessionMeta, SessionObserverIntent,
-    SessionObserverIntentAttribution, SessionRelation, StoreError,
+    CausalRef, SessionLineage, SessionMeta, SessionObserverIntent, SessionRelation, StoreError,
 };
 
 const RECORD_KIND: &str = "SessionMeta relation";
@@ -240,7 +239,6 @@ impl CausalColumns {
 pub struct StoredObserverIntent {
     pub process_id: ProcessId,
     pub process_incarnation: Option<i64>,
-    pub attribution: String,
 }
 
 /// Backend-neutral representation of one stored session relation and its lists.
@@ -251,9 +249,7 @@ pub struct StoredRelation {
     pub cause: CausalColumns,
     pub source_session_id: Option<SessionId>,
     pub source_node_id: Option<String>,
-    pub observer_inheritance_kind: Option<String>,
     pub pending_observer_intents: Vec<StoredObserverIntent>,
-    pub fork_inheritance_processes: Vec<ProcessId>,
 }
 
 /// Shared session-metadata codec and stored-data validator for SQL backends.
@@ -290,14 +286,10 @@ impl SessionMetaCodec {
                     })
                 })
                 .transpose()?;
-            let attribution = match intent.attribution {
-                SessionObserverIntentAttribution::HostRequested => "host_requested",
-                SessionObserverIntentAttribution::ForkInherited => "fork_inherited",
-            };
+
             pending_observer_intents.push(StoredObserverIntent {
                 process_id: intent.process_id.clone(),
                 process_incarnation,
-                attribution: attribution.to_string(),
             });
         }
         let mut stored = StoredRelation {
@@ -307,9 +299,7 @@ impl SessionMetaCodec {
             cause: CausalColumns::default(),
             source_session_id: None,
             source_node_id: None,
-            observer_inheritance_kind: None,
             pending_observer_intents,
-            fork_inheritance_processes: Vec::new(),
         };
         match &meta.relation {
             SessionRelation::Root => stored.relation_kind = "root".to_string(),
@@ -324,23 +314,10 @@ impl SessionMetaCodec {
             SessionRelation::Fork {
                 source_session_id,
                 source_node_id,
-                observer_inheritance,
             } => {
                 stored.relation_kind = "fork".to_string();
                 stored.source_session_id = Some(source_session_id.clone());
                 stored.source_node_id = Some(source_node_id.to_string());
-                match observer_inheritance {
-                    ObserverInheritance::All => {
-                        stored.observer_inheritance_kind = Some("all".to_string());
-                    }
-                    ObserverInheritance::None => {
-                        stored.observer_inheritance_kind = Some("none".to_string());
-                    }
-                    ObserverInheritance::Only(process_ids) => {
-                        stored.observer_inheritance_kind = Some("only".to_string());
-                        stored.fork_inheritance_processes = process_ids.clone();
-                    }
-                }
             }
         }
         Ok(stored)
@@ -355,10 +332,9 @@ impl SessionMetaCodec {
     pub fn decode_with_process_rows(
         self,
         mut stored: StoredRelation,
-        observer_intent_rows: Vec<(i64, String, Option<i64>, String)>,
-        fork_inheritance_rows: Vec<(i64, String)>,
+        observer_intent_rows: Vec<(i64, String, Option<i64>)>,
     ) -> Result<SessionMeta, StoreError> {
-        for (process_index, process_id, process_incarnation, attribution) in observer_intent_rows {
+        for (process_index, process_id, process_incarnation) in observer_intent_rows {
             if self.read_index(process_index, "observer-intent process_index")?
                 != stored.pending_observer_intents.len()
             {
@@ -367,28 +343,20 @@ impl SessionMetaCodec {
             stored.pending_observer_intents.push(StoredObserverIntent {
                 process_id: process_id.into(),
                 process_incarnation,
-                attribution,
             });
         }
-        stored.fork_inheritance_processes =
-            self.decode_process_rows(fork_inheritance_rows, "fork inheritance process_index")?;
         self.decode(stored)
     }
 
     pub fn decode(self, stored: StoredRelation) -> Result<SessionMeta, StoreError> {
         let relation = match stored.relation_kind.as_str() {
             "root" => {
-                self.require_empty(
-                    &stored.fork_inheritance_processes,
-                    "fork inheritance processes",
-                )?;
                 if stored.cause.decode(self)?.is_some() {
                     return Err(self.corrupt("root relation carries a causal payload"));
                 }
                 if stored.parent_session_id.is_some()
                     || stored.source_session_id.is_some()
                     || stored.source_node_id.is_some()
-                    || stored.observer_inheritance_kind.is_some()
                 {
                     return Err(
                         self.corrupt("root relation carries an out-of-family payload column")
@@ -397,14 +365,7 @@ impl SessionMetaCodec {
                 SessionRelation::Root
             }
             "child" => {
-                self.require_empty(
-                    &stored.fork_inheritance_processes,
-                    "fork inheritance processes",
-                )?;
-                if stored.source_session_id.is_some()
-                    || stored.source_node_id.is_some()
-                    || stored.observer_inheritance_kind.is_some()
-                {
+                if stored.source_session_id.is_some() || stored.source_node_id.is_some() {
                     return Err(
                         self.corrupt("child relation carries an out-of-family payload column")
                     );
@@ -424,26 +385,13 @@ impl SessionMetaCodec {
                         self.corrupt("fork relation carries an out-of-family payload column")
                     );
                 }
-                let observer_inheritance = match stored.observer_inheritance_kind.as_deref() {
-                    Some("all") => ObserverInheritance::All,
-                    Some("none") => ObserverInheritance::None,
-                    Some("only") => ObserverInheritance::Only(stored.fork_inheritance_processes),
-                    Some(other) => {
-                        return Err(
-                            self.corrupt(format!("unknown observer_inheritance_kind `{other}`"))
-                        );
-                    }
-                    None => {
-                        return Err(self.corrupt("fork relation is missing observer inheritance"));
-                    }
-                };
+
                 SessionRelation::Fork {
                     source_session_id: self
                         .required(stored.source_session_id, "source_session_id")?,
                     source_node_id: crate::NodeId::new(
                         self.required(stored.source_node_id, "source_node_id")?,
                     ),
-                    observer_inheritance,
                 }
             }
             other => return Err(self.corrupt(format!("unknown relation_kind `{other}`"))),
@@ -461,19 +409,10 @@ impl SessionMetaCodec {
                     })
                 })
                 .transpose()?;
-            let attribution = match intent.attribution.as_str() {
-                "host_requested" => SessionObserverIntentAttribution::HostRequested,
-                "fork_inherited" => SessionObserverIntentAttribution::ForkInherited,
-                other => {
-                    return Err(
-                        self.corrupt(format!("unknown observer-intent attribution `{other}`"))
-                    );
-                }
-            };
+
             pending_observer_intents.push(SessionObserverIntent {
                 process_id: intent.process_id,
                 process_incarnation,
-                attribution,
             });
         }
         Ok(SessionMeta {
@@ -501,7 +440,7 @@ impl SessionMetaCodec {
     ///
     /// Admission compares this against the lineage a rebind declares, so it
     /// reads only the columns that carry lineage: no causal provenance, no
-    /// observer-inheritance list, and therefore no extra queries inside the
+    /// pending observer-intent list, and therefore no extra queries inside the
     /// admission transaction.
     pub fn decode_lineage(
         self,
@@ -533,29 +472,6 @@ impl SessionMetaCodec {
 
     fn required<T>(self, value: Option<T>, field: &'static str) -> Result<T, StoreError> {
         value.ok_or_else(|| self.corrupt(format!("required column `{field}` is NULL")))
-    }
-
-    fn require_empty(self, values: &[ProcessId], field: &'static str) -> Result<(), StoreError> {
-        if values.is_empty() {
-            Ok(())
-        } else {
-            Err(self.corrupt(format!("non-fork relation has unexpected {field}")))
-        }
-    }
-
-    fn decode_process_rows(
-        self,
-        rows: Vec<(i64, String)>,
-        field: &'static str,
-    ) -> Result<Vec<ProcessId>, StoreError> {
-        let mut process_ids = Vec::with_capacity(rows.len());
-        for (process_index, process_id) in rows {
-            if self.read_index(process_index, field)? != process_ids.len() {
-                return Err(self.corrupt("process indexes are not contiguous"));
-            }
-            process_ids.push(ProcessId::from(process_id));
-        }
-        Ok(process_ids)
     }
 
     fn read_u64_text(self, value: String, field: &'static str) -> Result<u64, StoreError> {
@@ -596,7 +512,7 @@ pub fn guard_rebind_lineage(
 /// that root and drop the recorded parent. The lineage is therefore write-once
 /// here: it must match exactly, and only the rest of the record (the pending
 /// observer intents the sole production caller settles, and the causal
-/// provenance and observer inheritance that are not lineage) may move.
+/// provenance that is not lineage) may move.
 pub fn guard_session_meta_relation_rewrite(
     session_id: &SessionId,
     recorded: &SessionLineage,
@@ -705,9 +621,7 @@ mod identity_tests {
             },
             source_session_id: Some(SessionId::from("source-session")),
             source_node_id: Some("source-node".to_string()),
-            observer_inheritance_kind: Some("none".to_string()),
             pending_observer_intents: Vec::new(),
-            fork_inheritance_processes: Vec::new(),
         };
         let error = codec
             .decode(stored("root"))
@@ -737,9 +651,7 @@ mod identity_tests {
             cause: CausalColumns::default(),
             source_session_id: None,
             source_node_id: None,
-            observer_inheritance_kind: None,
             pending_observer_intents: Vec::new(),
-            fork_inheritance_processes: Vec::new(),
         };
 
         let mut root = stored("root");
@@ -760,7 +672,6 @@ mod identity_tests {
         let mut fork = stored("fork");
         fork.source_session_id = Some(SessionId::from("source"));
         fork.source_node_id = Some("source-node".to_string());
-        fork.observer_inheritance_kind = Some("none".to_string());
         fork.parent_session_id = Some(SessionId::from("stray-parent"));
         let error = codec
             .decode(fork)
@@ -776,7 +687,6 @@ mod identity_tests {
         let mut fork = stored("fork");
         fork.source_session_id = Some(SessionId::from("source"));
         fork.source_node_id = Some("source-node".to_string());
-        fork.observer_inheritance_kind = Some("none".to_string());
         codec.decode(fork).expect("a clean fork relation decodes");
     }
 

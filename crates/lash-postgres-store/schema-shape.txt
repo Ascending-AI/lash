@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 112
+version 113
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -361,7 +361,6 @@ table lash_session_meta
   column caused_by_turn_id text nullable
   column created_at_ms bigint nullable
   column last_commit_at_ms bigint nullable
-  column observer_inheritance_kind text nullable
   column parent_session_id text nullable
   column relation_kind text not-null
   column session_id text not-null
@@ -369,14 +368,7 @@ table lash_session_meta
   column source_node_id text nullable
   column source_session_id text nullable
   primary-key (session_id)
-table lash_session_meta_fork_inheritance_processes
-  column process_id text not-null
-  column process_index bigint not-null
-  column session_id text not-null
-  primary-key (session_id, process_index)
-  foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
 table lash_session_meta_pending_observer_intents
-  column attribution text not-null
   column process_id text not-null
   column process_incarnation bigint nullable
   column process_index bigint not-null

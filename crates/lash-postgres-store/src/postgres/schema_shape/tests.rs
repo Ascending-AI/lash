@@ -115,7 +115,6 @@ fn the_published_teardown_is_generated_from_the_schema_object_list() {
          {}\n",
         drops.join("\n\n")
     );
-    assert_eq!(crate::PostgresStorage::teardown_ddl(), expected);
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("teardown.sql");
     let published = std::fs::read_to_string(&path).expect("read the committed teardown artifact");
     if published != expected {
@@ -131,6 +130,7 @@ fn the_published_teardown_is_generated_from_the_schema_object_list() {
              Regenerate it with LASH_UPDATE_TEARDOWN_SQL=1 and review the diff."
         );
     }
+    assert_eq!(crate::PostgresStorage::teardown_ddl(), expected);
 }
 
 /// A structural check cannot see a missing row, so the artifact has to carry the

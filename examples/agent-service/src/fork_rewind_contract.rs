@@ -133,15 +133,73 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .await
         .expect("observe process from source session");
 
+    let selected = processes
+        .list_observed_by(
+            &SessionId::from(SOURCE_SESSION),
+            &lash::process::ProcessListFilter {
+                status: lash::process::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("host selects exact observed runs")
+        .iter()
+        .map(lash::process::ProcessRef::from_record)
+        .collect::<Vec<_>>();
+    let conflicting_target = SessionId::from("conflicting-observer-selection");
+    let mut different_run = selected[0].clone();
+    different_run.incarnation = lash::process::ProcessIncarnation::from_registration_sequence(
+        different_run.incarnation.registration_sequence() + 1,
+    );
+    let error = core
+        .fork_at(lash::ForkRequest {
+            session_id: conflicting_target.clone(),
+            node_id: retained_node_id.clone(),
+            relation: SessionRelation::Root,
+            observed_processes: vec![selected[0].clone(), different_run],
+        })
+        .await
+        .expect_err("conflicting incarnations must be refused before creating a target");
+    assert!(
+        matches!(error, lash::EmbedError::Store(lash::persistence::StoreError::Backend(message)) if message.contains("conflicting incarnations"))
+    );
+    assert!(
+        stores
+            .open_existing_store(&SessionStoreCreateRequest {
+                session_id: conflicting_target,
+                relation: SessionRelation::Root,
+                pending_observer_intents: Vec::new(),
+                policy: source_state.policy.clone(),
+            })
+            .await
+            .expect("inspect refused fork target")
+            .is_none()
+    );
     let first_branch = core
-        .fork_at(&retained_node_id, FIRST_BRANCH)
+        .fork_at(lash::ForkRequest {
+            session_id: (FIRST_BRANCH).into(),
+            node_id: (&retained_node_id).into(),
+            relation: SessionRelation::Fork {
+                source_session_id: (SOURCE_SESSION).into(),
+                source_node_id: (&retained_node_id).into(),
+            },
+            observed_processes: selected.clone(),
+        })
         .await
         .expect("fork retained continuation");
     assert_eq!(first_branch.session_id, FIRST_BRANCH);
     assert_eq!(first_branch.source_session_id, SOURCE_SESSION);
 
     let foreign_target_error = core
-        .fork_at(&retained_node_id, FOREIGN_TARGET)
+        .fork_at(lash::ForkRequest {
+            session_id: (FOREIGN_TARGET).into(),
+            node_id: (&retained_node_id).into(),
+            relation: SessionRelation::Fork {
+                source_session_id: (SOURCE_SESSION).into(),
+                source_node_id: (&retained_node_id).into(),
+            },
+            observed_processes: selected.clone(),
+        })
         .await
         .expect_err("an existing target must win over later fork validation");
     assert!(matches!(
@@ -152,9 +210,17 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     ));
 
     let explicit_branch = core
-        .fork_at_with_observer_inheritance(&retained_node_id, EXPLICIT_BRANCH, Default::default())
+        .fork_at(lash::ForkRequest {
+            session_id: (EXPLICIT_BRANCH).into(),
+            node_id: (&retained_node_id).into(),
+            relation: SessionRelation::Fork {
+                source_session_id: (SOURCE_SESSION).into(),
+                source_node_id: (&retained_node_id).into(),
+            },
+            observed_processes: selected.clone(),
+        })
         .await
-        .expect("fork with explicit observer-inheritance policy");
+        .expect("fork with explicit selected runs");
     assert_eq!(explicit_branch.session_id, EXPLICIT_BRANCH);
     assert_eq!(explicit_branch.source_session_id, SOURCE_SESSION);
     let inherited = processes
@@ -168,6 +234,52 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .await
         .expect("read inherited branch observations");
     assert_eq!(inherited[0].id, "fork-contract-observed-process");
+
+    // The surviving branches need not agree about which work to observe.
+    let other = processes
+        .register_process(ProcessRegistration::new(
+            "fork-contract-other-process",
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryContract::ExternallyOwned,
+            ProcessProvenance::host(),
+            lash::process::ProcessLifecyclePolicy::new(
+                lash::process::ParentScope::Host,
+                lash::process::OnParentEnd::Abandon,
+            ),
+        ))
+        .await
+        .expect("register second branch's work");
+    processes
+        .remove_observer(
+            &SessionId::from(FIRST_BRANCH),
+            &selected[0].process_id,
+            ProcessObserverBy::host("choose-other-work"),
+        )
+        .await
+        .expect("replace first branch observer");
+    processes
+        .add_observer_ref(
+            &SessionId::from(FIRST_BRANCH),
+            &lash::process::ProcessRef::from_record(&other),
+            ProcessObserverBy::host("choose-other-work"),
+        )
+        .await
+        .expect("observe other work");
+    let selected = processes
+        .list_observed_by(
+            &SessionId::from(EXPLICIT_BRANCH),
+            &lash::process::ProcessListFilter {
+                status: lash::process::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("select intended survivor before deletion")
+        .iter()
+        .map(lash::process::ProcessRef::from_record)
+        .collect::<Vec<_>>();
 
     let administration = core
         .session_administration()
@@ -205,11 +317,57 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         "deleted-source anchor remains explicitly retained"
     );
 
+    // Selection is a snapshot: deleting its source does not revoke it.
+    let context = administration
+        .delete_context(EXPLICIT_BRANCH)
+        .expect("selected source delete context");
+    LashCore::delete_session(context)
+        .await
+        .expect("delete selected source after selection");
     let rewound = core
-        .fork_at(&retained_node_id, REWOUND_BRANCH)
+        .fork_at(lash::ForkRequest {
+            session_id: (REWOUND_BRANCH).into(),
+            node_id: (&retained_node_id).into(),
+            relation: SessionRelation::Fork {
+                source_session_id: (EXPLICIT_BRANCH).into(),
+                source_node_id: (&retained_node_id).into(),
+            },
+            observed_processes: selected.clone(),
+        })
         .await
         .expect("re-fork retained anchor after source deletion");
     assert_eq!(rewound.session_id, REWOUND_BRANCH);
     assert_eq!(rewound.node_id, retained_node_id);
     assert_eq!(rewound.source_session_id, SOURCE_SESSION);
+    let observed = processes
+        .list_observed_by(
+            &SessionId::from(REWOUND_BRANCH),
+            &lash::process::ProcessListFilter {
+                status: lash::process::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("read selected branch observations after writer deletion");
+    assert_eq!(
+        observed.len(),
+        1,
+        "rewind must preserve explicitly selected live branch observers"
+    );
+    assert_eq!(observed[0].id, selected[0].process_id);
+    assert_eq!(observed[0].incarnation, selected[0].incarnation);
+    let rewind_store = stores
+        .open_existing_store(&SessionStoreCreateRequest {
+            session_id: REWOUND_BRANCH.into(),
+            relation: SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            policy: SessionPolicy::new(TurnBudget::Unbounded),
+        })
+        .await
+        .expect("read rewound lineage")
+        .expect("rewound store");
+    assert!(
+        matches!(rewind_store.load_session_meta().await.expect("metadata").expect("metadata exists").relation,
+        SessionRelation::Fork { source_session_id, .. } if source_session_id == EXPLICIT_BRANCH)
+    );
 }
