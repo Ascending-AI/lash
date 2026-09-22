@@ -14,6 +14,25 @@ async fn typed_http_failure(body: &'static str) -> lash_core::provider::Provider
         .expect_err("typed HTTP failure must not succeed")
 }
 
+#[test]
+fn sse_error_event_top_level_code_is_classified() {
+    let mut state = ResponsesStreamState::default();
+    assert!(!state.output_started());
+
+    let err = OpenAiCompatibleProvider::process_sse_event(
+        r#"{"type":"error","code":"server_error","message":"failed","param":null,"sequence_number":1}"#,
+        &mut state,
+        None,
+    )
+    .expect_err("an in-band error event must fail the call");
+
+    assert_eq!(err.retry_verdict, TransportRetryVerdict::RetryableTransient);
+    assert_eq!(
+        err.code.as_ref().map(|code| code.to_string()),
+        Some("provider:server_error".to_string())
+    );
+}
+
 #[tokio::test]
 async fn typed_context_length_error_is_authoritative_at_provider_handle() {
     let failure = typed_http_failure(

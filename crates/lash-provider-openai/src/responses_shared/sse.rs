@@ -21,10 +21,7 @@ pub fn process_sse_event(
     })?;
     let event_name = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
     if event_name == "error" {
-        let retry_verdict = event
-            .get("error")
-            .map(responses_error_retry_verdict)
-            .unwrap_or_default();
+        let retry_verdict = sse_error_event_retry_verdict(&event);
         let message = event
             .get("message")
             .and_then(|v| v.as_str())

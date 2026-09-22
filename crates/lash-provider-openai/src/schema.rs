@@ -14,14 +14,18 @@ pub(crate) fn classify_openai_error(
     value: &Value,
     mut failure: LlmTransportError,
 ) -> LlmTransportError {
-    let Some(error) = error_object(value) else {
-        return failure;
-    };
-    let Some(code) = error
-        .get("code")
-        .or_else(|| error.get("type"))
-        .and_then(Value::as_str)
-    else {
+    let code = error_object(value)
+        .and_then(|error| {
+            error
+                .get("code")
+                .or_else(|| error.get("type"))
+                .and_then(Value::as_str)
+        })
+        // An in-band `{"type":"error","code":"…"}` event carries its code at
+        // the top level. A top-level `type` is the event name, never a
+        // provider code, so the fallback consults `code` alone.
+        .or_else(|| value.get("code").and_then(Value::as_str));
+    let Some(code) = code else {
         return failure;
     };
 
@@ -47,6 +51,26 @@ pub(crate) fn classify_openai_error(
         _ => {}
     }
     failure
+}
+
+/// Retry verdict for an in-band `{"type":"error",…}` SSE event: a nested
+/// `error` object that carries a code wins, and otherwise the event's own
+/// top-level `code` decides through the same mapping. A top-level `type` is
+/// the event name, never a provider code, so the fallback consults `code`
+/// alone.
+pub(crate) fn sse_error_event_retry_verdict(event: &Value) -> TransportRetryVerdict {
+    let coded_error = event.get("error").filter(|error| {
+        ["code", "type", "status"]
+            .iter()
+            .any(|field| error.get(field).is_some_and(|value| !value.is_null()))
+    });
+    if let Some(error) = coded_error {
+        return responses_error_retry_verdict(error);
+    }
+    event
+        .get("code")
+        .map(|code| responses_error_retry_verdict(&serde_json::json!({ "code": code })))
+        .unwrap_or_default()
 }
 
 /// Classify an error object embedded in a Responses SSE event (or a non-2xx
@@ -107,6 +131,46 @@ mod tests {
         );
 
         assert_eq!(failure.code, None);
+    }
+
+    #[test]
+    fn top_level_error_event_code_is_a_typed_provider_code() {
+        let failure = classify_openai_error(
+            &serde_json::json!({"type": "error", "code": "server_error", "message": "stream failed"}),
+            LlmTransportError::new("stream failed"),
+        );
+
+        assert_eq!(
+            failure.code.as_ref().map(|code| code.namespaced()),
+            Some("provider:server_error".to_string())
+        );
+    }
+
+    #[test]
+    fn sse_error_event_verdict_reads_top_level_code_never_type() {
+        assert_eq!(
+            sse_error_event_retry_verdict(&serde_json::json!({
+                "type": "error",
+                "code": "server_error",
+                "message": "failed"
+            })),
+            TransportRetryVerdict::RetryableTransient
+        );
+        assert_eq!(
+            sse_error_event_retry_verdict(&serde_json::json!({
+                "type": "error",
+                "message": "failed"
+            })),
+            TransportRetryVerdict::NotRetryable
+        );
+        assert_eq!(
+            sse_error_event_retry_verdict(&serde_json::json!({
+                "type": "error",
+                "code": "server_error",
+                "error": {"code": "rate_limit_exceeded"}
+            })),
+            TransportRetryVerdict::RetryableThrottle { retry_after: None }
+        );
     }
 
     #[test]
