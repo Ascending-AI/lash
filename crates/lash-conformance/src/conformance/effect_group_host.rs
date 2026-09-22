@@ -1296,6 +1296,81 @@ pub async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F:
     close(&scoped, handle, RUN).await.expect("the group closes");
 }
 
+/// Reopen after close: a group closed here while a loser still runs keeps its
+/// caller-visible entry — that is what retention is *for* — so a reopen on the
+/// same host must serve the journaled ranks rather than answer
+/// `closed to its caller`. The loser is parked on a gate at close time, so the
+/// entry provably survives the close (`outstanding != 0`); there is no timing
+/// in this law.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_closed_group_reopened_while_a_loser_still_runs_serves_its_settlements<
+    F: Fn() -> Host,
+>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let scoped = host
+        .scoped(admit(scope(prefix, "reopen-closed")))
+        .expect("a scope binds");
+    let key = group_key(prefix, "reopen-closed");
+    let (slow, loser) = gated(1);
+    let mut handle = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::All,
+        RUN,
+        vec![settles(0), slow],
+    )
+    .await;
+    loser.wait_until_waiting().await;
+
+    let first = next(&scoped, &mut handle)
+        .await
+        .expect("the first settlement arrives");
+    assert_eq!(first.position, 0);
+    assert_eq!(first.sequence, 1);
+    close(&scoped, handle, RUN)
+        .await
+        .expect("the group closes while the loser still runs");
+    assert_eq!(
+        loser.finished(),
+        0,
+        "the loser is still parked: the closed entry survives unreaped"
+    );
+
+    // The same host, the same group: the reopen is a new caller interest and
+    // the journaled rank is served again — not refused as closed.
+    let mut reopened = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::All,
+        RUN,
+        vec![settles(0), settles(1)],
+    )
+    .await;
+    let re_served = next(&scoped, &mut reopened)
+        .await
+        .expect("the reopened handle serves the recorded rank");
+    assert_eq!(re_served.position, 0);
+    assert_eq!(re_served.sequence, 1);
+
+    loser.release();
+    let last = next(&scoped, &mut reopened)
+        .await
+        .expect("the loser's settlement lands under the reopened caller");
+    assert_eq!(last.position, 1);
+    assert_eq!(last.sequence, 2);
+    close(&scoped, reopened, RUN)
+        .await
+        .expect("the group closes");
+}
+
 /// A scope whose open group still has a live child is not quiescent:
 /// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` while the
 /// child runs, leaves the scope unfenced, and retires it once every child

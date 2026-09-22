@@ -722,15 +722,28 @@ impl NativeEffectGroups {
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let handle = EffectGroupHandle::new(&group);
-        if let Some(existing) = groups.open.read_recover().get(group.group_key()).cloned() {
-            fence_reopen(&group, existing.as_ref())?;
-            return Ok(handle);
+        {
+            let open = groups.open.write_recover();
+            if let Some(existing) = open.get(group.group_key()) {
+                fence_reopen(&group, existing.as_ref())?;
+                // A reopen is a new caller interest: an entry closed by an
+                // earlier caller but not yet reaped opens again — a closed
+                // group's settlements keep landing under host ownership
+                // precisely so a caller may read them. Only `closed` clears;
+                // the narrowed disposition stays cumulative. The clear runs
+                // under the map's write lock so a `reap` re-judging the entry
+                // under the same lock cannot retire it out from under the new
+                // handle.
+                existing.state.lock_recover().closed = false;
+                return Ok(handle);
+            }
         }
         let resolved = Self::resolve_children(executors, &group)?;
         let state = {
             let mut open = groups.open.write_recover();
             if let Some(existing) = open.get(group.group_key()) {
                 fence_reopen(&group, existing.as_ref())?;
+                existing.state.lock_recover().closed = false;
                 return Ok(handle);
             }
             let state = Arc::new(NativeEffectGroup::new(&group));
@@ -1053,10 +1066,15 @@ impl NativeEffectGroups {
     /// supported way to end a group.
     fn reap(&self, group_key: &str, state: &Arc<NativeEffectGroup>) {
         let mut open = self.open.write_recover();
-        if open
-            .get(group_key)
-            .is_some_and(|current| Arc::ptr_eq(current, state))
-        {
+        if open.get(group_key).is_some_and(|current| {
+            // Re-judge the retirement under the write lock: a reopen that
+            // cleared `closed` — or a settlement that landed — since the
+            // caller's check must not be retired out from under it.
+            Arc::ptr_eq(current, state) && {
+                let inner = current.state.lock_recover();
+                inner.closed && inner.order.len() == current.children
+            }
+        }) {
             open.remove(group_key);
             #[cfg(any(test, feature = "testing"))]
             self.retired.lock_recover().insert(
