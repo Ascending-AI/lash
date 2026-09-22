@@ -602,25 +602,29 @@ pub(crate) async fn run_tool_child<'run>(
         orchestrating_starts.clone(),
     ))
     .await?;
-    // Realized intent evidence moves into the settlement, where the opener
-    // incorporates it as evidence. The journaled terminal keeps the record and
-    // the declarations; the outcomes belong to the settlement channel.
-    let intent_outcomes = std::mem::take(&mut outcome.intent_outcomes);
-    let mut possession = started_processes(&intent_outcomes);
+    // The settlement is aggregated from the journaled outcome by the one
+    // constructor every terminal owns (FIG-3411): per-attempt facts ride
+    // `outcome.captures` and its `triggers`; what the orchestrating lane wrote
+    // outside any attempt frame still drains from the child-local buffers.
+    let model_return =
+        resolve_model_return(&dispatch, request, &outcome, &outcome.intent_outcomes).await;
+    let mut settlement = ToolSettlement::from_dispatch(&outcome, model_return);
+    settlement
+        .checkpoint_messages
+        .extend(dispatch.checkpoint_messages.drain());
+    settlement
+        .triggers
+        .extend(dispatch.trigger_outcomes.drain());
+    settlement.usage.extend(usage_ledger.take());
     for process_id in orchestrating_starts.drain() {
-        if !possession.contains(&process_id) {
-            possession.push(process_id);
+        if !settlement.possession.contains(&process_id) {
+            settlement.possession.push(process_id);
         }
     }
-    let settlement = ToolSettlement {
-        version: super::tool_settlement::TOOL_SETTLEMENT_VERSION,
-        possession,
-        model_return: resolve_model_return(&dispatch, request, &outcome, &intent_outcomes).await,
-        intent_outcomes,
-        triggers: dispatch.trigger_outcomes.drain(),
-        checkpoint_messages: dispatch.checkpoint_messages.drain(),
-        usage: usage_ledger.take(),
-    };
+    // Realized intent evidence moved into the settlement, where the opener
+    // incorporates it as evidence. The journaled terminal keeps the record and
+    // the declarations; the outcomes belong to the settlement channel.
+    let _ = std::mem::take(&mut outcome.intent_outcomes);
     Ok(RuntimeEffectOutcome::ToolInvocation {
         outcome: Box::new(outcome),
         settlement: Box::new(settlement),
@@ -815,9 +819,6 @@ async fn drive(
         },
     ))
     .await;
-    for trigger in coordinated.triggers {
-        dispatch.trigger_outcomes.enqueue(trigger);
-    }
     match coordinated.launch {
         ToolCallLaunch::Done(outcome) => Ok(*outcome),
         // Deferred completion is coordination and belongs at handler level
@@ -964,7 +965,7 @@ pub(crate) async fn await_journaled_tool_completion(
         Ok(resolution) => resolution,
         Err(error) => return failed_child_outcome(pending, &error.to_string()),
     };
-    crate::tool_dispatch::settle_completed_pending_tool_call(
+    let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
         dispatch,
         pending.tool_name,
         pending.args,
@@ -973,7 +974,18 @@ pub(crate) async fn await_journaled_tool_completion(
         pending.duration_ms,
         pending.attempts,
     )
-    .await
+    .await;
+    // The captures and trigger receipts the pre-park attempts journaled ride
+    // the pending row into the settled outcome (FIG-3411); facts the resume
+    // itself produced landed in the child-local buffers and reach the
+    // settlement through the driver's drains.
+    let mut captures = pending.captures;
+    captures.extend(outcome.captures);
+    outcome.captures = captures;
+    let mut triggers = pending.triggers;
+    triggers.extend(outcome.triggers);
+    outcome.triggers = triggers;
+    outcome
 }
 
 /// The invocation a journaled await is recorded under: a child of the
@@ -1014,6 +1026,8 @@ fn unarmed_child_outcome(
         attempts: pending.attempts,
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
+        captures: pending.captures,
+        triggers: pending.triggers,
     }
 }
 
@@ -1037,6 +1051,8 @@ fn failed_child_outcome(
         attempts: pending.attempts,
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
+        captures: pending.captures,
+        triggers: pending.triggers,
     }
 }
 
@@ -1095,31 +1111,6 @@ async fn resolve_model_return(
         ));
     }
     model_return
-}
-
-/// Possession, read out of the same realized outcome the bound value's
-/// projection is taken from (ADR 0099 §6).
-///
-/// Deliberately the realized *intent outcome*, not a side channel: that is what
-/// `record_processes_started_by_intents` reads for an in-turn call, and a
-/// possession set assembled from anywhere else could name a process the child's
-/// own result never bound.
-fn started_processes(
-    intent_outcomes: &[crate::ToolIntentExecutionOutcome],
-) -> Vec<crate::ProcessId> {
-    intent_outcomes
-        .iter()
-        .filter_map(|intent| match intent {
-            crate::ToolIntentExecutionOutcome::Executed { kind, result, .. }
-                if *kind == crate::ToolIntentKind::StartProcess =>
-            {
-                crate::ProcessRef::from_handle_json(result)
-                    .ok()
-                    .map(|process_ref| process_ref.process_id)
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 /// The opener an admitted execution scope names, or `None` when the scope is

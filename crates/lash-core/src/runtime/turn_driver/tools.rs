@@ -179,6 +179,8 @@ impl RuntimeTurnDriver<'_> {
                                 pending.resolved_by.as_ref(),
                                 duration_ms,
                                 Vec::new(),
+                                Vec::new(),
+                                Vec::new(),
                             )
                             .await;
                         let completed = prepare_context

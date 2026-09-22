@@ -291,7 +291,11 @@ impl RuntimeExecutionContext<'_> {
             launch: crate::runtime::ToolCallLaunch::Done {
                 result: Box::new(completed.completed),
             },
-            triggers: coordinated.triggers,
+            // The applicator restored this leaf's journaled trigger receipts
+            // into the dispatch buffer; the batch journals them as its own
+            // flat list, so draining here is the same channel the
+            // orchestrating arm above uses.
+            triggers: self.dispatch.trigger_outcomes.drain(),
         })
     }
 
@@ -349,6 +353,8 @@ impl RuntimeExecutionContext<'_> {
                     attempts: Vec::new(),
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
+                    captures: Vec::new(),
+                    triggers: Vec::new(),
                 };
                 let completed = self
                     .complete_undispatched_tool_call(call.id, None, outcome)
@@ -511,6 +517,8 @@ impl RuntimeExecutionContext<'_> {
                                     pending,
                                     duration_ms,
                                     attempts: Vec::new(),
+                                    captures: Vec::new(),
+                                    triggers: Vec::new(),
                                 },
                                 self.cancellation_token.clone(),
                             )

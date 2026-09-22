@@ -135,6 +135,7 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
         },
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
     };
     let input = bytecode_v17_loop_input();
     let mut fixture = serde_json::json!({
@@ -182,6 +183,7 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         },
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
     };
     let mut wire = serde_json::to_value(segment_state).expect("serialize segment-state writer");
     wire["vm"]["execution_nonce"] = serde_json::json!(16294208416658607535_u64);
@@ -350,6 +352,7 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
         },
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
     };
     let wire = serde_json::to_value(&segment_state).expect("serialize current segment state");
     assert_eq!(wire["version"], LASHLANG_SEGMENT_STATE_VERSION);
@@ -407,6 +410,7 @@ fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejecti
         },
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
     };
     let mut wire = serde_json::to_value(segment_state).expect("serialize predecessor writer");
     let object = wire
@@ -456,6 +460,7 @@ fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_chan
         },
         started_process_ids: Vec::new(),
         child_max_attempts: recorded,
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
     };
     let encoded = serde_json::to_vec(&segment_state).expect("encode segment handover");
     let decoded = decode_lashlang_segment_state(&encoded).expect("decode segment handover");

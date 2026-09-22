@@ -192,7 +192,6 @@ impl ToolAttemptEffectIdentity {
 
 pub struct CoordinatedToolInvocation {
     pub launch: ToolCallLaunch,
-    pub triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
 /// Sequences the per-child final intent drains of one tool batch in source
@@ -405,6 +404,7 @@ pub async fn coordinate_tool_invocation<'run>(
     let started_at = context.clock.now();
     let max_attempts = retry_policy.max_attempts().max(1);
     let mut triggers = Vec::new();
+    let mut captures = Vec::new();
     let mut attempts = Vec::new();
 
     // Whether this attempt may defer is a recorded fact for a group child and a
@@ -444,13 +444,13 @@ pub async fn coordinate_tool_invocation<'run>(
                 }
             };
             if !observed.is_empty() && !honoured {
+                abandon_to_open_buffers(context, triggers, captures);
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::ControllerAborted(completion_routing_mismatch(
                         recorded.clone(),
                         observed,
                         &call,
                     )),
-                    triggers,
                 };
             }
         }
@@ -466,8 +466,9 @@ pub async fn coordinate_tool_invocation<'run>(
                         err.to_string(),
                         identity.duration_ms(context, started_at, 0),
                         attempts,
+                        captures,
+                        triggers,
                     ))),
-                    triggers,
                 };
             }
         };
@@ -499,8 +500,9 @@ pub async fn coordinate_tool_invocation<'run>(
                         err.to_string(),
                         identity.duration_ms(context, started_at, 0),
                         attempts,
+                        captures,
+                        triggers,
                     ))),
-                    triggers,
                 };
             }
         };
@@ -511,17 +513,13 @@ pub async fn coordinate_tool_invocation<'run>(
             crate::panic_containment::enforce_message("tool_panicked", &failure.message);
         }
         triggers.extend(outcome.triggers);
-        // Restore what the attempt journaled. On a live execution this moves
-        // the facts out of the attempt-local buffers the runner installed; on
-        // replay the journaled capture is the only place they exist. Either
-        // way they land here exactly once per consumption, which is what makes
-        // a replayed attempt indistinguishable from a fresh one (ADR 0099 §13).
-        context
-            .checkpoint_messages
-            .enqueue(outcome.capture.messages);
-        if let Some(ledger) = context.direct_completions.usage_ledger() {
-            ledger.extend(outcome.capture.usage);
-        }
+        // The attempt's journaled facts ride the outcome to the incorporation
+        // boundary: on a live execution this moves them out of the
+        // attempt-local buffers the runner installed, and on replay the
+        // journaled capture is the only place they exist. Either way they are
+        // consumed exactly once per attempt outcome, which is what makes a
+        // replayed attempt indistinguishable from a fresh one (ADR 0099 §13).
+        captures.push(outcome.capture);
         match outcome.launch {
             crate::ToolAttemptLaunch::Pending {
                 key,
@@ -537,8 +535,9 @@ pub async fn coordinate_tool_invocation<'run>(
                         pending,
                         duration_ms,
                         attempts,
+                        captures,
+                        triggers,
                     })),
-                    triggers,
                 };
             }
             crate::ToolAttemptLaunch::Done {
@@ -575,6 +574,8 @@ pub async fn coordinate_tool_invocation<'run>(
                                 record,
                                 intents,
                                 attempts,
+                                captures,
+                                triggers,
                             },
                         )
                         .await
@@ -582,7 +583,6 @@ pub async fn coordinate_tool_invocation<'run>(
                             Ok(outcome) => ToolCallLaunch::Done(Box::new(outcome)),
                             Err(error) => ToolCallLaunch::ControllerAborted(error),
                         },
-                        triggers,
                     };
                 };
                 if attempt >= max_attempts {
@@ -607,6 +607,8 @@ pub async fn coordinate_tool_invocation<'run>(
                                 record,
                                 intents,
                                 attempts,
+                                captures,
+                                triggers,
                             },
                         )
                         .await
@@ -614,7 +616,6 @@ pub async fn coordinate_tool_invocation<'run>(
                             Ok(outcome) => ToolCallLaunch::Done(Box::new(outcome)),
                             Err(error) => ToolCallLaunch::ControllerAborted(error),
                         },
-                        triggers,
                     };
                 }
                 if retry_after > 0
@@ -636,8 +637,9 @@ pub async fn coordinate_tool_invocation<'run>(
                             ),
                             identity.duration_ms(context, started_at, 0),
                             attempts,
+                            captures,
+                            triggers,
                         ))),
-                        triggers,
                     };
                 }
             }
@@ -651,8 +653,29 @@ pub async fn coordinate_tool_invocation<'run>(
             "tool retry loop exited without a terminal result",
             identity.duration_ms(context, started_at, 0),
             attempts,
+            captures,
+            triggers,
         ))),
-        triggers,
+    }
+}
+
+/// When no outcome exists to carry them — a controller abort refuses the
+/// launch itself — an attempt's journaled facts land in the open context's
+/// buffers, exactly where the pre-applicator restore put them, because the
+/// commit they are evidence of already happened.
+fn abandon_to_open_buffers(
+    context: &ToolDispatchContext<'_>,
+    triggers: Vec<ToolTriggerEffectOutcome>,
+    captures: Vec<crate::runtime::ToolAttemptCapture>,
+) {
+    for trigger in triggers {
+        context.trigger_outcomes.enqueue(trigger);
+    }
+    for capture in captures {
+        context.checkpoint_messages.enqueue(capture.messages);
+        if let Some(ledger) = context.direct_completions.usage_ledger() {
+            ledger.extend(capture.usage);
+        }
     }
 }
 
@@ -674,6 +697,8 @@ struct TerminalAttemptSettlement<'settlement> {
     record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
+    captures: Vec<crate::runtime::ToolAttemptCapture>,
+    triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
 /// The sealed settlement a §4 boundary commit persists as its drain input:
@@ -713,6 +738,8 @@ async fn settle_terminal_attempt(
         mut record,
         mut intents,
         attempts,
+        captures,
+        triggers,
     } = settlement;
     let mut recorded_call_id = recorded_call_id.map(str::to_string);
     // The §4 boundary: a group child's final record commits *before* any
@@ -837,6 +864,8 @@ async fn settle_terminal_attempt(
         attempts,
         intents,
         intent_outcomes,
+        captures,
+        triggers,
     })
 }
 
@@ -1018,12 +1047,18 @@ fn projected_intent_answers(
     answers
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a failure outcome is assembled from every channel the attempts accumulated"
+)]
 fn runtime_failure_outcome(
     call: &PreparedToolCall,
     code: impl Into<String>,
     message: impl Into<String>,
     duration_ms: u64,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
+    captures: Vec<crate::runtime::ToolAttemptCapture>,
+    triggers: Vec<ToolTriggerEffectOutcome>,
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: ToolCallRecord {
@@ -1040,6 +1075,8 @@ fn runtime_failure_outcome(
         attempts,
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
+        captures,
+        triggers,
     }
 }
 

@@ -10,12 +10,16 @@ mod execution_context;
 #[cfg(test)]
 mod fig790_tests;
 mod process_handles;
+mod settlement_incorporation;
 #[cfg(test)]
 mod settlement_latency_tests;
 pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
+pub use settlement_incorporation::{
+    Incorporated, IncorporationLedger, SettlementSource, UsageChargeSink, UsageDeltaIdentity,
+};
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
     ToolBatchOccurrence, ToolBatchReplies, ToolInvocation, ToolInvocationReply,

@@ -519,6 +519,8 @@ paths = [
 symbols = [
   "ToolSettlement",
   "ToolUsageDelta",
+  "ToolDispatchOutcome",
+  "PendingToolDispatchOutcome",
   "ToolTriggerEffectOutcome",
   "TriggerDeliveryEmitReceipt",
   "TriggerDeliveryEmitOutcome",

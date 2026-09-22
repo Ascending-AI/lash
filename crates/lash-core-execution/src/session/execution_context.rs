@@ -59,6 +59,13 @@ pub struct RuntimeExecutionContext<'run> {
     /// owns the stack. Its fixed host-reply API must unwind before the
     /// enclosing code-execution effect can abort.
     nested_effect_error: Arc<std::sync::Mutex<Option<crate::RuntimeEffectControllerError>>>,
+    /// The once-only settlement incorporation ledger (ADR 0099 §6/§13,
+    /// FIG-3411): which recorded settlements this context has applied and
+    /// which usage deltas it has already charged. Travels wherever
+    /// `started_process_ids` travels — the `Arc` is shared by clones and
+    /// `to_static`, so a rebound or handed-over context incorporates against
+    /// the same set.
+    pub(crate) incorporation_ledger: Arc<std::sync::Mutex<crate::session::IncorporationLedger>>,
 }
 
 #[derive(Clone)]
@@ -155,6 +162,18 @@ impl<'run> RuntimeExecutionContext<'run> {
             .collect::<Vec<_>>();
         process_ids.sort_unstable();
         process_ids
+    }
+
+    /// Restore the once-only incorporation ledger a segment handover carried
+    /// (FIG-3411): without it a successor context would incorporate the same
+    /// settlement a second time and double-charge its usage.
+    pub fn restore_incorporation_ledger(&self, ledger: crate::session::IncorporationLedger) {
+        *self.incorporation_ledger.lock_recover() = ledger;
+    }
+
+    /// Snapshot the once-only incorporation ledger for a segment handover.
+    pub fn incorporation_ledger_snapshot(&self) -> crate::session::IncorporationLedger {
+        self.incorporation_ledger.lock_recover().clone()
     }
 
     pub(super) fn effect_attribution(&self) -> crate::RuntimeAttribution {
@@ -362,6 +381,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             process_execution: None,
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
+            incorporation_ledger: Arc::default(),
             parent_invocation: None,
             turn_phase_probe: None,
             turn_event_tx: None,
@@ -399,6 +419,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
+            incorporation_ledger: Arc::clone(&self.incorporation_ledger),
         })
     }
 

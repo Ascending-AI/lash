@@ -421,6 +421,17 @@ pub struct ToolDispatchOutcome {
     pub intents: crate::ToolIntents,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    /// The per-attempt captures in attempt order — committed
+    /// `EnqueueMessages` facts and per-provider-attempt usage deltas — which
+    /// the opener's settlement incorporation applies exactly once (ADR 0099
+    /// §6/§13, FIG-3411). Guarded by `TOOL_SETTLEMENT_VERSION` because this
+    /// rides the journaled `ToolInvocation` outcome.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captures: Vec<crate::runtime::ToolAttemptCapture>,
+    /// Trigger receipts the attempts emitted, carried to the same
+    /// incorporation boundary the captures are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -432,6 +443,13 @@ pub struct PendingToolDispatchOutcome {
     pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<lash_trace::TraceRetryAttempt>,
+    /// Captures collected from the attempts that ran before this call parked,
+    /// carried across the park so the journaled pending row keeps them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captures: Vec<crate::runtime::ToolAttemptCapture>,
+    /// Trigger receipts emitted before this call parked, carried likewise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -468,6 +486,8 @@ pub(super) fn outcome(
         attempts: Vec::new(),
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
+        captures: Vec::new(),
+        triggers: Vec::new(),
     }
 }
 

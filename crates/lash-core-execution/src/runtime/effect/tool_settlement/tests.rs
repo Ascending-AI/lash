@@ -82,6 +82,8 @@ fn delta(attempt: u32, call_id: &str, provider_attempt: u32, usage: TokenUsage) 
         attempt,
         llm_call_id: LlmCallId(call_id.to_string()),
         provider_attempt,
+        source: "test-source".to_string(),
+        model: "test-model".to_string(),
         usage,
     }
 }
@@ -244,7 +246,11 @@ fn an_attempt_capture_round_trips_and_refuses_an_unknown_field() {
 #[test]
 fn the_ledger_records_a_spend_with_its_full_identity() {
     let ledger = ToolUsageLedger::for_attempt(2);
-    ledger.record(&call_record("call-a", &[(1, 3), (2, 5)]));
+    ledger.record(
+        &call_record("call-a", &[(1, 3), (2, 5)]),
+        "test-source",
+        "test-model",
+    );
     assert_eq!(
         ledger.take(),
         vec![
@@ -252,12 +258,16 @@ fn the_ledger_records_a_spend_with_its_full_identity() {
                 attempt: 2,
                 llm_call_id: LlmCallId("call-a".to_string()),
                 provider_attempt: 1,
+                source: "test-source".to_string(),
+                model: "test-model".to_string(),
                 usage: spent(3),
             },
             ToolUsageDelta {
                 attempt: 2,
                 llm_call_id: LlmCallId("call-a".to_string()),
                 provider_attempt: 2,
+                source: "test-source".to_string(),
+                model: "test-model".to_string(),
                 usage: spent(5),
             },
         ]
@@ -293,13 +303,17 @@ fn the_aggregate_ledger_restores_journaled_deltas() {
 #[test]
 fn an_explicit_zero_spend_is_a_fact_and_an_absent_report_is_not() {
     let ledger = ToolUsageLedger::new();
-    ledger.record(&call_record_of(
-        "call-a",
-        vec![
-            attempt_with(1, crate::AttemptOutcome::Completed, Some(0)),
-            attempt_with(2, crate::AttemptOutcome::Failed, None),
-        ],
-    ));
+    ledger.record(
+        &call_record_of(
+            "call-a",
+            vec![
+                attempt_with(1, crate::AttemptOutcome::Completed, Some(0)),
+                attempt_with(2, crate::AttemptOutcome::Failed, None),
+            ],
+        ),
+        "test-source",
+        "test-model",
+    );
     assert_eq!(
         ledger.take(),
         vec![delta(0, "call-a", 1, TokenUsage::default())],
@@ -313,7 +327,11 @@ fn an_explicit_zero_spend_is_a_fact_and_an_absent_report_is_not() {
 fn a_cloned_ledger_records_into_the_same_accumulator() {
     let ledger = ToolUsageLedger::new();
     let nested = ledger.clone();
-    nested.record(&call_record("call-a", &[(1, 2)]));
+    nested.record(
+        &call_record("call-a", &[(1, 2)]),
+        "test-source",
+        "test-model",
+    );
     assert_eq!(ledger.take().len(), 1);
 }
 
@@ -324,13 +342,17 @@ fn a_cloned_ledger_records_into_the_same_accumulator() {
 #[test]
 fn a_billed_failed_attempt_and_its_successful_retry_are_two_facts() {
     let ledger = ToolUsageLedger::for_attempt(1);
-    ledger.record(&call_record_of(
-        "call-a",
-        vec![
-            attempt_with(1, crate::AttemptOutcome::Failed, Some(10)),
-            attempt_with(2, crate::AttemptOutcome::Completed, Some(41)),
-        ],
-    ));
+    ledger.record(
+        &call_record_of(
+            "call-a",
+            vec![
+                attempt_with(1, crate::AttemptOutcome::Failed, Some(10)),
+                attempt_with(2, crate::AttemptOutcome::Completed, Some(41)),
+            ],
+        ),
+        "test-source",
+        "test-model",
+    );
     assert_eq!(
         ledger.take(),
         vec![
@@ -346,10 +368,14 @@ fn a_billed_failed_attempt_and_its_successful_retry_are_two_facts() {
 #[test]
 fn a_billed_aborted_attempt_is_a_fact() {
     let ledger = ToolUsageLedger::for_attempt(2);
-    ledger.record(&call_record_of(
-        "call-a",
-        vec![attempt_with(1, crate::AttemptOutcome::Aborted, Some(9))],
-    ));
+    ledger.record(
+        &call_record_of(
+            "call-a",
+            vec![attempt_with(1, crate::AttemptOutcome::Aborted, Some(9))],
+        ),
+        "test-source",
+        "test-model",
+    );
     assert_eq!(ledger.take(), vec![delta(2, "call-a", 1, spent(9))]);
 }
 
@@ -358,13 +384,17 @@ fn a_billed_aborted_attempt_is_a_fact() {
 #[test]
 fn an_unbilled_failed_attempt_records_nothing() {
     let ledger = ToolUsageLedger::new();
-    ledger.record(&call_record_of(
-        "call-a",
-        vec![
-            attempt_with(1, crate::AttemptOutcome::Failed, None),
-            attempt_with(2, crate::AttemptOutcome::Completed, Some(3)),
-        ],
-    ));
+    ledger.record(
+        &call_record_of(
+            "call-a",
+            vec![
+                attempt_with(1, crate::AttemptOutcome::Failed, None),
+                attempt_with(2, crate::AttemptOutcome::Completed, Some(3)),
+            ],
+        ),
+        "test-source",
+        "test-model",
+    );
     assert_eq!(
         ledger.take(),
         vec![delta(0, "call-a", 2, spent(3))],

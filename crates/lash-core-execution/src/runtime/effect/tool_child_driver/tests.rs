@@ -658,10 +658,14 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
         // does — a billed provider attempt is a usage fact of the call,
         // whatever the call then returns.
         if let Some(sink) = usage_sink {
-            sink.record(&match self.call {
-                ProbeCall::Succeed => probed_call_record(),
-                ProbeCall::FailAfterBilling => failed_billed_call_record(),
-            });
+            sink.record(
+                &match self.call {
+                    ProbeCall::Succeed => probed_call_record(),
+                    ProbeCall::FailAfterBilling => failed_billed_call_record(),
+                },
+                "test-source",
+                "test-model",
+            );
         }
         match self.call {
             ProbeCall::Succeed => Ok(probed_completion()),

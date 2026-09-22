@@ -1658,7 +1658,9 @@ pub enum ExecutionEvidenceCollectionInterruption {
 
 /// Lash-owned identity for one logical LLM call, spanning all transport
 /// attempts made by the retry owner.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(transparent)]
 pub struct LlmCallId(pub String);
 

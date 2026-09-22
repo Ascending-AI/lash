@@ -475,6 +475,8 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
             None,
             17,
             Vec::new(),
+            Vec::new(),
+            Vec::new(),
         )
         .await;
 

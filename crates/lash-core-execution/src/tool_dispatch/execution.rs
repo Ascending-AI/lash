@@ -423,6 +423,8 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                 pending,
                 duration_ms,
                 attempts: Vec::new(),
+                captures: Vec::new(),
+                triggers: Vec::new(),
             }));
         }
     };

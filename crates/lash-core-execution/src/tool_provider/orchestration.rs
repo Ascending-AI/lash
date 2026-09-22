@@ -320,17 +320,17 @@ async fn coordinate_nested_tool_batch<'run>(
             },
         ))
         .await;
-        // The journaled attempts' triggers were drained into the outcome; they
-        // belong to the body's own buffer, which its settlement carries.
-        for trigger in coordinated.triggers {
-            dispatch.trigger_outcomes.enqueue(trigger);
-        }
+        // The journaled attempts' triggers ride the outcome; they belong to
+        // the body's own buffer, which its settlement carries.
         match coordinated.launch {
-            crate::tool_dispatch::ToolCallLaunch::Done(outcome) => {
+            crate::tool_dispatch::ToolCallLaunch::Done(mut outcome) => {
+                for trigger in std::mem::take(&mut outcome.triggers) {
+                    dispatch.trigger_outcomes.enqueue(trigger);
+                }
                 replies.push(dispatch_outcome_reply(*outcome));
             }
             crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {
-                let outcome = crate::runtime::effect::await_journaled_tool_completion(
+                let mut outcome = crate::runtime::effect::await_journaled_tool_completion(
                     dispatch.as_ref(),
                     dispatch.parent_invocation.as_ref(),
                     &call_id,
@@ -338,6 +338,9 @@ async fn coordinate_nested_tool_batch<'run>(
                     &turn_cancel_wait,
                 )
                 .await;
+                for trigger in std::mem::take(&mut outcome.triggers) {
+                    dispatch.trigger_outcomes.enqueue(trigger);
+                }
                 replies.push(dispatch_outcome_reply(outcome));
             }
             crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {

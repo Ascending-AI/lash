@@ -71,39 +71,6 @@ impl RuntimeExecutionContext<'_> {
         Ok(HandleAuthority::SessionVisible)
     }
 
-    /// Records run-local possession of every child a settled attempt's
-    /// recorded intents actually started.
-    ///
-    /// The in-session start path records possession the moment the registry
-    /// row lands (`record_started_process`), which is what lets this run await
-    /// its own child. A start declared as a tool intent is realized in
-    /// `tool_dispatch`, which holds no runtime execution context, so nothing
-    /// recorded it and the child was unreachable to the very run that started
-    /// it — `await handle` refused with `ProcessNotVisible`, deferred or not.
-    /// The realized handle travels back here with the settled attempt, so
-    /// possession is taken from the same realized outcome the bound value's
-    /// projection is taken from, and it rides the segment handover
-    /// (`restore_started_process_ids`) across a boundary like any other
-    /// run-local possession.
-    pub(super) fn record_processes_started_by_intents(
-        &self,
-        outcomes: &[crate::ToolIntentExecutionOutcome],
-    ) {
-        for outcome in outcomes {
-            let crate::ToolIntentExecutionOutcome::Executed { kind, result, .. } = outcome else {
-                continue;
-            };
-            if *kind != crate::ToolIntentKind::StartProcess {
-                continue;
-            }
-            // The realized start answers the one handle kind, so its id is read
-            // through the one handle parser rather than by field name.
-            if let Ok(process_ref) = Self::parse_process_handle(result) {
-                self.record_started_process(&process_ref.process_id);
-            }
-        }
-    }
-
     #[cfg(test)]
     pub(super) async fn start_tool_process(
         &self,
@@ -1579,6 +1546,8 @@ mod tests {
                         kind: crate::ToolIntentKind::StartProcess,
                         result: realized_handle.clone(),
                     }],
+                    captures: Vec::new(),
+                    triggers: Vec::new(),
                 },
             )
             .await;

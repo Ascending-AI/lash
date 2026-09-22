@@ -34,7 +34,7 @@ pub(crate) async fn apply_direct_outcome(
     // record is the only place they exist — once the error path below
     // returns, nothing else carries them to the child's settlement.
     if let (Some(sink), Some(record)) = (usage_sink, call_record.as_ref()) {
-        sink.record(record);
+        sink.record(record, usage_source, &request.model);
     }
     let (response, usage) = apply_direct_llm_result(
         current,
@@ -45,6 +45,7 @@ pub(crate) async fn apply_direct_outcome(
         caused_by,
         result,
         call_record.as_ref(),
+        usage_sink.is_some(),
     )
     .await?;
     let call_record = call_record.ok_or_else(|| {
@@ -68,6 +69,12 @@ async fn apply_direct_llm_result(
     caused_by: Option<&CausalRef>,
     result: Result<LlmResponse, LlmCallError>,
     call_record: Option<&crate::LlmCallRecord>,
+    // Whether a `ToolUsageLedger` sink captured this call's sealed record
+    // (FIG-3411). Inside a tool attempt usage is never charged live — the
+    // captured delta is journaled with the attempt and charged by the
+    // opener exactly once at settlement incorporation — so a present sink
+    // suppresses the merge below and makes the capture the only carrier.
+    usage_captured: bool,
 ) -> Result<(LlmResponse, TokenUsage), PluginError> {
     let llm_call_id = emit_direct_llm_trace_started(current, request, caused_by);
     match result {
@@ -92,7 +99,9 @@ async fn apply_direct_llm_result(
             //     usage into the already-persisted state. Recording (without
             //     persisting) is replay-safe: it just rebuilds the in-memory
             //     ledger that the single turn-commit drain then persists.
-            usage_capability.record_token_usage(usage_source, usage_model, &usage);
+            if !usage_captured {
+                usage_capability.record_token_usage(usage_source, usage_model, &usage);
+            }
             Ok((response, usage))
         }
         Err(err) => {

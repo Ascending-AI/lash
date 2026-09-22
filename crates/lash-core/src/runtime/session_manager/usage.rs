@@ -30,6 +30,23 @@ pub(in crate::runtime::session_manager) struct ChannelEventSink {
     pub(in crate::runtime::session_manager) tx: mpsc::Sender<SessionStreamEvent>,
 }
 
+/// The opener-side charge a settlement's usage deltas land in (FIG-3411,
+/// ADR 0099 §13): the same shared token ledger the live path records into,
+/// offered to lash-core-execution's settlement applicator as the narrow
+/// `UsageChargeSink` seam so it charges under exactly the `(source, model)`
+/// the live path would have used without ever naming the ledger type.
+impl crate::session::UsageChargeSink for UsageCapability {
+    fn charge(
+        &self,
+        source: &str,
+        model: &str,
+        usage: &crate::TokenUsage,
+    ) -> Result<(), crate::PluginError> {
+        self.record_token_usage(source, model, usage);
+        Ok(())
+    }
+}
+
 impl UsageCapability {
     pub(in crate::runtime) fn record_token_usage(
         &self,
