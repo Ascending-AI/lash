@@ -734,13 +734,7 @@ pub fn code_execution_context_with_process_dependencies(
         .tool_catalog(tool_catalog)
         .trigger_router(trigger_router)
         .processes(processes)
-        .borrowed_effect_controller(
-            crate::ScopedEffectController::shared(
-                effect_controller,
-                crate::AdmittedScope::turn("test-session", "test-turn"),
-            )
-            .expect("foreground process fixture has an admitted turn"),
-        )
+        .shared_effect_controller(effect_controller)
         .process_env_store(process_env_store)
         .execution_env_spec(execution_env_spec)
         .build()

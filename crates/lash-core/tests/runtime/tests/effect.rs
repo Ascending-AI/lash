@@ -307,7 +307,12 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
     }
 
     let default_recorder = RecordingEffectController::default();
-    let scoped_recorder = RecordingEffectController::default();
+    // The scoped double shares the host-side recorder's substrate: group opens
+    // land there, where the host's tool-child resolver was registered.
+    let scoped_recorder = RecordingEffectController {
+        native: default_recorder.native.clone(),
+        ..Default::default()
+    };
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -365,15 +370,22 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         .expect("turn");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::ToolBatch), 1);
+    // A batch is a durable group now (FIG-3397): its children execute as
+    // `ToolInvocation` leaves under the opener's host-bound controller rather
+    // than as a `ToolBatch` command on the turn-scoped one.
+    assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::ToolBatch), 0);
     assert_eq!(
-        scoped_recorder.count_kind(RuntimeEffectKind::ToolAttempt),
+        default_recorder.count_kind(RuntimeEffectKind::ToolInvocation),
+        1
+    );
+    assert_eq!(
+        default_recorder.count_kind(RuntimeEffectKind::ToolAttempt),
         1
     );
     assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::Direct), 0);
     assert_eq!(default_recorder.count_kind(RuntimeEffectKind::Direct), 0);
     assert!(
-        scoped_recorder
+        default_recorder
             .envelopes()
             .iter()
             .filter(|envelope| envelope.contains("tool_attempt"))
@@ -949,25 +961,27 @@ async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appen
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let tool_outcomes = controller.tool_outcomes();
     assert_eq!(tool_outcomes.len(), 1);
-    assert_eq!(tool_outcomes[0]["type"], "tool_batch");
+    // The leaf is a `ToolInvocation` group child now (FIG-3397): its journaled
+    // trigger receipts ride in the recorded settlement (ADR 0099 §6).
+    assert_eq!(tool_outcomes[0]["type"], "tool_invocation");
+    let triggers = tool_outcomes[0]["settlement"]["triggers"]
+        .as_array()
+        .expect("tool trigger outcomes in the settlement record");
     assert_eq!(
-        tool_outcomes[0]["triggers"]
-            .as_array()
-            .expect("tool trigger outcomes")
-            .len(),
+        triggers.len(),
         2,
         "the tool attempt must retain both the first emission and its redrive"
     );
     assert_eq!(
-        tool_outcomes[0]["triggers"][0]["source_type"],
+        triggers[0]["source_type"],
         serde_json::json!("ui.button.pressed")
     );
     assert_eq!(
-        tool_outcomes[0]["triggers"][0]["payload"],
+        triggers[0]["payload"],
         serde_json::json!({ "pressed": true })
     );
     assert!(
-        tool_outcomes[0]["triggers"][0]["occurrence_id"]
+        triggers[0]["occurrence_id"]
             .as_str()
             .is_some_and(|value| !value.is_empty())
     );
@@ -1180,7 +1194,9 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
         .expect("turn");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolBatch), 1);
+    // The batch is a durable group of `ToolInvocation` children now
+    // (FIG-3397); each leaf's attempt records as before.
+    assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolInvocation), 2);
     assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolAttempt), 2);
     let tool_keys = recorder
         .records()
@@ -1199,11 +1215,19 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
             .iter()
             .any(|key| key.contains("child:1:call-2:attempt:1"))
     );
+    // No single envelope names both calls now: each leaf is its own
+    // `ToolInvocation` group child (FIG-3397).
     assert!(
         recorder
             .envelopes()
             .iter()
-            .any(|envelope| envelope.contains("call-1") && envelope.contains("call-2"))
+            .any(|envelope| envelope.contains("call-1"))
+    );
+    assert!(
+        recorder
+            .envelopes()
+            .iter()
+            .any(|envelope| envelope.contains("call-2"))
     );
     assert!(
         turn.tool_calls
