@@ -1193,6 +1193,8 @@ struct RuntimeCommitIntent<'a> {
     usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     #[serde(skip_serializing_if = "failure_evidence_is_empty")]
     failure_evidence: &'a [crate::TurnFailureEvidence],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    queued_run: Option<QueuedRunIntent<'a>>,
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,
@@ -1200,6 +1202,12 @@ struct RuntimeCommitIntent<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     interrupted_turn_input_cancellation: Option<&'a crate::TurnCancellationEvidence>,
     committed_attachment_ids: &'a [crate::AttachmentId],
+}
+
+#[derive(serde::Serialize)]
+struct QueuedRunIntent<'a> {
+    scope: &'a crate::ExecutionScope,
+    progress: &'a super::QueuedRunProgress,
 }
 
 /// Explicit allowlist for durable commit intent.
@@ -1227,6 +1235,10 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             usage_deltas: &commit.usage_deltas,
             failure_evidence: &commit.failure_evidence,
+            queued_run: commit.queued_run.as_ref().map(|run| QueuedRunIntent {
+                scope: &run.scope,
+                progress: &run.progress,
+            }),
             completed_queue_batches: commit
                 .completed_queue_claims
                 .iter()

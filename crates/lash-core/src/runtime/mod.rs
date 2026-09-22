@@ -427,6 +427,9 @@ pub(crate) use normalized_item::NormalizedItem;
 /// Event sinks default to no-op sinks.
 /// Execution scope is explicit and required at every runtime boundary that can execute
 /// nondeterministic work.
+mod queued_run;
+pub use queued_run::{QueuedEffectSource, QueuedTurnOptions};
+
 pub struct TurnOptions<'a> {
     events: Option<&'a dyn EventSink>,
     turn_events: Option<&'a dyn TurnActivitySink>,
@@ -504,6 +507,7 @@ pub struct LashRuntime {
     pub state: RuntimeSessionState,
     pub runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub runtime_lease_executor_id: String,
+    pub(crate) queued_run: Option<Box<crate::store::QueuedRunAdmission>>,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here

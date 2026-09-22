@@ -122,7 +122,7 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from("renewal-failure-mid-turn"),
                 ),
@@ -164,20 +164,19 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
         .await
         .expect("turn should finish")
         .expect("turn task")
-        .expect("advisory renewal failure must not select a durable error branch")
-        .expect("claimed queued work must produce a turn");
+        .expect_err("queued progress requires the current lane fence");
     assert!(
         store.session_execution_lease_renewal_count() > renewals_before_loss,
         "the live renewal task must observe the expired predecessor fence"
     );
     assert_eq!(
-        assembled.assistant_output.safe_text,
-        "stale claim completion"
+        assembled.code,
+        lash_core::RuntimeErrorCode::QueuedRunPending
     );
     assert_eq!(
         store.abandoned_claim_counts(),
         (0, 0),
-        "advisory lease loss must not mutate durable claim state out of band"
+        "lease loss must retain the admission and its assigned claims"
     );
 
     lash_core::store::SessionExecutionLeaseStore::release_session_execution_lease(
@@ -751,7 +750,7 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from("small-window-drain"),
                 ),
@@ -871,7 +870,7 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from("paired-exact-drain"),
                 ),
@@ -981,7 +980,7 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from("oversized-row")),
+                named_queued_scope(&SessionId::from("root"), &TurnId::from("oversized-row")),
             ),
             std::slice::from_ref(&batch_id),
         )
@@ -2007,7 +2006,7 @@ pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
     let drain = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("storeless-drain")),
+            named_queued_scope(&SessionId::from("root"), &TurnId::from("storeless-drain")),
         ))
         .await
         .expect("a storeless drain still answers");

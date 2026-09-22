@@ -72,6 +72,12 @@ pub enum RuntimeErrorCode {
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
     StoreCommitContended,
+    /// A physical queued attempt yielded with a durable continuation.
+    QueuedRunPending,
+    /// An exact queued request re-presented a failed terminal receipt.
+    QueuedRunFailed,
+    /// Restore the admitted configuration or explicitly abandon this run.
+    QueuedRunConfigurationChanged,
     /// The final runtime commit lost the session-head compare-and-swap to a
     /// newer commit. Nothing from the losing commit was published, but the
     /// identical stale commit is not safe to retry: reload the durable head and
@@ -404,6 +410,14 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
             format!("failed to snapshot dirty execution state: {message}"),
         ),
         crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
+        crate::store::StoreError::QueuedRunConfigurationChanged { session_id } => {
+            RuntimeError::new(
+                RuntimeErrorCode::QueuedRunConfigurationChanged,
+                format!(
+                    "session {session_id} has a pending queued run with different execution configuration; restore that configuration or explicitly abandon the admission"
+                ),
+            )
+        }
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
@@ -443,6 +457,9 @@ impl RuntimeErrorCode {
                 "turn_execution_requires_reconciled_tool_surface"
             }
             Self::StoreCommitContended => "store_commit_contended",
+            Self::QueuedRunPending => "queued_run_pending",
+            Self::QueuedRunFailed => "queued_run_failed",
+            Self::QueuedRunConfigurationChanged => "queued_run_configuration_changed",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
@@ -693,6 +710,7 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectGroupDrainDeferred
             | Self::SessionExecutionLaneBusy
             | Self::TurnInputSettlementSuperseded
+            | Self::QueuedRunPending
             | Self::StoreCommitContended
             | Self::CancelStartGateUnavailable
             | Self::PostgresAwaitEventStore
@@ -726,6 +744,8 @@ impl RuntimeErrorCode {
             | Self::ExecutionScopeAdmissionRefused
             | Self::TurnInputRedriveSetUnavailable
             | Self::TurnExecutionRequiresReconciledToolSurface
+            | Self::QueuedRunFailed
+            | Self::QueuedRunConfigurationChanged
             | Self::QueuedWorkRowExceedsContextWindow
             | Self::StoreCommitNodeBudgetExceeded
             | Self::StoreCommitByteBudgetExceeded
@@ -911,6 +931,9 @@ impl RuntimeErrorCode {
         Self::TurnInputRedriveSetUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
+        Self::QueuedRunPending,
+        Self::QueuedRunFailed,
+        Self::QueuedRunConfigurationChanged,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
         Self::StoreCommitNodeBudgetExceeded,
@@ -1109,6 +1132,9 @@ impl RuntimeErrorCode {
                 Self::TurnExecutionRequiresReconciledToolSurface
             }
             "store_commit_contended" => Self::StoreCommitContended,
+            "queued_run_pending" => Self::QueuedRunPending,
+            "queued_run_failed" => Self::QueuedRunFailed,
+            "queued_run_configuration_changed" => Self::QueuedRunConfigurationChanged,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,

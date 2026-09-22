@@ -191,7 +191,14 @@ crate::statements! {
 
         /// Reclaim session `?1`'s terminal input rows. Retention only.
         delete_terminal = "DELETE FROM pending_turn_inputs
-             WHERE session_id = ?1 AND {{terminal_turn_input_state(state)}}";
+             WHERE session_id = ?1 AND {{terminal_turn_input_state(state)}}
+               AND NOT EXISTS (
+                 SELECT 1 FROM queued_run_members m
+                 JOIN queued_runs r ON r.session_id = m.session_id AND r.scope_id = m.scope_id
+                 WHERE m.session_id = pending_turn_inputs.session_id
+                   AND m.member_kind = 'input' AND m.member_id = pending_turn_inputs.input_id
+                   AND r.status = 'pending'
+               )";
 
         delete_by_session = "DELETE FROM pending_turn_inputs WHERE session_id = ?1";
     }

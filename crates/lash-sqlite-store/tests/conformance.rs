@@ -2467,3 +2467,20 @@ lash_conformance::retention_tests!({
         Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
     (dir, factory)
 });
+
+#[tokio::test]
+async fn sqlite_queued_run_satisfies_cold_process_persistence_boundaries() {
+    let dir = tempfile::tempdir().expect("SQLite queued-run cold process tempdir");
+    let database = dir.path().join("queued-run-cold.db");
+    lash_conformance::assert_queued_run_cold_process_recovery(
+        dir.path(),
+        |action, nonce, marker| {
+            let mut command = tokio::process::Command::new(lash_conformance::helper_executable(
+                "sqlite-await-event-helper",
+            ));
+            command.arg(&database).arg(action).arg(nonce).arg(marker);
+            command
+        },
+    )
+    .await;
+}

@@ -137,13 +137,17 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
             .copied()
             .collect::<Vec<_>>(),
     );
-    // Two DDL constraints spell a `status IN` list. `ck_processes_status` is this
+    // Three DDL constraints spell a `status IN` list. `ck_processes_status` is this
     // law's subject. `ck_runtime_effect_replay_status` is a different column's
-    // vocabulary (`EffectRowStatus`), pinned by the lash-sim congruence registry
+    // vocabulary (`EffectRowStatus`). `ck_queued_runs_status` belongs to run
+    // admission. Both are pinned by the lash-sim congruence registry
     // and its writer-vocabulary law, so it is counted and skipped here rather
     // than silently swept into the process-status expectation.
     const VOCABULARY_SITE: &str = "CONSTRAINT ck_processes_status CHECK (";
-    const FOREIGN_VOCABULARY_SITE: &str = "CONSTRAINT ck_runtime_effect_replay_status CHECK (";
+    const FOREIGN_VOCABULARY_SITES: &[&str] = &[
+        "CONSTRAINT ck_runtime_effect_replay_status CHECK (",
+        "CONSTRAINT ck_queued_runs_status CHECK (",
+    ];
     let sources = [
         (
             "process_registry.rs",
@@ -179,7 +183,11 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
                     continue;
                 }
                 let prefix = &source[..offset];
-                if delimiter == "status IN " && prefix.ends_with(FOREIGN_VOCABULARY_SITE) {
+                if delimiter == "status IN "
+                    && FOREIGN_VOCABULARY_SITES
+                        .iter()
+                        .any(|site| prefix.ends_with(site))
+                {
                     foreign_sites += 1;
                     continue;
                 }
@@ -217,8 +225,9 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
          generated fragment, not here"
     );
     assert_eq!(
-        foreign_sites, 1,
-        "expected exactly 1 `ck_runtime_effect_replay_status` vocabulary literal, \
+        foreign_sites,
+        FOREIGN_VOCABULARY_SITES.len(),
+        "expected exactly the effect replay and queued-run vocabulary literals, \
          which the lash-sim congruence registry owns"
     );
     assert_eq!(

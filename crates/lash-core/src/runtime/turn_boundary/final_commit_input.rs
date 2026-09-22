@@ -18,6 +18,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) outcome: &'a TurnOutcome,
     pub(super) claim_settlement: TurnClaimSettlement,
     pub(super) current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
+    pub(super) queued_run: Option<Box<crate::store::QueuedRunCommit>>,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     pub(super) interrupted_turn_input_turn_id: Option<TurnId>,
     pub(super) interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,

@@ -23,6 +23,14 @@ pub(crate) struct PendingTurnInputRow {
 }
 
 impl PendingTurnInputRow {
+    pub(crate) fn claim_identity(&self) -> Option<(&str, &str, &LeaseOwnerIdentity)> {
+        Some((
+            self.claim_id.as_deref()?,
+            self.claim_token.as_deref()?,
+            self.claim_owner.as_ref()?,
+        ))
+    }
+
     /// The claim columns the shared claimability verdict consults.
     ///
     /// Exposed as one value rather than two fields so a call site cannot pass

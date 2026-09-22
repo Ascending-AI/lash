@@ -148,6 +148,17 @@ macro_rules! runtime_persistence_tests {
             stores [
             (commit_increments_head_and_round_trips_agent_frames, "root"),
             (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
+            (queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_claims, "queued-run-provenance"),
+            (queued_run_continuation_commits_outbox_and_retains_receipts, "queued-run-continuation"),
+            (queued_run_exact_selection_never_commits_a_partial_claim, "queued-run-exact"),
+            (queued_run_terminal_disposition_preserves_unassigned_work, "queued-run-disposition"),
+            (queued_run_checkpoint_assignment_survives_lane_rotation, "queued-run-checkpoint-assignment"),
+            (queued_run_frozen_batches_survive_takeover_and_changed_limits, "queued-run-batches"),
+            (queued_run_selected_excludes_pending_input, "queued-run-selected-composition"),
+            (queued_run_automatic_prefers_pending_input, "queued-run-automatic-composition"),
+            (queued_run_identity_survives_lane_rotation, "queued-run-identity"),
+            (queued_run_commit_receipt_precedes_revisions_but_not_lane_fence, "queued-run-receipt"),
+            (queued_run_selection_excludes_later_input_after_takeover, "queued-run-selection"),
             (commit_rejects_a_different_session_id, "alpha"),
             (commit_rejects_carried_nondefault_node_budget, "root"),
             (commit_rejects_carried_nondefault_byte_budget, "root"),
@@ -1554,6 +1565,8 @@ macro_rules! session_store_factory_tests {
             (session_store_factory, "session-store-factory"),
         ]);
         $crate::session_store_factory_tests!(@turn_cancel $fixture; [
+            (session_store_factory_discovers_empty_pending_queued_run, "queued-run-empty-discovery"),
+            (session_store_factory_retains_assigned_input_tombstone, "queued-run-assigned-retention"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
             (turn_cancel_closure_settlement_is_fenced_and_non_overwritable, "turn-cancel-closure-settlement"),
             (turn_cancel_scope_retirement_serializes_with_authorization, "turn-cancel-scope-retirement"),

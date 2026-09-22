@@ -919,7 +919,7 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("queued-busy-turn")),
+            named_queued_scope(&SessionId::from("root"), &TurnId::from("queued-busy-turn")),
         ))
         .await
         .expect("busy queued drain should not error")
@@ -950,7 +950,7 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("queued-after-busy-turn"),
             ),
@@ -1011,7 +1011,7 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
         super::effect::controller_effect_host(controller.clone());
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::AdmittedScope::turn("root", "queued-failover-wake"),
+        lash_core::AdmittedScope::queue_drain("root", "queued-failover-wake"),
     )
     .expect("durable queued-turn scope");
     let mut drain = lash_core::task::spawn(async move {
@@ -1087,7 +1087,7 @@ pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_ho
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::AdmittedScope::turn("root", "queued-live-holder"),
+        lash_core::AdmittedScope::queue_drain("root", "queued-live-holder"),
     )
     .expect("durable queued-turn scope");
     let mut drain = lash_core::task::spawn(async move {
@@ -1192,7 +1192,7 @@ pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pen
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::AdmittedScope::turn("root", "queued-cancelled-wait"),
+        lash_core::AdmittedScope::queue_drain("root", "queued-cancelled-wait"),
     )
     .expect("durable queued cancellation scope");
     let cancel = CancellationToken::new();
@@ -1285,7 +1285,7 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::AdmittedScope::turn("root", "queued-frozen-holder"),
+        lash_core::AdmittedScope::queue_drain("root", "queued-frozen-holder"),
     )
     .expect("durable queued-turn scope");
     let error = runtime
@@ -1359,7 +1359,7 @@ pub(super) async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_
     );
     let scope = lash_core::ScopedEffectController::shared(
         controller,
-        lash_core::AdmittedScope::turn("root", "queued-replay-owner"),
+        lash_core::AdmittedScope::queue_drain("root", "queued-replay-owner"),
     )
     .expect("controller-owned replay queued-turn scope");
     let busy_result = runtime
@@ -1425,7 +1425,7 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("command-before-lease-ttl"),
             ),
@@ -1453,7 +1453,7 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
     let after_ttl = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("command-after-lease-ttl"),
             ),
@@ -1515,7 +1515,7 @@ pub(super) async fn session_command_claim_lease_expiry_surfaces_session_executio
 }
 
 #[tokio::test]
-pub(super) async fn idle_queued_work_claim_lease_expiry_surfaces_session_execution_lease_lost() {
+pub(super) async fn idle_queued_work_claim_lease_expiry_retains_pending_admission() {
     let clock = Arc::new(StepExpiryClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let store = Arc::new(RecordingStore::with_clock(store_clock));
@@ -1533,17 +1533,22 @@ pub(super) async fn idle_queued_work_claim_lease_expiry_surfaces_session_executi
     let err = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("idle-claim-lease-expiry-turn"),
             ),
         ))
         .await
-        .expect_err("expired idle queued-work claim lease must fail as lease lost");
+        .expect_err("expired idle queued-work claim leaves durable recovery pending");
 
-    assert_eq!(
-        err.code,
-        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
+    assert_eq!(err.code, lash_core::RuntimeErrorCode::QueuedRunPending);
+    assert!(
+        store
+            .pending_queued_run(&SessionId::from("root"))
+            .await
+            .unwrap()
+            .is_some(),
+        "the replacement worker must resume the admitted run"
     );
 }
 
@@ -2293,7 +2298,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
             CancellationToken::new(),
             lash_core::ScopedEffectController::shared(
                 Arc::clone(&shared),
-                lash_core::AdmittedScope::turn("root", "claim-window-late-input-drain"),
+                lash_core::AdmittedScope::queue_drain("root", "claim-window-late-input-drain"),
             )
             .expect("scope the next turn"),
         )),

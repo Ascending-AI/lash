@@ -754,6 +754,29 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
             Ok((row.clone(), pending_turn_input_from_row(row)?))
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
+    claim_turn_input_rows_postgres_tx(
+        tx,
+        now,
+        session_id,
+        session_execution_lease,
+        owner,
+        mode,
+        selected,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn claim_turn_input_rows_postgres_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    now: u64,
+    session_id: &SessionId,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
+    owner: &LeaseOwnerIdentity,
+    mode: lash_core::TurnInputClaimMode,
+    selected: Vec<(PendingTurnInputRow, lash_core::PendingTurnInput)>,
+) -> Result<ClaimTransactionOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    let generation = session_execution_lease.fencing_token;
     let Some((head, _)) = selected.first() else {
         return Ok(ClaimTransactionOutcome::Commit(None));
     };
@@ -858,11 +881,21 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
         session_execution_lease,
         owner,
         max_inputs,
-        mode,
+        mode.clone(),
     )
     .await?
     {
         ClaimTransactionOutcome::Commit(value) => {
+            if let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
+                super::queued_run_assignment::assign_checkpoint_members_tx(
+                    &mut tx,
+                    session_id,
+                    turn_id,
+                    value.as_ref(),
+                    None,
+                )
+                .await?;
+            }
             tx.commit().await.map_err(store_sqlx_error)?;
             Ok(value)
         }

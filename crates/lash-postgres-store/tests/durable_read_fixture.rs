@@ -234,7 +234,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 113);
+    assert_eq!(PostgresStorage::schema_version(), 114);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -570,6 +570,24 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .await
         .expect("refresh refusal fixture session-meta contract from the current schema");
     }
+    sqlx::raw_sql(
+        "DROP TABLE IF EXISTS lash_queued_run_members; DROP TABLE IF EXISTS lash_queued_runs;",
+    )
+    .execute(&pool)
+    .await
+    .expect("replace author-time queued run catalog");
+    let schema = include_str!("../schema.sql");
+    let queued_start = schema
+        .find("CREATE TABLE IF NOT EXISTS lash_queued_runs (")
+        .expect("queued run schema");
+    let queued_end = schema[queued_start..]
+        .find("CREATE TABLE IF NOT EXISTS lash_turn_cancel_closure_authorizations (")
+        .expect("queued run schema end")
+        + queued_start;
+    sqlx::raw_sql(&schema[queued_start..queued_end])
+        .execute(&pool)
+        .await
+        .expect("refresh queued run catalog");
     sqlx::query(
         "UPDATE lash_schema_versions
             SET version = $1

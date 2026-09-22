@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 113.
+-- lash-postgres-store schema, component version 114.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -208,6 +208,27 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancellation_bindings (
     session_id TEXT PRIMARY KEY,
     binding_id TEXT NOT NULL CONSTRAINT ck_turn_cancellation_bindings_binding_id CHECK (length(binding_id) > 0),
     admitted_scope_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS lash_queued_runs (
+    session_id TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    status TEXT NOT NULL CONSTRAINT ck_queued_runs_status CHECK (status IN ('pending', 'settled')),
+    revision BIGINT NOT NULL CONSTRAINT ck_queued_runs_revision CHECK (revision >= 0),
+    admission_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, scope_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS lash_queued_runs_pending ON lash_queued_runs(session_id) WHERE status = 'pending';
+CREATE TABLE IF NOT EXISTS lash_queued_run_members (
+    session_id TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    collection_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_collection_kind CHECK (collection_kind IN ('initial', 'current', 'withheld', 'assigned')),
+    ordinal BIGINT NOT NULL CONSTRAINT ck_queued_run_members_ordinal CHECK (ordinal >= 0),
+    member_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_member_kind CHECK (member_kind IN ('input', 'batch')),
+    member_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, scope_id, collection_kind, ordinal),
+    UNIQUE (session_id, scope_id, collection_kind, member_kind, member_id),
+    FOREIGN KEY (session_id, scope_id) REFERENCES lash_queued_runs(session_id, scope_id)
 );
 
 CREATE TABLE IF NOT EXISTS lash_turn_cancel_closure_authorizations (
@@ -809,7 +830,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 113)
+VALUES ('lash-postgres-store', 114)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

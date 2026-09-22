@@ -322,17 +322,21 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     .await;
     let drain_id = format!("{prefix}-successor-drain");
     let drain_scope = effect_host
-        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
+        .scoped(admit(crate::ExecutionScope::queue_drain(
+            SESSION_ID, &drain_id,
+        )))
         .expect("scope the successor drain");
-    let drain = successor
-        .stream_next_queued_work(crate::TurnOptions::new(
-            tokio_util::sync::CancellationToken::new(),
-            drain_scope,
-        ))
-        .await
-        .expect("the successor drain must run");
+    let drain = Box::pin(successor.stream_next_queued_work(crate::TurnOptions::new(
+        tokio_util::sync::CancellationToken::new(),
+        drain_scope,
+    )))
+    .await
+    .expect("the successor drain must run");
     let recovered = match drain {
         crate::QueuedTurnDrain::Ran(turn) => turn,
+        crate::QueuedTurnDrain::Replayed(_) => {
+            panic!("first successor drain cannot replay a queued receipt")
+        }
         crate::QueuedTurnDrain::Empty(reason) => panic!(
             "an orphaned direct-turn acceptance must be claimable by any worker; drain was empty: \
              {reason:?}"

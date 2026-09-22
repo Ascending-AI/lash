@@ -908,6 +908,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
 
     let error = session
         .queued_turn()
+        .drain_id("explicit-refused-selection")
         .batch_ids([a1.batch_id.clone(), a2.batch_id.clone()])
         .run()
         .await
@@ -918,9 +919,17 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
                 SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
                     unclaimed_batch_ids,
                 },
-        } => assert_eq!(unclaimed_batch_ids, vec![a2.batch_id]),
+        } => assert_eq!(unclaimed_batch_ids, vec![a2.batch_id.clone()]),
         other => panic!("expected typed selected-drain refusal, got {other:?}"),
     }
+    let retry = session
+        .queued_turn()
+        .drain_id("explicit-refused-selection")
+        .batch_ids([a1.batch_id.clone(), a2.batch_id.clone()])
+        .run()
+        .await
+        .expect_err("a failed explicit receipt cannot label unexecuted batches satisfied");
+    assert!(matches!(retry, EmbedError::Runtime(_)));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         session
@@ -1160,8 +1169,7 @@ pub(super) async fn selected_queued_turn_reports_claimed_now_and_already_satisfi
 }
 
 #[tokio::test]
-pub(super) async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_busy_lane()
--> Result<()> {
+pub(super) async fn selected_queued_turn_deduplicates_absent_ids_and_requires_lane() -> Result<()> {
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let observed_provider_calls = Arc::clone(&provider_calls);
     let provider = crate::testing::TestProvider::builder()
@@ -1220,9 +1228,14 @@ pub(super) async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_bu
         .queued_turn()
         .batch_ids(["absent-batch", "absent-batch"])
         .run()
-        .await?;
-    assert!(lane_busy.turn.is_none());
-    assert_eq!(lane_busy.satisfied, expected);
+        .await
+        .expect_err("even empty admission requires current lane authority");
+    assert!(matches!(
+        lane_busy,
+        EmbedError::SelectedQueuedWorkDrainRefused {
+            cause: SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
+        }
+    ));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     store
         .release_session_execution_lease(&held_lease.completion())
@@ -2004,7 +2017,7 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
     let events = crate::turn::RunActivityCollector::default();
     let retry = session
         .queued_turn()
-        .batch_ids([receipt.batch_id])
+        .batch_ids([receipt.batch_id.as_str(), "absent-batch"])
         .drain_id("selected-handler-drain")
         .stream_to_with_effects(&events, &recorder)
         .await?;

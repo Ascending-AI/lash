@@ -90,6 +90,8 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("process_tombstones", "lash_process_tombstones"),
     pair("process_wake_deliveries", "lash_process_wake_deliveries"),
     pair("processes", "lash_processes"),
+    pair("queued_runs", "lash_queued_runs"),
+    pair("queued_run_members", "lash_queued_run_members"),
     pair("queued_work_batches", "lash_queued_work_batches"),
     pair("queued_work_items", "lash_queued_work_items"),
     pair("runtime_effect_group", "lash_runtime_effect_group"),

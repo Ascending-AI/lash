@@ -46,6 +46,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database = PathBuf::from(args.next().ok_or("missing SQLite database path")?);
     let action = args.next().ok_or("missing action or identity")?;
     let nonce = args.next().ok_or("missing vector nonce")?;
+    if action.starts_with("queued_") {
+        let marker =
+            std::path::PathBuf::from(args.next().ok_or("missing queued-run witness path")?);
+        if args.next().is_some() {
+            return Err("unexpected helper arguments".into());
+        }
+        let clock = Arc::new(lash_core::testing::TestClock::new(
+            if action == "queued_recover" {
+                1_000_000
+            } else {
+                1_000
+            },
+        ));
+        let store = Arc::new(lash_sqlite_store::Store::open_with_clock(&database, clock).await?);
+        Box::pin(lash_conformance::queued_run_cold_process_driver(
+            store, &nonce, &action, &marker,
+        ))
+        .await;
+        return Ok(());
+    }
     if matches!(
         action.as_str(),
         "turn_provider_mid_stream"

@@ -290,6 +290,9 @@ impl SessionCommitStore for Store {
                     {
                         ensure_session_execution_lease_conn(tx, &commit.session_id, fence, now)?;
                     }
+if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none() {
+                        return Err(StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() });
+                    }
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
                     planner.validate_session_binding(
@@ -520,6 +523,21 @@ impl SessionCommitStore for Store {
                             None => lash_core::store::PublishedLeafFacts::Retired { node_id },
                         },
                     };
+                    if let Some(pending) = load_run_conn(tx, &commit.session_id, None)? {
+                        let own_initial_command = pending.members.is_none()
+                            && commit.session_execution_lease_fence.is_some()
+                            && commit.turn_commit.operation.key == "session-command";
+                        if commit.queued_run.as_ref().is_none_or(|progress| progress.scope != pending.scope) && !own_initial_command {
+                            return Err(StoreError::QueuedRunConflict { session_id: commit.session_id.clone() });
+                        }
+                    }
+                                        let queued_admission = if let Some(progress) = &commit.queued_run {
+                        let admission = load_run_conn(tx, &commit.session_id, Some(&progress.scope))?.ok_or_else(|| StoreError::QueuedRunConflict { session_id: commit.session_id.clone() })?;
+                        admission.advance(progress, &[])?;
+                        let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
+                        validate_run_members_conn(tx, fence, progress)?;
+                        Some(admission)
+                    } else { None };
                     let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
                         actual_head_revision: actual_revision,
                         published_leaf,
@@ -942,6 +960,13 @@ impl SessionCommitStore for Store {
                             now,
                             enqueue_nonce,
                         )?);
+                    }
+                    if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
+                        if matches!(progress.progress, lash_core::store::QueuedRunProgress::Settle { .. }) {
+                    let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
+                    settle_run_members_conn(tx, fence, &progress.scope)?;
+                }
+                write_run_conn(tx, &admission.advance(progress, &enqueued_queue_batches)?, false)?;
                     }
                     let mut result = plan.result(
                         stored_checkpoint.checkpoint_ref,

@@ -26,7 +26,12 @@ mod lease_timings;
 mod load;
 mod maintenance;
 mod preflight;
+mod queued_run;
 pub mod queued_work;
+pub use queued_run::{
+    BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunPosition,
+    QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
+};
 mod realization;
 mod retention;
 pub mod runtime_commit;
@@ -338,7 +343,7 @@ impl SessionHeadMeta {
     }
 }
 
-fn persisted_session_config_from_state(
+pub fn persisted_session_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
     let mut config = crate::PersistedSessionConfig::from(&state.policy);
@@ -584,6 +589,7 @@ impl RuntimeCommit {
             turn_cancel_closure_settlement,
             adopted_intent_rows,
             committed_attachment_ids,
+            queued_run: _,
         } = self;
         debug_assert!(
             completed_queue_claims.is_empty()
@@ -752,6 +758,7 @@ impl RuntimeCommit {
             usage_deltas: usage_deltas.to_vec(),
             failure_evidence: Vec::new(),
             turn_commit: RuntimeTurnCommitStamp::new(operation),
+            queued_run: None,
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
@@ -1606,6 +1613,39 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
 /// [`SessionCommitStore::commit_runtime_state`].
 #[async_trait::async_trait]
 pub trait QueuedWorkStore: Send + Sync {
+    /// Acquire or resume the session's sole unfinished queued run under the
+    /// current lane fence. Retry preserves identity and physical position.
+    async fn begin_or_resume_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        request: BeginQueuedRun,
+    ) -> Result<QueuedRunAdmission, StoreError>;
+
+    /// Select and claim the initial work, or reclaim exactly the recorded
+    /// membership under the successor lane. Selection and claims are atomic.
+    async fn select_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        scope: &crate::ExecutionScope,
+        owner: &LeaseOwnerIdentity,
+        max_inputs: usize,
+        configuration: &crate::PersistedSessionConfig,
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<SelectedQueuedRun, StoreError>;
+
+    /// Pending-run discovery remains available after original members settle.
+    async fn pending_queued_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<QueuedRunAdmission>, StoreError>;
+
+    /// Fenced disposition for an empty run or a failure before physical commit.
+    async fn settle_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        settlement: QueuedRunCommit,
+    ) -> Result<QueuedRunAdmission, StoreError>;
+
     /// Persist a queued-work batch for later claiming.
     async fn enqueue_queued_work(
         &self,

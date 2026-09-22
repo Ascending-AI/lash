@@ -139,7 +139,12 @@ impl LashRuntime {
                 )
                 .await;
                 // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                let turn_index = self.state.turn_index + 1;
+                let turn_index = self
+                    .queued_run
+                    .as_ref()
+                    .map_or(self.state.turn_index + 1, |run| {
+                        run.position.turn_index as usize
+                    });
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
                 let turn_control_binding =
                     turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller)
@@ -196,7 +201,12 @@ impl LashRuntime {
             }
         };
         // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-        let turn_index = self.state.turn_index + 1;
+        let turn_index = self
+            .queued_run
+            .as_ref()
+            .map_or(self.state.turn_index + 1, |run| {
+                run.position.turn_index as usize
+            });
         let trace_turn_id = input
             .trace_turn_id
             .clone()
@@ -227,10 +237,11 @@ impl LashRuntime {
         let base_messages = base_read_model.messages;
         let base_render_cache = base_read_model.prompt_render_cache;
         let mut turn_delta = Vec::new();
-        let initial_turn_causes = queued_turn_work
-            .as_ref()
-            .map(|work| work.turn_causes.clone())
-            .unwrap_or_default();
+        let initial_turn_causes: Vec<_> = queued_claims
+            .iter()
+            .filter(|_| materialize_initial_claims)
+            .flat_map(|claim| claim.materialize_queued_turn_work().turn_causes)
+            .collect();
         turn_delta.extend(
             initial_turn_causes
                 .iter()

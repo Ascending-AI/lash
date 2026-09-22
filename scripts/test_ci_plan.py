@@ -672,6 +672,10 @@ class PostgresMatrixTests(unittest.TestCase):
                 "public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres",
                 "Test runtime Postgres agent scenarios",
             ),
+            (
+                "automatic_queued_retry_reuses_recorded_completion_before_new_arrivals",
+                "Test runtime Postgres agent scenarios",
+            ),
         ):
             with self.subTest(oracle=oracle):
                 bazel, cargo = suite_body(step_name)

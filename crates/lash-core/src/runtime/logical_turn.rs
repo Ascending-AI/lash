@@ -298,7 +298,9 @@ impl LashRuntime {
                 ),
             ));
         }
-        let root_trace_turn_id = if supplied_trace_turn_id.is_empty() {
+        let root_trace_turn_id = if let Some(run) = &self.queued_run {
+            TurnId::from(run.scope.id())
+        } else if supplied_trace_turn_id.is_empty() {
             TurnId::from(scoped_effect_controller.scope_id())
         } else {
             supplied_trace_turn_id
@@ -312,7 +314,11 @@ impl LashRuntime {
         let mut follow_on_turns = 0usize;
 
         loop {
-            let turn_trace_turn_id = agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
+            let turn_trace_turn_id = self
+                .queued_run
+                .as_ref()
+                .map(|run| run.position.turn_id.clone())
+                .unwrap_or_else(|| agent_frame_follow_turn_id(&root_trace_turn_id, turns.len()));
             // A frame switch creates a new physical turn identity, but it does
             // not create new effect authority. Every frame in this admitted
             // run therefore keeps the controller's exact execution scope.
@@ -331,6 +337,58 @@ impl LashRuntime {
             )
             .await;
             announce_queued_work = true;
+            let at_queued_frame_limit = self.queued_run.as_ref().is_some_and(|run| {
+                run.position.physical_ordinal >= MAX_AGENT_FRAME_SWITCHES as u64
+                    && run.last_commit.as_ref().is_some_and(|commit| {
+                        matches!(
+                            commit.progress,
+                            crate::store::QueuedRunProgress::Advance {
+                                include_outbox: true,
+                                ..
+                            }
+                        )
+                    })
+            });
+            if at_queued_frame_limit {
+                let terminal = Box::pin(self.finish_logical_turn_error(LogicalTurnErrorContext {
+                    message: format!("logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"),
+                    trace_turn_id: turn_trace_turn_id,
+                    sinks: TurnSinks { events, turn_events },
+                    scoped_effect_controller: turn_effect_controller,
+                    cancel: cancel.clone(),
+                    claims,
+                    session_execution_lease: session_execution_lease.as_ref(),
+                })).await;
+                let mut terminal = match terminal {
+                    Ok(terminal) => terminal,
+                    Err(error) => {
+                        self.invalidate_resident_session_state();
+                        return Err(error);
+                    }
+                };
+                frame_stopwatch.stamp(&mut terminal.turn, self.host.core.clock.as_ref());
+                turns.push(terminal.turn);
+                if let Some(store) = self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.history_store())
+                    && store
+                        .pending_queued_run(&self.state.session_id)
+                        .await
+                        .map_err(super::runtime_error_from_store_commit)?
+                        .is_some()
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::QueuedRunPending,
+                        "frame-switch limit committed; withheld queued work awaits the next drain",
+                    ));
+                }
+                self.queued_run = None;
+                return Ok(AgentFrameRun {
+                    turns,
+                    acceptance: None,
+                });
+            }
             let execution_result = match start {
                 LogicalTurnStart::Input(mut input) => {
                     input.trace_turn_id = Some(turn_trace_turn_id.clone());
@@ -388,6 +446,10 @@ impl LashRuntime {
             };
             let execution = match execution_result {
                 Ok(execution) => execution,
+                Err(err) if self.queued_run.is_some() => {
+                    self.invalidate_resident_session_state();
+                    return Err(err);
+                }
                 // FIG-1573: this frame ended without reaching a commit, so the
                 // commit-time re-defer never ran. Inputs routed into it while it
                 // was live are pinned to a turn id no later turn will ever carry
@@ -455,6 +517,86 @@ impl LashRuntime {
                 _ => None,
             };
             turns.push(turn);
+            if self.queued_run.is_some() {
+                let store = self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.history_store())
+                    .ok_or_else(|| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::QueuedRunPending,
+                            "queued continuation requires persistence",
+                        )
+                    })?;
+                let pending = store
+                    .pending_queued_run(&self.state.session_id)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+                let Some(pending) = pending else {
+                    self.queued_run = None;
+                    return Ok(AgentFrameRun {
+                        turns,
+                        acceptance: None,
+                    });
+                };
+                self.queued_run = Some(Box::new(pending.clone()));
+                let lease = session_execution_lease
+                    .as_ref()
+                    .filter(|lease| !lease.is_lost())
+                    .ok_or_else(|| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::QueuedRunPending,
+                            "queued continuation awaits a live execution lane",
+                        )
+                    })?;
+                let frame_limit_due = pending.position.physical_ordinal
+                    >= MAX_AGENT_FRAME_SWITCHES as u64
+                    && matches!(
+                        pending.last_commit.as_ref().map(|commit| &commit.progress),
+                        Some(crate::store::QueuedRunProgress::Advance {
+                            include_outbox: true,
+                            ..
+                        })
+                    );
+                if post_commit_delivery_failed
+                    || (turns.len() >= MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS && !frame_limit_due)
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::QueuedRunPending,
+                        "committed queued continuation awaits the next drain",
+                    ));
+                }
+                let selection = store
+                    .select_queued_run(
+                        &lease.fence(),
+                        &pending.scope,
+                        &self.runtime_lease_owner,
+                        super::turn_loop::MAX_CLAIMED_TURN_INPUTS,
+                        &crate::store::persisted_session_config_from_state(&self.state),
+                        self.host
+                            .core
+                            .durability
+                            .queued_work_batching
+                            .claim_policy(self.max_context_tokens()),
+                    )
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+                announce_queued_work = matches!(
+                    pending.last_commit.as_ref().map(|commit| &commit.progress),
+                    Some(crate::store::QueuedRunProgress::Advance {
+                        include_outbox: true,
+                        ..
+                    })
+                );
+                let (mut input, next_claims) =
+                    self.queued_run_input(selection, announce_queued_work)?;
+                input.protocol_turn_options = follow_protocol_turn_options.clone();
+                input.turn_context = follow_turn_context.clone();
+                claims = next_claims;
+                start = LogicalTurnStart::Input(input);
+                carried_withheld = None;
+                continue;
+            }
             if post_commit_delivery_failed {
                 if let Some(withheld) = carried_withheld.take() {
                     self.abandon_withheld_terminal_work(withheld).await;
@@ -687,9 +829,5 @@ pub(super) fn agent_frame_follow_turn_id(
     root_turn_id: &TurnId,
     completed_turn_count: usize,
 ) -> TurnId {
-    if completed_turn_count == 0 {
-        root_turn_id.clone()
-    } else {
-        TurnId::from(format!("{root_turn_id}:agent-frame:{completed_turn_count}"))
-    }
+    crate::store::QueuedRunPosition::derive_turn_id(root_turn_id, completed_turn_count as u64)
 }

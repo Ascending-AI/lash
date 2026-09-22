@@ -81,26 +81,38 @@ fn normalise(line: &str) -> String {
 /// against the normalised line. The labels are themselves lowercase, so a
 /// case-folded comparison loses nothing.
 fn violations_in(line: &str, column: &str, labels: &[String]) -> Vec<String> {
-    let normalised = normalise(line);
+    let lower = line.to_lowercase();
     let column = normalise(column);
     let mut found = Vec::new();
-    for (operator, spelling) in [
-        ("in('", " IN ('"),
-        ("notin('", " NOT IN ('"),
-        ("='", " = '"),
-        ("<>'", " <> '"),
-    ] {
-        let needle = format!("{column}{operator}");
-        let mut search_from = 0;
-        while let Some(offset) = normalised[search_from..].find(&needle) {
-            let start = search_from + offset + needle.len();
-            if let Some(label) = labels
-                .iter()
-                .find(|label| normalised[start..].starts_with(label.as_str()))
+    let identifier_character =
+        |character: char| character.is_ascii_alphanumeric() || character == '_';
+    for (offset, _) in lower.match_indices(&column) {
+        let end = offset + column.len();
+        if lower[..offset]
+            .chars()
+            .next_back()
+            .is_some_and(identifier_character)
+            || lower[end..]
+                .chars()
+                .next()
+                .is_some_and(identifier_character)
+        {
+            continue;
+        }
+        let predicate = normalise(&lower[end..]);
+        for (operator, spelling) in [
+            ("in('", " IN ('"),
+            ("notin('", " NOT IN ('"),
+            ("='", " = '"),
+            ("<>'", " <> '"),
+        ] {
+            if let Some(value) = predicate.strip_prefix(operator)
+                && let Some(label) = labels
+                    .iter()
+                    .find(|label| value.starts_with(&format!("{label}'")))
             {
                 found.push(format!("{column}{spelling}{label}'"));
             }
-            search_from = start;
         }
     }
     found
@@ -232,6 +244,8 @@ fn the_gate_rejects_a_reintroduced_literal() {
 
     // Generated call sites and unrelated vocabularies stay clean.
     for benign in [
+        "               AND commit_state = 'pending'",
+        "               AND process_status = 'running'",
         "        live = live_process_status(\"status\"),",
         "           AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))",
         "               AND ($1::TEXT[] IS NULL OR status = ANY($1))",

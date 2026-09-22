@@ -35,6 +35,7 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
 ) -> Result<(), StoreError> {
     let carried: &[(&str, bool)] = &[
         ("failure_evidence", !commit.failure_evidence.is_empty()),
+        ("queued_run", commit.queued_run.is_some()),
         (
             "completed_queue_claims",
             !commit.completed_queue_claims.is_empty(),
@@ -113,6 +114,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         interrupted_turn_cancel_intent: _, // transient CAS predicate
         turn_cancel_closure_settlement: _, // transient fenced obligation
         adopted_intent_rows: _,         // refused non-zero by validation
+        queued_run: _,                  // refused by semantic-boundary validation
         committed_attachment_ids: _,    // refused non-empty by validation
     } = commit;
     let operation_key = turn_commit.operation.storage_key()?;

@@ -490,6 +490,8 @@ def target_support(
             "//crates/lash-postgres-store:package_files",
             "//crates/lash-sqlite-store:package_files",
         ])
+        if target["name"] == "process_lifecycle_vocabulary":
+            extra_compile_data.append("//crates/lash-core:package_files")
         if target["name"] == "cross_backend_store_differential":
             # Its completeness gates read the real store trait definitions
             # with `include_str!`, so the lash-core-store sources are

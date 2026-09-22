@@ -604,6 +604,8 @@ tables = [
     "pending_turn_inputs",
     "queued_work_batches",
     "queued_work_items",
+    "queued_runs",
+    "queued_run_members",
     "session_execution_leases",
     "tool_intent_submissions",
     "turn_cancel_affected_inputs",
@@ -618,6 +620,7 @@ statement_prefixes = [
     "pending_turn_input",
     "queued_work_batch",
     "queued_work_item",
+    "queued_run",
     "session_execution_lease",
     "tool_intent_submission",
     "turn_cancel_affected_input",
@@ -637,6 +640,8 @@ shared = [
     "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_batches.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_items.rs",
+    "crates/lash-store-sql/src/turn_ingress/queued_runs.rs",
+    "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs",
     "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs",
     "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs",
     "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs",
@@ -690,6 +695,8 @@ usage_deltas = "crates/lash-store-sql/src/session/usage_deltas.rs"
 release_stamp = "crates/lash-store-sql/src/session/release_stamp.rs"
 checkpoint_blob_refs = "crates/lash-store-sql/src/session/checkpoint_blob_refs.rs"
 [families.turn_ingress.table_modules]
+queued_runs = "crates/lash-store-sql/src/turn_ingress/queued_runs.rs"
+queued_run_members = "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs"
 pending_turn_inputs = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
 queued_work_batches = "crates/lash-store-sql/src/turn_ingress/queued_batches.rs"
 queued_work_items = "crates/lash-store-sql/src/turn_ingress/queued_items.rs"

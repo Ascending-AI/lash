@@ -118,6 +118,13 @@ mod attachments_and_queue;
 mod checkpoint_claims;
 mod leases;
 mod queue_redrive;
+mod queued_run_assignments;
+mod queued_run_cold;
+mod queued_run_composition;
+mod queued_runs;
+pub use queued_run_cold::{
+    assert_queued_run_cold_process_recovery, queued_run_cold_process_driver,
+};
 mod reopen_and_commit;
 mod suite_and_receipts;
 mod turn_inputs_and_reopen;
@@ -129,6 +136,9 @@ pub mod runtime_persistence_macro_support {
     pub use super::checkpoint_claims::*;
     pub use super::leases::*;
     pub use super::queue_redrive::*;
+    pub use super::queued_run_assignments::*;
+    pub use super::queued_run_composition::*;
+    pub use super::queued_runs::*;
     pub use super::reopen_and_commit::*;
     pub use super::suite_and_receipts::*;
     pub use super::turn_inputs_and_reopen::*;

@@ -136,6 +136,8 @@ pub const TABLES: &[&str] = &[
     turn_ingress::cancel_requests::TABLE,
     turn_ingress::cancellation_bindings::TABLE,
     turn_ingress::closure_authorizations::TABLE,
+    turn_ingress::queued_runs::TABLE,
+    turn_ingress::queued_run_members::TABLE,
     turn_ingress::closure_participants::TABLE,
     turn_ingress::pending_inputs::TABLE,
     turn_ingress::queued_batches::TABLE,
@@ -203,6 +205,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
     statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::TurnIngressStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::queued_runs::QueuedRunStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::cancel_requests::CancelRequestStatements::NEUTRAL);
     statements.extend_from_slice(
         turn_ingress::cancellation_bindings::CancellationBindingStatements::NEUTRAL,

@@ -74,7 +74,6 @@ impl NativeQueuedWorkRunHandle {
         let Some(session_id) = request.session_id else {
             return Ok(facade_support::QueuedWorkRunProgress::Unknown);
         };
-        let reason = request.reason;
         let mut policy = self.config.policy.clone();
         policy.session_id = Some(session_id.clone());
         let store = self
@@ -155,24 +154,13 @@ impl NativeQueuedWorkRunHandle {
         );
         let mut claimed = false;
         loop {
-            let scope = handle
-                .observe()
-                .queue_drain_scope(format!("{reason}:{}", uuid::Uuid::new_v4()));
-            let scoped = effect_host
-                .scoped(lash_core::AdmittedScope::unpinned(scope).map_err(|error| {
-                    facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                        error.to_string(),
-                    ))
-                })?)
-                .map_err(|error| {
-                    facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                        error.to_string(),
-                    ))
-                })?;
             let drain = crate::turn::stream_next_queued_prepared_turn(
                 &handle,
                 crate::turn::TurnSinks::default(),
-                scoped,
+                lash_core::facade_support::QueuedEffectSource::Host {
+                    host: effect_host.as_ref(),
+                    identity: None,
+                },
                 CancellationToken::new(),
                 lash_core::TurnCancelOriginHint::default(),
             )

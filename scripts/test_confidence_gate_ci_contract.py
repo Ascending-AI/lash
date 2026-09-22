@@ -2469,6 +2469,9 @@ derive_mutation_jobs() {{
             with self.subTest(suite=suite):
                 label, test_filter, package, target, runner, flags = row.split("|")
                 bazel, cargo = store_suite_branches(suite)
+                invocation_count = len(test_filter.split(","))
+                self.assertEqual(invocation_count, len(bazel.splitlines()))
+                self.assertEqual(invocation_count, len(cargo.splitlines()))
                 self.assertIn(label, bazel)
                 self.assertIn(f"-p {package}", cargo)
                 if target:
@@ -2481,12 +2484,15 @@ derive_mutation_jobs() {{
                     }[runner],
                     cargo,
                 )
-                if test_filter:
+                for selected_filter in filter(None, test_filter.split(",")):
                     # The one selection reaches both dialects. A libtest filter
                     # that matches nothing exits 0, so a name present on one
                     # side only is a silently retired leg.
-                    self.assertIn(f"--test_arg={test_filter}", bazel)
-                    self.assertIn(test_filter, cargo)
+                    self.assertIn(f"--test_arg={selected_filter}", bazel)
+                    self.assertIn(
+                        selected_filter if runner == "cargo-test" else f"test({selected_filter})",
+                        cargo,
+                    )
                 for flag in filter(None, flags.split(",")):
                     bazel_spelling, cargo_spellings = flag_dialects[flag]
                     self.assertIn(bazel_spelling, bazel, flag)

@@ -1836,6 +1836,41 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::QueuedWorkStore for CommitRetryStore {
+    async fn select_queued_run(
+        &self,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
+        scope: &lash_core::ExecutionScope,
+        owner: &lash_core::LeaseOwnerIdentity,
+        max_inputs: usize,
+        configuration: &lash_core::PersistedSessionConfig,
+        policy: lash_core::QueuedWorkClaimPolicy,
+    ) -> std::result::Result<lash_core::store::SelectedQueuedRun, lash_core::StoreError> {
+        self.inner
+            .select_queued_run(fence, scope, owner, max_inputs, configuration, policy)
+            .await
+    }
+    async fn pending_queued_run(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        self.inner.pending_queued_run(session_id).await
+    }
+    async fn settle_queued_run(
+        &self,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
+        settlement: lash_core::store::QueuedRunCommit,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        self.inner.settle_queued_run(fence, settlement).await
+    }
+    async fn begin_or_resume_queued_run(
+        &self,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
+        request: lash_core::store::BeginQueuedRun,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        self.inner.begin_or_resume_queued_run(fence, request).await
+    }
+
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: lash_core::runtime::QueuedWorkBatchDraft,

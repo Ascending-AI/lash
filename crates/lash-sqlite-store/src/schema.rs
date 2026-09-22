@@ -286,6 +286,27 @@ CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (
     admitted_scope_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS queued_runs (
+    session_id TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    status TEXT NOT NULL CONSTRAINT ck_queued_runs_status CHECK (status IN ('pending', 'settled')),
+    revision INTEGER NOT NULL CONSTRAINT ck_queued_runs_revision CHECK (revision >= 0),
+    admission_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, scope_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS queued_runs_pending ON queued_runs(session_id) WHERE status = 'pending';
+CREATE TABLE IF NOT EXISTS queued_run_members (
+    session_id TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    collection_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_collection_kind CHECK (collection_kind IN ('initial', 'current', 'withheld', 'assigned')),
+    ordinal INTEGER NOT NULL CONSTRAINT ck_queued_run_members_ordinal CHECK (ordinal >= 0),
+    member_kind TEXT NOT NULL CONSTRAINT ck_queued_run_members_member_kind CHECK (member_kind IN ('input', 'batch')),
+    member_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, scope_id, collection_kind, ordinal),
+    UNIQUE (session_id, scope_id, collection_kind, member_kind, member_id),
+    FOREIGN KEY (session_id, scope_id) REFERENCES queued_runs(session_id, scope_id)
+);
+
 CREATE TABLE IF NOT EXISTS turn_cancel_closure_authorizations (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
@@ -731,7 +752,7 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// there is no envelope migration or legacy decode path.
 // Generation 72 cuts over to ordered plugin parts and the standard-compaction identity.
 // Pre-cutover durable-core catalogs are rejected and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 73;
+pub(crate) const SCHEMA_VERSION: i32 = 74;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

@@ -27,6 +27,8 @@ pub mod closure_participants;
 pub mod pending_inputs;
 pub mod queued_batches;
 pub mod queued_items;
+pub mod queued_run_members;
+pub mod queued_runs;
 pub mod retired_scopes;
 pub mod session_execution_leases;
 pub mod tool_intent_submissions;
@@ -36,13 +38,16 @@ crate::statements! {
     /// backends issue verbatim.
     pub struct TurnIngressStatements @ "turn_ingress" {
         /// Whether session `?1` has work a runner could pick up at `?2`:
-        /// an available queued batch, or an input already deferred to the
-        /// next turn.
+        /// an unfinished queued run, an available queued batch, or an input
+        /// already deferred to the next turn.
         ///
         /// One question, so one statement: asking it as two would let a
         /// session go from empty to non-empty between them and report a
         /// bound-worthy session as idle.
         has_claimable_work = "SELECT EXISTS(
+                SELECT 1 FROM queued_runs
+                WHERE session_id = ?1 AND status = 'pending'
+             ) OR EXISTS(
                 SELECT 1
                 FROM queued_work_batches qwb
                 WHERE qwb.session_id = ?1

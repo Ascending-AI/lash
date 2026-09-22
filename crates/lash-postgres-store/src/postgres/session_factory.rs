@@ -796,6 +796,7 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
+    let queued_runs = &turn_ingress.queued_runs;
     for statement in [
         turn_ingress.queued_items_postgres.delete_by_session.sql(),
         turn_ingress.queued_batches.delete_by_session.sql(),
@@ -807,6 +808,8 @@ pub(crate) async fn delete_session_tx(
             .floor
             .delete_by_session
             .sql(),
+        queued_runs.delete_members.sql(),
+        queued_runs.delete_runs.sql(),
         turn_ingress.pending_inputs.delete_by_session.sql(),
         turn_ingress.cancel_requests.delete_by_session.sql(),
         // Administration revokes the session's effect authority before store

@@ -61,7 +61,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The table component 101 lacks: the cancellation affected-input child table
 /// component 102 installed (FIG-3263).
-const POST_FLOOR_TABLES: [&str; 2] = [
+const POST_FLOOR_TABLES: [&str; 4] = [
+    "lash_queued_run_members",
+    "lash_queued_runs",
     "lash_turn_cancel_affected_inputs",
     "lash_runtime_effect_group_child",
 ];
@@ -97,8 +99,8 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// Component 112 changed encoded payloads without introducing relations.
 /// The retained 111-to-112 arm therefore has no divergent artifacts.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
-/// Component 113 removes observer-selection metadata. No migration targets
-/// this generation; a component-112 stamp requires recreation.
+/// Component 114 adds queued-run admission. No migration targets this
+/// generation; a component-113 stamp requires recreation.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even

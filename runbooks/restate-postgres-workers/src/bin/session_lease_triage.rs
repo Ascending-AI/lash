@@ -817,6 +817,7 @@ async fn commit_cas_livelock(
             )
         };
         let loser = RuntimeCommit {
+            queued_run: None,
             turn_cancel_closure_settlement: None,
             commit_budget: lash_core::store::CommitBudget::bounded(1024 * 1024, 512),
             session_id: state.session_id,
@@ -1048,6 +1049,9 @@ async fn direct_turn_recovery(
             (true, None, output.final_value() == Some(&json!("ok")))
         }
         lash::QueuedTurnDrain::Empty(reason) => (false, Some(format!("{reason:?}")), false),
+        lash::QueuedTurnDrain::Replayed(_) => {
+            anyhow::bail!("first recovery drain unexpectedly replayed a terminal receipt")
+        }
     };
 
     let applications = store

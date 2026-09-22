@@ -21,6 +21,7 @@ mod checkpoints;
 mod factory;
 pub use factory::InMemorySessionStoreFactory;
 mod maintenance;
+mod queued_run;
 mod queued_work;
 mod reachability;
 mod reads;
@@ -192,6 +193,7 @@ pub struct InMemorySessionStore {
     pub turn_cancel_closure_authorizations:
         Mutex<HashMap<TurnId, crate::TurnCancelClosureAuthorization>>,
     pub retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
+    pub queued_runs: Mutex<HashMap<crate::ExecutionScope, crate::store::QueuedRunAdmission>>,
     pub queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     pub queued_work_next_seq: Mutex<u64>,
     /// Receiver-side sender allocation floor. This is a redelivery fence, not
@@ -353,6 +355,7 @@ impl InMemorySessionStore {
             turn_cancellation_binding: Mutex::new(None),
             turn_cancel_closure_authorizations: Mutex::new(HashMap::new()),
             retired_turn_cancel_scopes,
+            queued_runs: Mutex::new(HashMap::new()),
             queued_work: Mutex::new(Vec::new()),
             queued_work_next_seq: Mutex::new(0),
             wake_redelivery_fences: Mutex::new(HashMap::new()),
@@ -723,14 +726,22 @@ impl InMemorySessionStore {
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         #[cfg(any(test, feature = "testing"))]
         self.run_claim_after_lease_validation_hook();
-        self.claim_pending_turn_inputs_after_lease_validation(
+        let checkpoint_turn_id = match &mode {
+            crate::TurnInputClaimMode::ActiveTurn { turn_id, .. } => Some(turn_id.clone()),
+            crate::TurnInputClaimMode::NextTurn => None,
+        };
+        let claim = self.claim_pending_turn_inputs_after_lease_validation(
             session_id,
             session_execution_lease,
             owner,
             max_inputs,
             mode,
             now,
-        )
+        )?;
+        if let Some(turn_id) = checkpoint_turn_id {
+            self.assign_checkpoint_members(session_id, &turn_id, claim.as_ref(), None);
+        }
+        Ok(claim)
     }
 
     fn claim_pending_turn_inputs_after_lease_validation(

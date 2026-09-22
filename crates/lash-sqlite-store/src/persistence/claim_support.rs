@@ -413,6 +413,28 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
         .take(max_inputs)
         .map(|row| Ok((row.clone(), pending_turn_input_from_row(row)?)))
         .collect::<Result<Vec<_>, StoreError>>()?;
+    claim_turn_input_rows_sqlite_conn(
+        tx,
+        now,
+        session_id,
+        session_execution_lease,
+        owner,
+        mode,
+        selected,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn claim_turn_input_rows_sqlite_conn(
+    tx: &Connection,
+    now: u64,
+    session_id: &SessionId,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
+    owner: &LeaseOwnerIdentity,
+    mode: lash_core::TurnInputClaimMode,
+    selected: Vec<(PendingTurnInputRow, lash_core::PendingTurnInput)>,
+) -> Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    let generation = session_execution_lease.fencing_token;
     let Some((head, _)) = selected.first() else {
         return Ok(TxOutcome::Commit(None));
     };
@@ -508,15 +530,27 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
     conn.write_flow(move |tx| {
         let outcome: Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> = (|| {
             ensure_session_execution_lease_conn(tx, &session_id, &session_execution_lease, now)?;
-            claim_pending_turn_inputs_sqlite_conn(
+            let outcome = claim_pending_turn_inputs_sqlite_conn(
                 tx,
                 now,
                 &session_id,
                 &session_execution_lease,
                 &owner,
                 max_inputs,
-                mode,
-            )
+                mode.clone(),
+            )?;
+            if let TxOutcome::Commit(input) = &outcome
+                && let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode
+            {
+                super::queued_run_assignment::assign_checkpoint_members_conn(
+                    tx,
+                    &session_id,
+                    turn_id,
+                    input.as_ref(),
+                    None,
+                )?;
+            }
+            Ok(outcome)
         })(
         );
         match outcome {

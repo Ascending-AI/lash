@@ -74,10 +74,30 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             *self.global_node_owners.lock_recover() = rebuilt_owners;
             *self.tombstoned_node_ids.lock_recover() = staged_tombstoned_node_ids;
         };
+        let protected_inputs = self
+            .queued_runs
+            .lock_recover()
+            .values()
+            .filter(|run| run.terminal.is_none())
+            .flat_map(|run| {
+                run.initial_members
+                    .iter()
+                    .flatten()
+                    .chain(run.members.iter().flatten())
+                    .chain(run.withheld_members.iter())
+                    .chain(run.assigned_members.iter())
+            })
+            .filter_map(|member| match member {
+                crate::store::QueuedRunMember::Input(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect::<std::collections::HashSet<_>>();
         let mut pending = self.pending_turn_inputs.lock_recover();
         let before = pending.len();
         pending.retain(|entry| {
-            !(entry.input.session_id == session_id && entry.input.state.is_terminal())
+            !(entry.input.session_id == session_id
+                && entry.input.state.is_terminal()
+                && !protected_inputs.contains(&entry.input.input_id))
         });
         // Cancellation rows include unresolved recovery intent. They remain
         // until session deletion, which is the only safe reclamation boundary

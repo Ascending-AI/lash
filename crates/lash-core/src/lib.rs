@@ -355,7 +355,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
     pub use crate::runtime::TurnIssueSeverity;
-    pub use crate::runtime::TurnOptions;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
     pub use crate::runtime::UnreportedUsageAttempt;
@@ -383,6 +382,7 @@ pub mod facade_support {
     pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::trigger_delivery_reconcile_scope;
     pub use crate::runtime::turn_control_binding_id_for_scope;
+    pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     pub use crate::runtime::{process_signal_await_key, process_signal_wait_key};
     pub use lash_core_execution::runtime::process::ProcessAdmissionDeferred;

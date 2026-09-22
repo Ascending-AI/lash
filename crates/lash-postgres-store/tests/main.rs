@@ -41,3 +41,6 @@ mod store_effect_group_drain_conformance;
 mod tool_child_invocation;
 #[path = "turn_cancel_receipt_consistency.rs"]
 mod turn_cancel_receipt_consistency;
+
+#[path = "queued_run_recovery.rs"]
+mod queued_run_recovery;

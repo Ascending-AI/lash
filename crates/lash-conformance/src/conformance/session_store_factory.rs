@@ -15,6 +15,11 @@ use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 mod admission;
+mod queued_run;
+pub use queued_run::{
+    session_store_factory_discovers_empty_pending_queued_run,
+    session_store_factory_retains_assigned_input_tombstone,
+};
 #[path = "session_store_factory_attachment_fence.rs"]
 mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]

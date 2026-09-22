@@ -345,6 +345,11 @@ impl InMemorySessionStoreFactory {
         let Some(store) = store else {
             return Ok(Some(false));
         };
+        if store.queued_runs.lock_recover().values().any(|run| {
+            run.scope.session_id() == Some(&request.session_id) && run.terminal.is_none()
+        }) {
+            return Ok(Some(true));
+        }
         // This is a conservative readiness peek, not a claim. A due row with a
         // same-generation claim may belong to a crashed/live lease holder; it
         // must keep the driver's bounded contention recheck armed until the

@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 113
+version 114
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -246,6 +246,24 @@ table lash_processes
   column wake_session_id text nullable
   unique (process_id, incarnation)
   primary-key (process_id)
+table lash_queued_run_members
+  column collection_kind text not-null
+  column member_id text not-null
+  column member_kind text not-null
+  column ordinal bigint not-null
+  column scope_id text not-null
+  column session_id text not-null
+  unique (session_id, scope_id, collection_kind, member_kind, member_id)
+  primary-key (session_id, scope_id, collection_kind, ordinal)
+  foreign-key (session_id, scope_id) references lash_queued_runs (session_id, scope_id) on delete no action
+table lash_queued_runs
+  column admission_json text not-null
+  column revision bigint not-null
+  column scope_id text not-null
+  column session_id text not-null
+  column status text not-null
+  unique (session_id) where status = 'pending'::text
+  primary-key (session_id, scope_id)
 table lash_queued_work_batches
   column authority_json text not-null
   column available_at_ms bigint not-null

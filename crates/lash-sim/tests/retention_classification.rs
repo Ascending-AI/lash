@@ -1,5 +1,5 @@
 //! The ratified 2026-09-08 retention census (FIG-2503), extended by FIG-677
-//! and FIG-2875: 46 SQLite / 47 PostgreSQL.
+//! and FIG-2875, with queued-run ownership added by FIG-3484.
 //! Like schema_congruence.rs, this ordinary integration test is discovered by
 //! the workspace nextest CI shards. Every new durable table needs a declaration.
 
@@ -134,6 +134,18 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         "session_execution_leases",
         LifecycleOwned {
             scope: "one fence per session; session deletion",
+        },
+    ),
+    (
+        "queued_runs",
+        LifecycleOwned {
+            scope: "session deletion; pending ownership and terminal receipts survive queue settlement",
+        },
+    ),
+    (
+        "queued_run_members",
+        LifecycleOwned {
+            scope: "owning queued run; ordered membership survives source-row settlement",
         },
     ),
     (
@@ -393,7 +405,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 51, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 53, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

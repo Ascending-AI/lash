@@ -275,6 +275,11 @@ impl SessionCommitStore for PostgresSessionStore {
         if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
             ensure_session_execution_lease_tx(&mut tx, &commit.session_id, fence).await?;
         }
+        if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none() {
+            return Err(StoreError::SessionExecutionLeaseExpired {
+                session_id: commit.session_id.clone(),
+            });
+        }
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
@@ -598,6 +603,39 @@ impl SessionCommitStore for PostgresSessionStore {
                 None => lash_core::store::PublishedLeafFacts::Retired { node_id },
             },
         };
+        if let Some(pending) = load_run_tx(&mut tx, &commit.session_id, None).await? {
+            let own_initial_command = pending.members.is_none()
+                && commit.session_execution_lease_fence.is_some()
+                && commit.turn_commit.operation.key == "session-command";
+            if commit
+                .queued_run
+                .as_ref()
+                .is_none_or(|progress| progress.scope != pending.scope)
+                && !own_initial_command
+            {
+                return Err(StoreError::QueuedRunConflict {
+                    session_id: commit.session_id.clone(),
+                });
+            }
+        }
+        let queued_admission = if let Some(progress) = &commit.queued_run {
+            let admission = load_run_tx(&mut tx, &commit.session_id, Some(&progress.scope))
+                .await?
+                .ok_or_else(|| StoreError::QueuedRunConflict {
+                    session_id: commit.session_id.clone(),
+                })?;
+            admission.advance(progress, &[])?;
+            let fence = commit
+                .session_execution_lease_fence
+                .as_ref()
+                .ok_or_else(|| StoreError::SessionExecutionLeaseExpired {
+                    session_id: commit.session_id.clone(),
+                })?;
+            validate_run_members_tx(&mut tx, fence, progress).await?;
+            Some(admission)
+        } else {
+            None
+        };
         let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
             actual_head_revision: authoritative_revision,
             published_leaf,
@@ -857,6 +895,26 @@ impl SessionCommitStore for PostgresSessionStore {
         let mut enqueued_queue_batches = Vec::new();
         for batch in &commit.enqueued_queue_batches {
             enqueued_queue_batches.push(enqueue_queued_work_tx(&mut tx, batch, now).await?);
+        }
+        if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
+            if matches!(
+                progress.progress,
+                lash_core::store::QueuedRunProgress::Settle { .. }
+            ) {
+                let fence = commit
+                    .session_execution_lease_fence
+                    .as_ref()
+                    .ok_or_else(|| StoreError::SessionExecutionLeaseExpired {
+                        session_id: commit.session_id.clone(),
+                    })?;
+                settle_run_members_tx(&mut tx, fence, &progress.scope).await?;
+            }
+            write_run_tx(
+                &mut tx,
+                &admission.advance(progress, &enqueued_queue_batches)?,
+                false,
+            )
+            .await?;
         }
         let mut result = plan.result(checkpoint_ref, manifest, enqueued_queue_batches);
         result.turn_cancel_input_outcome = turn_cancel_input_outcome;
