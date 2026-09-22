@@ -53,7 +53,7 @@ pub(crate) fn reasoning_retention_transport_error(
 ) -> LlmTransportError {
     LlmTransportError::new(error.message)
         .with_kind(ProviderFailureKind::Unsupported)
-        .with_adapter_code(TurnFailureCode::UnsupportedReasoningRetention)
+        .with_lash_code(TurnFailureCode::UnsupportedReasoningRetention)
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
@@ -99,7 +99,7 @@ pub(crate) fn empty_response_diagnostic(
 ) -> lash_core::llm::transport::LlmTransportError {
     lash_core::llm::transport::LlmTransportError::new("OpenAI-compatible empty_response")
         .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable)
-        .with_adapter_code(TurnFailureCode::EmptyResponse)
+        .with_lash_code(TurnFailureCode::EmptyResponse)
         .with_raw(raw)
 }
 

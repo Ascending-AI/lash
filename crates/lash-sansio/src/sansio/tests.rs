@@ -172,7 +172,7 @@ fn turn_checkpoint_stamps_current_generation() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 6);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 7);
 }
 
 #[test]
@@ -1261,7 +1261,8 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
             envelope: Some(envelope),
             ..
         }) if envelope.kind == crate::session_model::TurnFailureKind::TokenUsageAccounting
-            && envelope.code == Some(crate::session_model::TurnFailureCode::TokenUsageOverflow)
+            && envelope.code
+                == Some(crate::session_model::TurnFailureCode::TokenUsageOverflow.into())
             && envelope.user_message.contains("input_total_tokens")
     )));
     assert!(effects.iter().any(|effect| matches!(
@@ -1345,8 +1346,8 @@ fn context_overflow_llm_error_stops_as_its_own_outcome() {
             retryable: false,
             kind: crate::llm::types::ProviderFailureKind::Validation,
             raw: None,
-            code: Some(crate::session_model::FailureCode::Provider(
-                "context_length_exceeded".to_string(),
+            code: Some(crate::session_model::FailureCode::provider(
+                "context_length_exceeded",
             )),
             terminal_reason: LlmTerminalReason::ContextOverflow,
             request_body: None,

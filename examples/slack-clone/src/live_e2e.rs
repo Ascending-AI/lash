@@ -332,7 +332,7 @@ fn typed_provider_error(
         lash::provider::TransportRetryVerdict::NotRetryable
     };
     lash::provider::LlmTransportError::new(message)
-        .with_provider_code(code)
+        .with_code(lash::provider::FailureCode::provider(code))
         .with_kind(kind)
         .with_retry_verdict(retry_verdict)
 }

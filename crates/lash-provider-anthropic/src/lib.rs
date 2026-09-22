@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(error.kind, lash_core::ProviderFailureKind::Stream);
         assert_eq!(
             error.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:stream_ended_before_message_stop".to_string())
+            Some("lash:stream_ended_before_message_stop".to_string())
         );
         let partial = error.partial_response.as_deref().expect("partial response");
         assert_eq!(partial.full_text(), "partial");
@@ -681,7 +681,7 @@ mod tests {
         assert_eq!(err.kind, lash_core::ProviderFailureKind::Validation);
         assert_eq!(
             err.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:provider_file_media_type_required".to_string())
+            Some("lash:provider_file_media_type_required".to_string())
         );
         assert_eq!(
             err.message,

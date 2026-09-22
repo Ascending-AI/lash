@@ -677,10 +677,23 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             stream_summary,
             attempts,
         } => {
-            attrs.push(KeyValue::new(
-                attr::ERROR_TYPE,
-                error.code.clone().unwrap_or_default(),
-            ));
+            // `error.type` is the failure kind/category, not the code
+            // spelling or the terminal reason: a timeout reports `timeout`,
+            // not `provider_error`. Anything outside the provider-failure
+            // vocabulary demotes to `_OTHER`.
+            let error_type = match error.failure_kind.as_deref() {
+                Some(
+                    kind @ ("transport" | "timeout" | "http" | "stream" | "auth" | "validation"
+                    | "quota" | "unsupported"),
+                ) => kind.to_string(),
+                _ => "_OTHER".to_string(),
+            };
+            attrs.push(KeyValue::new(attr::ERROR_TYPE, error_type));
+            // `lash.error.code` is the code's spelling alone — `code` arrives
+            // already projected to spelling-only by the trace producers.
+            if let Some(code) = &error.code {
+                attrs.push(KeyValue::new(attr::LASH_ERROR_CODE, code.clone()));
+            }
             attrs.push(KeyValue::new(attr::ERROR_MESSAGE, error.message.clone()));
             attrs.push(KeyValue::new(attr::LASH_ERROR_RETRYABLE, error.retryable));
             push_payload_json(

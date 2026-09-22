@@ -216,6 +216,6 @@ pub(crate) fn reasoning_encode_transport_error(
         "reasoning dialect `{}` cannot encode {intent:?} for {endpoint:?}: {}",
         error.dialect, error.detail
     ))
-    .with_adapter_code(TurnFailureCode::ReasoningEncodingUnrepresentable)
+    .with_lash_code(TurnFailureCode::ReasoningEncodingUnrepresentable)
     .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }

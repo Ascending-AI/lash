@@ -230,7 +230,7 @@ fn malformed_tool_call_input_json_fails_the_anthropic_request() {
     assert_eq!(error.kind, ProviderFailureKind::Validation);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:invalid_tool_call_input_json".to_string())
+        Some("lash:invalid_tool_call_input_json".to_string())
     );
     assert!(error.message.contains("lookup"));
     assert_eq!(error.raw.as_deref().map(String::as_str), Some("{"));

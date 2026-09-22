@@ -59,7 +59,7 @@ async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
 
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:websocket_idle_timeout".to_string())
+        Some("lash:websocket_idle_timeout".to_string())
     );
     assert!(
         events.lock_recover().is_empty(),
@@ -118,7 +118,7 @@ async fn codex_scripted_websocket_idle_after_output_is_terminal_error() {
 
     assert_eq!(
         err.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:websocket_idle_timeout".to_string())
+        Some("lash:websocket_idle_timeout".to_string())
     );
     assert_eq!(http.captured_len(), 0);
     assert_eq!(ws.captured().len(), 1);

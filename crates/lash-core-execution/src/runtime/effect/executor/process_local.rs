@@ -32,7 +32,7 @@ pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> 
     match serde_json::to_value(&output) {
         Ok(value) => Resolution::Ok(value),
         Err(error) => Resolution::Err(crate::runtime::ExternalCompletionError {
-            code: "process_terminal_encode".to_string(),
+            code: crate::TurnFailureCode::from_wire("process_terminal_encode").into(),
             message: error.to_string(),
             raw: None,
         }),
@@ -334,7 +334,10 @@ impl ProcessLocalExecution {
                                 Ok(output) => process_terminal_resolution(output),
                                 Err(error) => {
                                     Resolution::Err(crate::runtime::ExternalCompletionError {
-                                        code: "process_terminal_unobservable".to_string(),
+                                        code: crate::TurnFailureCode::from_wire(
+                                            "process_terminal_unobservable",
+                                        )
+                                        .into(),
                                         message: error.to_string(),
                                         raw: None,
                                     })

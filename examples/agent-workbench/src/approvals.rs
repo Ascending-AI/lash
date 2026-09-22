@@ -373,9 +373,19 @@ pub(crate) fn approval_resolution(approval: &PendingApproval) -> lash::Resolutio
     resolution_for(ApprovalDecision::Approved, &approval.arguments)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the literal `agent_workbench` is a fixed valid host-namespace spelling, so validation cannot fail"
+)]
 pub(crate) fn denial_resolution() -> lash::Resolution {
-    let mut error =
-        lash::ExternalCompletionError::new("approval_denied", "the operator denied this change");
+    let mut error = lash::ExternalCompletionError::new(
+        lash::provider::FailureCode::foreign(
+            lash::provider::Namespace::host("agent_workbench").expect("valid namespace"),
+            "approval_denied",
+        )
+        .expect("a validated host namespace is foreign-mintable"),
+        "the operator denied this change",
+    );
     error.raw = Some(json!({ "policy": "agent_workbench_human_approval" }));
     lash::Resolution::Err(error)
 }
@@ -453,7 +463,7 @@ mod tests {
             panic!("denial must be an error resolution");
         };
         let expected = json!({ "policy": "agent_workbench_human_approval" });
-        assert_eq!(error.code, "approval_denied");
+        assert_eq!(error.code.namespaced(), "agent_workbench:approval_denied");
         assert_eq!(error.message, "the operator denied this change");
         assert_eq!(error.raw, Some(expected));
         assert_eq!(resolution, lash::Resolution::Err(error.clone()));

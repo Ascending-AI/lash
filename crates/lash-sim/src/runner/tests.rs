@@ -826,7 +826,7 @@ async fn fixed_script_manifest_schema_contains_required_proofs_and_artifact_fiel
         if name.ends_with("timeout") {
             let envelope = &terminal["error_envelope"];
             assert_eq!(envelope["kind"], "Timeout");
-            assert_eq!(envelope["code"], "adapter:timeout");
+            assert_eq!(envelope["code"], "lash:timeout");
             assert_eq!(envelope["retryable"], true);
         }
         if name == "openai-compatible.chat-stream-chunk-timeout" {
@@ -893,7 +893,7 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
             serde_json::from_str(&transcript_body).expect("timeout transcript JSON");
         let envelope = &transcript["terminal"]["error_envelope"];
         assert_eq!(envelope["kind"], "Timeout");
-        assert_eq!(envelope["code"], "adapter:timeout");
+        assert_eq!(envelope["code"], "lash:timeout");
         assert_eq!(envelope["retryable"], true);
         assert!(envelope["status"].is_null());
         assert_eq!(

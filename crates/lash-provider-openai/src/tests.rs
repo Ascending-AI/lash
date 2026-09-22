@@ -602,7 +602,7 @@ fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
     assert_eq!(err.kind, ProviderFailureKind::Validation);
     assert_eq!(
         err.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:unsupported_attachment_capability".to_string())
+        Some("lash:unsupported_attachment_capability".to_string())
     );
     assert_eq!(
         err.message,
@@ -667,7 +667,7 @@ fn responses_unsupported_image_mime_is_rejected_at_request_boundary() {
     assert_eq!(err.kind, ProviderFailureKind::Validation);
     assert_eq!(
         err.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:unsupported_attachment_capability".to_string())
+        Some("lash:unsupported_attachment_capability".to_string())
     );
     assert!(err.message.contains("OpenAI"));
 }
@@ -699,7 +699,7 @@ fn responses_body_rejects_numeric_reasoning_from_budget_encoding() {
 
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:reasoning_encoding_unrepresentable".to_string())
+        Some("lash:reasoning_encoding_unrepresentable".to_string())
     );
     assert!(!error.is_retryable());
     assert!(error.message.contains("openai"));
@@ -850,7 +850,7 @@ fn chat_body_openai_format_rejects_budget() {
 
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:reasoning_encoding_unrepresentable".to_string())
+        Some("lash:reasoning_encoding_unrepresentable".to_string())
     );
     assert!(!error.is_retryable());
     assert!(error.message.contains("openai"));
@@ -884,7 +884,7 @@ fn chat_body_reasoning_toggle_false_respects_dialect() {
         .expect_err("OpenAI Chat Completions cannot encode enabled:false");
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:reasoning_encoding_unrepresentable".to_string())
+        Some("lash:reasoning_encoding_unrepresentable".to_string())
     );
     assert!(!error.is_retryable());
     assert!(error.message.contains("ToggleFalse"));
@@ -2090,7 +2090,7 @@ fn openrouter_stream_wire_fences_all_evidence_on_served_model_conflict() {
     assert_eq!(error.kind, ProviderFailureKind::Stream);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:stream_evidence_identity_conflict".to_string())
+        Some("lash:stream_evidence_identity_conflict".to_string())
     );
     assert!(error.message.contains("served_model"));
     assert_eq!(state.execution_evidence, initial_evidence);
@@ -2171,7 +2171,7 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let failure = result.expect_err("unfinished paid tool output must stop the ladder");
     assert_eq!(
         failure.code.as_ref().map(|code| code.to_string()),
-        Some("refusal:unsafe_retry_after_output_started".to_string())
+        Some("lash:unsafe_retry_after_output_started".to_string())
     );
     assert!(!failure.is_retryable());
 }
@@ -2208,7 +2208,7 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
     let failure = result.expect_err("opaque paid reasoning must stop the ladder");
     assert_eq!(
         failure.code.as_ref().map(|code| code.to_string()),
-        Some("refusal:unsafe_retry_after_output_started".to_string())
+        Some("lash:unsafe_retry_after_output_started".to_string())
     );
     assert!(!failure.is_retryable());
 }
@@ -2325,7 +2325,7 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
     assert_eq!(error.kind, ProviderFailureKind::Stream);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:stream_ended_before_finish_reason".to_string())
+        Some("lash:stream_ended_before_finish_reason".to_string())
     );
     assert!(error.is_retryable());
     let partial = error.partial_response.as_deref().expect("partial response");
@@ -2396,7 +2396,7 @@ async fn responses_stream_requires_terminal_event_and_accepts_incomplete_termina
         .expect_err("Responses requires a terminal event");
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:stream_ended_before_terminal_response".to_string())
+        Some("lash:stream_ended_before_terminal_response".to_string())
     );
     assert_eq!(
         error

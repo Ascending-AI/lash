@@ -111,7 +111,7 @@ async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
         .expect_err("empty Chat EOF without a finish reason remains malformed");
     assert_eq!(
         chat_error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:empty_response".to_string())
+        Some("lash:empty_response".to_string())
     );
     assert_eq!(chat_transport.calls(), 1);
 
@@ -128,7 +128,7 @@ async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
         .expect_err("empty Responses EOF without a terminal event remains malformed");
     assert_eq!(
         responses_error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:empty_response".to_string())
+        Some("lash:empty_response".to_string())
     );
     assert_eq!(responses_transport.calls(), 1);
 }
@@ -144,7 +144,7 @@ async fn assert_empty_responses_stream_is_rejected(body: &'static str, descripti
         .expect_err(description);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:empty_response".to_string())
+        Some("lash:empty_response".to_string())
     );
     assert_eq!(transport.calls(), 1);
 }
@@ -213,7 +213,7 @@ async fn empty_buffered_responses_require_completed_status() {
             .expect_err(description);
         assert_eq!(
             error.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:empty_response".to_string())
+            Some("lash:empty_response".to_string())
         );
         assert_eq!(transport.requests.lock_recover().len(), 1);
     }
@@ -247,7 +247,7 @@ async fn empty_chat_requires_wire_stop_even_when_native_evidence_exists() {
         .expect_err("native evidence cannot replace a missing wire finish_reason");
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:empty_response".to_string())
+        Some("lash:empty_response".to_string())
     );
     assert_eq!(transport.requests.lock_recover().len(), 1);
 }

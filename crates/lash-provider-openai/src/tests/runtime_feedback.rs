@@ -138,7 +138,7 @@ fn runtime_feedback_unencodable_chat_attachment_names_message_index() {
     assert_eq!(error.kind, ProviderFailureKind::Validation);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:attachment_source_not_encodable".to_string())
+        Some("lash:attachment_source_not_encodable".to_string())
     );
     assert!(error.message.contains("message index 1"));
 }

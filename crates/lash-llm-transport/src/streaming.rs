@@ -199,21 +199,21 @@ impl SseBuffer {
 fn event_limit_error() -> LlmTransportError {
     LlmTransportError::new("SSE event exceeded the configured byte limit")
         .with_kind(ProviderFailureKind::Stream)
-        .with_adapter_code(TurnFailureCode::SseEventTooLarge)
+        .with_lash_code(TurnFailureCode::SseEventTooLarge)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable)
 }
 
 fn total_limit_error() -> LlmTransportError {
     LlmTransportError::new("SSE response exceeded the configured total byte limit")
         .with_kind(ProviderFailureKind::Stream)
-        .with_adapter_code(TurnFailureCode::SseResponseTooLarge)
+        .with_lash_code(TurnFailureCode::SseResponseTooLarge)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable)
 }
 
 fn timeout_error(message: &str) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Timeout)
-        .with_adapter_code(TurnFailureCode::Timeout)
+        .with_lash_code(TurnFailureCode::Timeout)
         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
 }
 
@@ -461,7 +461,7 @@ mod tests {
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
         assert_eq!(
             err.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:timeout".to_string())
+            Some("lash:timeout".to_string())
         );
         assert_eq!(err.message, "stream chunk timed out");
         assert!(err.is_retryable());
@@ -503,7 +503,7 @@ mod tests {
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
         assert_eq!(
             err.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:timeout".to_string())
+            Some("lash:timeout".to_string())
         );
         assert_eq!(err.message, "request timed out");
         assert!(err.is_retryable());
@@ -519,7 +519,7 @@ mod tests {
         assert_eq!(err.kind, ProviderFailureKind::Stream);
         assert_eq!(
             err.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:sse_event_too_large".to_string())
+            Some("lash:sse_event_too_large".to_string())
         );
         assert!(!err.is_retryable());
     }
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(err.kind, ProviderFailureKind::Stream);
         assert_eq!(
             err.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:sse_event_too_large".to_string())
+            Some("lash:sse_event_too_large".to_string())
         );
         assert!(!err.is_retryable());
     }
@@ -549,7 +549,7 @@ mod tests {
         assert_eq!(err.kind, ProviderFailureKind::Stream);
         assert_eq!(
             err.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:sse_response_too_large".to_string())
+            Some("lash:sse_response_too_large".to_string())
         );
         assert!(!err.is_retryable());
     }

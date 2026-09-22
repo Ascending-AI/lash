@@ -433,8 +433,8 @@ pub enum RemoteToolCallOutcome {
     Cancelled(serde_json::Value),
 }
 
-/// Typed turn-failure code, as carried to a host.
-pub use lash_sansio::TurnFailureCode as RemoteTurnFailureCode;
+/// Namespaced failure code, as carried to a host.
+pub use lash_sansio::FailureCode as RemoteFailureCode;
 /// Typed origin of a turn failure, as carried to a host.
 pub use lash_sansio::TurnFailureKind as RemoteTurnFailureKind;
 
@@ -453,12 +453,13 @@ pub struct RemoteTurnIssue {
     /// the field carried before it was typed; an unrecognized spelling decodes
     /// into `RemoteTurnFailureKind::Unknown` rather than failing.
     pub kind: RemoteTurnFailureKind,
-    /// Typed failure code. Serializes as the same string the field carried
-    /// before it was typed; a vocabulary this build does not own (a provider
-    /// error code, a plugin abort code, a `RuntimeErrorCode` spelling) decodes
-    /// into `RemoteTurnFailureCode::Other` with the spelling retained.
+    /// The failure's namespaced code (`<namespace>:<spelling>`): `lash`
+    /// carries this workspace's [`TurnFailureCode`](lash_sansio::TurnFailureCode)
+    /// vocabulary, `provider` carries codes the provider emitted on the wire,
+    /// and host or plugin vocabularies keep their own namespaces verbatim —
+    /// never reinterpreted into a Lash spelling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<RemoteTurnFailureCode>,
+    pub code: Option<RemoteFailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<RemoteLlmTerminalReason>,
     pub message: String,

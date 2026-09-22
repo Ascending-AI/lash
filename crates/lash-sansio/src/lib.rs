@@ -78,13 +78,14 @@ pub use session::{
 pub use session_model::message::{MessageOrigin, TurnOutputSource};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope, FailureCode,
-    MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence, NoProgressBudget, Part,
-    PartAttachment, PartKind, PromptBuiltin, PromptLayer, PromptSlot, PromptSlotLayer,
-    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, ProtocolEvent, RenderedPrompt,
-    ResolvedPromptLayer, SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, TokenUsage,
-    TokenUsageOverflow, TurnBudget, TurnCancelDisposition, TurnCancelMode,
-    TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
-    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
+    InvalidNamespace, MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence, Namespace,
+    NoProgressBudget, Part, PartAttachment, PartKind, PromptBuiltin, PromptLayer, PromptSlot,
+    PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection, ProtocolEvent,
+    RenderedPrompt, ResolvedPromptLayer, SessionAppendNode, SessionHistoryRecord,
+    SessionStreamEvent, TokenUsage, TokenUsageOverflow, TurnBudget, TurnCancelDisposition,
+    TurnCancelMode, TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish,
+    TurnOutcome, TurnStop, default_prompt_template, messages_are_prompt_resume_safe,
+    resolve_prompt_layers, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
 pub use tool_catalog::{

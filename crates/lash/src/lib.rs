@@ -1055,6 +1055,13 @@ pub mod provider {
         LlmRequestScope, LlmResponse, LlmStreamEvidence, NormalizedError, ProtocolPosition,
         ProviderEndpointError, facade_support::LlmTransportError,
     };
+    /// The namespaced failure code carried on
+    /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt
+    /// journals: `lash:` codes are workspace-authored, `provider:` codes came
+    /// off the provider wire, and a host names its own vocabulary through
+    /// [`Namespace::host`] plus [`FailureCode::foreign`] — a host namespace is
+    /// first-class, never `provider:`.
+    pub use lash_core::{FailureCode, InvalidNamespace, Namespace};
 }
 
 pub use crate::core::ForkRequest;

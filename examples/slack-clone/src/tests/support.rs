@@ -13,7 +13,9 @@ use std::time::Duration;
 
 use lash::ModelSpec;
 use lash::direct::LlmOutputPart;
-use lash::provider::{LlmResponse, ProviderFailureKind, ProviderHandle, TransportRetryVerdict};
+use lash::provider::{
+    FailureCode, LlmResponse, ProviderFailureKind, ProviderHandle, TransportRetryVerdict,
+};
 use tokio::task::JoinHandle;
 
 use crate::bot::channel::{BotIdentity, ChannelBot};
@@ -198,7 +200,7 @@ impl Script {
                         } => {
                             let error = lash::provider::LlmTransportError::new(message)
                                 .with_kind(kind)
-                                .with_provider_code(code)
+                                .with_code(FailureCode::provider(code))
                                 .with_retry_verdict(TransportRetryVerdict::NotRetryable);
                             return Err(error);
                         }

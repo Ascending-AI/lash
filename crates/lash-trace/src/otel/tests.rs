@@ -220,7 +220,9 @@ fn otel_sink_accepts_turn_and_llm_lifecycle() {
                 message: "boom".to_string(),
                 retryable: false,
                 terminal_reason: None,
+                failure_kind: None,
                 code: Some("test".to_string()),
+                code_namespace: None,
                 raw: None,
             },
             stream_summary: None,
@@ -239,6 +241,82 @@ fn otel_sink_accepts_turn_and_llm_lifecycle() {
     .unwrap();
 
     assert!(sink.active.lock_recover().is_empty());
+}
+
+/// FIG-3435: OTel `error.type` carries the failure kind, not the terminal
+/// reason — a timeout exports `timeout` even though its terminal reason is
+/// `provider_error`, and an unknown kind demotes to `_OTHER`. The
+/// `lash.error.code` attribute carries the code's spelling alone.
+#[test]
+fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
+
+    let exporter = InMemorySpanExporter::default();
+    let provider = SdkTracerProvider::builder()
+        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+        .build();
+    let sink = OtelTraceSink::new(provider.tracer("test"));
+    let context = TraceContext::default().for_session("session-1");
+
+    sink.append(&TraceRecord::new(
+        context.clone(),
+        TraceEvent::LlmCallFailed {
+            error: crate::TraceError {
+                message: "timed out".to_string(),
+                retryable: true,
+                terminal_reason: Some("provider_error".to_string()),
+                failure_kind: Some("timeout".to_string()),
+                code: Some("insufficient_quota".to_string()),
+                code_namespace: Some("provider".to_string()),
+                raw: None,
+            },
+            stream_summary: None,
+            attempts: None,
+        },
+    ))
+    .unwrap();
+    sink.append(&TraceRecord::new(
+        context,
+        TraceEvent::LlmCallFailed {
+            error: crate::TraceError {
+                message: "no kind".to_string(),
+                retryable: false,
+                terminal_reason: Some("provider_error".to_string()),
+                failure_kind: None,
+                code: None,
+                code_namespace: None,
+                raw: None,
+            },
+            stream_summary: None,
+            attempts: None,
+        },
+    ))
+    .unwrap();
+
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 2);
+    let attribute = |span: &opentelemetry_sdk::trace::SpanData, key: &str| {
+        span.attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| kv.value.clone())
+            .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
+    };
+    assert_eq!(
+        attribute(&spans[0], "error.type"),
+        OtelValue::String("timeout".into()),
+        "a timeout must export its kind, not the provider_error terminal reason"
+    );
+    assert_eq!(
+        attribute(&spans[0], "lash.error.code"),
+        OtelValue::String("insufficient_quota".into()),
+        "the code attribute carries the spelling alone, not provider:insufficient_quota"
+    );
+    assert_eq!(
+        attribute(&spans[1], "error.type"),
+        OtelValue::String("_OTHER".into()),
+        "an absent failure kind demotes to _OTHER"
+    );
 }
 
 #[test]

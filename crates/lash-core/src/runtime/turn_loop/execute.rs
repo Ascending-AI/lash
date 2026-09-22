@@ -470,7 +470,7 @@ impl LashRuntime {
             events,
             Some(TerminalDiagnostic {
                 kind: TerminalDiagnosticKind::Plugin,
-                code: Some(crate::TurnFailureCode::from_wire(&abort.code)),
+                code: Some(abort.code),
                 message: abort.message,
                 retryable: None,
                 activity: TerminalActivityTarget::TurnScopedSink(turn_events),

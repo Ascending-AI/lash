@@ -50,7 +50,7 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
         lash_core::ProtocolPosition::TerminalObserved
     );
     assert!(turn.errors.iter().all(|error| {
-        error.code != Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart)
+        error.code != Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())
     }));
 }
 
@@ -102,7 +102,7 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
 
     assert!(matches!(turn.outcome, TurnOutcome::Stopped(_)));
     assert!(turn.errors.iter().any(|error| {
-        error.code == Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart)
+        error.code == Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())
     }));
 }
 

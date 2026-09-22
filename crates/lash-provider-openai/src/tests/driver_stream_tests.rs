@@ -403,7 +403,7 @@ async fn slow_stream_start_uses_response_start_timeout_classification() {
     assert_eq!(error.kind, ProviderFailureKind::Timeout);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:timeout".to_string())
+        Some("lash:timeout".to_string())
     );
     assert_eq!(
         error.message,
@@ -438,7 +438,7 @@ async fn slow_mid_stream_uses_chunk_timeout_classification() {
     assert_eq!(error.kind, ProviderFailureKind::Timeout);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:timeout".to_string())
+        Some("lash:timeout".to_string())
     );
     assert_eq!(
         error.message,
@@ -804,7 +804,7 @@ async fn responses_resume_event_without_sequence_number_fails_closed() {
 
     assert_eq!(
         failure.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:responses_resume_event_missing_sequence".to_string())
+        Some("lash:responses_resume_event_missing_sequence".to_string())
     );
     assert_eq!(transport.requests().len(), 2, "creation then resume");
     assert_eq!(transport.requests()[1].method, LlmHttpMethod::Get);
@@ -856,7 +856,7 @@ async fn responses_resume_response_without_event_stream_fails_closed() {
 
     assert_eq!(
         failure.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:responses_resume_not_streaming".to_string())
+        Some("lash:responses_resume_not_streaming".to_string())
     );
     assert_eq!(transport.requests().len(), 2, "creation then resume");
     assert_eq!(transport.requests()[1].method, LlmHttpMethod::Get);
@@ -900,7 +900,7 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
     assert_eq!(transport.requests().len(), 1, "resume path is unreachable");
     assert_eq!(
         failure.code.as_ref().map(|code| code.to_string()),
-        Some("refusal:unsafe_retry_after_output_started".to_string())
+        Some("lash:unsafe_retry_after_output_started".to_string())
     );
 
     let no_sequence_transport = AbortingSseTransport::new(vec![

@@ -66,8 +66,9 @@ pub struct LlmTransportError {
     pub http_status: Option<u16>,
     /// Cold raw provider evidence stays off the inline `Result` error path.
     pub raw: Option<Box<String>>,
-    /// Namespaced failure code: the producer declares whether the spelling is
-    /// provider-owned, adapter-authored, or a Lash refusal.
+    /// Namespaced failure code: `lash:` for workspace-authored codes,
+    /// `provider:` for provider wire vocabulary, or a host's own namespace —
+    /// a host vocabulary is a first-class namespace, never `provider:`.
     pub code: Option<FailureCode>,
     pub terminal_reason: LlmTerminalReason,
     /// Cold diagnostic metadata stays off the inline `Result` error path.
@@ -149,21 +150,18 @@ impl LlmTransportError {
         self
     }
 
-    /// A code the provider emitted on the wire.
-    pub fn with_provider_code(mut self, code: impl Into<String>) -> Self {
-        self.code = Some(FailureCode::Provider(code.into()));
+    /// A failure code in whatever namespace authored it: `provider:` codes
+    /// come off the provider wire, `FailureCode::foreign` carries a host's
+    /// own namespace, and `FailureCode::lash` carries the workspace
+    /// vocabulary.
+    pub fn with_code(mut self, code: FailureCode) -> Self {
+        self.code = Some(code);
         self
     }
 
-    /// A code the Lash adapter or transport authored.
-    pub fn with_adapter_code(mut self, code: TurnFailureCode) -> Self {
-        self.code = Some(FailureCode::Adapter(code));
-        self
-    }
-
-    /// A code Lash charge-safety or retry policy authored while refusing.
-    pub fn with_refusal_code(mut self, code: TurnFailureCode) -> Self {
-        self.code = Some(FailureCode::Refusal(code));
+    /// A code this workspace authored — the `lash` namespace.
+    pub fn with_lash_code(mut self, code: TurnFailureCode) -> Self {
+        self.code = Some(FailureCode::lash(code));
         self
     }
 

@@ -57,7 +57,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
             Err(
                 crate::LlmTransportError::new("stream ended before terminal evidence")
                     .with_kind(crate::ProviderFailureKind::Stream)
-                    .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
+                    .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
                     .with_retry_verdict(
                         crate::llm::transport::TransportRetryVerdict::RetryableTransient,
                     )

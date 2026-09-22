@@ -1324,7 +1324,7 @@ impl LocalDirectEffectRunner {
                         retryable: false,
                         kind: crate::ProviderFailureKind::Unknown,
                         raw: None,
-                        code: Some(crate::FailureCode::Adapter(
+                        code: Some(crate::FailureCode::lash(
                             crate::TurnFailureCode::AttachmentResolutionFailed,
                         )),
                         terminal_reason: crate::LlmTerminalReason::ProviderError,

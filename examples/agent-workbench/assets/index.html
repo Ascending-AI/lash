@@ -3089,7 +3089,7 @@
           const facts = [
             attempt.protocol_position && `position ${attempt.protocol_position}`,
             error.class && `error ${error.class}`,
-            error.provider_code && `code ${error.provider_code}`,
+            error.code && `code ${error.code}`,
             error.http_status !== undefined && `http ${error.http_status}`,
             error.provider_request_id && `request ${error.provider_request_id}`,
             error.retry_after_ms !== undefined && `retry-after ${error.retry_after_ms}ms`,

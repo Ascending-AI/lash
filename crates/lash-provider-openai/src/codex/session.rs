@@ -411,7 +411,7 @@ impl CodexProvider {
                     LlmTransportError::new("Codex WebSocket connect timed out")
                         .with_kind(ProviderFailureKind::Timeout)
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                        .with_adapter_code(TurnFailureCode::WebsocketConnectTimeout),
+                        .with_lash_code(TurnFailureCode::WebsocketConnectTimeout),
                 )
             })?;
         connect.map(|(websocket, _)| websocket).map_err(|error| {
@@ -424,7 +424,7 @@ impl CodexProvider {
             let mut transport_error =
                 LlmTransportError::new(format!("Codex WebSocket connect failed: {error}"))
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                    .with_adapter_code(TurnFailureCode::WebsocketConnect);
+                    .with_lash_code(TurnFailureCode::WebsocketConnect);
             if let Some(status) = status {
                 transport_error = transport_error.with_http_status(status);
             }

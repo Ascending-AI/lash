@@ -438,8 +438,11 @@ pub fn tool_output_from_completion_resolution(
     match resolution {
         crate::Resolution::Ok(value) => crate::ToolCallOutput::success(value),
         crate::Resolution::Err(err) => {
-            let mut failure =
-                crate::ToolFailure::tool(crate::ToolFailureClass::Execution, err.code, err.message);
+            let mut failure = crate::ToolFailure::tool(
+                crate::ToolFailureClass::Execution,
+                err.code.namespaced(),
+                err.message,
+            );
             failure.raw = err.raw.map(crate::ToolValue::untrusted_json);
             crate::ToolCallOutput::failure(failure)
         }

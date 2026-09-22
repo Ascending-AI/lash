@@ -56,7 +56,7 @@ impl OpenAiCompatibleProvider {
                             "Chat attachment wire parts cannot encode a provider-file handle",
                         )
                         .with_kind(ProviderFailureKind::Validation)
-                        .with_adapter_code(TurnFailureCode::AttachmentSourceNotEncodable));
+                        .with_lash_code(TurnFailureCode::AttachmentSourceNotEncodable));
                     }
                     if matches!(source, AttachmentSource::Stored { .. })
                         && req.attachment_bytes(source).is_none()
@@ -65,7 +65,7 @@ impl OpenAiCompatibleProvider {
                     "OpenAI Chat Completions could not materialize a stored attachment because session-guard resolution did not provide its bytes",
                 )
                 .with_kind(ProviderFailureKind::Validation)
-                .with_adapter_code(TurnFailureCode::StoredAttachmentNotResolved));
+                .with_lash_code(TurnFailureCode::StoredAttachmentNotResolved));
                     }
 
                     if !source.media_type().is_some_and(|mime| mime.is_image()) {
@@ -73,7 +73,7 @@ impl OpenAiCompatibleProvider {
                             "Chat attachment parts require an image media type",
                         )
                         .with_kind(ProviderFailureKind::Validation)
-                        .with_adapter_code(TurnFailureCode::AttachmentSourceNotEncodable));
+                        .with_lash_code(TurnFailureCode::AttachmentSourceNotEncodable));
                     }
 
                     Ok(())
@@ -794,7 +794,7 @@ fn execution_evidence_error(
 ) -> LlmTransportError {
     LlmTransportError::new(format!("{context} {error}"))
         .with_kind(ProviderFailureKind::Stream)
-        .with_adapter_code(TurnFailureCode::from_wire(error.code()))
+        .with_lash_code(TurnFailureCode::from_wire(error.code()))
 }
 
 fn merge_execution_evidence(

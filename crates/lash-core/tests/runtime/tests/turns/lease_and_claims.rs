@@ -314,7 +314,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
                         stream.send(LlmStreamEvent::Usage(usage.clone()));
                         return Err(LlmTransportError::new("Stream ended without finish_reason")
                             .with_kind(lash_core::ProviderFailureKind::Stream)
-                            .with_adapter_code(TurnFailureCode::StreamEndedBeforeFinishReason)
+                            .with_lash_code(TurnFailureCode::StreamEndedBeforeFinishReason)
                             .with_retry_verdict(
                                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                             )
@@ -606,7 +606,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
                             "stream ended before terminal evidence",
                         )
                         .with_kind(lash_core::ProviderFailureKind::Stream)
-                        .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
+                        .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
                         .with_retry_verdict(
                             lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                         )
@@ -719,7 +719,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
     let issue = assembled.errors.first().expect("typed provider issue");
     assert_eq!(
         issue.code,
-        Some(lash_core::TurnFailureCode::UnsafeRetryAfterOutputStarted)
+        Some(lash_core::TurnFailureCode::UnsafeRetryAfterOutputStarted.into())
     );
     assert_eq!(issue.retryable, Some(false));
     assert!(

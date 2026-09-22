@@ -424,7 +424,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if let Err(overflow) = self.try_handle_response(response) {
             self.fail_turn(make_error_event(
                 crate::session_model::TurnFailureKind::TokenUsageAccounting,
-                Some(crate::session_model::TurnFailureCode::TokenUsageOverflow),
+                Some(crate::session_model::TurnFailureCode::TokenUsageOverflow.into()),
                 format!(
                     "token usage counter `{}` overflowed while accumulating turn usage",
                     overflow.counter()
@@ -498,7 +498,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             Err(error) => {
                 self.fail_turn(make_error_event(
                     crate::session_model::TurnFailureKind::ExecutionEnvironment,
-                    Some(crate::session_model::TurnFailureCode::ReconfigureFailed),
+                    Some(crate::session_model::TurnFailureCode::ReconfigureFailed.into()),
                     format!("Failed to refresh execution environment: {error}"),
                     Some(error),
                 ));
@@ -835,6 +835,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     retryable: error.retryable,
                     raw: error.raw.clone(),
                     code: error.code.clone(),
+                    kind: error.kind,
                     terminal_reason: error.terminal_reason,
                 },
             });
@@ -845,15 +846,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.record_llm_error(&error);
         let mut envelope = crate::session_model::make_error_envelope(
             crate::session_model::TurnFailureKind::LlmProvider,
-            error.code.as_ref().map(|code| match code {
-                // Provider spellings are foreign vocabulary: the envelope
-                // keeps them verbatim under an explicit `provider:` prefix.
-                crate::session_model::FailureCode::Provider(slug) => {
-                    crate::session_model::TurnFailureCode::Other(format!("provider:{slug}"))
-                }
-                crate::session_model::FailureCode::Adapter(code)
-                | crate::session_model::FailureCode::Refusal(code) => code.clone(),
-            }),
+            error.code.clone(),
             Some(error.terminal_reason),
             format!("LLM error: {}", error.message),
             error.raw.clone(),

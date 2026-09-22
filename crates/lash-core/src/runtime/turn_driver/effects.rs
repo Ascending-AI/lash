@@ -602,8 +602,11 @@ impl RuntimeTurnDriver<'_> {
         committed.extend(applied.messages);
         emit_session_events(event_tx, applied.events).await;
         if let Some(abort) = applied.abort {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::from_wire_code(&abort.code),
+            // A plugin's abort code is plugin-authored vocabulary: it lands
+            // in `ForeignCode` verbatim (namespace included) and is never
+            // re-parsed into a Lash `RuntimeErrorCode` arm.
+            return Err(RuntimeError::foreign(
+                abort.code.namespaced(),
                 abort.message,
             ));
         }

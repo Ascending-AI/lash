@@ -718,7 +718,7 @@ impl LashRuntime {
             };
             if let Err(err) = restore_result {
                 delivery.turn.errors.push(post_commit_delivery_issue(
-                    crate::TurnFailureCode::ProtocolRestoreSession,
+                    crate::TurnFailureCode::ProtocolRestoreSession.into(),
                     err.to_string(),
                 ));
                 delivery.post_commit_delivery_failed = true;
@@ -782,7 +782,7 @@ impl LashRuntime {
             Ok(None) => {}
             Err(err) => {
                 delivery.turn.errors.push(post_commit_delivery_issue(
-                    crate::TurnFailureCode::Other(err.code.as_str().to_string()),
+                    crate::FailureCode::from(&err.code),
                     err.message,
                 ));
                 delivery.post_commit_delivery_failed = true;
@@ -957,7 +957,7 @@ impl LashRuntime {
             events,
             Some(TerminalDiagnostic {
                 kind: TerminalDiagnosticKind::Runtime,
-                code: Some(crate::TurnFailureCode::AgentFrameSwitchLimit),
+                code: Some(crate::TurnFailureCode::AgentFrameSwitchLimit.into()),
                 message,
                 retryable: Some(false),
                 activity: TerminalActivityTarget::UnscopedSink {

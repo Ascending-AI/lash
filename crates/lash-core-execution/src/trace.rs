@@ -963,9 +963,7 @@ mod span_identity_tests {
                     }),
                     error: Some(crate::NormalizedError {
                         class: "rate_limited".to_string(),
-                        provider_code: Some("rate_limit_exceeded".to_string()),
-                        adapter_code: None,
-                        refusal_code: None,
+                        code: Some(crate::FailureCode::provider("rate_limit_exceeded")),
                         http_status: Some(429),
                         provider_request_id: None,
                         retry_after: Some(std::time::Duration::from_millis(250)),
@@ -1002,9 +1000,7 @@ mod span_identity_tests {
             retryable: true,
             kind: crate::ProviderFailureKind::Http,
             raw: None,
-            code: Some(crate::FailureCode::Provider(
-                "rate_limit_exceeded".to_string(),
-            )),
+            code: Some(crate::FailureCode::provider("rate_limit_exceeded")),
             terminal_reason: crate::LlmTerminalReason::ProviderError,
             request_body: None,
             partial_response: None,

@@ -209,7 +209,7 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
     assert_eq!(err.kind, ProviderFailureKind::Timeout);
     assert_eq!(
         err.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:timeout".to_string())
+        Some("lash:timeout".to_string())
     );
     assert!(err.is_retryable());
     assert!(err.http_status.is_none());
