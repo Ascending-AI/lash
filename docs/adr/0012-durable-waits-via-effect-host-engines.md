@@ -12,7 +12,7 @@ occurrence-sequenced keys.
 Lash owns the effect-journal contract; the configured substrate owns the journal.
 Restate supplies its native journal. The SQLite and PostgreSQL substrates implement
 the same contract in `runtime_effect_replay` and `lash_runtime_effect_replay`.
-The inline substrate owns no replay journal. The session commit store does not absorb
+The native substrate owns no replay journal. The session commit store does not absorb
 this responsibility: effect replay and settled session history remain separate seams
 joined by stable operation identity.
 
