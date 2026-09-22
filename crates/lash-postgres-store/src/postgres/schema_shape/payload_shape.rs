@@ -819,7 +819,8 @@ mod tests {
 
     #[test]
     fn committed_fingerprints_match_every_registered_carrier() {
-        let manifest_dir = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
+        let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
+        let manifest_dir = workspace.as_deref().map_or_else(
             || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             |root| std::path::PathBuf::from(root).join("crates/lash-postgres-store"),
         );
@@ -829,6 +830,11 @@ mod tests {
         if committed != generated
             && std::env::var("LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS").as_deref() == Ok("1")
         {
+            assert!(
+                workspace.is_some()
+                    || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).is_absolute(),
+                "Bazel regeneration requires BUILD_WORKSPACE_DIRECTORY"
+            );
             std::fs::write(&path, &generated).expect("rewrite fingerprint artifact");
             panic!(
                 "regenerated {} -- rerun the test to confirm",

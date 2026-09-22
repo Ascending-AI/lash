@@ -375,7 +375,7 @@ pub(super) fn write_generated_backend_regression_fixtures(
             backend_equivalence_contract,
             regression_contract: spec.regression_contract,
             replay_command: format!(
-                "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$(realpath -- {})\"",
+                "cargo run -p lash-sim --locked -- replay {}",
                 fixture_trace_path.display()
             ),
         };

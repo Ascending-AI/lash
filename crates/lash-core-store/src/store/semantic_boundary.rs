@@ -227,7 +227,13 @@ mod semantic_boundary_request_identity_tests {
         .join("\n")
             + "\n";
         if std::env::var_os("UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN").is_some() {
-            let manifest_dir = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
+            let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
+            assert!(
+                workspace.is_some()
+                    || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).is_absolute(),
+                "Bazel regeneration requires BUILD_WORKSPACE_DIRECTORY"
+            );
+            let manifest_dir = workspace.map_or_else(
                 || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 |root| std::path::PathBuf::from(root).join("crates/lash-core-store"),
             );

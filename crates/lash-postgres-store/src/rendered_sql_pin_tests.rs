@@ -99,7 +99,12 @@ const PIN: &str = include_str!("rendered_sql_pin.txt");
 fn every_converted_statement_keeps_its_rendered_bytes() {
     let rendered = rendered_pin();
     if std::env::var_os("LASH_UPDATE_RENDERED_SQL_PIN").is_some() {
-        let manifest_dir = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
+        let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
+        assert!(
+            workspace.is_some() || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).is_absolute(),
+            "Bazel regeneration requires BUILD_WORKSPACE_DIRECTORY"
+        );
+        let manifest_dir = workspace.map_or_else(
             || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             |root| std::path::PathBuf::from(root).join("crates/lash-postgres-store"),
         );

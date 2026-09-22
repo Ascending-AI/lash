@@ -427,11 +427,11 @@ async fn run_generated_evidence_profile(
             sqlite_replay_report_path: relative_path(artifact_root, &sqlite_replay_report_path),
             sqlite_replay_report_sha256,
             replay_command: format!(
-                "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$(realpath -- {})\"",
+                "cargo run -p lash-sim --locked -- replay {}",
                 trace_path.display()
             ),
             sqlite_replay_command: format!(
-                "kiln run //crates/lash-sim:lash-sim__bin -- replay-sqlite \"$(realpath -- {})\" --out {}",
+                "cargo run -p lash-sim --locked -- replay-sqlite {} --out {}",
                 trace_path.display(),
                 replay_dir.display()
             ),
@@ -834,7 +834,7 @@ async fn run_generated_search_profile(
             trace.oracle.message.clone()
         };
         let replay_command = format!(
-            "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$(realpath -- {})\"",
+            "cargo run -p lash-sim --locked -- replay {}",
             trace_path.display()
         );
         let package = json!({
@@ -851,7 +851,7 @@ async fn run_generated_search_profile(
             "determinism_rerun_trace": determinism_rerun_trace_path,
             "replay_command": replay_command,
             "regenerate_command": format!(
-                "kiln run //crates/lash-sim:lash-sim__bin -- run --out <artifact-root> --profile {profile} --seed {seed} --max-boundaries {boundary_limit}"
+                "cargo run -p lash-sim --locked -- run --out <artifact-root> --profile {profile} --seed {seed} --max-boundaries {boundary_limit}"
             ),
             "minimize": minimize_summary,
         });
