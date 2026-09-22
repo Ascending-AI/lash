@@ -152,6 +152,19 @@ impl ToolChildHost {
         &self.openers
     }
 
+    /// The `ProcessLifetime` completion-key issuer a group child records
+    /// (ADR 0099 §14): this host's turn-control binding id.
+    ///
+    /// Read it from the host children actually resolve on rather than from
+    /// `RuntimeControlConfig::effect_host`: `BoundSession` re-binds that field
+    /// to the store's turn-control authority, whose binding id names the
+    /// durable registry while `prepare_completion_key` still issues the key
+    /// into the inner (native) registry the children run under.
+    #[must_use]
+    pub fn tool_child_completion_issuer(&self) -> Option<crate::TurnControlBindingId> {
+        crate::TurnControlBindingId::new(self.effect_host().ok()?.turn_control_binding_id()).ok()
+    }
+
     /// The host this resolver routes for, or the routing fact "gone".
     fn effect_host(&self) -> Result<Arc<dyn EffectHost>, RuntimeEffectControllerError> {
         self.host.upgrade().ok_or_else(|| {

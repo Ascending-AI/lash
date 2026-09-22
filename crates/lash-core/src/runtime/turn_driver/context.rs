@@ -75,13 +75,21 @@ impl<'run> RuntimeTurnDriver<'run> {
                         self.host.core.control.engine_child_max_attempts,
                     )
                     .with_turn_phase_probe(self.turn_phase_probe.clone());
-                // The host's binding id is what a group child records as its
-                // `ProcessLifetime` completion-key issuer (ADR 0099 §14).
-                match crate::TurnControlBindingId::new(
-                    self.host.core.control.effect_host.turn_control_binding_id(),
-                ) {
-                    Ok(issuer) => context.with_tool_child_completion_issuer(issuer),
-                    Err(_) => context,
+                // The issuer is read from the installed tool-child host
+                // rather than `control.effect_host`: a bound session re-binds
+                // the latter to the store's turn-control authority while the
+                // children keep resolving on the host this issuer names
+                // (ADR 0099 §14).
+                match self
+                    .host
+                    .core
+                    .control
+                    .tool_children
+                    .as_ref()
+                    .and_then(|host| host.tool_child_completion_issuer())
+                {
+                    Some(issuer) => context.with_tool_child_completion_issuer(issuer),
+                    None => context,
                 }
             })
     }
