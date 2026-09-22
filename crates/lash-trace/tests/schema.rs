@@ -25,7 +25,7 @@ use lash_trace::{
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_29() {
+fn trace_schema_version_is_pinned_at_30() {
     // This is the current on-disk trace schema version.
     // Every reader (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level doc comment and the
