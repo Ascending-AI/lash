@@ -1,7 +1,7 @@
 use super::*;
 use crate::ProcessId;
 use crate::SessionId;
-use crate::{ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _};
+use crate::{ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _};
 
 fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
     crate::ToolIntents::v3(
@@ -177,7 +177,7 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
             .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
     );
     let events = registry
-        .events_after(&ProcessId::from("intent-law-target"), 0)
+        .full_event_window(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read crash-law target events");
     assert_eq!(
@@ -432,7 +432,7 @@ async fn tool_intent_outcome_replay_is_scoped_to_its_minting_emission() {
     );
     assert_eq!(
         registry
-            .events_after(&ProcessId::from("intent-law-target"), 0)
+            .full_event_window(&ProcessId::from("intent-law-target"), 0)
             .await
             .expect("read recovered target events")
             .iter()
@@ -510,7 +510,7 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
         "the recorded refusal cannot become success after live state changes"
     );
     let events = registry
-        .events_after(&ProcessId::from("intent-law-target"), 0)
+        .full_event_window(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read the committed prefix");
     assert_eq!(
@@ -580,7 +580,7 @@ async fn concurrent_batch_drains_intents_in_call_order_then_intent_index() {
             if result.intent_outcomes.len() == 2
     )));
     let events = registry
-        .events_after(&ProcessId::from("intent-law-target"), 0)
+        .full_event_window(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read ordered intent events");
     assert_eq!(
@@ -800,7 +800,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
                 ))
     ));
     let events = registry
-        .events_after(&ProcessId::from("intent-law-target"), 0)
+        .full_event_window(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read post-cancel events");
     assert_eq!(
@@ -871,7 +871,7 @@ async fn retry_drains_only_the_final_attempts_intents() {
     assert_eq!(outcome.attempts.len(), 2);
     assert_eq!(outcome.intent_outcomes.len(), 1);
     let events = registry
-        .events_after(&ProcessId::from("retry-intent-target"), 0)
+        .full_event_window(&ProcessId::from("retry-intent-target"), 0)
         .await
         .expect("read retry intent target events");
     assert_eq!(events.len(), 1, "the retried declaration never drains");

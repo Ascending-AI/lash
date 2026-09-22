@@ -533,6 +533,82 @@ pub trait ProcessRegistryTestSupport: Send + Sync {
     }
 }
 
+/// Small-fixture event-log convenience, excluded from production builds.
+///
+/// Tests using this helper assert that their complete history fits in one
+/// page. Production consumers must make pagination and retention explicit.
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+pub trait ProcessEventLogTestSupport: ProcessEventLog {
+    async fn full_event_window(
+        &self,
+        process_id: &ProcessId,
+        after_sequence: u64,
+    ) -> Result<Vec<super::events::ProcessEvent>, PluginError> {
+        let process_ref = self.resolve_process_ref(process_id).await?;
+        self.full_event_window_ref(&process_ref, after_sequence)
+            .await
+    }
+
+    async fn full_event_window_ref(
+        &self,
+        process_ref: &super::model::ProcessRef,
+        after_sequence: u64,
+    ) -> Result<Vec<super::events::ProcessEvent>, PluginError> {
+        let limit = std::num::NonZeroUsize::new(4_096).unwrap_or(std::num::NonZeroUsize::MIN);
+        let outcome = self
+            .event_page_ref(
+                process_ref,
+                limit,
+                super::events::ProcessEventQueryMode::Full,
+                Some(super::events::ProcessEventPageToken::new(
+                    process_ref.process_id.clone(),
+                    process_ref.incarnation,
+                    after_sequence,
+                    super::events::ProcessEventQueryMode::Full,
+                )),
+            )
+            .await?;
+        match outcome {
+            super::events::ProcessEventReadOutcome::Retained(super::events::ProcessEventPage {
+                events: super::events::ProcessEventPageEvents::Full(events),
+                more: super::events::ProcessEventPageMore::Complete,
+            }) => Ok(events),
+            super::events::ProcessEventReadOutcome::Retained(super::events::ProcessEventPage {
+                more: super::events::ProcessEventPageMore::More { .. },
+                ..
+            }) => Err(PluginError::Session(
+                "test fixture process history did not fit in one complete page".to_string(),
+            )),
+            super::events::ProcessEventReadOutcome::Retained(_) => {
+                unreachable!("full query returned lite page")
+            }
+            super::events::ProcessEventReadOutcome::NoLongerRetained(
+                super::events::ProcessEventHistoryRetention::Pruned {
+                    terminal_label,
+                    pruned_at_ms,
+                },
+            ) => Err(PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }),
+            super::events::ProcessEventReadOutcome::NoLongerRetained(
+                super::events::ProcessEventHistoryRetention::Retired {
+                    requested_incarnation,
+                    current_incarnation,
+                },
+            ) => Err(PluginError::ProcessIncarnationSuperseded {
+                process_id: process_ref.process_id.clone(),
+                requested_incarnation,
+                current_incarnation,
+            }),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T> ProcessEventLogTestSupport for T where T: ProcessEventLog + ?Sized {}
+
 /// A process registry together with its test-only probes: the registry type
 /// the conformance suites take. Blanket-implemented under the same gate as
 /// [`ProcessRegistryTestSupport`]; an `Arc<dyn ConformanceProcessRegistry>`

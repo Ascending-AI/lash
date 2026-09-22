@@ -1,8 +1,8 @@
 //! `process_events`: the append-only event log of one process incarnation.
 //!
-//! Every read of this table reports `event_json` and nothing else — the
-//! indexed columns exist to find a row, and the decoded event carries all of
-//! them — so the only projection wider than one column is the insert.
+//! Full page reads select `event_json`. Lite page reads select only the indexed
+//! ordering position and event type, so payload bytes never cross the database
+//! boundary when a host asks for metadata.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_events";
@@ -10,6 +10,9 @@ pub const TABLE: &str = "process_events";
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str =
     "process_id, process_incarnation, sequence, event_type, idempotency_key, event_json";
+
+/// Payload-free event-page projection.
+pub const LITE_PAGE_COLUMNS: &str = "sequence, event_type";
 
 crate::statements! {
     /// `process_events` statements both backends issue verbatim.
@@ -24,10 +27,15 @@ crate::statements! {
         /// has recorded none.
         select_max_sequence = "SELECT MAX(sequence) FROM process_events WHERE process_id = ?1";
 
-        /// Everything incarnation `?1` / `?2` recorded after sequence `?3`.
-        list_after_sequence = "SELECT event_json FROM process_events
+        /// At most `?4` full rows incarnation `?1` / `?2` recorded after `?3`.
+        page_full = "SELECT event_json FROM process_events
                  WHERE process_id = ?1 AND process_incarnation = ?2 AND sequence > ?3
-                 ORDER BY sequence ASC";
+                 ORDER BY sequence ASC LIMIT ?4";
+
+        /// The same bounded read without selecting `event_json`.
+        page_lite = "SELECT sequence, event_type FROM process_events
+                 WHERE process_id = ?1 AND process_incarnation = ?2 AND sequence > ?3
+                 ORDER BY sequence ASC LIMIT ?4";
 
         /// The last `?2` events of process `?1`, newest first. The caller
         /// reverses them; the descending order is what lets the primary key
@@ -51,5 +59,45 @@ crate::statements! {
                         process_id, process_incarnation, sequence, event_type, idempotency_key, event_json
                      )
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EventStatements;
+    use crate::{Dialect, SchemaTables, TableLayout};
+
+    const MAIN: TableLayout = TableLayout::new(&[SchemaTables::new("main", crate::TABLES)]);
+
+    #[test]
+    fn rendered_event_pages_pin_limit_and_payload_free_lite_projection() {
+        let sqlite = EventStatements::render(Dialect::sqlite(MAIN));
+        assert_eq!(
+            sqlite.page_full.sql(),
+            "SELECT event_json FROM main.process_events
+                 WHERE process_id = ?1 AND process_incarnation = ?2 AND sequence > ?3
+                 ORDER BY sequence ASC LIMIT ?4"
+        );
+        assert_eq!(
+            sqlite.page_lite.sql(),
+            "SELECT sequence, event_type FROM main.process_events
+                 WHERE process_id = ?1 AND process_incarnation = ?2 AND sequence > ?3
+                 ORDER BY sequence ASC LIMIT ?4"
+        );
+
+        let postgres = EventStatements::render(Dialect::postgres());
+        assert_eq!(
+            postgres.page_full.sql(),
+            "SELECT event_json FROM lash_process_events
+                 WHERE process_id = $1 AND process_incarnation = $2 AND sequence > $3
+                 ORDER BY sequence ASC LIMIT $4"
+        );
+        assert_eq!(
+            postgres.page_lite.sql(),
+            "SELECT sequence, event_type FROM lash_process_events
+                 WHERE process_id = $1 AND process_incarnation = $2 AND sequence > $3
+                 ORDER BY sequence ASC LIMIT $4"
+        );
+        assert!(!postgres.page_lite.sql().contains("event_json"));
     }
 }

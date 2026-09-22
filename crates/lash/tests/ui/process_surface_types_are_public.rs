@@ -21,18 +21,20 @@ use lash::process::{
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
     ProcessDefinitionValue, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessEventLog, ProcessEventSemantics, ProcessEventSemanticsSpec,
-    ProcessEventSink, ProcessEventType, ProcessExecutionConcurrencyError, ProcessExecutionContext,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessIncarnation, ProcessInput,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeases,
-    ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance,
-    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef, ProcessRegistrar,
-    ProcessRegistration, ProcessRegistry, ProcessRetention, ProcessRuntimeHost, ProcessService,
-    ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog,
+    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventPageToken,
+    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemantics,
+    ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType,
+    ProcessExecutionConcurrencyError, ProcessExecutionContext, ProcessExecutionEnvRef,
+    ProcessExecutionEnvSpec, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView,
+    ProcessIdentity, ProcessIncarnation, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
+    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter,
+    ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef,
+    ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRetention, ProcessRuntimeHost,
+    ProcessService, ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
     ProcessToolIntents, ProcessToolVisibilityFilter, ProcessValueSelector, ProcessWake,
     ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver,
@@ -44,5 +46,18 @@ use lash::process::{
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, process_wake_source_key,
     publish_process_execution_env, watch_process_registry, watch_process_registry_with_sink,
 };
+
+fn paged_events_signature_is_public(
+    processes: &Processes,
+    process_id: &lash::ProcessId,
+    continuation: Option<ProcessEventPageToken>,
+) {
+    let _future = processes.events(
+        process_id,
+        std::num::NonZeroUsize::new(64).unwrap(),
+        ProcessEventQueryMode::Lite,
+        continuation,
+    );
+}
 
 fn main() {}

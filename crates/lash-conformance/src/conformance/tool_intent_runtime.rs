@@ -1,3 +1,4 @@
+use crate::ProcessEventLogTestSupport as _;
 use crate::admit;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -238,7 +239,7 @@ pub async fn public_signal_intent_wakes_parked_process(
         crate::Resolution::Ok(serde_json::json!({"tier": "durable"}))
     );
     let events = registry
-        .events_after(&process_id, 0)
+        .full_event_window(&process_id, 0)
         .await
         .expect("read durable signal target events");
     assert_eq!(

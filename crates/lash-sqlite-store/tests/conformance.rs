@@ -121,19 +121,147 @@ use lash_conformance::{
 use lash_core::store::ConformanceSessionStoreFactory;
 use lash_core::{
     AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity, ProcessInput,
-    ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
-    ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
-    RecoveryContract, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionCommitStore,
-    SessionStoreFactory, TriggerStore,
+    ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventLog as _,
+    ProcessExecutionEnvStore, ProcessIdentity, ProcessInput, ProcessLifecycle as _,
+    ProcessListFilter, ProcessProvenance, ProcessQuery as _, ProcessRegistrar as _,
+    ProcessRegistration, ProcessRegistry, ProcessStatusFilter, RecoveryContract, Resolution,
+    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimePersistence, SessionCommitStore, SessionStoreFactory,
+    TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry,
     SqliteRuntimeEffectController, SqliteSessionStoreFactory, SqliteTriggerStore, Store,
 };
 use tempfile::TempDir;
+
+#[cfg(feature = "testing")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
+    use lash_core::ProcessRetention as _;
+
+    let dir = tempfile::tempdir().expect("process-event snapshot tempdir");
+    let path = dir.path().join("process-event-snapshot.db");
+    let sessions = dir.path().join("sessions");
+    let injector = lash_sqlite_store::testing::SqliteFaultInjector::default();
+    let reader = Arc::new(
+        SqliteProcessRegistry::open_with_fault_injector_for_testing(
+            &path,
+            &sessions,
+            injector.clone(),
+        )
+        .await
+        .expect("open paused process registry reader"),
+    );
+    let writer = Arc::new(
+        SqliteProcessRegistry::open(&path, &sessions)
+            .await
+            .expect("open competing process registry writer"),
+    );
+    let process_id = ProcessId::from("event-page-snapshot");
+    reader
+        .register_process(
+            ProcessRegistration::new(
+                process_id.clone(),
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryContract::ExternallyOwned,
+                ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "snapshot.tail".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+        )
+        .await
+        .expect("register snapshot process");
+    for sequence in 0..3 {
+        reader
+            .append_event(
+                &process_id,
+                ProcessEventAppendRequest::new(
+                    "snapshot.tail",
+                    serde_json::json!({ "sequence": sequence }),
+                ),
+            )
+            .await
+            .expect("append unread event tail");
+    }
+    let terminal = reader
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete snapshot process");
+    let first = reader
+        .event_page(
+            &process_id,
+            std::num::NonZeroUsize::MIN,
+            lash_core::ProcessEventQueryMode::Full,
+            None,
+        )
+        .await
+        .expect("read first event page");
+    let lash_core::ProcessEventReadOutcome::Retained(first) = first else {
+        panic!("new process history must be retained");
+    };
+    let lash_core::ProcessEventPageMore::More { continuation } = first.more else {
+        panic!("fixture must leave a nonempty unread tail");
+    };
+
+    let pause = injector.pause_process_event_page_after_identity();
+    let read_task = tokio::spawn({
+        let reader = Arc::clone(&reader);
+        let process_id = process_id.clone();
+        async move {
+            reader
+                .event_page(
+                    &process_id,
+                    std::num::NonZeroUsize::new(16).expect("non-zero page size"),
+                    lash_core::ProcessEventQueryMode::Full,
+                    Some(continuation),
+                )
+                .await
+        }
+    });
+    pause.wait_until_reached().await;
+    let prune = writer
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            lash_core::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune process through competing connection");
+    assert_eq!(prune.pruned_processes, 1);
+    pause.release();
+
+    let outcome = read_task
+        .await
+        .expect("join paused event-page read")
+        .expect("event-page read result");
+    assert!(
+        !matches!(
+            outcome,
+            lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
+                events: lash_core::ProcessEventPageEvents::Full(ref events),
+                more: lash_core::ProcessEventPageMore::Complete,
+            }) if events.is_empty()
+        ),
+        "a prune between identity lookup and page fetch must not become false empty completion: {outcome:?}"
+    );
+}
 
 #[path = "conformance/direct_turn_acceptance.rs"]
 mod direct_turn_acceptance;

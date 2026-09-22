@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::SessionCommitStore as _;
 use lash_core::ToolProvider as _;
 use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
@@ -1250,7 +1251,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         "session creation must not mint an edge the host did not name"
     );
     let observer_events = registry
-        .events_after(&ProcessId::from("named-process"), 0)
+        .full_event_window(&ProcessId::from("named-process"), 0)
         .await
         .expect("read observer audit events")
         .into_iter()

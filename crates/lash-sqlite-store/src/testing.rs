@@ -221,6 +221,7 @@ struct InjectorState {
     point_occurrences: [u64; 3],
     pause: Option<ArmedPause>,
     read_pause: Option<Arc<PauseState>>,
+    process_event_page_read_pause: Option<Arc<PauseState>>,
     write_transaction_ordinal: u64,
     observations: Vec<SqliteFaultObservation>,
 }
@@ -299,10 +300,30 @@ impl SqliteFaultInjector {
         SqliteReadPause { state }
     }
 
+    /// Pause the next process-event page between its identity/retention lookup
+    /// and event query.
+    pub fn pause_process_event_page_after_identity(&self) -> SqliteReadPause {
+        let state = Arc::new(PauseState::default());
+        self.lock_state().process_event_page_read_pause = Some(Arc::clone(&state));
+        SqliteReadPause { state }
+    }
+
     /// Reach the queued-work hydration seam, blocking the connection thread
     /// while a pause armed by `pause_queued_work_hydration` is outstanding.
     pub(crate) fn reach_queued_work_hydration(&self) {
         let Some(pause) = self.lock_state().read_pause.take() else {
+            return;
+        };
+        let mut progress = pause.state.lock_recover();
+        progress.reached_ordinal = Some(0);
+        pause.changed.notify_all();
+        while !progress.released {
+            progress = pause.changed.wait(progress).recover();
+        }
+    }
+
+    pub(crate) fn reach_process_event_page_after_identity(&self) {
+        let Some(pause) = self.lock_state().process_event_page_read_pause.take() else {
             return;
         };
         let mut progress = pause.state.lock_recover();

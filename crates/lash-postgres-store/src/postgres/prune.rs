@@ -48,7 +48,8 @@ pub(super) async fn prune_process_rows_tx(
 mod tests {
     use super::*;
     use lash_core::{
-        ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _,
+        ProcessRegistrar as _,
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -92,7 +93,7 @@ mod tests {
             .expect("complete rollback process");
         let events_before = serde_json::to_value(
             registry
-                .events_after(&process_id, 0)
+                .full_event_window(&process_id, 0)
                 .await
                 .expect("read events before divergent prune"),
         )
@@ -129,7 +130,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(
                 registry
-                    .events_after(&process_id, 0)
+                    .full_event_window(&process_id, 0)
                     .await
                     .expect("read events after divergent prune"),
             )

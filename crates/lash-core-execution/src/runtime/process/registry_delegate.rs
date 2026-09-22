@@ -204,21 +204,33 @@ macro_rules! delegate_process_event_log {
                 $event_hook
             }
 
-            async fn events_after(
+            async fn event_page(
                 &self,
                 process_id: &$crate::ProcessId,
-                after_sequence: u64,
-            ) -> Result<Vec<$crate::ProcessEvent>, $crate::PluginError> {
-                self.$inner.events_after(process_id, after_sequence).await
+                limit: std::num::NonZeroUsize,
+                mode: $crate::ProcessEventQueryMode,
+                continuation: Option<$crate::ProcessEventPageToken>,
+            ) -> Result<
+                $crate::ProcessEventReadOutcome<$crate::ProcessEventPage>,
+                $crate::PluginError,
+            > {
+                self.$inner
+                    .event_page(process_id, limit, mode, continuation)
+                    .await
             }
 
-            async fn events_after_ref(
+            async fn event_page_ref(
                 &self,
                 process_ref: &$crate::ProcessRef,
-                after_sequence: u64,
-            ) -> Result<Vec<$crate::ProcessEvent>, $crate::PluginError> {
+                limit: std::num::NonZeroUsize,
+                mode: $crate::ProcessEventQueryMode,
+                continuation: Option<$crate::ProcessEventPageToken>,
+            ) -> Result<
+                $crate::ProcessEventReadOutcome<$crate::ProcessEventPage>,
+                $crate::PluginError,
+            > {
                 self.$inner
-                    .events_after_ref(process_ref, after_sequence)
+                    .event_page_ref(process_ref, limit, mode, continuation)
                     .await
             }
 

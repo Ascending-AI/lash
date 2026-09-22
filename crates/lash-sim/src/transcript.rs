@@ -550,13 +550,15 @@ mod tests {
             "retargeted",
             "a retarget must settle its stale wake delivery as retargeted"
         );
-        let retarget_event = registry
-            .events_after(&ProcessId::from(process_id), 0)
-            .await
-            .expect("read process audit events")
-            .into_iter()
-            .find(|event| event.event_type == "process.subscription_retargeted")
-            .expect("retarget audit event");
+        let retarget_event = crate::runtime_boundaries::collect_process_events(
+            registry.as_ref(),
+            &ProcessId::from(process_id),
+        )
+        .await
+        .expect("read process audit events")
+        .into_iter()
+        .find(|event| event.event_type == "process.subscription_retargeted")
+        .expect("retarget audit event");
         assert_eq!(retarget_event.event_type, "process.subscription_retargeted");
 
         let terminal = registry

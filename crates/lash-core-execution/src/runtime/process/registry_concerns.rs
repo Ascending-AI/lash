@@ -17,7 +17,8 @@ use crate::{EffectHost, ExecutionScope};
 use super::ProcessCompletionOutcome;
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest,
+    ProcessEventAppendRequest, ProcessEventPage, ProcessEventPageToken, ProcessEventQueryMode,
+    ProcessEventReadOutcome,
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
@@ -406,19 +407,45 @@ pub trait ProcessEventLog: ProcessQuery {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
-    async fn events_after(
+    /// Read at most `limit` events from one exact process lifetime.
+    ///
+    /// `continuation` is opaque to hosts and must have been issued for the same
+    /// process id and projection mode. Implementations fetch at most one extra
+    /// row to determine whether another page exists.
+    async fn event_page(
         &self,
         process_id: &ProcessId,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError>;
+        limit: NonZeroUsize,
+        mode: ProcessEventQueryMode,
+        continuation: Option<ProcessEventPageToken>,
+    ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError>;
 
-    async fn events_after_ref(
+    async fn event_page_ref(
         &self,
         process_ref: &ProcessRef,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError> {
-        self.get_process_ref(process_ref).await?;
-        self.events_after(&process_ref.process_id, after_sequence)
+        limit: NonZeroUsize,
+        mode: ProcessEventQueryMode,
+        continuation: Option<ProcessEventPageToken>,
+    ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError> {
+        if let Some(token) = continuation.as_ref()
+            && (token.process_id() != process_ref.process_id
+                || token.process_incarnation() != process_ref.incarnation
+                || token.mode() != mode)
+        {
+            return Err(PluginError::Session(
+                "process event page token does not match the requested process reference and mode"
+                    .to_string(),
+            ));
+        }
+        let continuation = continuation.or_else(|| {
+            Some(ProcessEventPageToken::new(
+                process_ref.process_id.clone(),
+                process_ref.incarnation,
+                0,
+                mode,
+            ))
+        });
+        self.event_page(&process_ref.process_id, limit, mode, continuation)
             .await
     }
 
@@ -431,28 +458,14 @@ pub trait ProcessEventLog: ProcessQuery {
         process_id: &ProcessId,
         event_type: &str,
         up_to_sequence: u64,
-    ) -> Result<u64, PluginError> {
-        Ok(self
-            .events_after(process_id, 0)
-            .await?
-            .into_iter()
-            .filter(|event| event.sequence <= up_to_sequence && event.event_type == event_type)
-            .count() as u64)
-    }
+    ) -> Result<u64, PluginError>;
 
     async fn count_events_through_ref(
         &self,
         process_ref: &ProcessRef,
         event_type: &str,
         up_to_sequence: u64,
-    ) -> Result<u64, PluginError> {
-        Ok(self
-            .events_after_ref(process_ref, 0)
-            .await?
-            .into_iter()
-            .filter(|event| event.sequence <= up_to_sequence && event.event_type == event_type)
-            .count() as u64)
-    }
+    ) -> Result<u64, PluginError>;
 
     /// The most recent `limit` events, in ascending sequence order.
     ///
@@ -463,13 +476,7 @@ pub trait ProcessEventLog: ProcessQuery {
         &self,
         process_id: &ProcessId,
         limit: usize,
-    ) -> Result<Vec<ProcessEvent>, PluginError> {
-        let mut events = self.events_after(process_id, 0).await?;
-        if events.len() > limit {
-            events.drain(..events.len() - limit);
-        }
-        Ok(events)
-    }
+    ) -> Result<Vec<ProcessEvent>, PluginError>;
 }
 
 /// Durable execution lifecycle transitions.

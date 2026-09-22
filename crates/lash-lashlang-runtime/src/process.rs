@@ -611,6 +611,150 @@ struct LashlangProcessHost<'run> {
     cancellation: crate::ExecutionCancellation,
 }
 
+#[async_trait::async_trait]
+trait SignalWaitProcesses: Send + Sync {
+    async fn current_wait(&self) -> Result<Option<lash_core::WaitState>, lash_core::PluginError>;
+
+    async fn event_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core::ProcessEventPageToken>,
+    ) -> Result<
+        lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+        lash_core::PluginError,
+    >;
+
+    async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError>;
+}
+
+#[async_trait::async_trait]
+impl SignalWaitProcesses for lash_core::facade_support::ProcessEngineProcessContext {
+    async fn current_wait(&self) -> Result<Option<lash_core::WaitState>, lash_core::PluginError> {
+        Ok(self.record().await?.and_then(|record| record.wait))
+    }
+
+    async fn event_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core::ProcessEventPageToken>,
+    ) -> Result<
+        lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+        lash_core::PluginError,
+    > {
+        self.event_page(limit, lash_core::ProcessEventQueryMode::Full, continuation)
+            .await
+    }
+
+    async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError> {
+        self.set_wait(wait).await.map(|_| ())
+    }
+}
+
+enum SignalWaitSetupError {
+    Read(lash_core::PluginError),
+    Set(lash_core::PluginError),
+}
+
+async fn establish_signal_wait(
+    processes: &dyn SignalWaitProcesses,
+    process_id: &ProcessId,
+    name: String,
+    event_type: String,
+    key: String,
+    ordinal: u64,
+) -> Result<(), SignalWaitSetupError> {
+    let since_ms = wait_since_ms(processes, process_id, &key)
+        .await
+        .map_err(SignalWaitSetupError::Read)?;
+    let wait = lash_core::WaitState {
+        since_ms,
+        kind: lash_core::WaitKind::Signal {
+            name,
+            event_type,
+            key,
+            ordinal,
+        },
+    };
+    processes
+        .set_wait(wait)
+        .await
+        .map_err(SignalWaitSetupError::Set)?;
+    Ok(())
+}
+
+async fn wait_since_ms(
+    processes: &dyn SignalWaitProcesses,
+    process_id: &ProcessId,
+    key: &str,
+) -> Result<u64, lash_core::PluginError> {
+    if let Some(since_ms) = processes
+        .current_wait()
+        .await?
+        .and_then(|wait| match &wait.kind {
+            lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {
+                Some(wait.since_ms)
+            }
+            _ => None,
+        })
+    {
+        return Ok(since_ms);
+    }
+
+    let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
+    let mut continuation = None;
+    let mut matched_since_ms = None;
+    loop {
+        let outcome = processes.event_page(limit, continuation).await?;
+        let page = match outcome {
+            lash_core::ProcessEventReadOutcome::Retained(page) => page,
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Pruned {
+                    terminal_label,
+                    pruned_at_ms,
+                },
+            ) => {
+                return Err(lash_core::PluginError::ProcessNoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                });
+            }
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Retired {
+                    requested_incarnation,
+                    current_incarnation,
+                },
+            ) => {
+                return Err(lash_core::PluginError::ProcessIncarnationSuperseded {
+                    process_id: process_id.clone(),
+                    requested_incarnation,
+                    current_incarnation,
+                });
+            }
+        };
+        let lash_core::ProcessEventPageEvents::Full(events) = page.events else {
+            unreachable!("full process event query returned a lite page");
+        };
+        for event in events {
+            if event.event_type != "process.waiting" {
+                continue;
+            }
+            let Some(wait_value) = event.payload.get("wait") else {
+                continue;
+            };
+            if let Ok(wait) = serde_json::from_value::<lash_core::WaitState>(wait_value.clone())
+                && wait.key() == key
+            {
+                matched_since_ms = Some(wait.since_ms);
+            }
+        }
+        continuation = match page.more {
+            lash_core::ProcessEventPageMore::Complete => break,
+            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+        };
+    }
+    Ok(matched_since_ms.unwrap_or_else(lash_core::facade_support::current_epoch_ms))
+}
+
 type ProcessHostAbilityFuture<'a> =
     Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;
 
@@ -948,27 +1092,23 @@ impl LashlangProcessHost<'_> {
             &name,
             event_ordinal,
         );
-        let since_ms =
-            self.wait_since_ms(&key)
-                .await
-                .map_err(|error| LashlangHostError::ReadSignalWait {
-                    message: error.to_string(),
-                })?;
-        let wait = lash_core::WaitState {
-            since_ms,
-            kind: lash_core::WaitKind::Signal {
-                name: name.clone(),
-                event_type: event_type.clone(),
-                key: key.clone(),
-                ordinal: event_ordinal,
-            },
-        };
-        self.processes
-            .set_wait(wait.clone())
-            .await
-            .map_err(|error| LashlangHostError::SetSignalWait {
+        establish_signal_wait(
+            &self.processes,
+            &self.process_id,
+            name.clone(),
+            event_type,
+            key,
+            event_ordinal,
+        )
+        .await
+        .map_err(|error| match error {
+            SignalWaitSetupError::Read(error) => LashlangHostError::ReadSignalWait {
                 message: error.to_string(),
-            })?;
+            },
+            SignalWaitSetupError::Set(error) => LashlangHostError::SetSignalWait {
+                message: error.to_string(),
+            },
+        })?;
         let payload = self
             .ctx
             .await_process_signal_event(&self.process_id, &name, event_ordinal)
@@ -983,35 +1123,6 @@ impl LashlangProcessHost<'_> {
                 message: error.to_string(),
             })?;
         Ok(lashlang::from_json(payload))
-    }
-
-    async fn wait_since_ms(&self, key: &str) -> Result<u64, lash_core::PluginError> {
-        if let Some(since_ms) = self.processes.record().await?.and_then(|record| {
-            let wait = record.wait?;
-            match &wait.kind {
-                lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {
-                    Some(wait.since_ms)
-                }
-                _ => None,
-            }
-        }) {
-            return Ok(since_ms);
-        }
-
-        for event in self.processes.events_after(0).await?.into_iter().rev() {
-            if event.event_type != "process.waiting" {
-                continue;
-            }
-            let Some(wait_value) = event.payload.get("wait") else {
-                continue;
-            };
-            if let Ok(wait) = serde_json::from_value::<lash_core::WaitState>(wait_value.clone())
-                && wait.key() == key
-            {
-                return Ok(wait.since_ms);
-            }
-        }
-        Ok(lash_core::facade_support::current_epoch_ms())
     }
 
     fn perform_selected_ability<'a>(
@@ -1541,3 +1652,6 @@ pub use schema::lashlang_type_expr_schema;
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]
 mod segment_trace_tests;
+#[cfg(test)]
+#[path = "process/signal_wait_tests.rs"]
+mod signal_wait_tests;

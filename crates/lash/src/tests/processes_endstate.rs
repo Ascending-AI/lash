@@ -3,13 +3,16 @@ use super::*;
 use lashlang::testing::ast_builders as b;
 
 use lash_core::{
-    ProcessEngine as _, ProcessQuery as _, ProcessRetention as _, TestProcessRegistryWriteExt,
+    ProcessEngine as _, ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRetention as _,
+    TestProcessRegistryWriteExt,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
 use programs::{child_join_process, wait_signal_process};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+
+use event_pages::full_events;
 
 struct FailOnceReleaseEnvStore {
     inner: Arc<lash_core::InMemoryProcessExecutionEnvStore>,
@@ -1120,10 +1123,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
         waiting.originator,
         lash_core::ProcessOriginator::Host { .. }
     ));
-    let waiting_events = core
-        .processes()
-        .events(&ProcessId::from("sessionless-direct"), 0)
-        .await?;
+    let waiting_events = full_events(&core, &ProcessId::from("sessionless-direct")).await?;
     assert!(
         waiting_events
             .iter()
@@ -1203,7 +1203,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
         panic!("triggered process did not succeed: {output:#?}");
     };
     assert_eq!(value.to_json_value(), serde_json::json!({ "ok": true }));
-    let signal_events = core.processes().events(triggered_process_id, 0).await?;
+    let signal_events = registry.full_event_window(triggered_process_id, 0).await?;
     assert!(
         signal_events
             .iter()
@@ -1302,7 +1302,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         value.to_json_value(),
         serde_json::json!({ "delivered": true })
     );
-    let events = registry.events_after(process_id, 0).await?;
+    let events = registry.full_event_window(process_id, 0).await?;
 
     let session = core.session(session_id).open().await?;
     let observed = session.admin().processes().list_all().await?;
@@ -1414,8 +1414,7 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let still_waiting = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     assert_eq!(still_waiting.lifecycle, lash_core::ProcessStatus::Waiting);
     assert!(
-        core.processes()
-            .events(&ProcessId::from(process_id), 0)
+        full_events(&core, &ProcessId::from(process_id))
             .await?
             .iter()
             .all(|event| event.event_type != "signal.ready" && event.event_type != "signal.nope")
@@ -1563,10 +1562,7 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     );
 
     // The suspension history is on the event log: two waits, two resumes.
-    let events = core
-        .processes()
-        .events(&ProcessId::from(process_id), 0)
-        .await?;
+    let events = full_events(&core, &ProcessId::from(process_id)).await?;
     let waiting = events
         .iter()
         .filter(|event| event.event_type == "process.waiting")
@@ -1839,8 +1835,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         .await?;
     assert_eq!(wake_after_delete.event.event_type, "process.wake");
     assert!(
-        core.processes()
-            .events(&ProcessId::from(process_id), 0)
+        full_events(&core, &ProcessId::from(process_id))
             .await?
             .iter()
             .any(|event| event.payload["text"] == "wake after deleted session")
@@ -2498,6 +2493,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
 }
 
 mod artifact_cleanup_round4;
+mod event_pages;
 mod native_process_await;
 mod programs;
 mod recovery_dispositions;

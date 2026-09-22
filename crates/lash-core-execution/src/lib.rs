@@ -248,6 +248,9 @@ pub mod facade_support {
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
+    pub use crate::runtime::ObservedProcessEventLite;
+    pub use crate::runtime::ObservedProcessEventPage;
+    pub use crate::runtime::ObservedProcessEventReadOutcome;
     pub use crate::runtime::ObservedWorkItem;
     pub use crate::runtime::ObservedWorkItemState;
     pub use crate::runtime::OutputState;
@@ -720,6 +723,8 @@ pub(crate) use provider::{
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ConformanceProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
+pub use runtime::ProcessEventLogTestSupport;
+#[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessRegistryTestSupport;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestLocalProcessRegistry;
@@ -758,7 +763,10 @@ pub use runtime::{
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
     ProcessDefinitionValue, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
     ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog,
+    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
+    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventPageToken,
+    ProcessEventPageTokenStoreExt, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,

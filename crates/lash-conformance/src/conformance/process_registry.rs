@@ -3,6 +3,7 @@
 use lash_sansio::ProcessId;
 mod caller_departure;
 mod cancellation;
+mod event_paging;
 mod event_replay;
 mod external_ref;
 mod lifecycle;
@@ -11,8 +12,8 @@ mod registration;
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 pub use lifecycle::superseded_process_lease_cannot_release_or_complete;
 pub use registration::{
-    concurrent_identical_registrations_are_idempotent, registration_and_observers_are_atomic,
-    registration_reports_created_then_existing,
+    concurrent_identical_registrations_are_idempotent, process_registry_fresh_instances,
+    registration_and_observers_are_atomic, registration_reports_created_then_existing,
 };
 pub mod status_filters;
 mod turn_parent_end;
@@ -20,6 +21,7 @@ mod turn_parent_end;
 use super::process_change_horizon::changes_after_full_relist_if_required;
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 use crate::{
     PluginError, ProcessObserverBy, ProcessRecord, ProcessRef, ProjectionWatermark,
     TestProcessRegistryWriteExt,
@@ -44,17 +46,6 @@ fn settled_cancellation(message: &str) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
         crate::ToolCancellation::runtime(message),
     ))
-}
-
-/// The backend's maker hands every registry law its own registry handle rather
-/// than one shared instance.
-pub async fn process_registry_fresh_instances<F>(make: &F)
-where
-    F: Fn(&str) -> Arc<dyn crate::ConformanceProcessRegistry>,
-{
-    let first = make("fresh-instance-probe");
-    let second = make("fresh-instance-probe");
-    assert_fresh_instances(&first, &second, "process_registry");
 }
 
 pub async fn process_registry_registration_contract(
@@ -489,6 +480,12 @@ pub async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn
     reused_process_ids_refuse_superseded_incarnations_for(registry, "raw").await;
 }
 
+pub async fn process_event_page_tokens_reject_out_of_range_sql_cursors(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    event_paging::assert_out_of_range_tokens_are_rejected(registry).await;
+}
+
 pub async fn watched_process_registry_reused_process_ids_refuse_superseded_incarnations(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -539,6 +536,7 @@ async fn reused_process_ids_refuse_superseded_incarnations_for(
         .expect("register second process incarnation");
     assert_ne!(first.incarnation, second.incarnation);
     let first_ref = ProcessRef::from_record(&first);
+    event_paging::assert_retired_history(&registry, &first_ref, &first, &second).await;
     for refusal in [
         registry
             .append_event_ref(
@@ -547,7 +545,10 @@ async fn reused_process_ids_refuse_superseded_incarnations_for(
             )
             .await
             .map(|_| ()),
-        registry.events_after_ref(&first_ref, 0).await.map(|_| ()),
+        registry
+            .full_event_window_ref(&first_ref, 0)
+            .await
+            .map(|_| ()),
         registry
             .count_events_through_ref(&first_ref, event_type, u64::MAX)
             .await
@@ -1218,7 +1219,7 @@ async fn assert_refold_matches_stored_projection(
     transition: &str,
 ) {
     let events = reader
-        .events_after(process_id, 0)
+        .full_event_window(process_id, 0)
         .await
         .expect("load refold event log");
     let stored = reader
@@ -1463,7 +1464,7 @@ pub async fn producer_terminal_status_must_match_materialized_outcome(
     );
     assert!(
         registry
-            .events_after(&process_id, 0)
+            .full_event_window(&process_id, 0)
             .await
             .expect("read events after rejected append")
             .is_empty(),
@@ -1939,7 +1940,7 @@ pub async fn observer_events_are_auditable_and_transfer_is_atomic(
             .expect("target observer added")
     );
     let event_types = registry
-        .events_after(&process_id, 0)
+        .full_event_window(&process_id, 0)
         .await
         .expect("observer audit log")
         .into_iter()
@@ -1996,7 +1997,7 @@ pub async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Pro
     }));
     assert!(
         registry
-            .events_after(&process_id, 0)
+            .full_event_window(&process_id, 0)
             .await
             .expect("retarget audit log")
             .iter()
@@ -2051,7 +2052,7 @@ pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessReg
     .expect("serialize before delete");
     let events_before = serde_json::to_vec(
         &registry
-            .events_after(&process_id, 0)
+            .full_event_window(&process_id, 0)
             .await
             .expect("read events before delete"),
     )
@@ -2074,15 +2075,15 @@ pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessReg
         before, after,
         "session delete changed lifecycle record bytes"
     );
-    let events_after = serde_json::to_vec(
+    let events_after_delete = serde_json::to_vec(
         &registry
-            .events_after(&process_id, 0)
+            .full_event_window(&process_id, 0)
             .await
             .expect("read events after delete"),
     )
     .expect("serialize events after delete");
     assert_eq!(
-        events_before, events_after,
+        events_before, events_after_delete,
         "session delete changed process event bytes"
     );
 }
@@ -2158,9 +2159,10 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(
-        registry.events_after(&process_id, 0).await,
+        registry.full_event_window(&process_id, 0).await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
+    event_paging::assert_pruned_history(&registry, &process_id, pruned_at_ms).await;
     // A pruned process has no row to hold authority over, so a lease claim must
     // read as the tombstone rather than resurrecting a lease (FIG-953).
     assert!(matches!(
@@ -2342,7 +2344,7 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
 
     // The transition is a durable event, so the fold reproduces it.
     let events = registry
-        .events_after(&process_id, 0)
+        .full_event_window(&process_id, 0)
         .await
         .expect("read caller-departure events");
     assert!(

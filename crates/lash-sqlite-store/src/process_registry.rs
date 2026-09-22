@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventPageTokenStoreExt as _;
 use lash_core::ProcessQuery as _;
 use lash_core::facade_support;
 use lash_sansio::ProcessId;
@@ -560,71 +561,165 @@ impl lash_core::ProcessEventLog for SqliteProcessRegistry {
         Ok(result)
     }
 
-    async fn events_after(
+    async fn event_page(
         &self,
         process_id: &ProcessId,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
+        limit: std::num::NonZeroUsize,
+        mode: lash_core::ProcessEventQueryMode,
+        continuation: Option<lash_core::ProcessEventPageToken>,
+    ) -> Result<
+        lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+        lash_core::PluginError,
+    > {
         let process_id = process_id.clone();
+        #[cfg(feature = "testing")]
+        let read_pause = self.conn.fault_injector();
         self.conn
-            .call(move |conn| {
+            .read(move |conn| {
                 Ok((|| {
-                    let record = Self::require_process_conn(conn, &process_id)?;
-                    let mut stmt = conn
-                        .prepare(process_sql().event.list_after_sequence.sql())
-                        .map_err(process_sqlite_error)?;
-                    let rows = stmt
-                        .query_map(
-                            params![
-                                process_id.as_str(),
-                                record.incarnation.registration_sequence() as i64,
-                                after_sequence as i64
-                            ],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .map_err(process_sqlite_error)?;
-                    let mut events = Vec::new();
-                    for row in rows {
-                        events.push(
-                            serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                                .map_err(process_decode_error)?,
-                        );
+                    if let Some(token) = continuation.as_ref() {
+                        if token.process_id() != process_id {
+                            return Err(lash_core::PluginError::Session(format!(
+                                "process event page token belongs to `{}`, not `{process_id}`",
+                                token.process_id()
+                            )));
+                        }
+                        if token.mode() != mode {
+                            return Err(lash_core::PluginError::Session(
+                                "process event page token projection does not match the requested mode"
+                                    .to_string(),
+                            ));
+                        }
                     }
-                    Ok(events)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
-    async fn events_after_ref(
-        &self,
-        process_ref: &ProcessRef,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
-        let process_ref = process_ref.clone();
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    Self::require_process_ref_conn(conn, &process_ref)?;
-                    let mut stmt = conn
-                        .prepare(process_sql().event.list_after_sequence.sql())
-                        .map_err(process_sqlite_error)?;
-                    let rows = stmt
-                        .query_map(
-                            params![
-                                process_ref.process_id.as_str(),
-                                process_ref.incarnation.registration_sequence() as i64,
-                                after_sequence as i64,
-                            ],
-                            |row| row.get::<_, String>(0),
+                    let record_result = match continuation.as_ref() {
+                        Some(token) => Self::require_process_ref_conn(
+                            conn,
+                            &ProcessRef::new(process_id.clone(), token.process_incarnation()),
+                        ),
+                        None => Self::require_process_conn(conn, &process_id),
+                    };
+                    let record = match record_result {
+                        Ok(record) => record,
+                        Err(lash_core::PluginError::ProcessNoLongerRetained {
+                            terminal_label,
+                            pruned_at_ms,
+                        }) => {
+                            return Ok(lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                                lash_core::ProcessEventHistoryRetention::Pruned {
+                                    terminal_label,
+                                    pruned_at_ms,
+                                },
+                            ));
+                        }
+                        Err(lash_core::PluginError::ProcessIncarnationSuperseded {
+                            requested_incarnation,
+                            current_incarnation,
+                            ..
+                        }) => {
+                            return Ok(lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                                lash_core::ProcessEventHistoryRetention::Retired {
+                                    requested_incarnation,
+                                    current_incarnation,
+                                },
+                            ));
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    #[cfg(feature = "testing")]
+                    if let Some(injector) = read_pause.as_ref() {
+                        injector.reach_process_event_page_after_identity();
+                    }
+                    let after_sequence = continuation
+                        .as_ref()
+                        .map_or(0, lash_core::ProcessEventPageToken::after_sequence);
+                    let after_sequence = i64::try_from(after_sequence).map_err(|_| {
+                        lash_core::PluginError::Session(
+                            "process event page token sequence exceeds the SQL cursor range"
+                                .to_string(),
                         )
-                        .map_err(process_sqlite_error)?;
-                    rows.map(|row| {
-                        serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                            .map_err(process_decode_error)
-                    })
-                    .collect()
+                    })?;
+                    let fetch_limit = limit
+                        .get()
+                        .checked_add(1)
+                        .and_then(|value| i64::try_from(value).ok())
+                        .ok_or_else(|| {
+                            lash_core::PluginError::Session(
+                                "process event page limit is too large".to_string(),
+                            )
+                        })?;
+                    let page = match mode {
+                        lash_core::ProcessEventQueryMode::Full => {
+                            let mut stmt = conn
+                                .prepare(process_sql().event.page_full.sql())
+                                .map_err(process_sqlite_error)?;
+                            let rows = stmt
+                                .query_map(
+                                    params![
+                                        process_id.as_str(),
+                                        record.incarnation.registration_sequence() as i64,
+                                        after_sequence,
+                                        fetch_limit,
+                                    ],
+                                    |row| row.get::<_, String>(0),
+                                )
+                                .map_err(process_sqlite_error)?;
+                            let mut events = Vec::new();
+                            for row in rows {
+                                events.push(
+                                    serde_json::from_str(&row.map_err(process_sqlite_error)?)
+                                        .map_err(process_decode_error)?,
+                                );
+                            }
+                            lash_core::ProcessEventPage::from_full_rows(
+                                events,
+                                limit,
+                                &process_id,
+                                record.incarnation,
+                            )
+                        }
+                        lash_core::ProcessEventQueryMode::Lite => {
+                            let mut stmt = conn
+                                .prepare(process_sql().event.page_lite.sql())
+                                .map_err(process_sqlite_error)?;
+                            let rows = stmt
+                                .query_map(
+                                    params![
+                                        process_id.as_str(),
+                                        record.incarnation.registration_sequence() as i64,
+                                        after_sequence,
+                                        fetch_limit,
+                                    ],
+                                    |row| {
+                                        Ok(lash_core::ProcessEventLite {
+                                            sequence: plugin_u64_from_sql(
+                                                "ProcessEventLite",
+                                                "sequence",
+                                                row.get(0)?,
+                                            )
+                                            .map_err(|error| {
+                                                rusqlite::Error::FromSqlConversionFailure(
+                                                    0,
+                                                    rusqlite::types::Type::Integer,
+                                                    Box::new(error),
+                                                )
+                                            })?,
+                                            event_type: row.get(1)?,
+                                        })
+                                    },
+                                )
+                                .map_err(process_sqlite_error)?;
+                            let events = rows
+                                .map(|row| row.map_err(process_sqlite_error))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            lash_core::ProcessEventPage::from_lite_rows(
+                                events,
+                                limit,
+                                &process_id,
+                                record.incarnation,
+                            )
+                        }
+                    };
+                    Ok(lash_core::ProcessEventReadOutcome::Retained(page))
                 })())
             })
             .await

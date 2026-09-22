@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::{
-    ProcessEventLog as _, ProcessObserverRegistry as _, ProcessRetention as _,
-    ProcessWakeOutbox as _,
+    ProcessEventLog as _, ProcessEventLogTestSupport as _, ProcessObserverRegistry as _,
+    ProcessRetention as _, ProcessWakeOutbox as _,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -1099,7 +1099,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         vec!["fork-selective-process"]
     );
     let event_count_before = registry
-        .events_after(&ProcessId::from("fork-selective-process"), 0)
+        .full_event_window(&ProcessId::from("fork-selective-process"), 0)
         .await
         .expect("read observer audit before duplicate apply")
         .len();
@@ -1113,7 +1113,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .expect("reapply fork observer");
     assert_eq!(
         registry
-            .events_after(&ProcessId::from("fork-selective-process"), 0)
+            .full_event_window(&ProcessId::from("fork-selective-process"), 0)
             .await
             .expect("read observer audit after duplicate apply")
             .len(),
@@ -1329,7 +1329,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         "open must publish the observer edge left pending by a create crash"
     );
     let observer_event_count = registry
-        .events_after(&ProcessId::from(process_id), 0)
+        .full_event_window(&ProcessId::from(process_id), 0)
         .await?
         .into_iter()
         .filter(|event| event.event_type == "process.observer_added")
@@ -1341,7 +1341,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     core.session(session_id).open().await?;
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(process_id), 0)
+            .full_event_window(&ProcessId::from(process_id), 0)
             .await?
             .into_iter()
             .filter(|event| event.event_type == "process.observer_added")
@@ -1466,7 +1466,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
         assert!(meta.pending_observer_intents.is_empty());
 
         let create_events = registry
-            .events_after(&create_process_id, 0)
+            .full_event_window(&create_process_id, 0)
             .await?
             .into_iter()
             .filter(|event| event.event_type == "process.observer_added")
@@ -1480,7 +1480,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
             })
         );
         let fork_events = registry
-            .events_after(&fork_process_id, 0)
+            .full_event_window(&fork_process_id, 0)
             .await?
             .into_iter()
             .filter(|event| event.event_type == "process.observer_added")

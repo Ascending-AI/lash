@@ -6,6 +6,7 @@ use super::contracts::{
     assert_no_duplicate_label_step, assert_session_turn_child_graph,
     assert_successful_agent_scenario,
 };
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::llm::types::LlmUsage;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -622,7 +623,7 @@ async fn assert_session_process_admission_contract(
                 process.id
             );
             let events = registry
-                .events_after(&process.id, 0)
+                .full_event_window(&process.id, 0)
                 .await
                 .expect("load observer-visible process lifecycle events");
             let first_started = events
@@ -1084,7 +1085,10 @@ finish(result.answer);"#,
         );
         assert_all_processes_terminal(&final_process_list);
         let process_id = final_process_list[0].process_id.clone();
-        let process_events = runtime.core.processes().events(&process_id, 0).await?;
+        let process_events = runtime
+            .process_registry
+            .full_event_window(&process_id, 0)
+            .await?;
         assert!(
             process_events.iter().any(|event| {
                 event.event_type == "process.yield"

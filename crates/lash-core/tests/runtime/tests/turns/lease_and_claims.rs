@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 
 #[path = "lease_and_claims/acceptance_window.rs"]
 mod acceptance_window;
@@ -1783,7 +1784,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
     assert_eq!(tool_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         registry
-            .events_after(&ProcessId::from("cas-survivor-intent-target"), 0)
+            .full_event_window(&ProcessId::from("cas-survivor-intent-target"), 0)
             .await
             .expect("read committed pre-CAS intent")
             .iter()
@@ -1847,7 +1848,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
     );
     assert_eq!(
         registry
-            .events_after(&ProcessId::from("cas-survivor-intent-target"), 0)
+            .full_event_window(&ProcessId::from("cas-survivor-intent-target"), 0)
             .await
             .expect("read intent after CAS loss")
             .iter()

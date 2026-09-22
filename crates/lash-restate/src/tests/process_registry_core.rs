@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 
 #[tokio::test]
 pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
@@ -951,7 +952,7 @@ finish(await handle);
         .stable_hash()
         .expect("signal command envelope hash");
     let first_intent_events = process_registry
-        .events_after(&ProcessId::from("restate-recorded-intent-target"), 0)
+        .full_event_window(&ProcessId::from("restate-recorded-intent-target"), 0)
         .await
         .expect("read the first recorded-intent event set")
         .into_iter()
@@ -1071,7 +1072,7 @@ finish(await handle);
         "the redriven process-command frame must be byte-identical"
     );
     let replayed_intent_events = process_registry
-        .events_after(&ProcessId::from("restate-recorded-intent-target"), 0)
+        .full_event_window(&ProcessId::from("restate-recorded-intent-target"), 0)
         .await
         .expect("read redriven recorded-intent events")
         .into_iter()

@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 
 /// Race-free control geometry for the FIG-1293 signal path: the target is
 /// worker-owned (`Rerunnable`), but this focused host deliberately installs no
@@ -113,7 +114,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
         "the focused law installs no worker, so scheduler timing cannot alter the event sequence"
     );
     let events = registry
-        .events_after(&ProcessId::from("pg-public-intent-target"), 0)
+        .full_event_window(&ProcessId::from("pg-public-intent-target"), 0)
         .await
         .expect("read Rerunnable target events");
     assert_eq!(

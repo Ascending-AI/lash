@@ -50,6 +50,49 @@ fn process_event_old_system_time_json_is_rejected() {
 }
 
 #[test]
+fn process_event_page_token_round_trips_as_an_opaque_string() {
+    let token = ProcessEventPageToken::new(
+        ProcessId::from("opaque-token-process"),
+        ProcessIncarnation::from_registration_sequence(7),
+        41,
+        ProcessEventQueryMode::Lite,
+    );
+    let encoded = serde_json::to_string(&token).expect("encode page token");
+    assert!(encoded.starts_with("\"process-event-page:v1:"));
+    assert!(!encoded.contains("opaque-token-process"));
+    assert_eq!(format!("{token:?}"), "ProcessEventPageToken(..)");
+    assert_eq!(
+        serde_json::from_str::<ProcessEventPageToken>(&encoded).expect("decode page token"),
+        token
+    );
+}
+
+#[test]
+fn process_event_page_token_rejects_non_ascii_hex_without_panicking() {
+    let encoded = r#""process-event-page:v1:éé""#;
+
+    assert!(serde_json::from_str::<ProcessEventPageToken>(encoded).is_err());
+}
+
+#[test]
+fn process_event_page_token_rejects_sequences_outside_the_sql_range() {
+    for after_sequence in [i64::MAX as u64 + 1, u64::MAX] {
+        let encoded = serde_json::to_string(&ProcessEventPageToken::new(
+            ProcessId::from("out-of-range-token-process"),
+            ProcessIncarnation::from_registration_sequence(7),
+            after_sequence,
+            ProcessEventQueryMode::Full,
+        ))
+        .expect("encode out-of-range page token");
+
+        assert!(
+            serde_json::from_str::<ProcessEventPageToken>(&encoded).is_err(),
+            "sequence {after_sequence} must not decode into a SQL-backed cursor"
+        );
+    }
+}
+
+#[test]
 fn process_wake_input_from_event_payload_prefers_text_field() {
     let payload = serde_json::json!({
         "text": "ready",
@@ -524,7 +567,7 @@ async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
     // (c) ...and yet nothing reading the journal can tell: the event is the
     // same event, semantics included.
     let journal = registry
-        .events_after(&process_id, 0)
+        .full_event_window(&process_id, 0)
         .await
         .expect("read the process journal");
     let appended = journal
@@ -698,7 +741,7 @@ async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
     let registry = TestLocalProcessRegistry::default();
     let (old_ref, _) = register_successor(&registry, &ProcessId::from("reused-event-cursor")).await;
 
-    let result = registry.events_after_ref(&old_ref, 0).await;
+    let result = registry.full_event_window_ref(&old_ref, 0).await;
 
     assert!(
         matches!(
@@ -706,6 +749,87 @@ async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
             Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
         ),
         "old event cursor must refuse the successor, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn event_page_tokens_bind_process_incarnation_and_query_mode() {
+    let registry = TestLocalProcessRegistry::default();
+    let first_id = ProcessId::from("event-page-token-first");
+    let first = registry
+        .register_process(registration(&first_id))
+        .await
+        .expect("register first token process");
+    let second_id = ProcessId::from("event-page-token-second");
+    registry
+        .register_process(registration(&second_id))
+        .await
+        .expect("register second token process");
+    let limit = std::num::NonZeroUsize::new(1).expect("non-zero page size");
+
+    let wrong_process = registry
+        .event_page(
+            &second_id,
+            limit,
+            ProcessEventQueryMode::Full,
+            Some(ProcessEventPageToken::new(
+                first_id.clone(),
+                first.incarnation,
+                0,
+                ProcessEventQueryMode::Full,
+            )),
+        )
+        .await;
+    assert!(
+        matches!(wrong_process, Err(crate::PluginError::Session(ref message)) if message.contains("belongs to")),
+        "a token for another process must be refused, got {wrong_process:?}"
+    );
+
+    let wrong_mode = registry
+        .event_page(
+            &first_id,
+            limit,
+            ProcessEventQueryMode::Lite,
+            Some(ProcessEventPageToken::new(
+                first_id.clone(),
+                first.incarnation,
+                0,
+                ProcessEventQueryMode::Full,
+            )),
+        )
+        .await;
+    assert!(
+        matches!(wrong_mode, Err(crate::PluginError::Session(ref message)) if message.contains("projection")),
+        "a token for another query mode must be refused, got {wrong_mode:?}"
+    );
+
+    let retired = registry
+        .event_page(
+            &first_id,
+            limit,
+            ProcessEventQueryMode::Full,
+            Some(ProcessEventPageToken::new(
+                first_id.clone(),
+                ProcessIncarnation::from_registration_sequence(
+                    first.incarnation.registration_sequence() + 1,
+                ),
+                0,
+                ProcessEventQueryMode::Full,
+            )),
+        )
+        .await
+        .expect("incarnation mismatch is a typed read outcome");
+    assert!(
+        matches!(
+            retired,
+            ProcessEventReadOutcome::NoLongerRetained(
+                ProcessEventHistoryRetention::Retired {
+                    current_incarnation,
+                    ..
+                }
+            ) if current_incarnation == first.incarnation
+        ),
+        "a token for another incarnation must report retired history, got {retired:?}"
     );
 }
 
@@ -983,14 +1107,14 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
         .expect("observe from remaining");
     let sole_events = serde_json::to_vec(
         &registry
-            .events_after(&ProcessId::from("sole"), 0)
+            .full_event_window(&ProcessId::from("sole"), 0)
             .await
             .expect("sole events before delete"),
     )
     .expect("serialize sole events");
     let shared_events = serde_json::to_vec(
         &registry
-            .events_after(&ProcessId::from("shared"), 0)
+            .full_event_window(&ProcessId::from("shared"), 0)
             .await
             .expect("shared events before delete"),
     )
@@ -1032,7 +1156,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     assert_eq!(
         serde_json::to_vec(
             &registry
-                .events_after(&ProcessId::from("sole"), 0)
+                .full_event_window(&ProcessId::from("sole"), 0)
                 .await
                 .expect("sole events")
         )
@@ -1042,7 +1166,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     assert_eq!(
         serde_json::to_vec(
             &registry
-                .events_after(&ProcessId::from("shared"), 0)
+                .full_event_window(&ProcessId::from("shared"), 0)
                 .await
                 .expect("shared events")
         )

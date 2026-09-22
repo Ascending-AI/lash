@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::TurnFailureCode;
 
 use lashlang::LashlangArtifactStore as _;
@@ -581,7 +582,7 @@ pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_ad
     );
     assert_eq!(
         registry
-            .events_after(&record.id, 0)
+            .full_event_window(&record.id, 0)
             .await
             .expect("read cancellation events")
             .iter()
@@ -721,7 +722,7 @@ pub(super) async fn restate_cancel_replay_refuses_incompatible_journal_payloads(
         );
         assert_eq!(
             registry
-                .events_after(&record.id, 0)
+                .full_event_window(&record.id, 0)
                 .await
                 .expect("read cancellation history")
                 .iter()
@@ -1846,7 +1847,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         &[None, Some(continuation)]
     );
     let events = registry
-        .events_after(&ProcessId::from("segmented-durable"), 0)
+        .full_event_window(&ProcessId::from("segmented-durable"), 0)
         .await
         .expect("process events");
     assert_eq!(
@@ -2096,7 +2097,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
         );
         assert_eq!(
             registry
-                .events_after(&ProcessId::from(process_id), 0)
+                .full_event_window(&ProcessId::from(process_id), 0)
                 .await
                 .expect("matrix events")
                 .iter()

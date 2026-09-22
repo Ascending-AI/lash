@@ -747,7 +747,9 @@ pub mod process {
         ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore,
         ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
         ProcessDefinitionValue, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
-        ProcessEventAppendRequest, ProcessEventLog, ProcessEventType, ProcessExecutionContext,
+        ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog,
+        ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventPageToken,
+        ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventType, ProcessExecutionContext,
         ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView,
         ProcessIdentity, ProcessIncarnation, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
         ProcessLeaseCompletion, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
@@ -761,19 +763,23 @@ pub mod process {
         ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
         ProjectionWatermark, RecoveryContract, SessionScope, WatchedRegistry,
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
-        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
-        facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionIntake,
-        facade_support::ProcessAdmissionReport, facade_support::ProcessChangeHub,
-        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
-        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
-        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::ProcessWorkerFault, facade_support::SessionScopeId,
-        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
+        facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
+        facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
+        facade_support::ObservedWorkItemState, facade_support::ProcessAdmissionDeferred,
+        facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
+        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
+        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
+        facade_support::ProcessWake, facade_support::ProcessWorkObserver,
+        facade_support::ProcessWorkSnapshot, facade_support::ProcessWorkerFault,
+        facade_support::SessionScopeId, facade_support::watch_process_registry,
+        facade_support::watch_process_registry_with_sink,
     };
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).
     #[cfg(any(test, feature = "testing"))]
-    pub use lash_core::{ConformanceProcessRegistry, ProcessRegistryTestSupport};
+    pub use lash_core::{
+        ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
+    };
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
     /// projected into the wake input ([`ProcessValueSelector`]).

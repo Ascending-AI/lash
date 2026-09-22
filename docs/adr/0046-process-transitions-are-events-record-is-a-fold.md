@@ -194,7 +194,7 @@ registration, lifecycle transition, signal, cancellation request, terminal
 outcome, replay, and failed append, folding the complete event log from the
 registration base must equal the stored record field-for-field.
 
-External consumers of `events_after` observe additive reserved event kinds,
+External consumers of `event_page` observe additive reserved event kinds,
 including lifecycle transitions, observer audit events, and subscription
 retargets. Consumers must ignore unknown event kinds so future runtime facts
 remain additive. The best-effort `ProcessEventSink` emits these events as well;

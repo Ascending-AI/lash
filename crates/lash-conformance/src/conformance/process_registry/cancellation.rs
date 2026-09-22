@@ -1,4 +1,5 @@
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 use lash_core::{CancelOrigin, CancelRequest};
 use pretty_assertions::assert_eq;
 
@@ -122,7 +123,7 @@ pub(super) async fn contract(
     ));
     assert_eq!(
         reader
-            .events_after_ref(&process_ref, 0)
+            .full_event_window_ref(&process_ref, 0)
             .await
             .expect("read event tail")
             .len(),
@@ -240,7 +241,7 @@ pub(super) async fn contract(
     );
     assert_eq!(read(&reader, &unrun_ref).await, failed);
     let events = reader
-        .events_after_ref(&unrun_ref, 0)
+        .full_event_window_ref(&unrun_ref, 0)
         .await
         .expect("read failed-start event");
     assert_eq!(events.len(), 1);

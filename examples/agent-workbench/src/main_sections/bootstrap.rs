@@ -195,7 +195,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // Best-effort freshness feed for appended process events (ADR 0017). The
     // sink is a freshness overlay on the durable event log, never truth: no
     // delivery guarantee, and a consumer needing completeness reconciles from
-    // `events_after`. Terminal observation still rides `await_terminal`.
+    // paged event reads. Terminal observation still rides `await_terminal`.
     // `emit` must be fast, so it only hands each event to this channel; the
     // consumer task does the projection off the append path.
     let (host_shutdown, _) = tokio::sync::watch::channel(false);

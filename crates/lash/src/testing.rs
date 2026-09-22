@@ -67,6 +67,7 @@ pub mod conformance {
 
     #[cfg(feature = "rlm")]
     mod rlm {
+        use lash_core::ProcessEventLogTestSupport as _;
         use std::sync::Arc;
         use std::time::Duration;
 
@@ -674,7 +675,7 @@ finish("registered");
 
             await_success(&registry, &process_id).await;
             let wake_sequence = registry
-                .events_after(&process_id, 0)
+                .full_event_window(&process_id, 0)
                 .await
                 .expect("trigger-triggered process events")
                 .into_iter()

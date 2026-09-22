@@ -100,13 +100,24 @@ pub struct ObservedProcess {
     pub child_session_id: Option<SessionId>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ObservedProcessEvent {
     pub sequence: u64,
     pub event_type: String,
     pub occurred_at_ms: u64,
     pub payload: serde_json::Value,
 }
+
+/// Payload-free event metadata for list and timeline views.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedProcessEventLite {
+    pub sequence: u64,
+    pub event_type: String,
+}
+
+pub type ObservedProcessEventPage =
+    super::ProcessEventPage<ObservedProcessEvent, ObservedProcessEventLite>;
+pub type ObservedProcessEventReadOutcome = super::ProcessEventReadOutcome<ObservedProcessEventPage>;
 
 impl ObservedWorkItem {
     /// The observed process's identity kind.
@@ -154,7 +165,7 @@ impl ObservedWorkItem {
 
 /// Per-item event tail in session snapshots. Snapshots are polled by
 /// docks/UIs, so per-poll cost must stay bounded instead of growing with a
-/// process's full event history; detail views page through `events_after`
+/// process's full event history; detail views page through `event_page`
 /// with a cursor.
 pub const SNAPSHOT_EVENT_TAIL: usize = 32;
 const SNAPSHOT_READ_ATTEMPTS: usize = 2;
@@ -345,18 +356,46 @@ impl ProcessWorkObserver {
             .collect())
     }
 
-    pub async fn events_after(
+    pub async fn event_page(
         &self,
         process_id: &ProcessId,
-        after_sequence: u64,
-    ) -> Result<Vec<ObservedProcessEvent>, PluginError> {
-        Ok(self
+        limit: std::num::NonZeroUsize,
+        mode: super::ProcessEventQueryMode,
+        continuation: Option<super::ProcessEventPageToken>,
+    ) -> Result<ObservedProcessEventReadOutcome, PluginError> {
+        let outcome = self
             .registry
-            .events_after(process_id, after_sequence)
-            .await?
-            .into_iter()
-            .map(ObservedProcessEvent::from)
-            .collect())
+            .event_page(process_id, limit, mode, continuation)
+            .await?;
+        Ok(match outcome {
+            super::ProcessEventReadOutcome::NoLongerRetained(retention) => {
+                super::ProcessEventReadOutcome::NoLongerRetained(retention)
+            }
+            super::ProcessEventReadOutcome::Retained(page) => {
+                let events = match page.events {
+                    super::ProcessEventPageEvents::Full(events) => {
+                        super::ProcessEventPageEvents::Full(
+                            events.into_iter().map(ObservedProcessEvent::from).collect(),
+                        )
+                    }
+                    super::ProcessEventPageEvents::Lite(events) => {
+                        super::ProcessEventPageEvents::Lite(
+                            events
+                                .into_iter()
+                                .map(|event| ObservedProcessEventLite {
+                                    sequence: event.sequence,
+                                    event_type: event.event_type,
+                                })
+                                .collect(),
+                        )
+                    }
+                };
+                super::ProcessEventReadOutcome::Retained(super::ProcessEventPage {
+                    events,
+                    more: page.more,
+                })
+            }
+        })
     }
 }
 

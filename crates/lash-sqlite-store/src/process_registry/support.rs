@@ -362,6 +362,30 @@ impl SqliteProcessRegistry {
         Self::open_configured(path, clock, session_store_root.into()).await
     }
 
+    #[cfg(feature = "testing")]
+    pub async fn open_with_fault_injector_for_testing(
+        path: &Path,
+        session_store_root: impl Into<PathBuf>,
+        fault_injector: crate::testing::SqliteFaultInjector,
+    ) -> tokio_rusqlite::Result<Self> {
+        let conn = SqliteConnection::open_with_fault_injector(
+            path,
+            SqliteConnectionPolicy::default(),
+            Some(fault_injector),
+        )
+        .await?;
+        ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
+        apply_pragmas(&conn, StoreBacking::File).await?;
+        Ok(Self {
+            conn,
+            clock: Arc::new(lash_core::facade_support::SystemClock),
+            process_session_store_root: Some(session_store_root.into()),
+            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            path: Some(path.to_path_buf()),
+        })
+    }
+
     async fn open_configured(
         path: &Path,
         clock: Arc<dyn lash_core::Clock>,

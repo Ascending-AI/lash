@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessQuery as _, ProcessRegistrar as _};
+use lash_core::{ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRegistrar as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -114,7 +114,7 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
     );
     assert_eq!(
         registry
-            .events_after(&process_id, 0)
+            .full_event_window(&process_id, 0)
             .await
             .expect("read PostgreSQL ingress events")
             .iter()
@@ -200,7 +200,7 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         )
     };
     let cancel_events = registry
-        .events_after(&process_id, 0)
+        .full_event_window(&process_id, 0)
         .await
         .expect("read PostgreSQL cancel ingress events")
         .into_iter()

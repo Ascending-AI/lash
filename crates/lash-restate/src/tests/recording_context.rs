@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::controller::context::ProcessWorkflowStartFailure;
+use lash_core::ProcessEventLogTestSupport as _;
 
 mod helpers;
 use helpers::{TestTurnCancelWakeStep, test_turn_cancel_wake_step};
@@ -1003,7 +1004,7 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
     .await
     .expect("feed checked-in corpus bytes through the Restate endpoint");
     let signal_events = registry
-        .events_after(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
+        .full_event_window(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
         .await
         .expect("read corpus signal outcomes")
         .into_iter()
@@ -1161,7 +1162,7 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
         );
         assert_eq!(
             registry
-                .events_after(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
+                .full_event_window(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
                 .await
                 .expect("read the refusal witness target")
                 .into_iter()
@@ -1356,7 +1357,7 @@ pub(super) async fn pre_cutover_process_reference_payload_refuses_before_effect_
     .expect("capture the current process-reference RunCommand");
     assert_eq!(
         capture_registry
-            .events_after(&ProcessId::from(PROCESS_REFERENCE_REPLAY_TARGET), 0)
+            .full_event_window(&ProcessId::from(PROCESS_REFERENCE_REPLAY_TARGET), 0)
             .await
             .expect("read the captured witness effect")
             .into_iter()
@@ -1410,7 +1411,7 @@ pub(super) async fn pre_cutover_process_reference_payload_refuses_before_effect_
     );
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS_REFERENCE_REPLAY_TARGET), 0)
+            .full_event_window(&ProcessId::from(PROCESS_REFERENCE_REPLAY_TARGET), 0)
             .await
             .expect("read the isolated refusal witness target")
             .into_iter()

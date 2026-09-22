@@ -222,13 +222,18 @@ impl ProcessEngineProcessContext {
             .await
     }
 
-    pub async fn events_after(
+    pub async fn event_page(
         &self,
-        after_sequence: u64,
-    ) -> Result<Vec<super::events::ProcessEvent>, crate::PluginError> {
+        limit: std::num::NonZeroUsize,
+        mode: super::events::ProcessEventQueryMode,
+        continuation: Option<super::events::ProcessEventPageToken>,
+    ) -> Result<
+        super::events::ProcessEventReadOutcome<super::events::ProcessEventPage>,
+        crate::PluginError,
+    > {
         self.process_work
             .registry()
-            .events_after(&self.process_id, after_sequence)
+            .event_page(&self.process_id, limit, mode, continuation)
             .await
     }
 

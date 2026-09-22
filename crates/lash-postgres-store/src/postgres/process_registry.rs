@@ -1,4 +1,5 @@
 use crate::*;
+use lash_core::ProcessEventPageTokenStoreExt as _;
 use lash_core::ProcessQuery as _;
 use lash_core::facade_support::{self, registry_transitions::ProcessLeaseReclaimDecision};
 use lash_sansio::ProcessId;
@@ -775,48 +776,138 @@ impl lash_core::ProcessEventLog for PostgresProcessRegistry {
         Ok(result)
     }
 
-    async fn events_after(
+    async fn event_page(
         &self,
         process_id: &ProcessId,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError> {
-        let record = self
-            .get_process(process_id)
-            .await?
-            .ok_or_else(|| registry_transitions::unknown_process(process_id))?;
-        let rows = sqlx::query(process_sql().event.list_after_sequence.sql())
-            .bind(process_id.as_str())
-            .bind(record.incarnation.registration_sequence() as i64)
-            .bind(after_sequence as i64)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        let mut events = Vec::new();
-        for row in rows {
-            let json: String = row.get(0);
-            events.push(serde_json::from_str(&json).map_err(process_decode_error)?);
+        limit: std::num::NonZeroUsize,
+        mode: lash_core::ProcessEventQueryMode,
+        continuation: Option<lash_core::ProcessEventPageToken>,
+    ) -> Result<lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>, PluginError> {
+        if let Some(token) = continuation.as_ref() {
+            if token.process_id() != process_id {
+                return Err(PluginError::Session(format!(
+                    "process event page token belongs to `{}`, not `{process_id}`",
+                    token.process_id()
+                )));
+            }
+            if token.mode() != mode {
+                return Err(PluginError::Session(
+                    "process event page token projection does not match the requested mode"
+                        .to_string(),
+                ));
+            }
         }
-        Ok(events)
-    }
-
-    async fn events_after_ref(
-        &self,
-        process_ref: &ProcessRef,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        require_process_ref_tx(&mut tx, process_ref).await?;
-        let rows = sqlx::query(process_sql().event.list_after_sequence.sql())
-            .bind(process_ref.process_id.as_str())
-            .bind(process_ref.incarnation.registration_sequence() as i64)
-            .bind(after_sequence as i64)
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+        let record_result = match continuation.as_ref() {
+            Some(token) => {
+                require_process_ref_tx(
+                    &mut tx,
+                    &ProcessRef::new(process_id.clone(), token.process_incarnation()),
+                )
+                .await
+            }
+            None => require_process_tx(&mut tx, process_id).await,
+        };
+        let record = match record_result {
+            Ok(record) => record,
+            Err(PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                tx.rollback().await.map_err(plugin_sqlx_error)?;
+                return Ok(lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_core::ProcessEventHistoryRetention::Pruned {
+                        terminal_label,
+                        pruned_at_ms,
+                    },
+                ));
+            }
+            Err(PluginError::ProcessIncarnationSuperseded {
+                requested_incarnation,
+                current_incarnation,
+                ..
+            }) => {
+                tx.rollback().await.map_err(plugin_sqlx_error)?;
+                return Ok(lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_core::ProcessEventHistoryRetention::Retired {
+                        requested_incarnation,
+                        current_incarnation,
+                    },
+                ));
+            }
+            Err(error) => {
+                tx.rollback().await.map_err(plugin_sqlx_error)?;
+                return Err(error);
+            }
+        };
+        let after_sequence = continuation
+            .as_ref()
+            .map_or(0, lash_core::ProcessEventPageToken::after_sequence);
+        let after_sequence = i64::try_from(after_sequence).map_err(|_| {
+            PluginError::Session(
+                "process event page token sequence exceeds the SQL cursor range".into(),
+            )
+        })?;
+        let fetch_limit = limit
+            .get()
+            .checked_add(1)
+            .and_then(|value| i64::try_from(value).ok())
+            .ok_or_else(|| PluginError::Session("process event page limit is too large".into()))?;
+        let page = match mode {
+            lash_core::ProcessEventQueryMode::Full => {
+                let rows = sqlx::query(process_sql().event.page_full.sql())
+                    .bind(process_id.as_str())
+                    .bind(record.incarnation.registration_sequence() as i64)
+                    .bind(after_sequence)
+                    .bind(fetch_limit)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(plugin_sqlx_error)?;
+                let events = rows
+                    .into_iter()
+                    .map(|row| {
+                        serde_json::from_str(&row.get::<String, _>(0)).map_err(process_decode_error)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                lash_core::ProcessEventPage::from_full_rows(
+                    events,
+                    limit,
+                    process_id,
+                    record.incarnation,
+                )
+            }
+            lash_core::ProcessEventQueryMode::Lite => {
+                let rows = sqlx::query(process_sql().event.page_lite.sql())
+                    .bind(process_id.as_str())
+                    .bind(record.incarnation.registration_sequence() as i64)
+                    .bind(after_sequence)
+                    .bind(fetch_limit)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(plugin_sqlx_error)?;
+                let events = rows
+                    .into_iter()
+                    .map(|row| {
+                        Ok(lash_core::ProcessEventLite {
+                            sequence: plugin_u64_from_sql(
+                                "ProcessEventLite",
+                                "sequence",
+                                row.get(0),
+                            )?,
+                            event_type: row.get(1),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, PluginError>>()?;
+                lash_core::ProcessEventPage::from_lite_rows(
+                    events,
+                    limit,
+                    process_id,
+                    record.incarnation,
+                )
+            }
+        };
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        rows.into_iter()
-            .map(|row| serde_json::from_str(&row.get::<String, _>(0)).map_err(process_decode_error))
-            .collect()
+        Ok(lash_core::ProcessEventReadOutcome::Retained(page))
     }
 
     async fn count_events_through(

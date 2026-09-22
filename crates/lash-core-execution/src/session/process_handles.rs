@@ -383,7 +383,7 @@ mod tests {
         PreparedToolCall, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall, ToolProvider,
     };
     use crate::{
-        ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
         ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
     };
     use lash_sansio::sync::MutexExt as _;
@@ -930,7 +930,7 @@ mod tests {
         assert_eq!(record.tool, "signal_process");
         let events = host
             .process_registry
-            .events_after(&ProcessId::from("target-process"), 0)
+            .full_event_window(&ProcessId::from("target-process"), 0)
             .await
             .expect("list events");
         assert!(

@@ -1248,13 +1248,28 @@ impl SessionProcessAdmin {
     pub async fn events(
         &self,
         process_id: &ProcessId,
-        after_sequence: u64,
-    ) -> Result<Vec<lash_core::facade_support::ObservedProcessEvent>> {
+        limit: std::num::NonZeroUsize,
+        mode: lash_core::ProcessEventQueryMode,
+        continuation: Option<lash_core::ProcessEventPageToken>,
+    ) -> Result<lash_core::facade_support::ObservedProcessEventReadOutcome> {
         let Some(observer) = self.control.process_observer_opt() else {
-            return Ok(Vec::new());
+            let events = match mode {
+                lash_core::ProcessEventQueryMode::Full => {
+                    lash_core::ProcessEventPageEvents::Full(Vec::new())
+                }
+                lash_core::ProcessEventQueryMode::Lite => {
+                    lash_core::ProcessEventPageEvents::Lite(Vec::new())
+                }
+            };
+            return Ok(lash_core::ProcessEventReadOutcome::Retained(
+                lash_core::ProcessEventPage {
+                    events,
+                    more: lash_core::ProcessEventPageMore::Complete,
+                },
+            ));
         };
         observer
-            .events_after(process_id, after_sequence)
+            .event_page(process_id, limit, mode, continuation)
             .await
             .map_err(Into::into)
     }

@@ -1,6 +1,7 @@
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::ProcessEventLogTestSupport as _;
 
 /// The full-lane group: seven children, one per driver lane.
 #[expect(
@@ -299,7 +300,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
     );
     let events = scenario
         .registry
-        .events_after(&scenario.intent_target, 0)
+        .full_event_window(&scenario.intent_target, 0)
         .await
         .expect("the intent target's event log reads");
     assert_eq!(

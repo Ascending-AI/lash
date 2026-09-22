@@ -1,6 +1,17 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+/// The backend's maker hands every registry law its own registry handle rather
+/// than one shared instance.
+pub async fn process_registry_fresh_instances<F>(make: &F)
+where
+    F: Fn(&str) -> Arc<dyn crate::ConformanceProcessRegistry>,
+{
+    let first = make("fresh-instance-probe");
+    let second = make("fresh-instance-probe");
+    assert_fresh_instances(&first, &second, "process_registry");
+}
+
 /// FIG-2964: registration reports whether *this* call created the row.
 ///
 /// Registration is idempotent by fingerprint on every tier: an exact repeat

@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessQuery as _, ProcessToolIntents as _};
+use lash_core::{ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessToolIntents as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -942,7 +942,9 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
         first_outcome,
         lash_core::ToolIntentExecutionOutcome::Executed { .. }
     ));
-    let events = registry.events_after(&ProcessId::from(PROCESS), 0).await?;
+    let events = registry
+        .full_event_window(&ProcessId::from(PROCESS), 0)
+        .await?;
     assert_eq!(
         events
             .iter()
@@ -988,7 +990,7 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
     ));
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1033,7 +1035,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     ));
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1043,7 +1045,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     );
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
@@ -1089,7 +1091,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
     ));
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1134,7 +1136,7 @@ async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result
     ));
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1266,7 +1268,7 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
     let mut realized = 0;
     for target in [targets[0], targets[1], PROCESS] {
         let count = registry
-            .events_after(&ProcessId::from(target), 0)
+            .full_event_window(&ProcessId::from(target), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
@@ -1326,7 +1328,7 @@ async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted(
     ));
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1386,7 +1388,7 @@ async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handle
     );
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
@@ -1424,7 +1426,7 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     ));
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1457,7 +1459,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     ));
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1660,7 +1662,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1685,7 +1687,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 1);
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
