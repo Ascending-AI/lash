@@ -2224,12 +2224,12 @@ def verify_resolution(metadata: dict) -> int:
             tree = [
                 os.environ.get("KILN_REAL_CARGO", "cargo"),
                 "tree",
+                "--color=never",
                 "-p",
                 command.package,
                 "-e",
                 "normal",
                 "--locked",
-                "--no-dedupe",
                 "--prefix",
                 "none",
                 "--format",
@@ -2247,6 +2247,7 @@ def verify_resolution(metadata: dict) -> int:
                 if "|" not in line:
                     continue
                 package, features = line.split("|", 1)
+                features = features.removesuffix(" (*)")
                 name = package.split()[0]
                 if name in members:
                     theirs.setdefault(name, set()).update(
