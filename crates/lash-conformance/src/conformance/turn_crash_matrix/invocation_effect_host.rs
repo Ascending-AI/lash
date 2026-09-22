@@ -124,4 +124,14 @@ impl crate::EffectHost for InvocationEffectHost {
     ) -> Result<crate::ScopedEffectController<'run>, crate::RuntimeError> {
         crate::ScopedEffectController::shared(Arc::clone(&self.inner), scope)
     }
+
+    /// The turn driver registers its live opener only against a lendable
+    /// controller; without this the recovered turn's tool children would name
+    /// an opener no resolver on this host is running.
+    fn scoped_static(
+        &self,
+        scope: crate::AdmittedScope,
+    ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
+        crate::ScopedEffectController::shared(Arc::clone(&self.inner), scope).map(Some)
+    }
 }
