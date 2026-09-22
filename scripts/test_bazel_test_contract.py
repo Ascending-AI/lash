@@ -1188,5 +1188,30 @@ class FocusedClippyVerdicts(unittest.TestCase):
             self.assertEqual(["--", "//crate:lib"], arguments[-2:])
             self.assertFalse(any(arg.startswith("--build_event_json_file=") for arg in arguments))
 
+class CargoResolutionTests(unittest.TestCase):
+    def test_repeated_tree_markers_preserve_features_and_still_reject_drift(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+
+        plan = {"lane": [{"commands": [["cargo", "check", "-p", "example"]]}]}
+        for features, output, expected in (
+            (["enabled"], "example v1.0.0|enabled\nexample v1.0.0|enabled (*)\n", 0),
+            ([], "example v1.0.0|\nexample v1.0.0| (*)\n", 0),
+            (["enabled"], "example v1.0.0|changed\nexample v1.0.0|changed (*)\n", 1),
+        ):
+            with self.subTest(features=features, expected=expected), \
+                    patch.object(generator.feature_variants.Workspace, "from_metadata", return_value=SimpleNamespace(packages={"example": None})), \
+                    patch.object(generator, "feature_coverage_plan", return_value=plan), \
+                    patch.object(generator.feature_variants, "resolve_request", return_value=SimpleNamespace(sorted_features=lambda: {"example": features})), \
+                    patch.object(generator.subprocess, "run", return_value=SimpleNamespace(stdout=output)), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(generator.verify_resolution({}), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
