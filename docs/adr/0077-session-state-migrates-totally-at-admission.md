@@ -91,10 +91,15 @@ as source state or written in the target format after the advance.
 
 ### Record counters remain codec discriminators
 
-The checkpoint-manifest `2`, checkpoint-component encoding `2`, session-head
-`4`, process-wake `1`, and protocol-turn-options `1` counters remain. They
-identify the local envelope or body codec used by a converter and continue to
-detect corrupt or impossible mixtures. `session_state_version` instead says
+The checkpoint-manifest, checkpoint-component encoding, session-head,
+process-wake, and protocol-turn-options counters remain. Their current values
+are not restated here: `scripts/versioned-surfaces.toml` is the registry of
+every durable format version, the format manifest (`lash::formats`) reports
+the values a build writes, and `scripts/check_format_registry.py` holds the two
+in agreement. Each counter is an exact-generation fence: a reader refuses a
+record stamped with any other value, older or newer. The counters identify the
+local envelope or body codec used by a converter and continue to detect corrupt
+or impossible mixtures. `session_state_version` instead says
 that the complete mutable recovery unit has passed one semantic compatibility
 boundary. Neither number can replace the other.
 
@@ -112,9 +117,10 @@ declared legacy meaning (`GenerationOptions::default()`). The same step audits
 queued session commands and declares unchanged old command payloads
 tolerate-old where their existing representation already has identical
 meaning. The session version does not absorb the head counter. The immutable
-node-body generation remains a separate forward-reader concern and is owed a
-bump only by an actual node-body shape change, not merely because a head-only
-type shares its source file.
+node-body generation is a separate exact-generation fence
+(`SESSION_NODE_BODY_SCHEMA_VERSION`) and is owed a bump only by an actual
+node-body shape change, not merely because a head-only type shares its source
+file.
 
 ### Converter registry and source-shape enforcement
 
@@ -200,10 +206,13 @@ This decision does not create a universal storage version:
 
 - Store DDL retains its creation/open-time transactional migration or exact
   refusal policy. Session converters never alter physical schema.
-- Immutable graph-node bodies retain tolerate-old/refuse-newer reads and are
-  never rewritten by admission.
-- Engine journals retain tolerate-old replay under FIG-1139 and FIG-1140 and
-  are never rewritten by the Lash session store.
+- Immutable graph-node bodies are fenced at one exact generation: a body
+  stamped with any other `SESSION_NODE_BODY_SCHEMA_VERSION`, older or newer, is
+  refused. Admission never rewrites them.
+- Engine journals carry their own exact format counters (the tool-effect,
+  Restate journal, and durable-wait surfaces in the registry) and are refused,
+  not reinterpreted, under any other value. The Lash session store never
+  rewrites them.
 - VM, RLM, and artifact executable state remains exact-pin plus drain.
 - Wire compatibility remains negotiation and refusal, never storage migration.
 

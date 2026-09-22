@@ -21,6 +21,14 @@
 //!
 //! # What is *not* here
 //!
+//! The registry this table is checked against is
+//! `scripts/versioned-surfaces.toml`: every version-shaped constant in the
+//! repository is a registered surface there or an exclusion with a stated
+//! reason, and every registered surface either names its row here or says why
+//! it has none. `scripts/check_format_registry.py` fails CI when the two
+//! disagree, which is what keeps the exhaustiveness claim above true. The
+//! exclusions fall into these classes:
+//!
 //! - **Store schema versions.** SQLite's four `user_version` stamps and
 //!   PostgreSQL's component stamp belong to their backends, version on their
 //!   own cadence, and are read from the deployment rather than from the build.
@@ -28,30 +36,51 @@
 //!   [`StorePreflight`](crate::persistence::StorePreflight) instead.
 //! - **Wire protocol versions.** `REMOTE_PROTOCOL_VERSION` and the trace
 //!   schema version gate a live peer or a reader, not parked durable bytes.
+//! - **Hash-domain family tags.** A `*_FAMILY_VERSION` (and the frame-key and
+//!   journal-identity tags spelled differently) names the preimage family of a
+//!   content-addressed identity. It is a component of the identity, not a
+//!   stamp any reader compares.
 //!
 //! # Feature gating is honest, not incidental
 //!
 //! The Lashlang VM and RLM formats exist only when the `rlm` feature is on,
-//! because the crates that define them are optional dependencies. A build
-//! without `rlm` writes none of those formats, so [`durable_formats`] does not
-//! list them. Module artifacts are different: their durable surface and
+//! and the Restate journal and object-state formats only when the `restate`
+//! feature is on, because the crates that define them are optional
+//! dependencies. A build without a feature writes none of its formats, so
+//! [`durable_formats`] does not list them. Module artifacts are different: their durable surface and
 //! semantic identity are owned by non-optional `lash-sansio`, so the format is
 //! listed in every build even when the optional verifier is absent.
 
+pub use lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 pub use lash_core::store::{
-    CHECKPOINT_COMPONENT_ENCODING_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
-    SESSION_HEAD_META_SCHEMA_VERSION,
+    APPEND_REQUEST_IDENTITY_ENCODING_VERSION, CHECKPOINT_COMPONENT_ENCODING_VERSION,
+    CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION, CURRENT_SESSION_STATE_VERSION,
+    RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
+    SESSION_HEAD_META_SCHEMA_VERSION, USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
 };
-pub use lash_core::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, SESSION_NODE_BODY_SCHEMA_VERSION};
+pub use lash_core::{
+    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+    PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, SESSION_NODE_BODY_SCHEMA_VERSION,
+    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION, TOOL_PRESENTATION_VERSION,
+    TOOL_SETTLEMENT_VERSION,
+};
 #[cfg(feature = "rlm")]
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
 #[cfg(feature = "rlm")]
-pub use lash_protocol_rlm::RLM_SNAPSHOT_VERSION;
-pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
+pub use lash_protocol_rlm::{
+    NATIVE_DRIVER_STATE_VERSION, NATIVE_TRANSPORT_VERSION, RLM_SNAPSHOT_VERSION,
+};
+#[cfg(feature = "restate")]
+pub use lash_restate::{
+    DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION,
+    PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+};
+pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
 #[cfg(feature = "rlm")]
 pub use lashlang::{
     BYTECODE_FORMAT_VERSION, HEAP_SIZE_SCHEDULE_VERSION, LASHLANG_SNAPSHOT_VERSION,
     LASHLANG_VM_ABI_VERSION, VM_CONTINUATION_FORMAT_VERSION, WORKFLOW_GRAPH_SCHEMA_VERSION,
+    WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
 };
 
 /// One durable format whose version decides whether stored bytes open under
@@ -73,6 +102,35 @@ pub enum DurableFormat {
     ProcessWakeDelivery,
     /// The persisted JSON body of a session-graph node.
     SessionNodeBody,
+    /// The session-state generation marker admission compares before any
+    /// mutable session payload is read (ADR 0077).
+    SessionStateGeneration,
+    /// The persisted protocol-specific turn-options envelope.
+    ProtocolTurnOptions,
+    /// The versioned typed parent scope persisted beside a ledger row's index
+    /// projection.
+    ParentScopeStoragePayload,
+    /// The persisted process lease record.
+    ProcessLease,
+    /// The identity bytes a retried append request must reproduce. Identity,
+    /// not a stored stamp — see [`FormatProbe::IdentityOnly`].
+    AppendRequestIdentity,
+    /// The identity encoding of a record-config semantic-boundary request.
+    RecordConfigRequestIdentity,
+    /// The identity encoding of a create-session semantic-boundary request.
+    CreateSessionRequestIdentity,
+    /// The identity encoding of a usage-ledger semantic-boundary request.
+    UsageLedgerRequestIdentity,
+    /// The retained tool-child request of a durable effect group.
+    ToolChildRequest,
+    /// The semantic settlement a tool child journals on its outcome.
+    ToolSettlement,
+    /// The facts one atomic tool attempt journals with its outcome.
+    ToolAttemptCapture,
+    /// The journaled presentation record of one tool result.
+    ToolPresentation,
+    /// The serialized sans-IO turn checkpoint.
+    TurnCheckpoint,
     /// Compiled Lashlang bytecode. Identity-checked rather than
     /// version-compared — see [`FormatProbe::IdentityOnly`].
     Bytecode,
@@ -89,6 +147,21 @@ pub enum DurableFormat {
     /// The serialized workflow-graph contract a persisted graph projection
     /// carries.
     WorkflowGraphSchema,
+    /// The optional workflow type-facet projection a persisted graph carries.
+    WorkflowTypeFacet,
+    /// The native RLM driver state parked in the protocol driver-state slot.
+    NativeRlmDriverState,
+    /// The native RLM provider-call and repair envelopes recorded in session
+    /// history.
+    NativeRlmTransport,
+    /// The Restate durable-wait nested workflow request journaled by a
+    /// Restate deployment.
+    RestateDurableWaitRequest,
+    /// The identity epoch a Restate durable-wait index stamps into its object
+    /// state.
+    RestateDurableWaitIndexEpoch,
+    /// The Restate-journaled process-command admission payload.
+    RestateProcessCommandJournal,
     /// The Lashlang VM ABI this build implements. Never persisted — see
     /// [`FormatProbe::NotPersisted`].
     VmAbi,
@@ -104,6 +177,19 @@ impl DurableFormat {
             DurableFormat::SessionHeadMeta => "session head meta",
             DurableFormat::ProcessWakeDelivery => "process wake delivery",
             DurableFormat::SessionNodeBody => "session node body",
+            DurableFormat::SessionStateGeneration => "session state generation",
+            DurableFormat::ProtocolTurnOptions => "protocol turn options",
+            DurableFormat::ParentScopeStoragePayload => "parent scope storage payload",
+            DurableFormat::ProcessLease => "process lease",
+            DurableFormat::AppendRequestIdentity => "append request identity",
+            DurableFormat::RecordConfigRequestIdentity => "record-config request identity",
+            DurableFormat::CreateSessionRequestIdentity => "create-session request identity",
+            DurableFormat::UsageLedgerRequestIdentity => "usage-ledger request identity",
+            DurableFormat::ToolChildRequest => "tool child request",
+            DurableFormat::ToolSettlement => "tool settlement",
+            DurableFormat::ToolAttemptCapture => "tool attempt capture",
+            DurableFormat::ToolPresentation => "tool presentation",
+            DurableFormat::TurnCheckpoint => "turn checkpoint",
             DurableFormat::Bytecode => "bytecode",
             DurableFormat::VmContinuation => "VM continuation",
             DurableFormat::LashlangSnapshot => "Lashlang snapshot",
@@ -111,6 +197,12 @@ impl DurableFormat {
             DurableFormat::LashlangSegmentHandover => "Lashlang segment handover",
             DurableFormat::RlmSnapshotEnvelope => "RLM snapshot envelope",
             DurableFormat::WorkflowGraphSchema => "workflow graph schema",
+            DurableFormat::WorkflowTypeFacet => "workflow type facet",
+            DurableFormat::NativeRlmDriverState => "native RLM driver state",
+            DurableFormat::NativeRlmTransport => "native RLM transport",
+            DurableFormat::RestateDurableWaitRequest => "Restate durable-wait request",
+            DurableFormat::RestateDurableWaitIndexEpoch => "Restate durable-wait index epoch",
+            DurableFormat::RestateProcessCommandJournal => "Restate process-command journal",
             DurableFormat::VmAbi => "Lashlang VM ABI",
         }
     }
@@ -173,8 +265,9 @@ pub struct DurableFormatEntry {
 /// Every durable format this build writes, with the version it writes.
 ///
 /// The order is stable and report-shaped: store-owned formats first, then the
-/// language substrate, then the protocol envelope above it, so a rendered
-/// report reads outward from the store.
+/// language substrate, then the protocol envelope above it, then the Restate
+/// adapter's journal and object state, so a rendered report reads outward from
+/// the store.
 pub fn durable_formats() -> &'static [DurableFormatEntry] {
     &[
         DurableFormatEntry {
@@ -217,6 +310,97 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
             version: FormatVersion::Counter(SESSION_NODE_BODY_SCHEMA_VERSION),
             owning_crate: "lash-core",
             constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::SessionStateGeneration,
+            version: FormatVersion::Counter(CURRENT_SESSION_STATE_VERSION),
+            owning_crate: "lash-core",
+            constant: "CURRENT_SESSION_STATE_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ProtocolTurnOptions,
+            version: FormatVersion::Counter(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION),
+            owning_crate: "lash-core",
+            constant: "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ParentScopeStoragePayload,
+            version: FormatVersion::Counter(PARENT_SCOPE_STORAGE_PAYLOAD_VERSION as u32),
+            owning_crate: "lash-core",
+            constant: "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ProcessLease,
+            version: FormatVersion::Counter(PROCESS_LEASE_SCHEMA_VERSION),
+            owning_crate: "lash-core",
+            constant: "PROCESS_LEASE_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::AppendRequestIdentity,
+            version: FormatVersion::Counter(APPEND_REQUEST_IDENTITY_ENCODING_VERSION),
+            owning_crate: "lash-core",
+            constant: "APPEND_REQUEST_IDENTITY_ENCODING_VERSION",
+            probe: FormatProbe::IdentityOnly,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::RecordConfigRequestIdentity,
+            version: FormatVersion::Counter(RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION),
+            owning_crate: "lash-core",
+            constant: "RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION",
+            probe: FormatProbe::IdentityOnly,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::CreateSessionRequestIdentity,
+            version: FormatVersion::Counter(CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION),
+            owning_crate: "lash-core",
+            constant: "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION",
+            probe: FormatProbe::IdentityOnly,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::UsageLedgerRequestIdentity,
+            version: FormatVersion::Counter(USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION),
+            owning_crate: "lash-core",
+            constant: "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION",
+            probe: FormatProbe::IdentityOnly,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ToolChildRequest,
+            version: FormatVersion::Counter(TOOL_CHILD_REQUEST_VERSION as u32),
+            owning_crate: "lash-core",
+            constant: "TOOL_CHILD_REQUEST_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ToolSettlement,
+            version: FormatVersion::Counter(TOOL_SETTLEMENT_VERSION as u32),
+            owning_crate: "lash-core",
+            constant: "TOOL_SETTLEMENT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ToolAttemptCapture,
+            version: FormatVersion::Counter(TOOL_ATTEMPT_CAPTURE_VERSION as u32),
+            owning_crate: "lash-core",
+            constant: "TOOL_ATTEMPT_CAPTURE_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ToolPresentation,
+            version: FormatVersion::Counter(TOOL_PRESENTATION_VERSION as u32),
+            owning_crate: "lash-core",
+            constant: "TOOL_PRESENTATION_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::TurnCheckpoint,
+            version: FormatVersion::Counter(TURN_CHECKPOINT_SCHEMA_VERSION),
+            owning_crate: "lash-sansio",
+            constant: "TURN_CHECKPOINT_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]
@@ -277,11 +461,59 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
         },
         #[cfg(feature = "rlm")]
         DurableFormatEntry {
+            format: DurableFormat::WorkflowTypeFacet,
+            version: FormatVersion::Counter(WORKFLOW_TYPE_FACET_SCHEMA_VERSION),
+            owning_crate: "lashlang",
+            constant: "WORKFLOW_TYPE_FACET_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "rlm")]
+        DurableFormatEntry {
+            format: DurableFormat::NativeRlmDriverState,
+            version: FormatVersion::Counter(NATIVE_DRIVER_STATE_VERSION),
+            owning_crate: "lash-protocol-rlm",
+            constant: "NATIVE_DRIVER_STATE_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "rlm")]
+        DurableFormatEntry {
+            format: DurableFormat::NativeRlmTransport,
+            version: FormatVersion::Counter(NATIVE_TRANSPORT_VERSION),
+            owning_crate: "lash-protocol-rlm",
+            constant: "NATIVE_TRANSPORT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "rlm")]
+        DurableFormatEntry {
             format: DurableFormat::VmAbi,
             version: FormatVersion::Identity(LASHLANG_VM_ABI_VERSION),
             owning_crate: "lashlang",
             constant: "LASHLANG_VM_ABI_VERSION",
             probe: FormatProbe::NotPersisted,
+        },
+        #[cfg(feature = "restate")]
+        DurableFormatEntry {
+            format: DurableFormat::RestateDurableWaitRequest,
+            version: FormatVersion::Counter(DURABLE_WAIT_REQUEST_VERSION as u32),
+            owning_crate: "lash-restate",
+            constant: "DURABLE_WAIT_REQUEST_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "restate")]
+        DurableFormatEntry {
+            format: DurableFormat::RestateDurableWaitIndexEpoch,
+            version: FormatVersion::Counter(DURABLE_WAIT_INDEX_IDENTITY_EPOCH as u32),
+            owning_crate: "lash-restate",
+            constant: "DURABLE_WAIT_INDEX_IDENTITY_EPOCH",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "restate")]
+        DurableFormatEntry {
+            format: DurableFormat::RestateProcessCommandJournal,
+            version: FormatVersion::Counter(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION),
+            owning_crate: "lash-restate",
+            constant: "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION",
+            probe: FormatProbe::Comparable,
         },
     ]
 }
@@ -289,7 +521,8 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
 /// The manifest row for one format, when this build carries it.
 ///
 /// `None` means the format is not part of this build — the Lashlang and RLM
-/// rows are absent without the `rlm` feature — which is a different answer from
+/// rows are absent without the `rlm` feature and the Restate rows without
+/// `restate` — which is a different answer from
 /// "version zero" and is reported as such.
 pub fn durable_format(format: DurableFormat) -> Option<&'static DurableFormatEntry> {
     durable_formats()

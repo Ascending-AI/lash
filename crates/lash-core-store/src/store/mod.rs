@@ -64,8 +64,8 @@ pub use claim_plan::{
 };
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
-    OperationId, RuntimeCommitReceiptDecision, decide_runtime_commit_receipt,
-    derive_history_node_id,
+    APPEND_REQUEST_IDENTITY_ENCODING_VERSION, OperationId, RuntimeCommitReceiptDecision,
+    decide_runtime_commit_receipt, derive_history_node_id,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{
@@ -117,6 +117,11 @@ pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
     RuntimeCommitPlan, RuntimeCommitPlanner, RuntimeCommitReceiptRecord, RuntimeCommitReceiptWrite,
     RuntimeCommitReplay,
+};
+pub use semantic_boundary::{
+    CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
+    RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
+    USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
 };
 pub use session_execution_lease::{
     LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,

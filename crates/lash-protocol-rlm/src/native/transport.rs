@@ -5,7 +5,9 @@ use lash_core::{Part, PartKind, SessionHistoryRecord};
 use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent};
 use lash_sansio::TurnId;
 
-const NATIVE_TRANSPORT_VERSION: u32 = 1;
+/// Schema version of the native RLM provider-call and repair envelopes
+/// recorded in session history.
+pub const NATIVE_TRANSPORT_VERSION: u32 = 1;
 
 const PHASE: &str = "native_transport";
 

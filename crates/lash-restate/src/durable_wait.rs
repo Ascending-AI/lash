@@ -132,7 +132,10 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// decoder rejects the version-1 field instead of silently granting a fresh
 /// relative timeout after a worker replacement.
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
-pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 6;
+/// Identity epoch the durable-wait index stamps into its object state; an
+/// object holding another epoch, or pre-cutover state with none, is refused at
+/// open with a drain-and-recreate instruction.
+pub const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 6;
 const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";

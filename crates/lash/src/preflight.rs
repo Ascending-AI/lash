@@ -44,8 +44,7 @@
 //!
 //! Every report carries [`PreflightReport::not_scanned`], including a clean one.
 //! [`PreflightMode::Summary`] deliberately skips the per-session blob walk, and
-//! two of the durable formats have no surface a bounded walk can enumerate at
-//! all. A preflight's worst failure mode is a silent cap — a walk that stopped
+//! many durable formats have no surface a bounded walk can enumerate at all. A preflight's worst failure mode is a silent cap — a walk that stopped
 //! early and published what it managed to see as if it were everything — so the
 //! list is part of the answer rather than a footnote to it.
 
@@ -220,6 +219,38 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: one row per graph node, each body refused at decode rather \
              than at rest",
         ),
+        DurableFormat::SessionStateGeneration => SurfaceRelation::Unwalkable(
+            "no bounded surface: one marker per session, refused at admission rather than at rest",
+        ),
+        DurableFormat::ProtocolTurnOptions => SurfaceRelation::Unwalkable(
+            "no bounded surface: carried on each session head, refused at open rather than at rest",
+        ),
+        DurableFormat::ParentScopeStoragePayload => SurfaceRelation::Unwalkable(
+            "no bounded surface: one payload per parent-owned ledger row, refused at decode \
+             rather than at rest",
+        ),
+        DurableFormat::ProcessLease => SurfaceRelation::Unwalkable(
+            "no bounded surface: carried on process rows, refused when a lease is read rather \
+             than at rest",
+        ),
+        DurableFormat::AppendRequestIdentity
+        | DurableFormat::RecordConfigRequestIdentity
+        | DurableFormat::CreateSessionRequestIdentity
+        | DurableFormat::UsageLedgerRequestIdentity => SurfaceRelation::Unwalkable(
+            "identity, not a stamp: recomputed and compared when a retried request replays, \
+             never read back at rest",
+        ),
+        DurableFormat::ToolChildRequest
+        | DurableFormat::ToolSettlement
+        | DurableFormat::ToolAttemptCapture
+        | DurableFormat::ToolPresentation => SurfaceRelation::Unwalkable(
+            "no bounded surface: journaled on runtime-effect outcomes, refused when replay \
+             decodes them rather than at rest",
+        ),
+        DurableFormat::TurnCheckpoint => SurfaceRelation::Unwalkable(
+            "no bounded surface: a sans-IO host stores the serialized checkpoint, so the bytes \
+             this version gates live outside lash's own store",
+        ),
         DurableFormat::Bytecode => SurfaceRelation::Walk {
             surface: DurableSurface::ParkedSegment,
             primary: false,
@@ -245,6 +276,24 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         DurableFormat::WorkflowGraphSchema => SurfaceRelation::Unwalkable(
             "no bounded surface: the graph is projected for a host to store, so the bytes this \
              version gates live outside lash's own store",
+        ),
+        DurableFormat::WorkflowTypeFacet => SurfaceRelation::Unwalkable(
+            "no bounded surface: the type facet rides the projected graph a host stores, so the \
+             bytes this version gates live outside lash's own store",
+        ),
+        DurableFormat::NativeRlmDriverState => SurfaceRelation::Unwalkable(
+            "no bounded surface: parked in each session's protocol driver-state slot, refused \
+             when the driver resumes rather than at rest",
+        ),
+        DurableFormat::NativeRlmTransport => SurfaceRelation::Unwalkable(
+            "no bounded surface: one session-history record per provider exchange, refused at \
+             decode rather than at rest",
+        ),
+        DurableFormat::RestateDurableWaitRequest
+        | DurableFormat::RestateDurableWaitIndexEpoch
+        | DurableFormat::RestateProcessCommandJournal => SurfaceRelation::Unwalkable(
+            "no bounded surface: Restate journal and object state live in the Restate \
+             deployment, outside lash's own store",
         ),
         DurableFormat::VmAbi => SurfaceRelation::NotPersisted,
     }
@@ -499,11 +548,12 @@ fn evidence_for(format: DurableFormat, probe: FormatProbe) -> FormatEvidence {
 
 /// The formats no bounded walk enumerates, and why.
 ///
-/// Both are readable in principle — their versions sit in plain JSON columns —
-/// and neither has a surface a preflight can walk without reading the two
-/// highest-cardinality tables in the store. Naming them is the honest answer;
-/// walking them on every boot would make the preflight the outage it exists to
-/// prevent.
+/// Each lives either in one of the highest-cardinality tables in the store (one
+/// row per session, graph node, ledger row or journaled outcome), outside
+/// lash's store altogether (host-stored projections, Restate state), or is an
+/// identity recomputed on retry rather than a stamp read back. Naming them is
+/// the honest answer; walking the store-resident ones on every boot would make
+/// the preflight the outage it exists to prevent.
 fn unwalkable_formats() -> impl Iterator<Item = (DurableFormat, &'static str)> {
     durable_formats()
         .iter()

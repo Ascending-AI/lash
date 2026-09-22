@@ -9,20 +9,27 @@
 use super::*;
 use crate::SessionId;
 
-// Version 2 (FIG-2880) carries explicit ambient/restricted resident-tool
-// authority in the shared persisted-config projection. Version 3 accounts for
-// the cancellation-dependent commit fields admitted after that cutover.
-const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
-const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
-// Version 2 (FIG-2765): staged usage rows carry their usage disposition through
-// the usage-payload identity, so a retried usage-ledger commit whose rows gained
-// a hole or a correction no longer matches a v1 receipt. Version 3 (FIG-2765 fix
-// round): the v4 payload identity projects each hole's descriptor instead of a
-// count, moving every unreported row's payload hash again. The projection and
-// domain are unchanged; the version is the fence. Version 4 (FIG-2880) carries
-// the same explicit resident-tool authority as the other boundary operations.
-// Version 5 accounts for the cancellation-dependent commit fields.
-const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 5;
+/// Encoding version of the record-config semantic-boundary request identity.
+///
+/// Version 2 (FIG-2880) carries explicit ambient/restricted resident-tool
+/// authority in the shared persisted-config projection. Version 3 accounts for
+/// the cancellation-dependent commit fields admitted after that cutover.
+pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+/// Encoding version of the create-session semantic-boundary request identity;
+/// moves with [`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION`] for the same
+/// reasons.
+pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+/// Encoding version of the usage-ledger semantic-boundary request identity.
+///
+/// Version 2 (FIG-2765): staged usage rows carry their usage disposition through
+/// the usage-payload identity, so a retried usage-ledger commit whose rows gained
+/// a hole or a correction no longer matches a v1 receipt. Version 3 (FIG-2765 fix
+/// round): the v4 payload identity projects each hole's descriptor instead of a
+/// count, moving every unreported row's payload hash again. The projection and
+/// domain are unchanged; the version is the fence. Version 4 (FIG-2880) carries
+/// the same explicit resident-tool authority as the other boundary operations.
+/// Version 5 accounts for the cancellation-dependent commit fields.
+pub const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 5;
 
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///

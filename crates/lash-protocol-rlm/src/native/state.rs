@@ -32,7 +32,9 @@ pub(super) struct RlmDriverState {
     pub(super) code: String,
 }
 
-const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
+/// Schema version of the native RLM driver state parked in the protocol
+/// driver-state slot; a decode refuses any other version.
+pub const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Envelope {

@@ -263,6 +263,13 @@ fn component(report: &PreflightReport, format: DurableFormat) -> &ComponentReada
         .unwrap_or_else(|| panic!("the report has a row for {}", format.name()))
 }
 
+const REQUEST_IDENTITY: &str = "identity, not a stamp: recomputed and compared when a retried \
+                                request replays, never read back at rest";
+const TOOL_JOURNAL: &str = "no bounded surface: journaled on runtime-effect outcomes, refused when \
+                            replay decodes them rather than at rest";
+const RESTATE_STATE: &str = "no bounded surface: Restate journal and object state live in the \
+                             Restate deployment, outside lash's own store";
+
 #[test]
 fn every_durable_format_has_one_explicit_surface_relation() {
     let relations = [
@@ -308,6 +315,73 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
         ),
         (
+            DurableFormat::SessionStateGeneration,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: one marker per session, refused at admission rather than at \
+                 rest",
+            ),
+        ),
+        (
+            DurableFormat::ProtocolTurnOptions,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: carried on each session head, refused at open rather than at \
+                 rest",
+            ),
+        ),
+        (
+            DurableFormat::ParentScopeStoragePayload,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: one payload per parent-owned ledger row, refused at decode \
+                 rather than at rest",
+            ),
+        ),
+        (
+            DurableFormat::ProcessLease,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: carried on process rows, refused when a lease is read rather \
+                 than at rest",
+            ),
+        ),
+        (
+            DurableFormat::AppendRequestIdentity,
+            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
+        ),
+        (
+            DurableFormat::RecordConfigRequestIdentity,
+            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
+        ),
+        (
+            DurableFormat::CreateSessionRequestIdentity,
+            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
+        ),
+        (
+            DurableFormat::UsageLedgerRequestIdentity,
+            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
+        ),
+        (
+            DurableFormat::ToolChildRequest,
+            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
+        ),
+        (
+            DurableFormat::ToolSettlement,
+            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
+        ),
+        (
+            DurableFormat::ToolAttemptCapture,
+            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
+        ),
+        (
+            DurableFormat::ToolPresentation,
+            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
+        ),
+        (
+            DurableFormat::TurnCheckpoint,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: a sans-IO host stores the serialized checkpoint, so the bytes \
+                 this version gates live outside lash's own store",
+            ),
+        ),
+        (
             DurableFormat::Bytecode,
             SurfaceRelation::Walk {
                 surface: DurableSurface::ParkedSegment,
@@ -350,10 +424,43 @@ fn every_durable_format_has_one_explicit_surface_relation() {
                  version gates live outside lash's own store",
             ),
         ),
+        (
+            DurableFormat::WorkflowTypeFacet,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: the type facet rides the projected graph a host stores, so \
+                 the bytes this version gates live outside lash's own store",
+            ),
+        ),
+        (
+            DurableFormat::NativeRlmDriverState,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: parked in each session's protocol driver-state slot, refused \
+                 when the driver resumes rather than at rest",
+            ),
+        ),
+        (
+            DurableFormat::NativeRlmTransport,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: one session-history record per provider exchange, refused at \
+                 decode rather than at rest",
+            ),
+        ),
         (DurableFormat::VmAbi, SurfaceRelation::NotPersisted),
+        (
+            DurableFormat::RestateDurableWaitRequest,
+            SurfaceRelation::Unwalkable(RESTATE_STATE),
+        ),
+        (
+            DurableFormat::RestateDurableWaitIndexEpoch,
+            SurfaceRelation::Unwalkable(RESTATE_STATE),
+        ),
+        (
+            DurableFormat::RestateProcessCommandJournal,
+            SurfaceRelation::Unwalkable(RESTATE_STATE),
+        ),
     ];
 
-    assert_eq!(relations.len(), 14);
+    assert_eq!(relations.len(), 33);
     for (format, expected) in relations {
         assert_eq!(
             format_surface(format),
@@ -362,24 +469,41 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             format.name()
         );
     }
+    // The reasons are pinned above; this pins which manifest rows reach the
+    // report's `not_scanned` list, in manifest order.
+    let mut expected = vec![
+        DurableFormat::SessionHeadMeta,
+        DurableFormat::SessionNodeBody,
+        DurableFormat::SessionStateGeneration,
+        DurableFormat::ProtocolTurnOptions,
+        DurableFormat::ParentScopeStoragePayload,
+        DurableFormat::ProcessLease,
+        DurableFormat::AppendRequestIdentity,
+        DurableFormat::RecordConfigRequestIdentity,
+        DurableFormat::CreateSessionRequestIdentity,
+        DurableFormat::UsageLedgerRequestIdentity,
+        DurableFormat::ToolChildRequest,
+        DurableFormat::ToolSettlement,
+        DurableFormat::ToolAttemptCapture,
+        DurableFormat::ToolPresentation,
+        DurableFormat::TurnCheckpoint,
+        DurableFormat::WorkflowGraphSchema,
+        DurableFormat::WorkflowTypeFacet,
+        DurableFormat::NativeRlmDriverState,
+        DurableFormat::NativeRlmTransport,
+    ];
+    if cfg!(feature = "restate") {
+        expected.extend([
+            DurableFormat::RestateDurableWaitRequest,
+            DurableFormat::RestateDurableWaitIndexEpoch,
+            DurableFormat::RestateProcessCommandJournal,
+        ]);
+    }
     assert_eq!(
-        unwalkable_formats().collect::<Vec<_>>(),
-        vec![
-            (
-                DurableFormat::SessionHeadMeta,
-                "no bounded surface: one row per session, refused at open rather than at rest",
-            ),
-            (
-                DurableFormat::SessionNodeBody,
-                "no bounded surface: one row per graph node, each body refused at decode rather \
-                 than at rest",
-            ),
-            (
-                DurableFormat::WorkflowGraphSchema,
-                "no bounded surface: the graph is projected for a host to store, so the bytes this \
-                 version gates live outside lash's own store",
-            ),
-        ]
+        unwalkable_formats()
+            .map(|(format, _)| format)
+            .collect::<Vec<_>>(),
+        expected
     );
 }
 
@@ -732,7 +856,7 @@ async fn a_deep_probe_reads_the_surfaces_summary_skipped() {
 
 #[tokio::test]
 async fn a_report_always_names_the_formats_no_walk_enumerates() {
-    // Two durable formats have no bounded surface. Leaving them out of the
+    // Many durable formats have no bounded surface. Leaving them out of the
     // report entirely would make the manifest and the probe disagree about what
     // this build writes.
     let report = probe_store(&healthy_store(), PreflightOptions::deep())
