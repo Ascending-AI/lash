@@ -9,6 +9,7 @@ use lash_core::runtime::*;
 use lash_core::store::*;
 pub mod law_receipt;
 mod macros;
+mod response_derivation_macros;
 use lash_core::testing::conformance_support::default_queued_drain_policy;
 #[cfg(feature = "lashlang")]
 pub mod fused_artifact_store;

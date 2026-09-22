@@ -74,6 +74,13 @@ same contract natively. When a bound, a wait, or a redrive path is proposed
 inside lash-core, the first question is whether it belongs to the substrate —
 the answer decided FIG-526, and it will decide the next one.
 
+- lash-core never asks which tier it runs on. A behaviour difference is either
+  an operation on the effect seam or the single `EffectJournaling { Local,
+  Journaled }` fact on `RuntimeEffectController` (FIG-2226, PR #1946). The
+  only documented exceptions are `supports_concurrent_effects` and
+  `owns_commit_backpressure`: they are properties of the engine, not a tier
+  flag. `scripts/check-substrate-boundary.sh` guards the retired names.
+
 ## Considered and rejected: durable partial assistant streams (2026-08-20)
 
 A 2026-08 review of a peer harness design examined the alternative this

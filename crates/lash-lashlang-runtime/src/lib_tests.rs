@@ -414,6 +414,62 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
+    let environment = LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::default(),
+    );
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: r#"process scan(root: str) -> str { finish root }"#,
+        program: scan_module(),
+        environment: &environment,
+    })
+    .expect("process module compiles");
+    let store = InMemoryLashlangArtifactStore::new();
+    store
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("trace-map-test"),
+            &output.artifact,
+        )
+        .await
+        .expect("artifact publishes");
+    let input = LashlangProcessInput {
+        module_ref: output.module_ref.clone(),
+        process_ref: output
+            .artifact
+            .process_ref("scan")
+            .expect("scan export")
+            .clone(),
+        host_requirements_ref: output.host_requirements_ref.clone(),
+        process_name: "scan".to_string(),
+        args: serde_json::Map::new(),
+    };
+
+    let direct = trace_lashlang_process_map(&output.artifact, "scan").expect("direct map");
+    let snapshot = trace_lashlang_process_map_snapshot(&store, &input)
+        .await
+        .expect("stored map snapshot");
+    assert_eq!(snapshot, direct);
+    assert!(!snapshot.nodes.is_empty());
+
+    let mut missing_process = input.clone();
+    missing_process.process_name = "missing".to_string();
+    assert!(matches!(
+        trace_lashlang_process_map_snapshot(&store, &missing_process).await,
+        Err(TraceLanguageExecutionMapError::ProcessMissing { process_name, .. })
+            if process_name == "missing"
+    ));
+
+    let missing_hash = lashlang::ContentHash::new("missing-trace-map-artifact");
+    let mut missing_artifact = input;
+    missing_artifact.module_ref = lashlang::ModuleRef::new(&missing_hash);
+    assert!(matches!(
+        trace_lashlang_process_map_snapshot(&store, &missing_artifact).await,
+        Err(TraceLanguageExecutionMapError::ArtifactMissing(_))
+    ));
+}
+
 #[test]
 fn process_input_serializes_as_generic_engine_payload() {
     let hash = lashlang::ContentHash::new("abc123");

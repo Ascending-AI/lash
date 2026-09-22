@@ -37,9 +37,6 @@ pub(crate) use lash_core_store::usage;
 mod vocabulary;
 pub use vocabulary::*;
 
-// `PromptUsage` is re-exported below alongside the runtime's own types.
-pub use lash_sansio::PromptUsage;
-
 pub use crate::store::QueuedWorkClass;
 
 pub use causal::process_event_invocation;
@@ -54,16 +51,16 @@ pub use effect::{
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
     CausalRef, CheckpointClaimSet, ChildDrainOutcome, CompletionKeyPreparation, DrainedChild,
     EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
-    ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupDrainReport, GroupExecutors,
-    GroupFinalizationReport, GroupOnlyFinalization, GroupSettlement, GroupWakePolicy,
-    LlmRequestSpec, LoserPolicy, NativeEffectHost, NativeRuntimeEffectController,
-    OpenerFinalizationSteps, ProcessCommand, ProcessEffectOutcome, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
+    EffectJournalIdentity, EffectJournalRetirement, EffectJournaling, EffectOpener,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildBinding,
+    GroupDrainReport, GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization,
+    GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserPolicy, NativeEffectHost,
+    NativeRuntimeEffectController, OpenerFinalizationSteps, ProcessCommand, ProcessEffectOutcome,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
+    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
+    ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
@@ -76,7 +73,7 @@ pub use effect::{
     ToolIntentSubmissionGuard, ToolInvocationEffectOutcome, ToolSettlement, ToolUsageDelta,
     ToolUsageLedger, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
     TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnControlParticipation,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
     concrete_turn_cancellation_authority, effect_groups_unsupported,
     refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
     validate_replayed_effect_envelope,

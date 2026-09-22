@@ -13,7 +13,8 @@
 # SET OF ITS COLUMN PAIRINGS, so declaration order is likewise irrelevant while
 # (a, b) -> (x, y) stays distinct from the crossed (a, b) -> (y, x). What a matched
 # pair is then compared on is what changes the rows it affects: the partial predicate
-# and null-distinctness for a guard, the delete action for a foreign key. Column order
+# and null-distinctness for a guard, the delete action and deferral flags for a
+# foreign key. Column order
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
@@ -316,6 +317,7 @@ table lash_runtime_effect_group_child
   column replay_key text not-null
   unique (group_key, replay_key)
   primary-key (group_key, position)
+  foreign-key (group_key) references lash_runtime_effect_group (group_key) on delete no action deferrable initially deferred
 table lash_runtime_effect_replay
   column commit_seq bigint nullable
   column commit_state text not-null default
@@ -339,6 +341,7 @@ table lash_runtime_effect_replay
   unique (group_key, commit_seq) where commit_seq is not null
   unique (group_key, settlement_seq) where (group_key is not null) and (settlement_seq is not null)
   primary-key (scope_id, replay_key)
+  foreign-key (group_key) references lash_runtime_effect_group (group_key) on delete no action deferrable initially deferred
 table lash_runtime_turn_commits
   column committed_at_ms bigint not-null
   column identity_encoding_version integer nullable

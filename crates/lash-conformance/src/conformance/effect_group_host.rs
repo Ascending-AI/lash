@@ -2328,8 +2328,32 @@ pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() ->
         "the loser is released as a cancelled child terminal"
     );
 
-    // The release was the wait's own terminal: a late completion finds the
-    // wait already answered, never still live.
+    // The release was the wait's own terminal, written by the cancelled
+    // child's release arm — asynchronous to the close that issued it, so the
+    // law waits for it to land rather than asserting the instant. A revoked
+    // promise is released the same way: the peek error is also an answer.
+    let released = tokio::time::timeout(AWAIT_BUDGET, async {
+        loop {
+            match scoped.controller().peek_await_event(&await_key).await {
+                Ok(Some(terminal)) => break Ok(terminal),
+                Ok(None) => tokio::time::sleep(Duration::from_millis(20)).await,
+                Err(error) => break Err(error),
+            }
+        }
+    })
+    .await
+    .expect("the close released the losing wait before the budget ran out");
+    match released {
+        Ok(terminal) => assert!(
+            matches!(terminal, crate::Resolution::Cancelled),
+            "the losing wait's release terminal is the cancellation, not a completion: {terminal:?}"
+        ),
+        Err(error) => assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked,
+            "a revoked wait is a release; anything else is not: {error}"
+        ),
+    }
     let late = scoped
         .controller()
         .resolve_await_event(

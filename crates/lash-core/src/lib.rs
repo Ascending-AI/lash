@@ -197,6 +197,7 @@ pub mod facade_support {
     pub use crate::plugin::DirectCompletion;
     pub use crate::plugin::DirectLlmCompletion;
     pub use crate::plugin::EnqueueMessagesDirective;
+    pub use crate::plugin::NoPresentationArtifacts;
     pub use crate::plugin::PersistentRuntimeServices;
     pub use crate::plugin::PluginCommand;
     pub use crate::plugin::PluginDirective;
@@ -230,8 +231,10 @@ pub mod facade_support {
     pub use crate::plugin::SessionStateChangedContext;
     pub use crate::plugin::ShortCircuitToolDirective;
     pub use crate::plugin::ToolCatalogContribution;
+    pub use crate::plugin::ToolPresentationArtifacts;
+    pub use crate::plugin::ToolPresentationInput;
+    pub use crate::plugin::ToolPresentationStep;
     pub use crate::plugin::ToolResultProjectionContext;
-    pub use crate::plugin::ToolResultProjector;
     pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
     pub use crate::plugin::TurnHookReport;
@@ -704,10 +707,10 @@ pub use runtime::{
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy,
     DrainedChild, EffectAddress, EffectCommitState, EffectGroupDrainBudget, EffectGroupHandle,
-    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,
-    EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    GroupChildBinding, GroupDrainReport, GroupExecutors, GroupFinalizationReport,
-    GroupOnlyFinalization, GroupSettlement, GroupWakePolicy, HandleId,
+    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectJournaling, EffectOpener,
+    EffectOpenerError, EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt,
+    ForkSessionRequest, GroupChildBinding, GroupDrainReport, GroupExecutors,
+    GroupFinalizationReport, GroupOnlyFinalization, GroupSettlement, GroupWakePolicy, HandleId,
     InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LiveReplayEventDraft,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
     LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
@@ -745,41 +748,40 @@ pub use runtime::{
     ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone, ProcessToolIntents,
     ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
     ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
-    ProjectionWatermark, PromptUsage, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
+    ProjectionWatermark, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
     ProtocolTurnExtension, ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy,
     QueuedDrainRequest, QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt,
     QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority,
     QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkSubstrate,
     RecoveryContract, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup,
-    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
-    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
-    ScopeBoundController, ScopedEffectController, SegmentHandover, SegmentProgress,
-    SessionAdministration, SessionCursor, SessionCursorError, SessionDeleteContext,
-    SessionDeleteExecution, SessionDrainOutcome, SessionId, SessionListFilter,
-    SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
-    SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
-    StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization, StoredChildArbitration,
-    TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelOriginHint, TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext,
-    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, TurnControlParticipation, TurnEvent, TurnFailureEvidence,
-    TurnFailurePartialOutput, TurnFailureSettlement, TurnInput, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
-    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
-    TurnInputState, TurnInputStateKind, UnclaimedTurnInputs, UnreportedLedgerAttempt,
-    UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind,
-    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
-    artifact_destination_owner_retired_error, artifact_owner_retired_error,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
+    RuntimeReplayAttribution, RuntimeSessionState, ScopeBoundController, ScopedEffectController,
+    SegmentHandover, SegmentProgress, SessionAdministration, SessionCursor, SessionCursorError,
+    SessionDeleteContext, SessionDeleteExecution, SessionDrainOutcome, SessionId,
+    SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
+    SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    SessionWorkTarget, SleepSpec, StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization,
+    StoredChildArbitration, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
+    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
+    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
+    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
+    TurnInputSettlementClaim, TurnInputState, TurnInputStateKind, UnclaimedTurnInputs,
+    UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    WorkerSweepPolicy, artifact_destination_owner_retired_error, artifact_owner_retired_error,
     artifact_staging_edge_missing_error, artifact_store_plugin_error, effect_groups_unsupported,
     ensure_process_lease_schema_version,
 };

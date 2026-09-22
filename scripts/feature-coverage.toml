@@ -294,7 +294,7 @@ commands = [
   ["cargo", "test", "-p", "lash-runtime", "--no-default-features", "--locked"],
   # ADR 0079 host-wired extension features. Each gates one `lash::<name>`
   # module in the library and one `#[cfg]` block in
-  # `tests/facade_inventory.rs`, so the ON witness has to compile both
+  # `tests/integration/facade_inventory.rs`, so the ON witness has to compile both
   # contexts: `--all-targets` is the single command that does. The two
   # `--no-default-features` commands above are the shared OFF witness for
   # both contexts.

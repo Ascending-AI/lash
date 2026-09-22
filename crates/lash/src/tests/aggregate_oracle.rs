@@ -236,27 +236,26 @@ impl TurnActivitySink for OracleTheatre {
     }
 }
 
-/// The session's only tool-result projector: it records the leaf's settlement
-/// and raises its latch, then renders the reply the default projector would.
-///
-/// Registering it replaces the default runtime stack, because a session may
-/// carry exactly one projector and the shipped stack's tool-output budget
-/// already holds that slot.
-fn oracle_projector(theatre: Arc<OracleTheatre>) -> lash_core::facade_support::ToolResultProjector {
+/// One presentation step in the session's chain: it records the leaf's
+/// settlement and raises its latch, then passes the previous step's reply
+/// through unchanged.
+fn oracle_presentation_step(
+    theatre: Arc<OracleTheatre>,
+) -> lash_core::facade_support::ToolPresentationStep {
     Arc::new(
-        move |context: lash_core::facade_support::ToolResultProjectionContext| {
-            if context.tool_name == "oracle_step"
-                && let Some(id) = context.args.get("id").and_then(serde_json::Value::as_str)
+        move |input: lash_core::facade_support::ToolPresentationInput| {
+            if input.context.tool_name == "oracle_step"
+                && let Some(id) = input
+                    .context
+                    .args
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
             {
                 theatre.settled.lock_recover().push(id.to_string());
                 theatre.raise(&format!("settled:{id}"));
             }
-            let projected = lash_core::facade_support::ModelToolReturn::from_output(
-                context.call_id,
-                context.tool_name,
-                &context.output,
-            );
-            Box::pin(async move { Ok(projected) })
+            let previous = input.previous;
+            Box::pin(async move { Ok(previous) })
         },
     )
 }
@@ -468,13 +467,11 @@ fn oracle_core(
     explicit_ephemeral_facets(rlm_core_builder())
         .provider(provider)
         .model(mock_model_spec())
-        // Replaces the shipped runtime stack, whose tool-output budget owns the
-        // one projector slot a session has.
         .plugins(lash_core::facade_support::PluginStack::from_factories([Arc::new(
             StaticPluginFactory::new(
                 "aggregate-oracle",
                 lash_core::facade_support::PluginSpec::new()
-                    .with_tool_result_projector(oracle_projector(Arc::clone(&theatre))),
+                    .with_presentation_step(oracle_presentation_step(Arc::clone(&theatre))),
             ),
         ) as Arc<dyn PluginFactory>]))
         .tools(Arc::new(OracleTools {

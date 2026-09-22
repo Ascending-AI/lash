@@ -13,17 +13,8 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
 
     #[async_trait::async_trait]
     impl RuntimeEffectController for ControllerOwnedTriggerEmitter {
-        async fn runtime_effect_failure_disposition(
-            &self,
-            _code: lash_core::RuntimeErrorCode,
-        ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
-            Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-        }
-
-        async fn turn_control_participation(
-            &self,
-        ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-            Ok(lash_core::TurnControlParticipation::DurableJournaled)
+        fn effect_journaling(&self) -> lash_core::EffectJournaling {
+            lash_core::EffectJournaling::Journaled
         }
 
         async fn execute_effect(

@@ -292,19 +292,10 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
     return env, deps
 
 
-# The agent-workbench cases that shell out to `node --test` to drive
-# `examples/agent-workbench/tests/browser_projection.mjs`. The Bazel action has
-# no Node.js toolchain and no Cargo-relative asset tree, so the partition label
-# skips them by name (`args`, below) and the `Test Cargo workspace partition`
-# job selects exactly them out of the same binary
-# (`tools/bazel/workbench_nextest_filter.txt`). Every other workbench case is
-# partition-owned and runs on the pool. Keep the two derived from this one list
-# so a new Node-gated case can never be skipped by Bazel without also being
-# picked up by Cargo, or the reverse.
-NODE_GATED_WORKBENCH_TESTS = (
-    "tests::recoverable_chat_tests::"
-    "workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
-)
+# The workbench unit test shells out to Node for its browser-projection case.
+# Its interpreter is a pinned Bazel input, including on feature-lane variants.
+WORKBENCH_NODE = "@workbench_node_linux_x64//:bin/node"
+WORKBENCH_NODE_ENV = {"LASH_WORKBENCH_TEST_NODE": f"$(rootpath {WORKBENCH_NODE})"}
 
 
 def cargo_test_policy(
@@ -546,7 +537,7 @@ def target_support(
         "runtime_scenarios",
     ):
         extra_data.append("//crates/lash-core-execution:rust_sources")
-    if package["name"] == "lash-runtime" and target["name"] == "facade_inventory":
+    if package["name"] == "lash-runtime" and target["name"] == "integration":
         extra_data.extend([
             "//crates/lash-remote-protocol:rust_sources",
             "//crates/lash-sansio:rust_sources",
@@ -578,8 +569,6 @@ def target_support(
             "//crates/lash-postgres-store:package_files",
             "//crates/lash-sqlite-store:package_files",
         ])
-        if target["name"] == "process_lifecycle_vocabulary":
-            extra_compile_data.append("//crates/lash-core:package_files")
         if target["name"] == "cross_backend_store_differential":
             # Its completeness gates read the real store trait definitions
             # with `include_str!`, so the lash-core-store sources are
@@ -595,6 +584,14 @@ def target_support(
         # examples included, so under Bazel it needs them all in the sandbox
         # or it would pass by seeing nothing.
         extra_compile_data.append("//:workspace_rust_sources")
+    if (
+        package["name"] == "lash-sim"
+        and target["name"] == "process_lifecycle_vocabulary"
+    ):
+        # The gate scans lash-core's sources as well as the two store
+        # packages' — a library's runfiles no longer carry another crate's
+        # `.rs` files, so the scanned root names the filegroup directly.
+        extra_compile_data.append("//crates/lash-core:rust_sources")
     return extra_compile_data, extra_data, test_env, target_args
 
 
@@ -924,21 +921,11 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             bin_unit_tags, bin_unit_cargo_reason = cargo_test_policy(
                 package["name"], "bin-unit-test", target["name"]
             )
-            bin_unit_skips = (
-                list(NODE_GATED_WORKBENCH_TESTS)
-                if package["name"] == "agent-workbench"
-                else []
-            )
+            workbench_node = package["name"] == "agent-workbench"
             unit_args = [
                 "lash_rust_unit_test(\n",
                 f"    name = {quote(name + '__unit_test')},\n",
             ]
-            if bin_unit_skips:
-                unit_args.append(
-                    "    args = "
-                    + string_list([f"--skip={test}" for test in bin_unit_skips])
-                    + ",\n"
-                )
             unit_args += [
                 f"    crate_features = {string_list(target_features)},\n",
                 f"    crate_name = {quote(crate_name)},\n",
@@ -952,6 +939,9 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 unit_args.append(
                     f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
                 )
+            if workbench_node:
+                unit_args.append(f"    extra_data = {string_list([WORKBENCH_NODE])},\n")
+                unit_args.append(f"    test_env = {json.dumps(WORKBENCH_NODE_ENV, sort_keys=True)},\n")
             unit_args.extend([
                 f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
@@ -968,12 +958,10 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 "label": f"//{package_dir}:{name}__unit_test",
                 "tags": bin_unit_tags,
             }
-            if bin_unit_skips:
-                bin_unit_inventory["bazel_skipped"] = sorted(bin_unit_skips)
             if bin_unit_cargo_reason:
                 bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
             inventory_targets.append(bin_unit_inventory)
-            if not bin_unit_skips and not bin_unit_tags:
+            if not workbench_node and not bin_unit_tags:
                 batch_members.append(f":{name}__unit_test")
 
     if package["name"] == "lash-internal-core":
@@ -1249,22 +1237,6 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     # nextest syntax error at the call site rather than an empty selection.
     outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
         " + ".join(cargo_nextest_terms) + "\n" if cargo_nextest_terms else "none()\n"
-    )
-    # The workbench partition is now exactly the Node-gated cases the Bazel
-    # label skipped, selected by name out of the same binary. Derived from the
-    # same `bazel_skipped` records the label's `--skip` args come from, so the
-    # two halves of the split cannot drift into a gap or an overlap.
-    workbench_terms = sorted(
-        f"({nextest_filter_term(package['package'], target)} & test(={test}))"
-        for package in inventory
-        if package["package"] == "agent-workbench"
-        for target in package["targets"]
-        if target.get("label") is not None
-        and target["kind"] in ("bin-unit-test", "test", "unit-test")
-        for test in target.get("bazel_skipped", ())
-    )
-    outputs[ROOT / "tools/bazel/workbench_nextest_filter.txt"] = (
-        " + ".join(workbench_terms) + "\n" if workbench_terms else "none()\n"
     )
     # The service jobs build these labels from the shared cache and execute
     # them uncached against the service they stand up. Generated, so a new
@@ -1911,28 +1883,21 @@ class FeatureLaneGraph:
         if kind == "bin-unit-test":
             base = label_name(target, library is None and len(binaries) == 1)
             name = f"{base}__unit_test__fv_{suffix}"
-            skips = (
-                [f"--skip={case}" for case in NODE_GATED_WORKBENCH_TESTS]
-                if package_name == "agent-workbench"
-                else []
-            )
+            workbench_node = package_name == "agent-workbench"
             self.add_chunk(
                 package_name,
                 name,
                 "lash_rust_feature_test(\n"
                 f"    name = {quote(name)},\n"
-                + (
-                    f"    args = {string_list(sorted(set(skips + args)))},\n"
-                    if skips or args
-                    else ""
-                )
+                + (f"    args = {string_list(sorted(set(args)))},\n" if args else "")
                 + f"    crate_features = {string_list(target_features)},\n"
                 f"    crate_name = {quote(crate_name)},\n"
                 f"    crate_root = {quote(crate_root)},\n"
                 f"    declared_features = {string_list(sorted(package['features']))},\n"
                 + exec_properties_argument(crate_name, "test")
                 + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
-                f"    library = {quote(library_label) if library_label else 'None'},\n"
+                + (f"    extra_data = {string_list([WORKBENCH_NODE])},\n" if workbench_node else "")
+                + f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
                 f"    manifest_dir = {quote(directory)},\n"
                 f"    package_name = {quote(package_name)},\n"
@@ -1942,8 +1907,8 @@ class FeatureLaneGraph:
                     else ""
                 )
                 + (
-                    f"    test_env = {json.dumps(rustc_env, sort_keys=True)},\n"
-                    if rustc_env
+                    f"    test_env = {json.dumps(rustc_env | (WORKBENCH_NODE_ENV if workbench_node else {}), sort_keys=True)},\n"
+                    if rustc_env or workbench_node
                     else ""
                 )
                 + f"    tags = {string_list(tags)},\n"
@@ -2059,22 +2024,29 @@ class FeatureLaneGraph:
         package_name = command.package
         package = self.by_name[package_name]
         features = set(resolution[package_name])
+        for name in command.tests:
+            if any(character in name for character in "*?[]"):
+                raise ValueError(f"feature lanes require literal --test names, got {name!r}")
+            target = next((
+                target for target in package["targets"]
+                if target["kind"][0] == "test" and target["name"] == name
+            ), None)
+            if target is None:
+                raise ValueError(f"{package_name}: unknown --test target {name!r}")
+            missing = set(target.get("required-features", [])) - features
+            if missing:
+                raise ValueError(
+                    f"{package_name}: --test {name} requires missing features {sorted(missing)}"
+                )
         kinds = set(command.kinds)
         labels = []
         library = self.library_of(package_name)
         # `cargo test -p X … <filter>` compiles every selected target and runs
         # only the cases whose name contains the filter; libtest takes the same
         # filter as a positional argument, so the variant runs the same subset.
-        args = [
-            token
-            for token in command.argv[2:]
-            if not token.startswith("-")
-            and token not in (package_name, "check", "test")
-            and command.argv[command.argv.index(token) - 1]
-            not in ("-p", "--package", "--features", "--test")
-        ]
+        args = list(command.test_args)
         runnable = command.subcommand == "test"
-        if library is not None and library.get("test", False) and "test" in kinds and not command.test_names:
+        if library is not None and library.get("test", False) and command.unit_tests:
             label = self.emit_target(
                 package_name, resolution, library, "unit-test", runnable, args
             )
@@ -2097,7 +2069,7 @@ class FeatureLaneGraph:
                 continue
             if kind not in kinds:
                 continue
-            if kind == "test" and command.test_names and target["name"] not in command.test_names:
+            if kind == "test" and not command.selects_test(target["name"]):
                 continue
             label = self.emit_target(
                 package_name, resolution, target, kind, runnable, args
@@ -2116,7 +2088,12 @@ class FeatureLaneGraph:
             if kind == "test" and runnable:
                 if not cargo_test_policy(package_name, kind, target["name"])[0]:
                     test_labels.append(label)
-            if kind == "bin" and target.get("test", False) and "test" in kinds and not command.test_names:
+            if (
+                kind == "bin"
+                and target.get("test", False)
+                and command.unit_tests
+                and command.selector != "--lib"
+            ):
                 unit_label = self.emit_target(
                     package_name, resolution, target, "bin-unit-test", runnable, args
                 )
@@ -2228,12 +2205,12 @@ def verify_resolution(metadata: dict) -> int:
             tree = [
                 os.environ.get("KILN_REAL_CARGO", "cargo"),
                 "tree",
+                "--color=never",
                 "-p",
                 command.package,
                 "-e",
                 "normal",
                 "--locked",
-                "--no-dedupe",
                 "--prefix",
                 "none",
                 "--format",
@@ -2251,6 +2228,7 @@ def verify_resolution(metadata: dict) -> int:
                 if "|" not in line:
                     continue
                 package, features = line.split("|", 1)
+                features = features.removesuffix(" (*)")
                 name = package.split()[0]
                 if name in members:
                     theirs.setdefault(name, set()).update(
@@ -2311,16 +2289,21 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
                 if kind == "custom-build" or not required <= root_features:
                     continue
                 if kind == "lib":
-                    if target.get("test", False) and "test" in kinds and not command.test_names:
+                    if target.get("test", False) and command.unit_tests:
                         expected.add((root, "unit-test", tuple(sorted(root_features))))
                     continue
                 if kind not in kinds:
                     continue
-                if kind == "test" and command.test_names and target["name"] not in command.test_names:
+                if kind == "test" and not command.selects_test(target["name"]):
                     continue
                 features = tuple(sorted(root_features | required))
                 expected.add((root, kind, features))
-                if kind == "bin" and target.get("test", False) and "test" in kinds and not command.test_names:
+                if (
+                    kind == "bin"
+                    and target.get("test", False)
+                    and command.unit_tests
+                    and command.selector != "--lib"
+                ):
                     expected.add((root, "bin-unit-test", features))
     recorded = {
         (unit["package"], unit["kind"], tuple(unit["features"])) for unit in units

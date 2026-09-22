@@ -24,6 +24,7 @@ use tokio::time::{Duration, timeout};
 mod attachment_normalization;
 mod context_source;
 mod directives;
+mod host_effect_ledger;
 mod intent_drain;
 mod internal_activation;
 mod orchestrating;
@@ -1679,6 +1680,7 @@ async fn retry_ladder_survives_a_later_pending_completion() {
     );
     let completed = execution
         .pending_completion_dispatch_outcome(
+            "pending-call",
             pending.tool_name,
             pending.args,
             crate::Resolution::Ok(serde_json::json!({ "done": true })),

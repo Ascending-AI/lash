@@ -8,7 +8,7 @@ use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
     ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
-use lash_sansio::core_support::*;
+use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -693,40 +693,63 @@ impl RuntimeExecutionContext<'_> {
         let tool_correlation_id = tool_activity_id(&call_id);
         let attempts = outcome.attempts.clone();
         let mut output = outcome.record.output.clone();
-        let projection_output = output.clone();
-        let projection_tool_name = outcome.record.tool.clone();
-        let projection_args = outcome.record.args.clone();
-        let projection_duration_ms = outcome.record.duration_ms;
-        let projection_call_id = call_id.clone();
-        let plugins = std::sync::Arc::clone(&self.dispatch.plugins);
-        let projection_context = crate::plugin::ToolResultProjectionContext {
-            session_id: self.dispatch.session_id.clone(),
-            tool_name: projection_tool_name,
-            args: projection_args,
-            output: projection_output,
-            duration_ms: projection_duration_ms,
-            call_id: projection_call_id,
+        // The settlement exists before the chain so a step can read its facts;
+        // its `model_return` is overwritten by the presented return below.
+        let mut settlement = crate::runtime::effect::ToolSettlement::from_dispatch(
+            &outcome,
+            ModelToolReturn::from_output(call_id.clone(), outcome.record.tool.clone(), &output),
+        );
+        // The presentation boundary (ADR 0099 §6, FIG-3420): the ordered
+        // presentation steps run once through the journaled `PresentToolResult`
+        // effect, keyed by `{call_id}:present`, so a replay serves the recorded
+        // `ToolPresentation` and never re-runs a step.
+        let presentation_replay_key = format!("{call_id}:present");
+        let scoped = self.dispatch.effect_controller.scoped();
+        let presented = match crate::EffectAddress::new(
+            scoped.execution_scope().clone(),
+            presentation_replay_key.clone(),
+        ) {
+            Ok(address) => scoped
+                .execute_effect(
+                    crate::RuntimeEffectEnvelope::new(
+                        crate::RuntimeEffectInvocation::new(
+                            address,
+                            self.dispatch.parentless_attribution(),
+                            presentation_replay_key,
+                        ),
+                        crate::RuntimeEffectCommand::PresentToolResult {
+                            call_id: call_id.clone(),
+                            tool_name: outcome.record.tool.clone(),
+                            args: outcome.record.args.clone(),
+                            output: Box::new(outcome.record.output.clone()),
+                            duration_ms: outcome.record.duration_ms,
+                        },
+                    ),
+                    crate::RuntimeEffectLocalExecutor::presentation(
+                        std::sync::Arc::clone(&self.dispatch.plugins),
+                        std::sync::Arc::new(settlement.clone()),
+                        std::sync::Arc::clone(&self.dispatch.attachment_store),
+                        self.attachment_acceptance().clone(),
+                    ),
+                )
+                .await
+                .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
+            Err(error) => Err(error.into()),
         };
-        let mut model_return = match plugins.project_tool_result(projection_context).await {
-            Ok(projected) => projected,
-            Err(err) => ModelToolReturn::text(
+        let mut model_return = match presented {
+            Ok(presentation) => presentation.model_return,
+            Err(error) => ModelToolReturn::text(
                 call_id.clone(),
                 outcome.record.tool.clone(),
-                err.to_string(),
+                error.to_string(),
             ),
         };
-        surface_attachment_materialization_notices(
-            self.attachment_acceptance(),
-            &output,
-            &mut model_return,
-        );
         // ADR 0099 §6/§13: the applicator owns possession, committed messages,
         // trigger receipts and usage charging, exactly once per source. A
         // refusal — an unreadable settlement or a spend with no charge sink —
         // fails the call closed rather than presenting a result whose
         // recorded facts were dropped.
-        let settlement =
-            crate::runtime::effect::ToolSettlement::from_dispatch(&outcome, model_return.clone());
+        settlement.model_return = model_return.clone();
         let settlement_source = crate::session::SettlementSource::Invocation {
             call_id: call_id.clone(),
             replay_key: call_id.clone(),
@@ -845,6 +868,7 @@ impl RuntimeExecutionContext<'_> {
     #[allow(clippy::too_many_arguments)]
     pub async fn pending_completion_dispatch_outcome(
         &self,
+        call_id: &str,
         tool_name: String,
         args: serde_json::Value,
         resolution: crate::Resolution,
@@ -870,6 +894,7 @@ impl RuntimeExecutionContext<'_> {
             .with_usage_ledger(usage_ledger.clone());
         let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
             &resumed_dispatch,
+            call_id,
             tool_name,
             args,
             resolution,
@@ -1018,6 +1043,7 @@ impl RuntimeExecutionContext<'_> {
             }
         };
         self.pending_completion_dispatch_outcome(
+            call_id,
             pending.tool_name,
             pending.args,
             resolution,

@@ -106,18 +106,8 @@ impl lash_core::AwaitEventResolver for ProjectionReplayController {
 
 #[async_trait]
 impl lash_core::RuntimeEffectController for ProjectionReplayController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
-    {
-        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        lash_core::EffectJournaling::Journaled
     }
 
     async fn execute_effect(
@@ -630,7 +620,7 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
     assert_eq!(
         restored_projection_basis
             .as_ref()
-            .map(|usage| usage.context_budget_tokens),
+            .map(|usage| usage.total()),
         Some(30_001),
         "cold reopen must restore the last completed turn's projection basis"
     );
@@ -638,7 +628,7 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
         checkpointed_projection_bases
             .lock_recover()
             .iter()
-            .map(|usage| usage.as_ref().map(|usage| usage.context_budget_tokens))
+            .map(|usage| usage.as_ref().map(|usage| usage.total()))
             .collect::<Vec<_>>(),
         vec![Some(30_001), Some(30_001)],
         "the durable AfterWork checkpoint must keep the pinned basis after a low-usage provider call"
@@ -1755,7 +1745,8 @@ impl lash_core::SessionStoreFactory for FailArmedCommitFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
         self.inner.open_existing_store_by_id(session_id).await
     }
 

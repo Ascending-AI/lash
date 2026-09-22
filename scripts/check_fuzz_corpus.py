@@ -45,8 +45,13 @@ def corpus_problems(targets: list[str], corpus_root: Path) -> list[str]:
     return problems
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     targets = fuzz_targets(FUZZ_MANIFEST.read_text(encoding="utf-8"))
+    if argv == ["--list-targets"]:
+        # The fuzz smoke job sources its loop from this list, so a new
+        # [[bin]] in fuzz/Cargo.toml is smoked without a workflow edit.
+        print("\n".join(targets))
+        return 0
     problems = corpus_problems(targets, CORPUS_ROOT)
     for problem in problems:
         print(f"fuzz corpus check: {problem}", file=sys.stderr)
@@ -57,4 +62,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

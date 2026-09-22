@@ -1651,7 +1651,7 @@ fn kill_child_at_participant_boundary(
     )
     .args([
         "--exact",
-        "participant_protocol_crash_child",
+        "runtime_operation_retirement::participant_protocol_crash_child",
         "--ignored",
         "--nocapture",
     ])

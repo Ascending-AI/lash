@@ -87,7 +87,10 @@ Only the failing model/channel is excluded, leaving other cohorts runnable.
 
 ## Evidence and summaries
 
-Attempt and task rows stream to stdout and `--results-file`. Task rows include
+Attempt and task rows stream to stdout and `--results-file`. Every row
+carries a `provenance` object naming the lash source revision, whether the
+checkout was dirty, and the SHA-256 of the running binary; the Markdown
+summary repeats it and calls out a dirty or unknown tree. Task rows include
 finish value, executions, failed executions, actual and expected host tool counts,
 rounds, grade, wall time, aggregate usage, cost availability and configured limits.
 RLM attempt rows include `code` (null for prose-only/request-finish attempts)

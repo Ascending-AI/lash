@@ -170,14 +170,10 @@ impl<'a> GraphProjection<'a> {
                 };
                 let children = self.graphs[graph_index].children.clone();
                 for child in children {
-                    if self.graph_by_key.contains_key(&child.child_graph_key) {
-                        changed |= self.visible_keys.insert(child.child_graph_key.clone());
+                    for child_graph_key in self.resolved_child_graph_keys(&child) {
+                        changed |= self.visible_keys.insert(child_graph_key);
                     }
-                    let Some(process_id) = process_id_from_graph_key(&child.child_graph_key) else {
-                        continue;
-                    };
-                    let Some(process) = self.observed_process(&ProcessId::from(process_id)).await
-                    else {
+                    let Some(process) = self.observed_process(&child.child_process_id).await else {
                         continue;
                     };
                     let Some(child_session_id) = process.child_session_id.as_deref() else {
@@ -284,27 +280,14 @@ impl<'a> GraphProjection<'a> {
         child: &lash::tracing::TraceLashlangGraphChildLink,
         out: &mut Vec<LashlangGraphLineageEdge>,
     ) {
-        let Some(process_id) = process_id_from_graph_key(&child.child_graph_key) else {
-            out.push(LashlangGraphLineageEdge {
-                parent_graph_key: child.parent_graph_key.clone(),
-                parent_node_id: child.parent_node_id.clone(),
-                bridge_graph_key: child.child_graph_key.clone(),
-                bridge_process_id: None,
-                bridge_status: self.graph_presence_status(&child.child_graph_key),
-                bridge_title: child
-                    .child_entry_name
-                    .clone()
-                    .unwrap_or_else(|| short_graph_title(&child.child_graph_key)),
-                child_graph_key: Some(child.child_graph_key.clone()),
-                child_session_id: None,
-                pending: !self.graph_by_key.contains_key(&child.child_graph_key),
-                terminal: false,
-                error: None,
-            });
-            return;
-        };
-
-        let process = self.observed_process(&ProcessId::from(process_id)).await;
+        let process_id = child.child_process_id.clone();
+        let bridge_graph_key = child.child_graph_key.clone().unwrap_or_else(|| {
+            format!(
+                "process:{process_id}:incarnation:{}",
+                child.child_incarnation
+            )
+        });
+        let process = self.observed_process(&process_id).await;
         if let Some(process) = process.as_ref()
             && let Some(child_session_id) = process.child_session_id.clone()
         {
@@ -313,14 +296,10 @@ impl<'a> GraphProjection<'a> {
                 out.push(LashlangGraphLineageEdge {
                     parent_graph_key: child.parent_graph_key.clone(),
                     parent_node_id: child.parent_node_id.clone(),
-                    bridge_graph_key: child.child_graph_key.clone(),
-                    bridge_process_id: Some(ProcessId::from(process_id.to_string())),
+                    bridge_graph_key: bridge_graph_key.clone(),
+                    bridge_process_id: Some(process_id.clone()),
                     bridge_status: process.status_label().to_string(),
-                    bridge_title: lineage_bridge_title(
-                        child,
-                        Some(process),
-                        &ProcessId::from(process_id),
-                    ),
+                    bridge_title: lineage_bridge_title(child, Some(process), &process_id),
                     child_graph_key: None,
                     child_session_id: Some(child_session_id),
                     pending: !process.terminal(),
@@ -332,14 +311,10 @@ impl<'a> GraphProjection<'a> {
                     out.push(LashlangGraphLineageEdge {
                         parent_graph_key: child.parent_graph_key.clone(),
                         parent_node_id: child.parent_node_id.clone(),
-                        bridge_graph_key: child.child_graph_key.clone(),
-                        bridge_process_id: Some(ProcessId::from(process_id.to_string())),
+                        bridge_graph_key: bridge_graph_key.clone(),
+                        bridge_process_id: Some(process_id.clone()),
                         bridge_status: process.status_label().to_string(),
-                        bridge_title: lineage_bridge_title(
-                            child,
-                            Some(process),
-                            &ProcessId::from(process_id),
-                        ),
+                        bridge_title: lineage_bridge_title(child, Some(process), &process_id),
                         child_graph_key: Some(graph.graph_key.clone()),
                         child_session_id: Some(child_session_id.clone()),
                         pending: false,
@@ -351,31 +326,63 @@ impl<'a> GraphProjection<'a> {
             return;
         }
 
-        let child_graph_observed = self.graph_by_key.contains_key(&child.child_graph_key);
+        let child_graph_keys = self.resolved_child_graph_keys(child);
+        let child_graph_observed = !child_graph_keys.is_empty();
         let terminal = process
             .as_ref()
             .map(|process| process.terminal())
             .unwrap_or(false);
-        out.push(LashlangGraphLineageEdge {
-            parent_graph_key: child.parent_graph_key.clone(),
-            parent_node_id: child.parent_node_id.clone(),
-            bridge_graph_key: child.child_graph_key.clone(),
-            bridge_process_id: Some(ProcessId::from(process_id.to_string())),
-            bridge_status: process
-                .as_ref()
-                .map(|process| process.status_label().to_string())
-                .unwrap_or_else(|| self.graph_presence_status(&child.child_graph_key)),
-            bridge_title: lineage_bridge_title(
-                child,
-                process.as_ref(),
-                &ProcessId::from(process_id),
-            ),
-            child_graph_key: Some(child.child_graph_key.clone()),
-            child_session_id: None,
-            pending: !child_graph_observed && !terminal,
-            terminal,
-            error: process.as_ref().and_then(|process| process.error.clone()),
-        });
+        let targets = if child_graph_keys.is_empty() {
+            vec![None]
+        } else {
+            child_graph_keys.into_iter().map(Some).collect()
+        };
+        for child_graph_key in targets {
+            let status_key = child_graph_key.as_deref().unwrap_or(&bridge_graph_key);
+            out.push(LashlangGraphLineageEdge {
+                parent_graph_key: child.parent_graph_key.clone(),
+                parent_node_id: child.parent_node_id.clone(),
+                bridge_graph_key: bridge_graph_key.clone(),
+                bridge_process_id: Some(process_id.clone()),
+                bridge_status: process
+                    .as_ref()
+                    .map(|process| process.status_label().to_string())
+                    .unwrap_or_else(|| self.graph_presence_status(status_key)),
+                bridge_title: lineage_bridge_title(child, process.as_ref(), &process_id),
+                child_graph_key,
+                child_session_id: None,
+                pending: !child_graph_observed && !terminal,
+                terminal,
+                error: process.as_ref().and_then(|process| process.error.clone()),
+            });
+        }
+    }
+
+    fn resolved_child_graph_keys(
+        &self,
+        child: &lash::tracing::TraceLashlangGraphChildLink,
+    ) -> Vec<String> {
+        if let Some(graph_key) = &child.child_graph_key
+            && self.graph_by_key.contains_key(graph_key)
+        {
+            return vec![graph_key.clone()];
+        }
+        self.graphs
+            .iter()
+            .filter(|graph| {
+                matches!(
+                    &graph.subject,
+                    TraceRuntimeSubject::Process { process_id }
+                        if process_id == child.child_process_id
+                ) && graph.history.first().is_some_and(|event| {
+                    event.event.identity.incarnation() == Some(child.child_incarnation)
+                        && child
+                            .child_attempt
+                            .is_none_or(|attempt| event.event.identity.attempt() == Some(attempt))
+                })
+            })
+            .map(|graph| graph.graph_key.clone())
+            .collect()
     }
 
     fn child_session_effect_graphs(&self, session_id: &SessionId) -> Vec<&TraceLashlangGraph> {
@@ -463,12 +470,6 @@ fn graph_title(graph: &TraceLashlangGraph) -> String {
     }
 }
 
-fn process_id_from_graph_key(graph_key: &str) -> Option<&str> {
-    graph_key
-        .strip_prefix("process:")
-        .filter(|id| !id.is_empty())
-}
-
 fn lineage_bridge_title(
     child: &lash::tracing::TraceLashlangGraphChildLink,
     process: Option<&lash::process::ObservedProcess>,
@@ -478,13 +479,6 @@ fn lineage_bridge_title(
         .map(|process| process.label().to_string())
         .or_else(|| child.child_entry_name.clone())
         .unwrap_or_else(|| process_id.to_string())
-}
-
-fn short_graph_title(graph_key: &str) -> String {
-    if let Some(process_id) = process_id_from_graph_key(graph_key) {
-        return process_id.to_string();
-    }
-    graph_key.to_string()
 }
 
 #[cfg(test)]
@@ -532,6 +526,7 @@ mod tests {
         children: Vec<TraceLashlangGraphChildLink>,
     ) -> TraceLashlangGraph {
         TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
             graph_key: graph_key.to_string(),
             scope: TraceRuntimeScope::new(session_id),
             subject,
@@ -541,9 +536,15 @@ mod tests {
             entry_ref: None,
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
             nodes: Vec::new(),
             edges: Vec::new(),
             children,
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            node_retention: Vec::new(),
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
         }
     }
 
@@ -598,6 +599,7 @@ mod tests {
             .expect("register subagent process");
 
         let parent_graph = TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
             graph_key: "effect:root:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: Some(SessionId::from("root")),
@@ -619,18 +621,28 @@ mod tests {
             entry_ref: None,
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
             nodes: Vec::new(),
             edges: Vec::new(),
             children: vec![TraceLashlangGraphChildLink {
                 parent_graph_key: "effect:root:turn-1:exec-1".to_string(),
                 parent_node_id: "spawn".to_string(),
-                child_graph_key: "process:subagent-process".to_string(),
+                child_graph_key: None,
+                child_process_id: ProcessId::from("subagent-process"),
+                child_incarnation: 1,
+                child_attempt: None,
                 child_module_ref: None,
                 child_entry_ref: None,
                 child_entry_name: Some("subagent".to_string()),
             }],
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            node_retention: Vec::new(),
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
         };
         let child_graph = TraceLashlangGraph {
+            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
             graph_key: "effect:child-session:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: Some(SessionId::from(child_session_id.to_string())),
@@ -652,9 +664,15 @@ mod tests {
             entry_ref: None,
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Completed,
+            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
             nodes: Vec::new(),
             edges: Vec::new(),
             children: Vec::new(),
+            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            node_retention: Vec::new(),
+            conflicts: Vec::new(),
+            history: Vec::new(),
+            execution_map: None,
         };
         let mut projection = GraphProjection::new(
             &observer,
@@ -672,7 +690,10 @@ mod tests {
         assert_eq!(lineage_edges.len(), 1);
         let edge = &lineage_edges[0];
         assert_eq!(edge.bridge_process_id.as_deref(), Some("subagent-process"));
-        assert_eq!(edge.bridge_graph_key, "process:subagent-process");
+        assert_eq!(
+            edge.bridge_graph_key,
+            "process:subagent-process:incarnation:1"
+        );
         assert_eq!(edge.child_session_id.as_deref(), Some(child_session_id));
         assert_eq!(
             edge.child_graph_key.as_deref(),
@@ -761,7 +782,10 @@ mod tests {
             vec![TraceLashlangGraphChildLink {
                 parent_graph_key: "effect:current-session:turn-1:exec-1".to_string(),
                 parent_node_id: "spawn".to_string(),
-                child_graph_key: "process:subagent-process".to_string(),
+                child_graph_key: None,
+                child_process_id: ProcessId::from("subagent-process"),
+                child_incarnation: 1,
+                child_attempt: None,
                 child_module_ref: None,
                 child_entry_ref: None,
                 child_entry_name: Some("subagent".to_string()),

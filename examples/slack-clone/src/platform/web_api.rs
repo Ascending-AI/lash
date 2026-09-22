@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 
 use super::args::{ApiError, SlackArgs, flag, limit};
-use super::db::{self, Author, MessageRow, TsWindow};
+use super::db::{self, Author, MessageRow, PostError, TsWindow};
 use super::state::PlatformState;
 use crate::ids::Ts;
 use crate::wire::methods::{
@@ -472,11 +472,14 @@ where
 }
 
 /// Translate a write failure into the Slack error code a client expects.
+///
+/// Classification is by type, not by message text: the write path fails with
+/// [`PostError`], which survives `anyhow` downcasting, so rewording a store
+/// message cannot degrade a classified refusal into `internal_error`.
 fn map_write_error(context: &str, error: anyhow::Error) -> ApiError {
-    match error.to_string().as_str() {
-        "channel_not_found" => ApiError::new("channel_not_found"),
-        "thread_not_found" => ApiError::new("thread_not_found"),
-        _ => ApiError::internal(context, error),
+    match error.downcast_ref::<PostError>() {
+        Some(post) => ApiError::new(post.code()),
+        None => ApiError::internal(context, error),
     }
 }
 

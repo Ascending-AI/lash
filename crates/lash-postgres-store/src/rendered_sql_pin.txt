@@ -32,10 +32,6 @@ UPDATE lash_runtime_effect_replay
                  due_at_ms = $6,
                  updated_at_ms = $7
              WHERE scope_id = $1 AND replay_key = $2
-=== effect::replay::ReplayStatements | effect_replay.set_settlement_seq
-UPDATE lash_runtime_effect_replay
-             SET settlement_seq = $3
-             WHERE scope_id = $1 AND replay_key = $2
 === effect::replay::ReplayStatements | effect_replay.select_group_commit_state
 SELECT group_key, commit_state FROM lash_runtime_effect_replay
              WHERE scope_id = $1 AND replay_key = $2
@@ -66,7 +62,7 @@ SELECT commit_state, commit_seq, drain_input FROM lash_runtime_effect_replay
              WHERE group_key = $1 AND replay_key = $2
 === effect::replay::ReplayStatements | effect_replay.cancel_commit_state
 UPDATE lash_runtime_effect_replay
-             SET commit_state = 'cancel_decided'
+             SET commit_state = 'cancel_decided', settlement_seq = $4
              WHERE scope_id = $1 AND replay_key = $2 AND group_key = $3
                AND commit_state = 'pending'
 === effect::replay::ReplayStatements | effect_replay.settle_drained

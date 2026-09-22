@@ -55,7 +55,7 @@ fn response_hook_fixture(hook_failures: usize, hook_events: usize) -> ResponseHo
                     Ok(Arc::new(RuntimeTestPlugin {
                         before_turn: None,
                         checkpoint: None,
-                        tool_result_projector: None,
+                        presentation_steps: vec![],
                         runtime_event: None,
                         external_registrar: Some(Arc::new(move |reg| {
                             let hook_calls = Arc::clone(&hook_calls);

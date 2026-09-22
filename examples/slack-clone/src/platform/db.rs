@@ -320,6 +320,40 @@ fn read_channel(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelRow> {
     })
 }
 
+/// The classified failures of the message path: names that resolve to nothing.
+///
+/// These are domain answers a caller may act on, so they are a type rather
+/// than a string matched out of `error.to_string()` — the sentinel-string
+/// scheme this replaces degraded a classified refusal into an opaque internal
+/// error every time a message was reworded. Carried inside `anyhow::Error`
+/// and recovered with `downcast_ref`; everything else the store reports stays
+/// opaque and surfaces as an internal error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PostError {
+    /// The channel argument named no channel.
+    ChannelNotFound,
+    /// `thread_ts` named no message in the channel.
+    ThreadNotFound,
+}
+
+impl PostError {
+    /// The stable machine-readable code both API surfaces report.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::ChannelNotFound => "channel_not_found",
+            Self::ThreadNotFound => "thread_not_found",
+        }
+    }
+}
+
+impl std::fmt::Display for PostError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.code())
+    }
+}
+
+impl std::error::Error for PostError {}
+
 /// The mint is `max(now, newest_ts + 1)`, so `ts` is unique and strictly
 /// increasing per channel even when two posts land in the same microsecond.
 /// Slack guarantees exactly this, and clients that treat `ts` as an ordering key
@@ -339,12 +373,12 @@ pub fn append_message(
     metadata_json: Option<&str>,
 ) -> Result<MessageRow> {
     if channel_by_id(transaction, channel_id)?.is_none() {
-        bail!("channel_not_found");
+        bail!(PostError::ChannelNotFound);
     }
     if let Some(parent) = thread_ts
         && !message_exists(transaction, channel_id, parent)?
     {
-        bail!("thread_not_found");
+        bail!(PostError::ThreadNotFound);
     }
     let newest: Option<i64> = transaction.query_row(
         "SELECT MAX(ts) FROM messages WHERE channel_id = ?1",

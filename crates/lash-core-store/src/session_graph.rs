@@ -8,7 +8,7 @@ use crate::session_graph_integrity::{
     ancestry_indices, graph_node_indices, validate_graph_parent_topology,
 };
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
-use crate::{BaseRenderCache, ClockWallTime, Message, PromptUsage, TokenUsage};
+use crate::{BaseRenderCache, ClockWallTime, Message, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_sansio::core_support::MessageCoreSupport;
 
@@ -266,10 +266,14 @@ pub struct SessionNodeRecord {
 /// `lash:` codes as provider spellings, so the fence rejects both directions
 /// rather than degrade the record.
 ///
+/// Version 21 (FIG-1961) retypes `PersistedTurnState.last_prompt_usage` to the
+/// checked `TokenUsage` shape; generation-20 bodies carrying the retired
+/// `PromptUsage` snapshot fields are refused rather than remapped.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 20;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 21;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {
@@ -457,7 +461,7 @@ pub struct PersistedTurnState {
     #[serde(default)]
     pub token_usage: TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_usage: Option<PromptUsage>,
+    pub last_prompt_usage: Option<TokenUsage>,
     #[serde(default)]
     pub protocol_turn_options: crate::ProtocolTurnOptions,
 }

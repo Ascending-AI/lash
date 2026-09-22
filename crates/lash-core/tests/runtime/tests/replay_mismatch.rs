@@ -38,17 +38,8 @@ impl AwaitEventResolver for ProxyPumpingReplayMismatchController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        self.rejecting
-            .runtime_effect_failure_disposition(code)
-            .await
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        self.rejecting.turn_control_participation().await
+    fn effect_journaling(&self) -> EffectJournaling {
+        self.rejecting.effect_journaling()
     }
 
     async fn execute_effect(

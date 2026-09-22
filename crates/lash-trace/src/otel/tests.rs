@@ -30,6 +30,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
         restate_invocation_id: Some("invocation-1".to_string()),
+        generation: Some(crate::TraceLanguageExecutionGeneration::new(2, 3)),
     };
     let language_record = TraceRecord::new(
         TraceContext::default(),
@@ -63,6 +64,14 @@ fn correlation_fields_are_exported_as_otel_attributes() {
     assert_eq!(
         attribute_value(&language_attrs, "lash.language_execution.call_id"),
         &OtelValue::String("call-1".into())
+    );
+    assert_eq!(
+        attribute_value(&language_attrs, "lash.language_execution.attempt"),
+        &OtelValue::I64(2)
+    );
+    assert_eq!(
+        attribute_value(&language_attrs, "lash.language_execution.incarnation"),
+        &OtelValue::I64(3)
     );
 
     for event in [
@@ -432,6 +441,7 @@ fn failed_language_execution_yields_error_span() {
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
         restate_invocation_id: None,
+        generation: None,
     };
 
     // 1. Failed node execution

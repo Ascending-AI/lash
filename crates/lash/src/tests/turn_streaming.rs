@@ -342,7 +342,8 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
+    {
         lash_core::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id).await
     }
 
@@ -422,18 +423,8 @@ impl lash_core::AwaitEventResolver for RecordingDurableEffectController {
 
 #[async_trait]
 impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
-    {
-        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        lash_core::EffectJournaling::Journaled
     }
 
     async fn execute_effect(

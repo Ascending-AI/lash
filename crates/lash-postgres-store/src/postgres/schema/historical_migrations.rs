@@ -17,11 +17,13 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_trigger_subscriptions", "deleted_at_ms"),
         ],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "lash_process_definitions",
             "lash_release_stamp",
             "lash_turn_cancel_affected_inputs",
         ],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -30,7 +32,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -39,7 +43,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -48,7 +54,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -57,7 +65,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -66,7 +76,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -75,7 +87,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -84,7 +98,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[("lash_processes", "cancel_requested_at_ms")],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &["idx_lash_processes_pending_cancel"],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -93,7 +109,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -102,7 +120,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -111,7 +131,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -120,7 +142,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -129,7 +153,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Historical declarations stop at component 87 and cannot be selected by
@@ -141,7 +167,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -150,7 +178,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -159,7 +189,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -168,7 +200,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -177,7 +211,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -186,7 +222,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -195,7 +233,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -204,7 +244,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -213,7 +255,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -222,7 +266,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -231,7 +277,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -240,7 +288,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -249,7 +299,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 71 merged the exec dispatch ledgers but still stored usage
@@ -260,7 +312,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 70 stored checked frame keys but still journaled two separate
@@ -271,7 +325,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 69 constrained pending-turn-input vocabulary and removed the
@@ -282,7 +338,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 68 constrained queued-work vocabulary and claim correlation
@@ -293,7 +351,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 67 made session-lease identity all-or-none as a destructive
@@ -304,7 +364,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 66 added DDL vocabulary constraints as a destructive cutover.
@@ -315,7 +377,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -324,7 +388,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &["idx_lash_processes_updated"],
+        introduced_constraints: &[],
         statements: &[PROCESS_UPDATED_INDEX_DDL],
     },
     // Component 64 changes durable identity bytes from SHA-256 to BLAKE3. Every
@@ -336,10 +402,12 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "lash_session_meta_pending_observer_intents",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -348,10 +416,12 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "lash_session_meta_pending_observer_intents",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             PENDING_OBSERVER_INTENTS_DDL,
             FOLD_PENDING_OBSERVER_INTENTS_DDL,
@@ -370,7 +440,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &["lash_runtime_turn_commits", "idx_lash_processes_updated"],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 61 removes graph-node `seq` and its index. The global
@@ -383,7 +455,9 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &["idx_lash_graph_nodes_seq", "idx_lash_processes_updated"],
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
@@ -392,10 +466,12 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &[],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -410,11 +486,13 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -440,12 +518,14 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
             "idx_lash_session_meta_catalog",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -470,6 +550,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
@@ -480,6 +561,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -509,6 +591,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
@@ -520,6 +603,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -553,6 +637,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
@@ -565,6 +650,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -604,6 +690,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
@@ -620,6 +707,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -663,6 +751,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
@@ -681,6 +770,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -727,6 +817,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
@@ -746,6 +837,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
@@ -797,6 +889,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
@@ -819,6 +912,7 @@ pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
             "idx_lash_processes_updated",
         ],
+        introduced_constraints: &[],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,

@@ -98,7 +98,9 @@ pub(crate) struct PluginContributions {
     pub(crate) assistant_stream_hooks: Vec<RegisteredHook<AssistantStreamHook>>,
     pub(crate) assistant_response_hooks: Vec<RegisteredHook<AssistantResponseHook>>,
     pub(crate) assistant_stream_finished_hooks: Vec<RegisteredHook<AssistantStreamFinishedHook>>,
-    pub(crate) tool_result_projector: Option<RegisteredExclusiveHook<ToolResultProjector>>,
+    /// Presentation steps compose in registration order (FIG-3420); no
+    /// exclusive `model_observation` ownership exists anymore.
+    pub(crate) presentation_steps: Vec<RegisteredHook<ToolPresentationStep>>,
     pub(crate) runtime_event_hooks: Vec<RegisteredHook<PluginLifecycleEventHook>>,
     pub(crate) session_config_mutators: Vec<SessionConfigMutator>,
     pub(crate) plugin_operations: BTreeMap<String, RegisteredPluginOperation>,
@@ -235,8 +237,10 @@ pub struct ToolResultRegistrations<'a> {
 }
 
 impl ToolResultRegistrations<'_> {
-    pub fn projector(self, hook: ToolResultProjector) -> Result<(), PluginError> {
-        self.reg.add_tool_result_projector(hook)
+    /// Appends one composable presentation step; steps run in registration
+    /// order inside the journaled `PresentToolResult` boundary (FIG-3420).
+    pub fn presentation_step(self, step: ToolPresentationStep) {
+        self.reg.add_presentation_step(step);
     }
 }
 
@@ -709,14 +713,12 @@ impl PluginRegistrar {
         )
     }
 
-    fn add_tool_result_projector(&mut self, hook: ToolResultProjector) -> Result<(), PluginError> {
-        register_singleton_hook(
-            &mut self.contributions.tool_result_projector,
+    fn add_presentation_step(&mut self, step: ToolPresentationStep) {
+        push_registered_hook(
+            &mut self.contributions.presentation_steps,
             &self.registering_plugin_id,
-            "tool result projector",
-            "model_observation",
-            hook,
-        )
+            step,
+        );
     }
 
     fn operation_owner(&self) -> Result<String, PluginError> {

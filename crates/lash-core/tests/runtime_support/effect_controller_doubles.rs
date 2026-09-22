@@ -317,25 +317,12 @@ impl lash_core::AwaitEventResolver for RejectingEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for RejectingEffectController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, RuntimeError> {
-        Ok(if self.abort_invocation_on_failure {
-            lash_core::RuntimeEffectFailureDisposition::AbortInvocation
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        if self.abort_invocation_on_failure {
+            lash_core::EffectJournaling::Journaled
         } else {
-            lash_core::RuntimeEffectFailureDisposition::RecordTurnFailure
-        })
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, RuntimeError> {
-        Ok(if self.abort_invocation_on_failure {
-            lash_core::TurnControlParticipation::DurableJournaled
-        } else {
-            lash_core::TurnControlParticipation::Local
-        })
+            lash_core::EffectJournaling::Local
+        }
     }
 
     async fn execute_effect(
@@ -576,7 +563,6 @@ pub struct RecordingEffectController {
     pub execute_code_locally: bool,
     pub fail_exec_after_local: Arc<std::sync::atomic::AtomicBool>,
     pub cancel_watch: CancelWatchBehavior,
-    pub fail_failure_disposition: Arc<std::sync::atomic::AtomicBool>,
     /// Model a host crash in the window between the journaled raw provider
     /// completion (phase 1) and hook post-processing (phase 2).
     pub crash_before_first_response_hooks: bool,
@@ -683,10 +669,6 @@ impl RecordingEffectController {
                 release_failures.notify_one();
             }
         }
-    }
-
-    pub fn fail_failure_disposition(&self) {
-        self.fail_failure_disposition.store(true, Ordering::SeqCst);
     }
 
     pub fn cancel_watch_attempts(&self) -> usize {
@@ -880,31 +862,12 @@ impl lash_core::AwaitEventResolver for RecordingEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for RecordingEffectController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, RuntimeError> {
-        if self.fail_failure_disposition.load(Ordering::SeqCst) {
-            return Err(RuntimeError::new(
-                lash_core::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                "injected runtime-effect failure-disposition error",
-            ));
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        if self.controller_owned_replay {
+            lash_core::EffectJournaling::Journaled
+        } else {
+            lash_core::EffectJournaling::Local
         }
-        Ok(if self.controller_owned_replay {
-            lash_core::RuntimeEffectFailureDisposition::AbortInvocation
-        } else {
-            lash_core::RuntimeEffectFailureDisposition::RecordTurnFailure
-        })
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, RuntimeError> {
-        Ok(if self.controller_owned_replay {
-            lash_core::TurnControlParticipation::DurableJournaled
-        } else {
-            lash_core::TurnControlParticipation::Local
-        })
     }
 
     async fn execute_effect(
@@ -1110,6 +1073,15 @@ impl RuntimeEffectController for RecordingEffectController {
                     .await
             }
             command @ RuntimeEffectCommand::IncorporateGroupSettlements { .. } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
+                    .await
+            }
+            // The recorded presentation boundary (FIG-3420): delegated like
+            // every other command this double journals — the local executor
+            // runs the step chain once and the record above is what replay
+            // serves.
+            command @ RuntimeEffectCommand::PresentToolResult { .. } => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await

@@ -752,7 +752,14 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// there is no envelope migration or legacy decode path.
 // Generation 72 cuts over to ordered plugin parts and the standard-compaction identity.
 // Pre-cutover durable-core catalogs are rejected and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 74;
+/// Bumped to 74 for FIG-1949 layer 2: the stored artifact-blob envelope now
+/// actually drops its `descriptor` field — the pointer table's namespace key
+/// is the sole owner of the payload-family fact. A pre-74 database holds
+/// envelopes that still carry the field, so it is rejected at open and
+/// recreated rather than decoded under the new shape.
+/// Version 75 adds durable queued-run admissions and normalized membership.
+/// Durable-core 74 catalogs require recreation.
+pub(crate) const SCHEMA_VERSION: i32 = 75;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -1150,54 +1157,6 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 11;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS runtime_effect_replay (
-    scope_id             TEXT NOT NULL,
-    session_id           TEXT,
-    replay_key           TEXT NOT NULL,
-    envelope_hash        TEXT NOT NULL,
-    envelope_json        TEXT NOT NULL,
-    status               TEXT NOT NULL,
-    outcome_json         TEXT,
-    error_json           TEXT,
-    lease_owner_id       TEXT,
-    lease_token          TEXT,
-    lease_expires_at_ms  INTEGER NOT NULL DEFAULT 0,
-    due_at_ms            INTEGER,
-    group_key            TEXT,
-    settlement_seq       INTEGER,
-    commit_state         TEXT NOT NULL DEFAULT 'pending',
-    commit_seq           INTEGER,
-    drain_input          TEXT,
-    created_at_ms        INTEGER NOT NULL,
-    updated_at_ms        INTEGER NOT NULL,
-    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
-    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
-    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
-    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
-    PRIMARY KEY (scope_id, replay_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_lease
-    ON runtime_effect_replay(status, lease_expires_at_ms);
-
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_session
-    ON runtime_effect_replay(session_id);
-
--- Backstop for the group counter, not the allocator. Ranks are allocated by a
--- single-row bump on runtime_effect_group; this index is what makes a
--- regression to a read-then-max allocator fail closed on a constraint violation
--- instead of silently seating two children at one rank. It doubles as the
--- ordered index the rank read scans, which is why its predicate is exactly the
--- read's filter.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_group_seq
-    ON runtime_effect_replay(group_key, settlement_seq)
-    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
-
--- One commit position per child, per group: the §4 linearization point's
--- backstop, the same role the settlement-seq unique index plays for ranks.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_commit_seq
-    ON runtime_effect_replay(group_key, commit_seq)
-    WHERE commit_seq IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS runtime_effect_group (
     group_key          TEXT PRIMARY KEY,
@@ -1237,6 +1196,10 @@ CREATE TABLE IF NOT EXISTS runtime_effect_group_child (
     envelope_json    TEXT NOT NULL,
     command_version  INTEGER NOT NULL,
     created_at_ms    INTEGER NOT NULL,
+    -- Membership rows are written before their group row inside the open
+    -- transaction (ADR 0065 N2), so the reference must settle at commit, not
+    -- at the statement.
+    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (group_key, position)
 );
 
@@ -1244,6 +1207,59 @@ CREATE TABLE IF NOT EXISTS runtime_effect_group_child (
 -- by (group_key, replay_key), which the position primary key does not serve.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_group_child_replay_key
     ON runtime_effect_group_child(group_key, replay_key);
+
+CREATE TABLE IF NOT EXISTS runtime_effect_replay (
+    scope_id             TEXT NOT NULL,
+    session_id           TEXT,
+    replay_key           TEXT NOT NULL,
+    envelope_hash        TEXT NOT NULL,
+    envelope_json        TEXT NOT NULL,
+    status               TEXT NOT NULL,
+    outcome_json         TEXT,
+    error_json           TEXT,
+    lease_owner_id       TEXT,
+    lease_token          TEXT,
+    lease_expires_at_ms  INTEGER NOT NULL DEFAULT 0,
+    due_at_ms            INTEGER,
+    group_key            TEXT,
+    settlement_seq       INTEGER,
+    commit_state         TEXT NOT NULL DEFAULT 'pending',
+    commit_seq           INTEGER,
+    drain_input          TEXT,
+    created_at_ms        INTEGER NOT NULL,
+    updated_at_ms        INTEGER NOT NULL,
+    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
+    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
+    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
+    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
+    CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK ((status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)),
+    CONSTRAINT ck_runtime_effect_replay_error_json CHECK ((status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)),
+    CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK ((settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))),
+    CONSTRAINT fk_runtime_effect_replay_group FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
+    PRIMARY KEY (scope_id, replay_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_lease
+    ON runtime_effect_replay(status, lease_expires_at_ms);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_session
+    ON runtime_effect_replay(session_id);
+
+-- Backstop for the group counter, not the allocator. Ranks are allocated by a
+-- single-row bump on runtime_effect_group; this index is what makes a
+-- regression to a read-then-max allocator fail closed on a constraint violation
+-- instead of silently seating two children at one rank. It doubles as the
+-- ordered index the rank read scans, which is why its predicate is exactly the
+-- read's filter.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_group_seq
+    ON runtime_effect_replay(group_key, settlement_seq)
+    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
+
+-- One commit position per child, per group: the §4 linearization point's
+-- backstop, the same role the settlement-seq unique index plays for ranks.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_commit_seq
+    ON runtime_effect_replay(group_key, commit_seq)
+    WHERE commit_seq IS NOT NULL;
 
 -- The await-event tables this database shares with durable core and the
 -- scope-retirement fence it shares with the process registry are applied
@@ -1379,7 +1395,15 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// values beside `live`. No DDL changes — a pre-33 build reads the column as
 /// always `live` and would permit the retries §7 forbids, so a pre-33 journal
 /// is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 33;
+/// Version 34 (FIG-1947) enforces the effect-replay payload, rank, and
+/// group-membership invariants at the DDL level: terminal status now requires
+/// its own payload column (`completed` owns `outcome_json`, `failed` owns
+/// `error_json`, `in_progress` owns neither), a `settlement_seq` rank exists
+/// exactly on `drained`/`cancel_decided` rows, and both `group_key` references
+/// resolve to `runtime_effect_group` rows — the membership table's
+/// children-before-group write order riding a deferred foreign key. A pre-34
+/// journal is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 34;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

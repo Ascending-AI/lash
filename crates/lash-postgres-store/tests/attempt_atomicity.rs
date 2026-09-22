@@ -311,19 +311,8 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
     fn supports_concurrent_effects(&self) -> bool {
         self.0.controller().supports_concurrent_effects()
     }
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
-        self.0
-            .controller()
-            .runtime_effect_failure_disposition(code)
-            .await
-    }
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        self.0.controller().turn_control_participation().await
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        self.0.controller().effect_journaling()
     }
     async fn execute_effect(
         &self,
@@ -456,17 +445,8 @@ impl lash_core::RuntimeEffectController for CrossingController {
         !self.force_serial && self.inner.supports_concurrent_effects()
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
-        self.inner.runtime_effect_failure_disposition(code).await
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        self.inner.turn_control_participation().await
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        self.inner.effect_journaling()
     }
 
     async fn execute_effect(

@@ -128,6 +128,7 @@ fn language_execution_records_are_jsonl_shaped() {
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
         restate_invocation_id: None,
+        generation: None,
     };
     let event = TraceLanguageExecution {
         event_key: "process:p1:node:n1:1:started".to_string(),
@@ -264,6 +265,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                     entry_ref: None,
                     entry_name: "main".to_string(),
                     restate_invocation_id: None,
+                    generation: None,
                 },
                 payload,
             },

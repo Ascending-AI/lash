@@ -88,6 +88,12 @@ pub enum RuntimeErrorCode {
     /// The session id is also retained in [`RuntimeErrorCause::SessionDeleted`]
     /// so hosts need not recover structured identity from display text.
     SessionDeleted,
+    /// The configured Session Catalog has no non-creating by-id lookup, so a
+    /// consumer that strictly requires that seam can never resolve the
+    /// session it names. A capability fact about the deployment, not a
+    /// transient miss: retrying the identical lookup cannot change the
+    /// answer, so this is terminal.
+    SessionCatalogLookupUnsupported,
     /// The final runtime commit writes more graph and attachment-adoption rows
     /// than the shared node budget permits. The same turn will fail identically
     /// until the host produces a smaller turn.
@@ -467,6 +473,7 @@ impl RuntimeErrorCode {
             Self::QueuedRunConfigurationChanged => "queued_run_configuration_changed",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
+            Self::SessionCatalogLookupUnsupported => "session_catalog_lookup_unsupported",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
             Self::CheckpointComponentEncodingVersionMismatch => {
@@ -759,6 +766,7 @@ impl RuntimeErrorCode {
             | Self::StoreCommitNodeBudgetExceeded
             | Self::StoreCommitByteBudgetExceeded
             | Self::SessionDeleted
+            | Self::SessionCatalogLookupUnsupported
             | Self::CheckpointComponentEncodingVersionMismatch
             | Self::RecordEncodingFailed
             | Self::MissingProcessExecutionId
@@ -947,6 +955,7 @@ impl RuntimeErrorCode {
         Self::QueuedRunConfigurationChanged,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
+        Self::SessionCatalogLookupUnsupported,
         Self::StoreCommitNodeBudgetExceeded,
         Self::StoreCommitByteBudgetExceeded,
         Self::CheckpointComponentEncodingVersionMismatch,
@@ -1150,6 +1159,7 @@ impl RuntimeErrorCode {
             "queued_run_configuration_changed" => Self::QueuedRunConfigurationChanged,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
+            "session_catalog_lookup_unsupported" => Self::SessionCatalogLookupUnsupported,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
             "checkpoint_component_encoding_version_mismatch" => {

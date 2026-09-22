@@ -279,8 +279,8 @@ impl InMemorySessionStoreFactory {
     pub async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        crate::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, crate::StoreError> {
+        crate::store::validate_session_id(session_id)?;
         Ok(self
             .stores
             .lock_recover()

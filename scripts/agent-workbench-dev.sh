@@ -455,9 +455,9 @@ new_ownership_token() {
 regular_private_file() {
   local file="$1"
   [[ -f "$file" && ! -L "$file" ]] || return 1
-  [[ "$(stat -c '%u' "$file" 2>/dev/null || true)" = "$(id -u)" ]] || return 1
-  local mode
-  mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+  local owner mode
+  read -r owner mode <<< "$(stat -c '%u %a' "$file" 2>/dev/null)" || return 1
+  [[ "$owner" = "$EUID" ]] || return 1
   [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
   (( (8#$mode & 0022) == 0 ))
 }
@@ -538,9 +538,9 @@ finally:
 private_owned_directory() {
   local directory="$1"
   [[ -d "$directory" && ! -L "$directory" ]] || return 1
-  [[ "$(stat -c '%u' "$directory" 2>/dev/null || true)" = "$(id -u)" ]] || return 1
-  local mode
-  mode="$(stat -c '%a' "$directory" 2>/dev/null || true)"
+  local owner mode
+  read -r owner mode <<< "$(stat -c '%u %a' "$directory" 2>/dev/null)" || return 1
+  [[ "$owner" = "$EUID" ]] || return 1
   [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
   (( (8#$mode & 0022) == 0 ))
 }

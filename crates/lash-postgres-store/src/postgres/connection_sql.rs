@@ -195,6 +195,42 @@ pub(crate) const SELECT_CHECK_CONSTRAINTS: &str = "SELECT c.conrelid::bigint AS 
      WHERE c.contype = 'c'
        AND c.conrelid::bigint = ANY($1::bigint[])";
 
+/// The foreign-key twin of [`SELECT_CHECK_CONSTRAINTS`]: every `contype='f'`
+/// constraint on the resolved tables, with the referential actions and
+/// deferral flags the registered-clause comparison pins. `confdeltype` and
+/// `confupdtype` are the single-character `pg_constraint` encodings; the
+/// caller maps them to the canonical `no action`/`restrict`/`cascade`/
+/// `set null`/`set default` spellings.
+pub(crate) const SELECT_FOREIGN_KEY_CONSTRAINTS: &str = "SELECT c.conrelid::bigint AS table_oid,
+            ARRAY(
+                SELECT a.attname::text
+                FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+                JOIN pg_catalog.pg_attribute AS a
+                    ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                ORDER BY key.ordinality
+            ) AS columns,
+            parent.relname::text AS referenced_table,
+            ARRAY(
+                SELECT a.attname::text
+                FROM unnest(c.confkey) WITH ORDINALITY AS key(attnum, ordinality)
+                JOIN pg_catalog.pg_attribute AS a
+                    ON a.attrelid = c.confrelid AND a.attnum = key.attnum
+                ORDER BY key.ordinality
+            ) AS referenced_columns,
+            c.confdeltype::text AS on_delete,
+            c.confupdtype::text AS on_update,
+            c.condeferrable AS deferrable,
+            c.condeferred AS initially_deferred,
+            c.convalidated AS validated,
+            COALESCE(
+                (pg_catalog.to_jsonb(c) ->> 'conenforced')::boolean,
+                TRUE
+            ) AS enforced
+     FROM pg_catalog.pg_constraint AS c
+     JOIN pg_catalog.pg_class AS parent ON parent.oid = c.confrelid
+     WHERE c.contype = 'f'
+       AND c.conrelid::bigint = ANY($1::bigint[])";
+
 /// Every connection-scoped statement, rendered once at first use.
 static CONNECTION_SQL: LazyLock<ConnectionStatements> =
     LazyLock::new(|| ConnectionStatements::render(Dialect::postgres()));

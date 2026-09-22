@@ -29,7 +29,16 @@ struct SchemaMigration {
     /// it is declared: the migration transaction aborts and the operator sees
     /// the conflict rather than a half-migrated schema.
     source_missing_guards: &'static [DeclaredGuard],
+    /// Foreign keys this build adds to a table the source already has,
+    /// declared at the granularity the shape diff reports them: the
+    /// column pairing, the on-delete action, and the deferral flags.
+    source_missing_foreign_keys: &'static [DeclaredForeignKey],
     introduced_relations: &'static [&'static str],
+    /// Named constraints the arm creates on tables the source already has.
+    /// `CHECK`s and foreign keys are `pg_constraint` rows, not `pg_class`
+    /// relations, so `introduced_relations` cannot see them — the divergence
+    /// probe looks these names up in the constraint catalog instead.
+    introduced_constraints: &'static [&'static str],
     statements: &'static [&'static str],
 }
 
@@ -56,6 +65,25 @@ struct DeclaredGuard {
     /// exactly — a predicate-less guard cannot match a partial index's finding
     /// or vice versa.
     predicate: Option<&'static str>,
+}
+
+/// One foreign key an explicit migration adds, declared precisely enough that
+/// tolerating its absence tolerates *only* it — the same discipline
+/// [`DeclaredGuard`] applies to uniqueness guards. The pairing of child to
+/// parent columns is the identity; the action and deferral flags are the
+/// semantics, so a declaration matching columns alone would wave a missing
+/// `DEFERRABLE` through on the strength of an immediate key this build happens
+/// to add.
+struct DeclaredForeignKey {
+    table: &'static str,
+    /// Referencing columns, zipped with `parent_columns` into the pairing set
+    /// the shape diff pairs on.
+    columns: &'static [&'static str],
+    parent_table: &'static str,
+    parent_columns: &'static [&'static str],
+    on_delete: ForeignKeyAction,
+    deferrable: bool,
+    initially_deferred: bool,
 }
 
 #[cfg(test)]
@@ -644,6 +672,22 @@ async fn apply_schema_migration(
     .await
     .map_err(store_sqlx_error)?;
     artifacts.extend(retired_columns);
+    if !migration.introduced_constraints.is_empty() {
+        let constraint_artifacts = sqlx::query_scalar::<_, String>(
+            r#"SELECT pg_catalog.format('%I.%I', namespace.nspname, constraint_catalog.conname)
+               FROM pg_catalog.pg_constraint AS constraint_catalog
+               JOIN pg_catalog.pg_namespace AS namespace
+                 ON namespace.oid = constraint_catalog.connamespace
+              WHERE namespace.nspname = ANY(pg_catalog.current_schemas(true))
+                AND constraint_catalog.conname = ANY($1)
+              ORDER BY namespace.nspname, constraint_catalog.conname"#,
+        )
+        .bind(migration.introduced_constraints.to_vec())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        artifacts.extend(constraint_artifacts);
+    }
     artifacts.sort();
     artifacts.dedup();
     if !artifacts.is_empty() {
@@ -815,6 +859,7 @@ impl SchemaMigration {
             .copied()
             .collect::<std::collections::BTreeSet<_>>();
         let mut missing_guards = self.source_missing_guards.iter().collect::<Vec<_>>();
+        let mut missing_foreign_keys = self.source_missing_foreign_keys.iter().collect::<Vec<_>>();
         let mut saw_version = false;
         let mut saw_requested_ancestor = false;
         let mut saw_observer_intent_depth = false;
@@ -843,6 +888,8 @@ impl SchemaMigration {
                         && missing_columns.remove(&(table.as_str(), expected.name.as_str())) => {}
                 SchemaFinding::MissingUniqueGuard { table, expected }
                     if remove_guard(&mut missing_guards, table, expected) => {}
+                SchemaFinding::MissingForeignKey { table, expected }
+                    if remove_foreign_key(&mut missing_foreign_keys, table, expected) => {}
                 SchemaFinding::UnexpectedColumn { table, found }
                     if table == "lash_runtime_turn_commits"
                         && found.name == "requested_ancestor_node_id" =>
@@ -869,6 +916,7 @@ impl SchemaMigration {
             && missing_tables.is_empty()
             && missing_columns.is_empty()
             && missing_guards.is_empty()
+            && missing_foreign_keys.is_empty()
             && (self.from >= 62 || self.from == 60 || saw_requested_ancestor)
             && (self.from > 62 || saw_missing_pending_observer_intents)
             && (self.from > 62 || saw_observer_intent_depth)
@@ -919,6 +967,44 @@ fn remove_guard(
                 .collect::<std::collections::BTreeSet<_>>()
                 == columns
             && expected.predicate.as_deref() == guard.predicate
+    }) else {
+        return false;
+    };
+    declared.remove(index);
+    true
+}
+
+/// Consumes the declared foreign key matching a finding.
+///
+/// Matched on the same identity the shape diff pairs on — the parent table
+/// and the set of child-to-parent column pairings — plus the action and
+/// deferral flags, because a declaration for the deferred key this build adds
+/// must not excuse a missing immediate key over the same columns.
+fn remove_foreign_key(
+    declared: &mut Vec<&'static DeclaredForeignKey>,
+    table: &str,
+    expected: &ForeignKeyShape,
+) -> bool {
+    let pairings: std::collections::BTreeSet<(String, String)> = expected
+        .columns
+        .iter()
+        .cloned()
+        .zip(expected.parent_columns.iter().cloned())
+        .collect();
+    let Some(index) = declared.iter().position(|key| {
+        key.table == table
+            && key.parent_table == expected.parent_table
+            && key
+                .columns
+                .iter()
+                .copied()
+                .map(str::to_string)
+                .zip(key.parent_columns.iter().copied().map(str::to_string))
+                .collect::<std::collections::BTreeSet<_>>()
+                == pairings
+            && key.on_delete == expected.on_delete
+            && key.deferrable == expected.deferrable
+            && key.initially_deferred == expected.initially_deferred
     }) else {
         return false;
     };

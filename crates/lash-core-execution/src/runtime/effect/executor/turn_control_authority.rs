@@ -129,11 +129,17 @@ pub fn concrete_turn_cancellation_authority(
         .clone()
 }
 
-/// Whether turn-control reads participate in a durable controller journal.
+/// Whether a controller journals its effects durably.
+///
+/// One fixed fact about a controller, read synchronously. A `Journaled`
+/// controller owns turn-control reads through its own journal and aborts the
+/// invocation on a runtime-effect failure so the engine can replay it; a
+/// `Local` controller keeps turn control host-owned and records the failure
+/// on the turn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnControlParticipation {
+pub enum EffectJournaling {
     Local,
-    DurableJournaled,
+    Journaled,
 }
 
 /// Which durable authority owns the reserved turn-control promises.

@@ -22,11 +22,12 @@ pub use typescript_runtime::{
 };
 
 pub use lash_trace::{
-    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
-    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
-    TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
-    TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
+    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionGeneration,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
+    TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+    TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
+    TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
+    TraceLashlangNodeObservation,
 };
 pub use lashlang::{
     CompiledProcessCache, InMemoryLashlangArtifactStore, LASH_TYPE_KEY, LashlangAbilities,
@@ -1338,9 +1339,10 @@ pub use deferred_triggers::{
     TriggerGrant, TriggerResolution, resolve_and_fold_deferred_triggers,
 };
 pub use process::{
-    LASHLANG_SEGMENT_STATE_VERSION, lashlang_process_event_types,
+    LASHLANG_SEGMENT_STATE_VERSION, TraceLanguageExecutionMapError, lashlang_process_event_types,
     lashlang_process_signal_event_types, lashlang_program_hash, lashlang_type_expr_schema,
-    trace_lashlang_main_map, trace_lashlang_source_identity,
+    trace_lashlang_main_map, trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
+    trace_lashlang_source_identity,
 };
 pub use typed_output::parse_output_schema;
 

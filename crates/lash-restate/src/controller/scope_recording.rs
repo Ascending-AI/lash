@@ -9,11 +9,10 @@ use std::sync::Arc;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, ExecutionScope, GroupSettlement, LoserPolicy, QueuedLaneAcquisition,
-    QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    TurnControlParticipation,
+    EffectGroupHandle, EffectJournaling, ExecutionScope, GroupSettlement, LoserPolicy,
+    QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
 };
 use restate_sdk::errors::TerminalError;
 
@@ -215,15 +214,8 @@ where
         self.inner.wants_segment_boundary(progress)
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: lash_core::RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        self.inner.runtime_effect_failure_disposition(code).await
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        self.inner.turn_control_participation().await
+    fn effect_journaling(&self) -> EffectJournaling {
+        self.inner.effect_journaling()
     }
 
     async fn execute_effect(

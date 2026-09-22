@@ -35,6 +35,9 @@ const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const OBSERVER_SELECTION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-98-observer-predecessor/postgres-expected.json",
 ];
+const CONSTRAINT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-102-379dda204/postgres-expected.json",
+];
 const MESSAGE_BODY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-4883e7a46/postgres-expected.json",
 ];
@@ -100,7 +103,13 @@ const EXPIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-101-f2a4770bd/postgres-expected.json",
 ];
 const FIG_3484_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-102-fig-3484/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-105-fig-3484/postgres-expected.json",
+];
+const SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-103-constraint-predecessor/postgres-expected.json",
+];
+const USAGE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-104-f1d0c1d5f/postgres-expected.json",
 ];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
@@ -246,7 +255,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 115);
+    assert_eq!(PostgresStorage::schema_version(), 116);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -548,6 +557,50 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("refresh refusal fixture with the component-113 explicit-observer catalog");
+    // The component-115 effect-replay constraints land on the catalog as a
+    // delta too: the same NOT VALID + VALIDATE pair the historical 114→115
+    // migration ran before the queued-admission cutover.
+    // The drops keep the delta idempotent — a dump refreshed by a build that
+    // already carried the constraints re-adds them rather than erroring.
+    sqlx::raw_sql(
+        "ALTER TABLE lash_runtime_effect_replay
+             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_outcome_json,
+             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_error_json,
+             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_settlement_seq,
+             DROP CONSTRAINT IF EXISTS fk_runtime_effect_replay_group;
+         ALTER TABLE lash_runtime_effect_group_child
+             DROP CONSTRAINT IF EXISTS fk_runtime_effect_group_child_group;
+         ALTER TABLE lash_runtime_effect_replay
+             ADD CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK (
+                 (status = 'completed' AND outcome_json IS NOT NULL)
+                 OR (status <> 'completed' AND outcome_json IS NULL)
+             ) NOT VALID,
+             ADD CONSTRAINT ck_runtime_effect_replay_error_json CHECK (
+                 (status = 'failed' AND error_json IS NOT NULL)
+                 OR (status <> 'failed' AND error_json IS NULL)
+             ) NOT VALID,
+             ADD CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK (
+                 (settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided')))
+                 OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))
+             ) NOT VALID,
+             ADD CONSTRAINT fk_runtime_effect_replay_group
+                 FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key)
+                 DEFERRABLE INITIALLY DEFERRED NOT VALID;
+         ALTER TABLE lash_runtime_effect_replay
+             VALIDATE CONSTRAINT ck_runtime_effect_replay_outcome_json,
+             VALIDATE CONSTRAINT ck_runtime_effect_replay_error_json,
+             VALIDATE CONSTRAINT ck_runtime_effect_replay_settlement_seq,
+             VALIDATE CONSTRAINT fk_runtime_effect_replay_group;
+         ALTER TABLE lash_runtime_effect_group_child
+             ADD CONSTRAINT fk_runtime_effect_group_child_group
+                 FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key)
+                 DEFERRABLE INITIALLY DEFERRED NOT VALID;
+         ALTER TABLE lash_runtime_effect_group_child
+             VALIDATE CONSTRAINT fk_runtime_effect_group_child_group;",
+    )
+    .execute(&pool)
+    .await
+    .expect("refresh refusal fixture with the component-115 effect-replay constraints");
     // The trigger subscription table cut over to the lifecycle column shape
     // with no migration, so the refusal fixture discards its pre-cutover rows
     // and takes the current catalog.

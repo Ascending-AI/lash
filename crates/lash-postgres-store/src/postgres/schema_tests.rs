@@ -4,13 +4,13 @@ use super::*;
 const RETAINED_MIGRATION_ENDPOINT: i32 = 87;
 
 #[test]
-fn current_destructive_cutover_has_no_migration_arm() {
+fn queued_run_cutover_has_no_migration_arm() {
     assert!(
         SCHEMA_MIGRATIONS
             .iter()
             .filter(|migration| migration.to == SCHEMA_VERSION)
             .all(SchemaMigration::is_recreate_boundary),
-        "the current component must reject every pre-cutover schema rather than migrate it"
+        "queued-run ownership requires recreation even from the immediate predecessor"
     );
 
     let immediate = HISTORICAL_MIGRATIONS
@@ -69,7 +69,9 @@ fn component_61_is_a_recreate_boundary_without_its_divergence_witness() {
         source_missing_tables: declared.source_missing_tables,
         source_missing_columns: declared.source_missing_columns,
         source_missing_guards: declared.source_missing_guards,
+        source_missing_foreign_keys: declared.source_missing_foreign_keys,
         introduced_relations: &[],
+        introduced_constraints: &[],
         statements: declared.statements,
     };
 
@@ -372,10 +374,15 @@ fn version_mismatch_refusal_derives_direction_and_catalog() {
 /// provisioning could apply (ADR 0081, FIG-3172).
 #[test]
 fn recreate_boundary_components_advertise_no_forward_migration() {
-    let sentence = forward_migration_sentence(SCHEMA_VERSION - 1);
+    // A boundary two generations back: the current component's only executable
+    // arm leaves from the immediate predecessor, so an older stamp must be told
+    // there is no path rather than pointed at provisioning.
+    let sentence = forward_migration_sentence(SCHEMA_VERSION - 2);
     assert!(
         sentence.contains(&format!(
-            "This build declares no forward migration into component {SCHEMA_VERSION}"
+            "only from component {}, so component {} has no upgrade path",
+            SCHEMA_VERSION - 1,
+            SCHEMA_VERSION - 2
         )),
         "a recreate-only source must be told there is no upgrade path: {sentence}"
     );
@@ -383,10 +390,25 @@ fn recreate_boundary_components_advertise_no_forward_migration() {
         !sentence.contains("re-open with Lash-managed provisioning enabled"),
         "a recreate boundary cannot be applied by re-opening with provisioning: {sentence}"
     );
-    let older = version_mismatch_error(Some(SCHEMA_VERSION - 1), None).to_string();
+    let older = version_mismatch_error(Some(SCHEMA_VERSION - 2), None).to_string();
     assert!(
         !older.contains("re-open with Lash-managed provisioning enabled"),
         "the rendered refusal must not advertise an upgrade that cannot execute: {older}"
+    );
+}
+
+/// The immediate predecessor's arm is real: its forward-migration sentence must
+/// name the path, and the version-mismatch refusal built from it must offer the
+/// provisioning re-open the arm can actually serve.
+#[test]
+fn the_migratable_predecessor_advertises_its_forward_migration() {
+    let sentence = forward_migration_sentence(SCHEMA_VERSION - 1);
+    assert!(
+        sentence.contains(&format!(
+            "does declare a forward migration from component {} into {SCHEMA_VERSION}",
+            SCHEMA_VERSION - 1
+        )) && sentence.contains("re-open with Lash-managed provisioning enabled"),
+        "the migratable predecessor must be told the upgrade path exists: {sentence}"
     );
 }
 

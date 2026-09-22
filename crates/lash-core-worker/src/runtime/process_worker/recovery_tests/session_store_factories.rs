@@ -40,6 +40,78 @@ pub(super) struct SegmentBoundarySessionStoreFactory {
     catalog: SessionStoreCatalog,
 }
 
+/// A catalog that creates but cannot resolve a session by id: its
+/// `open_existing_store_by_id` answer is the typed no-lookup refusal. Session
+/// initialisation must fail the process on the first admission — the refusal
+/// is a capability fact no retry can change, so re-admitting would only
+/// livelock the worker (FIG-3487).
+#[derive(Default)]
+pub(super) struct NoByIdLookupSessionStoreFactory {
+    by_id_opens: AtomicUsize,
+}
+
+impl NoByIdLookupSessionStoreFactory {
+    pub(super) fn by_id_opens(&self) -> usize {
+        self.by_id_opens.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::AttachmentRootSet for NoByIdLookupSessionStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "live_attachment_refs",
+        })
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        _id: &crate::AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "has_live_attachment_ref",
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStoreFactory for NoByIdLookupSessionStoreFactory {
+    async fn create_store(
+        &self,
+        _request: &crate::SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
+        Ok(Arc::new(InMemorySessionStore::default()))
+    }
+
+    // The fixture's one defect is the point: no non-creating by-id seam,
+    // stated as the typed capability refusal.
+    async fn open_existing_store_by_id(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
+        self.by_id_opens.fetch_add(1, Ordering::SeqCst);
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::open_existing_store_by_id",
+        })
+    }
+
+    // No tombstone is ever recorded, so no session has been deleted.
+    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    async fn delete_session(
+        &self,
+        _session_id: &SessionId,
+    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
+        Ok(crate::store::SessionBlobReclaimReport::default())
+    }
+}
+
 // These factories keep a session catalog but no attachment-root index, so
 // they cannot enumerate roots and must fail closed if passed to GC.
 #[async_trait::async_trait]
@@ -130,7 +202,7 @@ impl SessionStoreFactory for TestSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         Ok(self.catalog.by_id(session_id).map(|store| store as _))
     }
 
@@ -169,7 +241,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         Ok(self.catalog.by_id(session_id).map(|store| store as _))
     }
 
@@ -208,7 +280,7 @@ impl SessionStoreFactory for SegmentBoundarySessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         Ok(self.catalog.by_id(session_id).map(|store| store as _))
     }
 

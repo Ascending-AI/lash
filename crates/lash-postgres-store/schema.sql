@@ -560,47 +560,6 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index);
 
-CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
-    scope_id TEXT NOT NULL,
-    session_id TEXT,
-    replay_key TEXT NOT NULL,
-    envelope_hash TEXT NOT NULL,
-    envelope_json TEXT NOT NULL,
-    status TEXT NOT NULL,
-    outcome_json TEXT,
-    error_json TEXT,
-    lease_owner_id TEXT,
-    lease_token TEXT,
-    lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
-    due_at_ms BIGINT,
-    group_key TEXT,
-    settlement_seq BIGINT,
-    commit_state TEXT NOT NULL DEFAULT 'pending',
-    commit_seq BIGINT,
-    drain_input TEXT,
-    created_at_ms BIGINT NOT NULL,
-    updated_at_ms BIGINT NOT NULL,
-    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
-    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
-    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
-    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
-    PRIMARY KEY (scope_id, replay_key)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
-    ON lash_runtime_effect_replay(status, lease_expires_at_ms);
-CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
-    ON lash_runtime_effect_replay(session_id);
--- Settlement ranks are read by position, so a group must never record the same
--- sequence twice; the partial index leaves ungrouped and unsettled children
--- (both NULL-bearing) entirely unconstrained.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
-    ON lash_runtime_effect_replay(group_key, settlement_seq)
-    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
--- One commit position per child, per group: the §4 linearization point's
--- backstop, the same role the settlement-seq unique index plays for ranks.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_commit_seq
-    ON lash_runtime_effect_replay(group_key, commit_seq)
-    WHERE commit_seq IS NOT NULL;
 -- One row per open effect group. `next_seq` is the group's settlement counter:
 -- a discharging child bumps it inside its own transaction, which is the only
 -- allocator that cannot lose an update the way `MAX(settlement_seq) + 1`
@@ -646,12 +605,62 @@ CREATE TABLE IF NOT EXISTS lash_runtime_effect_group_child (
     envelope_json    TEXT NOT NULL,
     command_version  BIGINT NOT NULL,
     created_at_ms    BIGINT NOT NULL,
+    -- Membership rows are written before their group row inside the open
+    -- transaction (ADR 0065 N2), so the reference must settle at commit, not
+    -- at the statement.
+    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (group_key, position)
 );
 -- Reopens, drains and the unsettled-children join all reach a membership row
 -- by (group_key, replay_key), which the position primary key does not serve.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_group_child_replay_key
     ON lash_runtime_effect_group_child(group_key, replay_key);
+
+CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
+    scope_id TEXT NOT NULL,
+    session_id TEXT,
+    replay_key TEXT NOT NULL,
+    envelope_hash TEXT NOT NULL,
+    envelope_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    outcome_json TEXT,
+    error_json TEXT,
+    lease_owner_id TEXT,
+    lease_token TEXT,
+    lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
+    due_at_ms BIGINT,
+    group_key TEXT,
+    settlement_seq BIGINT,
+    commit_state TEXT NOT NULL DEFAULT 'pending',
+    commit_seq BIGINT,
+    drain_input TEXT,
+    created_at_ms BIGINT NOT NULL,
+    updated_at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
+    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
+    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
+    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
+    CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK ((status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)),
+    CONSTRAINT ck_runtime_effect_replay_error_json CHECK ((status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)),
+    CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK ((settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))),
+    CONSTRAINT fk_runtime_effect_replay_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
+    PRIMARY KEY (scope_id, replay_key)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
+    ON lash_runtime_effect_replay(status, lease_expires_at_ms);
+CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
+    ON lash_runtime_effect_replay(session_id);
+-- Settlement ranks are read by position, so a group must never record the same
+-- sequence twice; the partial index leaves ungrouped and unsettled children
+-- (both NULL-bearing) entirely unconstrained.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
+    ON lash_runtime_effect_replay(group_key, settlement_seq)
+    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
+-- One commit position per child, per group: the §4 linearization point's
+-- backstop, the same role the settlement-seq unique index plays for ranks.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_commit_seq
+    ON lash_runtime_effect_replay(group_key, commit_seq)
+    WHERE commit_seq IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_await_event_meta (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,

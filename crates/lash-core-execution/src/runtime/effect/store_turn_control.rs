@@ -235,9 +235,7 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         &'a self,
         scoped: &'a crate::ScopedEffectController<'_>,
     ) -> Result<crate::TurnControlBinding<'a>, crate::RuntimeError> {
-        if scoped.controller().turn_control_participation().await?
-            == crate::TurnControlParticipation::DurableJournaled
-        {
+        if scoped.controller().effect_journaling() == crate::EffectJournaling::Journaled {
             return self.owner.turn_control_binding(scoped).await;
         }
         let binding_id = self.authority.binding_id().to_string();

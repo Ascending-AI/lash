@@ -1263,17 +1263,6 @@ macro_rules! effect_controller_replay_tests {
     };
 }
 
-/// Register native journal response-derivation recovery.
-#[macro_export]
-macro_rules! effect_controller_response_derivation_tests {
-    ($fixture:block) => {
-        $crate::effect_controller_replay_tests!(@catalogue $fixture; [
-            (effect_controller_response_derivation_retry, "effect-controller-response-derivation-retry"),
-            (effect_controller_response_derivation_terminals, "effect-controller-response-derivation-terminals"),
-        ]);
-    };
-}
-
 /// Register effect-controller replay-mismatch diagnostics.
 #[macro_export]
 macro_rules! effect_controller_replay_mismatch_tests {
@@ -2175,6 +2164,22 @@ macro_rules! tool_child_invocation_tests {
             (
                 a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks,
                 "tool-child-group-prefix-incorporation"
+            ),
+            (
+                two_presentation_steps_compose_deterministically_on_first_run_and_replay,
+                "tool-child-presentation-composition"
+            ),
+            (
+                a_changed_presentation_environment_on_replay_does_not_change_the_recorded_presentation,
+                "tool-child-presentation-recorded-env"
+            ),
+            (
+                the_oracle_and_the_budget_plugin_coexist,
+                "tool-child-presentation-coexistence"
+            ),
+            (
+                a_retained_full_output_is_a_durable_artifact_not_a_path,
+                "tool-child-presentation-artifact"
             ),
         ]);
     };

@@ -27,7 +27,7 @@ pub use crate::runtime::turn_queue::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload,
     SessionCommandSettlement, process_wake_batch_draft,
 };
-pub use crate::runtime::usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
+pub use crate::runtime::usage::{merge_ledger_entry_saturating, nonzero_usage};
 pub use crate::session::Session;
 /// `session_model::transport_stream_events` is crate-private; the relocated
 /// runtime suites call it through this wrapper so the crate's non-testing

@@ -34,9 +34,13 @@ const SCANNED_ROOTS: &[&str] = &[
 ///   text, so generating them would move the gate rather than satisfy it.
 /// - `required_constraints.rs` is the registry of those same `CHECK`
 ///   declarations, compared against the schema files.
+/// - `schema/migrations.rs` carries that same DDL as the versioned migration
+///   arms' executable statements — the `113 -> 114` arm's `ADD CONSTRAINT`
+///   text is the `schema.sql` declaration verbatim, not a query predicate.
 const EXEMPT_FILES: &[&str] = &[
     "lash-sqlite-store/src/schema.rs",
     "lash-core/src/store_backend_support/required_constraints.rs",
+    "lash-postgres-store/src/postgres/schema/migrations.rs",
 ];
 
 #[expect(

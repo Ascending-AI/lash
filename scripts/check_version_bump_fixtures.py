@@ -43,6 +43,10 @@ VERSION_SOURCE = "crates/lash-postgres-store/src/lib.rs"
 MIGRATIONS_SOURCE = "crates/lash-postgres-store/src/postgres/schema/migrations.rs"
 # The refusal renderers stayed behind in the module the catalog was split out of.
 RENDERERS_SOURCE = "crates/lash-postgres-store/src/postgres/schema.rs"
+# The DDL artifact is the authority on which table owns a named constraint:
+# `introduced_constraints` lists names only, and the fixture drops them by
+# `(table, name)` pair.
+DDL_SOURCE = "crates/lash-postgres-store/schema.sql"
 FIXTURE_SOURCE = "runbooks/restate-postgres-workers/src/bin/version_bump.rs"
 GATE_SOURCE = "scripts/version-bump-recreation-e2e.sh"
 
@@ -155,6 +159,7 @@ class Migration:
     source_missing_tables: tuple[str, ...]
     source_missing_columns: tuple[tuple[str, str], ...]
     introduced_relations: tuple[str, ...]
+    introduced_constraints: tuple[str, ...]
 
 
 def read_source(repo: Path, relative: str) -> str:
@@ -323,11 +328,50 @@ def int_field(entry: str, field: str) -> int:
     return int(match.group(1))
 
 
+CONST_ARRAY = re.compile(
+    r"^const (\w+): &\[[^\]]*\] = &?\[(.*?)\];$", re.MULTILINE | re.DOTALL
+)
+CONST_REFERENCE = re.compile(r"(\w+): ([A-Z][A-Z0-9_]*)")
+
+
+CREATE_TABLE_BLOCK = re.compile(
+    r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", re.DOTALL
+)
+NAMED_CONSTRAINT = re.compile(r"\bCONSTRAINT (\w+)")
+
+
+def constraint_owners(text: str) -> dict[str, str]:
+    """Constraint name -> owning table, read from the DDL artifact.
+
+    `introduced_constraints` carries names only, and the fixture's rewind drops
+    them as `(table, name)` pairs — the table comes from the `CREATE TABLE`
+    body that declares the constraint.
+    """
+    owners: dict[str, str] = {}
+    for table, body in CREATE_TABLE_BLOCK.findall(text):
+        for name in NAMED_CONSTRAINT.findall(body):
+            owners[name] = table
+    return owners
+
+
 def parse_migrations(text: str) -> tuple[Migration, ...]:
     block = MIGRATIONS_BLOCK.search(text)
     if block is None:
         raise CheckError(f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS is not in the expected shape")
     body = block.group(1)
+    # A field shared across every entry is declared once as a module constant
+    # and referenced by name. Expand the reference into the literal the field
+    # parsers already read, so a shared list cannot drift from what the
+    # derivations below see.
+    constants = dict(CONST_ARRAY.findall(text))
+
+    def expand_reference(match: re.Match[str]) -> str:
+        name = match.group(2)
+        if name not in constants:
+            return match.group(0)
+        return f"{match.group(1)}: &[{constants[name]}]"
+
+    body = CONST_REFERENCE.sub(expand_reference, body)
     starts = [match.start() for match in MIGRATION_ENTRY.finditer(body)]
     if not starts:
         raise CheckError(f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS lists no migrations")
@@ -339,6 +383,7 @@ def parse_migrations(text: str) -> tuple[Migration, ...]:
             source_missing_tables=string_field(entry, "source_missing_tables"),
             source_missing_columns=pair_field(entry, "source_missing_columns"),
             introduced_relations=string_field(entry, "introduced_relations"),
+            introduced_constraints=string_field(entry, "introduced_constraints"),
         )
         for entry in (body[start:end] for start, end in zip(bounds, bounds[1:]))
     )
@@ -474,8 +519,9 @@ def check(repo: Path) -> tuple[bool, str]:
         ),
         (
             "DIVERGENT_ARTIFACTS",
-            predecessor.introduced_relations,
-            f"the component-{predecessor.from_version} migration's introduced_relations",
+            (*predecessor.introduced_relations, *predecessor.introduced_constraints),
+            f"the component-{predecessor.from_version} migration's introduced_relations "
+            "and introduced_constraints",
         ),
     ):
         found = string_array_constant(fixture_text, FIXTURE_SOURCE, constant)
@@ -500,6 +546,43 @@ def check(repo: Path) -> tuple[bool, str]:
                     f"{table}.{column}"
                     for table, column in floor.source_missing_columns
                 ),
+            )
+        )
+
+    # Named constraints are the third rewind axis: a `CHECK` or foreign key on
+    # a table the floor catalog already has survives every `DROP TABLE` and
+    # `DROP INDEX`, and it can also block the column drops — dropping
+    # `commit_state` while the rank-pairing `CHECK` still names it refuses. The
+    # floor migration's `introduced_constraints` names what a floor-stamped
+    # catalog may not carry; `schema.sql` resolves each name to the table the
+    # fixture must drop it from, and a pair whose table the table drops already
+    # take is excused — a `DROP CONSTRAINT` on a dropped table would name a
+    # relation that no longer exists.
+    ddl_text = read_source(repo, DDL_SOURCE)
+    owners = constraint_owners(ddl_text)
+    post_floor_table_set = set(floor.source_missing_tables)
+    left_behind_constraints: list[tuple[str, str]] = []
+    for name in floor.introduced_constraints:
+        owner = owners.get(name)
+        if owner is None:
+            failures.append(
+                f"{DDL_SOURCE}: post-floor constraint `{name}` is declared by no "
+                "CREATE TABLE, so the fixture cannot know which table drops it"
+            )
+        elif owner not in post_floor_table_set:
+            left_behind_constraints.append((owner, name))
+    declared_constraints = pair_array_constant(
+        fixture_text, FIXTURE_SOURCE, "POST_FLOOR_CONSTRAINTS"
+    )
+    if set(declared_constraints) != set(left_behind_constraints):
+        failures.append(
+            named_set_failure(
+                "POST_FLOOR_CONSTRAINTS",
+                f"the component-{floor.from_version} migration's "
+                "source_missing_constraints on tables POST_FLOOR_TABLES does not "
+                "already drop",
+                tuple(f"{table}.{name}" for table, name in declared_constraints),
+                tuple(f"{table}.{name}" for table, name in left_behind_constraints),
             )
         )
 

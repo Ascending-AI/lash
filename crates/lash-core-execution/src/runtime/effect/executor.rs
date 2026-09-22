@@ -29,9 +29,9 @@ pub use control::{
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition,
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
-    ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
-    ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
+    ResolveOutcome, RuntimeEffectController, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
@@ -66,8 +66,8 @@ pub use native_controller::NativeRuntimeEffectController;
 pub(crate) use native_controller::{NativeEffectGroups, NativeGroupClosing};
 pub use trigger::TriggerLocalExecution;
 pub use turn_control_authority::{
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlParticipation, concrete_turn_cancellation_authority,
+    EffectJournaling, TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
+    TurnControlBinding, concrete_turn_cancellation_authority,
 };
 
 use crate::LlmRequest as CoreLlmRequest;
@@ -342,7 +342,66 @@ enum LocalTarget {
     ProcessDefinitions(ProcessDefinitionLocalExecution),
     Trigger(TriggerLocalExecution),
     TurnAcceptance(Arc<dyn crate::TurnInputStore>),
+    /// The recorded presentation boundary's local work (ADR 0099 §6,
+    /// FIG-3420): run the session's ordered presentation steps once over the
+    /// journaled `PresentToolResult` input.
+    Presentation(PresentationLocalExecution),
     OwnedRunner(Box<dyn RuntimeEffectLocalRunner + Send + 'static>),
+}
+
+/// Everything the presentation boundary needs that is not on the journaled
+/// command: the session's plugin chain, the settlement a step may read, the
+/// store retained artifacts are `put` into, and the recorded
+/// attachment-acceptance environment the materialization notices compute
+/// under.
+pub struct PresentationLocalExecution {
+    pub plugins: Arc<crate::plugin::PluginSession>,
+    pub settlement: Arc<super::ToolSettlement>,
+    pub attachment_store: Arc<crate::SessionAttachmentStore>,
+    pub attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
+}
+
+impl PresentationLocalExecution {
+    async fn execute(
+        self,
+        envelope: RuntimeEffectEnvelope,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let RuntimeEffectCommand::PresentToolResult {
+            call_id,
+            tool_name,
+            args,
+            output,
+            duration_ms,
+        } = envelope.command
+        else {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "presentation executor cannot execute {} command directly",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        let artifacts = Arc::new(super::SessionPresentationArtifacts::new(Arc::clone(
+            &self.attachment_store,
+        )));
+        let context = crate::plugin::ToolResultProjectionContext {
+            session_id: crate::SessionId::from(self.plugins.session_id().to_string()),
+            call_id,
+            tool_name,
+            args,
+            output: *output,
+            duration_ms,
+            artifacts,
+        };
+        let presentation = self
+            .plugins
+            .present_tool_result(context, self.settlement, &self.attachment_acceptance)
+            .await;
+        Ok(RuntimeEffectOutcome::PresentToolResult {
+            presentation: Box::new(presentation),
+        })
+    }
 }
 
 enum RuntimeEffectLocalExecutorState<'run> {
@@ -631,6 +690,29 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Binds the session's plugin chain and artifact store for the journaled
+    /// `PresentToolResult` boundary (ADR 0099 §6, FIG-3420): the ordered
+    /// presentation steps run exactly once on the first execution and replay
+    /// serves the recorded `ToolPresentation`.
+    pub fn presentation(
+        plugins: Arc<crate::plugin::PluginSession>,
+        settlement: Arc<super::ToolSettlement>,
+        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
+    ) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(
+                PresentationLocalExecution {
+                    plugins,
+                    settlement,
+                    attachment_store,
+                    attachment_acceptance,
+                },
+            )),
+            replay_trace: None,
+        }
+    }
+
     pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(
@@ -862,6 +944,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         envelope.command.kind().as_str()
                     ),
                 ))
+            }
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(execution)) => {
+                execution.execute(envelope).await
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)) => {
                 let RuntimeEffectCommand::AcceptTurnInput { draft } = envelope.command else {

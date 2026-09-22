@@ -9,7 +9,6 @@ use serde::Serialize;
 use tokio::sync::{Notify, broadcast};
 
 use super::apps;
-use super::args::ApiError;
 use super::db::{self, Author, MessageRow};
 use super::{PlatformConfig, ui};
 use crate::ids::{IdMinter, Ts};
@@ -35,6 +34,15 @@ pub struct WorkspaceIdentity {
     /// The app's bot *user* id (`U…`) — the `<@…>` mention target.
     pub bot_user_id: String,
     pub bot_handle: String,
+}
+
+/// How a `Bearer` token check can fail. See [`PlatformState::authorize`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthError {
+    /// No token was presented.
+    NotAuthed,
+    /// A token was presented and did not match.
+    InvalidAuth,
 }
 
 /// One frame of the live UI stream. Not a Slack shape: this is the product's
@@ -172,7 +180,11 @@ impl PlatformState {
     /// Slack also accepts the token as a `token` argument. The platform requires
     /// the header, which is the only form current Slack SDKs use and the only
     /// form that keeps credentials out of query strings and access logs.
-    pub fn authorize(&self, headers: &HeaderMap) -> Result<(), ApiError> {
+    ///
+    /// The outcome is typed rather than a rendered error because each surface
+    /// renders auth failure its own way: the Slack-compatible API answers 200
+    /// with a code in the body, the product surface answers `401`/`403`.
+    pub fn authorize(&self, headers: &HeaderMap) -> Result<(), AuthError> {
         let presented = headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
@@ -182,8 +194,8 @@ impl PlatformState {
             // Constant-time: a plain `==` leaks how much of the token prefix was
             // right through how long the rejection took.
             Some(token) if constant_time_eq(token, &self.config.bot_token) => Ok(()),
-            Some(_) => Err(ApiError::new("invalid_auth")),
-            None => Err(ApiError::new("not_authed")),
+            Some(_) => Err(AuthError::InvalidAuth),
+            None => Err(AuthError::NotAuthed),
         }
     }
 

@@ -473,18 +473,26 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// known, without creating one.
     ///
     /// Required, with no default. This is the non-creating acquisition seam a
-    /// **Durable Session** resolves through (ADR 0097), and its two negative
+    /// **Durable Session** resolves through (ADR 0097), and its negative
     /// answers mean opposite things: `Ok(None)` is "this catalog has no such
-    /// session", while `Err` is "this catalog cannot resolve a session by id
-    /// at all". An inherited `Ok(None)` collapses the second into the first,
-    /// so every durable operation on a session that *does* exist would report
-    /// it missing and send the host looking for it. A factory with no by-id
-    /// lookup says so in its error; a decorator forwards to the catalog it
-    /// wraps.
+    /// session", while `Err` is "this catalog cannot answer". An inherited
+    /// `Ok(None)` collapses the second into the first, so every durable
+    /// operation on a session that *does* exist would report it missing and
+    /// send the host looking for it.
+    ///
+    /// The error is typed so the two failure shapes stay apart:
+    /// `StoreError::UnsupportedStoreOperation` is the deterministic "this
+    /// catalog has no by-id lookup" answer — a capability fact retrying
+    /// cannot change, so consumers that strictly require the seam (session
+    /// initialisation reopening a committed session, a `durable()` handle
+    /// bound to a session id) fail fast instead of looping. Any other `Err`
+    /// is a lookup failure a caller may retry. A factory with no by-id
+    /// lookup returns the typed refusal; a decorator forwards to the
+    /// catalog it wraps.
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String>;
+    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::StoreError>;
 
     /// Read exact cancellation closure pins before session deletion or
     /// process-scope retirement. Implementors that cannot provide this

@@ -80,7 +80,7 @@ class SourceOwnershipTests(unittest.TestCase):
             "cargo", "test", "-p", "lash-internal-core-execution",
             "--test", "process_model", "--test", "effect_model", "--no-default-features",
         ])
-        self.assertEqual(command.test_names, ("process_model", "effect_model"))
+        self.assertEqual(command.tests, ("process_model", "effect_model"))
         self.assertTrue(command.with_dev)
         selected = {}
         for args in declarations("crates/lash-core-execution", {"lash_rust_feature_test"}):

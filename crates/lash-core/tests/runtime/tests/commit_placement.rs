@@ -46,10 +46,8 @@ impl<const ENGINE: bool> lash_core::RuntimeEffectController for JournaledCommitC
     fn owns_commit_backpressure(&self) -> bool {
         ENGINE
     }
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        lash_core::EffectJournaling::Journaled
     }
     async fn execute_effect(
         &self,
@@ -129,17 +127,15 @@ async fn assert_commit_placement(
             ..LlmResponse::default()
         }),
     }]);
-    let host = match controller.turn_control_participation().await.unwrap() {
-        lash_core::TurnControlParticipation::Local => {
+    let host = match controller.effect_journaling() {
+        lash_core::EffectJournaling::Local => {
             let mut config = test_runtime_host_config();
             config.control.effect_host = Arc::new(
                 lash_core::facade_support::NativeEffectHost::new(controller.clone()),
             );
             EmbeddedRuntimeHost::new(config)
         }
-        lash_core::TurnControlParticipation::DurableJournaled => {
-            journal_replay_host(controller.clone())
-        }
+        lash_core::EffectJournaling::Journaled => journal_replay_host(controller.clone()),
     };
     let mut runtime = TestRuntime::new(transport)
         .host(host)

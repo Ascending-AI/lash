@@ -494,7 +494,9 @@ impl TurnWorkDriver {
             TurnWorkStore::Catalog(factory) => factory
                 .open_existing_store_by_id(&address.session_id)
                 .await
-                .map_err(|err| RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err))?
+                .map_err(|err| {
+                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                })?
                 .ok_or_else(|| {
                     RuntimeError::new(
                         crate::RuntimeErrorCode::InvalidTurnCancelRequest,

@@ -1383,7 +1383,7 @@ fn validate_process_execution_authority_conn(
                 authority.validate_invocation_for_write(process_id, record)
             }
         }
-        ProcessExecutionWriteAuthority::Lease(lease) => {
+        ProcessExecutionWriteAuthority::Lease { lease, .. } => {
             // The process-id half of the fence is checked first so a lease for
             // another process is refused without reading this process's row.
             if lease.process_id != process_id {

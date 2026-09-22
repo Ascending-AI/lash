@@ -15,7 +15,7 @@ use super::{
     PluginOperationRegistration, PluginOperationSpec, PluginQuery, PluginQueryHandler,
     PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler, PromptContributor,
     SessionConfigMutator, SessionToolAccess, SubagentSessionContext, ToolCatalogContributor,
-    ToolResultProjector, TurnContextTransform,
+    ToolPresentationStep, TurnContextTransform,
 };
 use crate::{PluginOptions, ToolProvider};
 
@@ -98,7 +98,8 @@ pub struct PluginSpec {
     pub assistant_stream_hooks: Vec<AssistantStreamHook>,
     pub assistant_response_hooks: Vec<AssistantResponseHook>,
     pub assistant_stream_finished_hooks: Vec<AssistantStreamFinishedHook>,
-    pub tool_result_projector: Option<ToolResultProjector>,
+    /// Composable presentation steps, applied in list order (FIG-3420).
+    pub presentation_steps: Vec<ToolPresentationStep>,
     pub runtime_event_hooks: Vec<PluginLifecycleEventHook>,
     pub session_config_mutators: Vec<SessionConfigMutator>,
     pub(crate) plugin_operations: Vec<PluginOperationRegistration>,
@@ -200,8 +201,10 @@ impl PluginSpec {
         self
     }
 
-    pub fn with_tool_result_projector(mut self, projector: ToolResultProjector) -> Self {
-        self.tool_result_projector = Some(projector);
+    /// Appends one composable presentation step (FIG-3420). Steps run in the
+    /// order `with_presentation_step` calls list them.
+    pub fn with_presentation_step(mut self, step: ToolPresentationStep) -> Self {
+        self.presentation_steps.push(step);
         self
     }
 
@@ -721,8 +724,8 @@ impl SessionPlugin for SpecPlugin {
         for hook in &self.spec.assistant_stream_finished_hooks {
             reg.output().stream_finished(Arc::clone(hook));
         }
-        if let Some(projector) = &self.spec.tool_result_projector {
-            reg.tool_results().projector(Arc::clone(projector))?;
+        for step in &self.spec.presentation_steps {
+            reg.tool_results().presentation_step(Arc::clone(step));
         }
         for hook in &self.spec.runtime_event_hooks {
             reg.session().on_event(Arc::clone(hook));

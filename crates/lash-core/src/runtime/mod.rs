@@ -163,9 +163,6 @@ use turn_boundary::*;
 use turn_commit_draft::*;
 use turn_driver::*;
 
-// `PromptUsage` is re-exported below alongside the runtime's own types.
-pub use lash_sansio::PromptUsage;
-
 pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
@@ -206,16 +203,16 @@ pub use effect::{
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
     CausalRef, CheckpointClaimSet, ChildDrainOutcome, CompletionKeyPreparation, DrainedChild,
     EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
-    ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupDrainReport, GroupExecutors,
-    GroupFinalizationReport, GroupOnlyFinalization, GroupSettlement, GroupWakePolicy,
-    LlmRequestSpec, LoserPolicy, NativeEffectHost, NativeRuntimeEffectController,
-    OpenerFinalizationSteps, ProcessCommand, ProcessEffectOutcome, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
+    EffectJournalIdentity, EffectJournalRetirement, EffectJournaling, EffectOpener,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildBinding,
+    GroupDrainReport, GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization,
+    GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserPolicy, NativeEffectHost,
+    NativeRuntimeEffectController, OpenerFinalizationSteps, ProcessCommand, ProcessEffectOutcome,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
+    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
+    ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
@@ -225,9 +222,9 @@ pub use effect::{
     ToolChildDriver, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
     TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, TurnControlParticipation, concrete_turn_cancellation_authority,
-    effect_groups_unsupported, refuse_unhonored_group_membership,
-    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
+    TurnControlBindingIdError, concrete_turn_cancellation_authority, effect_groups_unsupported,
+    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]
 pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
@@ -391,7 +388,7 @@ pub use usage::{
     UsageReconciliationReport, UsageReportRow, UsageTotals, diff_token_ledger, diff_usage_reports,
     outstanding_unreported_attempts,
 };
-use usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
+use usage::{merge_ledger_entry_saturating, nonzero_usage};
 pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no

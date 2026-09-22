@@ -719,8 +719,7 @@ class BazelTestContractTests(unittest.TestCase):
         """The Bazel partition owns every deterministic Rust binary.
 
         `tools/bazel/cargo_owned_nextest_filter.txt` is therefore `none()`, and
-        a trusted event with no workbench diff must refuse to run rather than
-        launder an empty selection into a green Cargo job.
+        a trusted event must refuse the Cargo job, including on workbench diffs.
         """
         self.assertEqual(
             "none()",
@@ -728,59 +727,17 @@ class BazelTestContractTests(unittest.TestCase):
             .read_text(encoding="utf-8")
             .strip(),
         )
-        completed, invocations, _ = self.run_workspace_test_step(
-            trusted=True, workbench=False
-        )
-        self.assertEqual(1, completed.returncode)
-        self.assertIn("without workbench", completed.stderr)
-        self.assertEqual([], invocations)
+        for workbench in (False, True):
+            with self.subTest(workbench=workbench):
+                completed, invocations, _ = self.run_workspace_test_step(
+                    trusted=True, workbench=workbench
+                )
+                self.assertEqual(1, completed.returncode)
+                self.assertIn("must use the Bazel partition", completed.stderr)
+                self.assertEqual([], invocations)
 
-    def test_a_trusted_event_runs_exactly_the_workbench_partition(self) -> None:
-        expected_filter = (
-            ROOT / "tools/bazel/workbench_nextest_filter.txt"
-        ).read_text(encoding="utf-8").strip()
-        completed, invocations, _ = self.run_workspace_test_step(
-            trusted=True, workbench=True
-        )
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertEqual(2, len(invocations))
-        nextest = invocations[1]
-        self.assertEqual(["nextest", "run"], nextest[:2])
-        self.assertEqual(expected_filter, nextest[nextest.index("-E") + 1])
-
-    def test_a_trusted_event_builds_only_the_workbench_package(self) -> None:
-        """The selection is one binary, so the build must be one package.
-
-        A `cargo build --workspace` here compiled and linked every workspace
-        crate on a 2-core runner before running a single Node-gated test, which
-        made this job the CI tail (836 s against the Bazel partition's 145 s).
-        The trusted path builds `agent-workbench`'s test targets and nothing
-        else; the store conformance helper example belongs to the untrusted
-        full-workspace path, which still spawns it.
-        """
-        _, invocations, _ = self.run_workspace_test_step(trusted=True, workbench=True)
-        build, nextest = invocations
-        self.assertEqual("build", build[0])
-        self.assertNotIn("--workspace", build)
-        self.assertNotIn("--example", build)
-        self.assertEqual(["--package", "agent-workbench"], build[-3:-1])
-        self.assertIn("--tests", build)
-        self.assertNotIn("--workspace", nextest)
-        self.assertIn("--package", nextest)
-        self.assertEqual(
-            "agent-workbench", nextest[nextest.index("--package") + 1]
-        )
-
-    def test_the_workbench_split_covers_every_workbench_case_exactly_once(
-        self,
-    ) -> None:
-        """Bazel skips by name exactly what the Cargo filter selects by name.
-
-        The workbench unit binary is partition-owned apart from the cases that
-        shell out to `node --test`. Those two halves are generated from one
-        `bazel_skipped` record; this refuses a hand edit that skips a case in
-        Bazel without selecting it in Cargo, or selects one Cargo never runs.
-        """
+    def test_workbench_browser_projection_has_a_pinned_bazel_node_input(self) -> None:
+        """The full workbench unit binary executes under Bazel with Node in runfiles."""
         workbench = next(
             target
             for target in inventory_targets()
@@ -789,31 +746,17 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertEqual([], workbench["tags"])
         self.assertNotIn("cargo_only", workbench)
-        skipped = workbench["bazel_skipped"]
-        self.assertEqual(sorted(skipped), skipped)
-        self.assertTrue(skipped)
+        self.assertNotIn("bazel_skipped", workbench)
         build_file = (
             ROOT / "examples/agent-workbench/BUILD.bazel"
         ).read_text(encoding="utf-8")
-        for test in skipped:
-            self.assertIn(f'"--skip={test}"', build_file)
-        expected_filter = " + ".join(
-            sorted(
-                "((package(agent-workbench) & kind(bin) &"
-                f" binary(agent-workbench)) & test(={test}))"
-                for test in skipped
-            )
-        )
-        self.assertEqual(
-            expected_filter,
-            (ROOT / "tools/bazel/workbench_nextest_filter.txt")
-            .read_text(encoding="utf-8")
-            .strip(),
-        )
+        self.assertIn('"@workbench_node_linux_x64//:bin/node"', build_file)
+        self.assertIn('"LASH_WORKBENCH_TEST_NODE"', build_file)
+        self.assertNotIn("--skip=tests::recoverable_chat_tests::workbench_browser", build_file)
         source = (
             ROOT / "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
         ).read_text(encoding="utf-8")
-        self.assertIn('Command::new("node")', source)
+        self.assertIn('var_os("LASH_WORKBENCH_TEST_NODE")', source)
 
     def test_an_untrusted_event_keeps_the_full_cargo_workspace_run(self) -> None:
         completed, invocations, python_invocations = self.run_workspace_test_step(
@@ -1187,6 +1130,109 @@ class FocusedClippyVerdicts(unittest.TestCase):
             self.assertIn("--aspects=" + self.driver.ASPECT, arguments)
             self.assertEqual(["--", "//crate:lib"], arguments[-2:])
             self.assertFalse(any(arg.startswith("--build_event_json_file=") for arg in arguments))
+
+class CargoTargetSelectionTests(unittest.TestCase):
+    def emit(self, arguments, required_features=()):
+        from unittest.mock import Mock, patch
+
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+
+        library = {"name": "example", "kind": ["lib"], "test": True}
+        targets = [library, *(
+            {"name": name, "kind": ["test"], "test": True}
+            for name in ("process_model", "effect_model", "other")
+        ), {"name": "app", "kind": ["bin"], "test": True}]
+        targets[1]["required-features"] = list(required_features)
+        graph = generator.FeatureLaneGraph.__new__(generator.FeatureLaneGraph)
+        graph.by_name = {"example": {"targets": targets}}
+        graph.library_of = Mock(return_value=library)
+        graph.emit_target = Mock(side_effect=lambda package, resolution, target, kind, runnable, args:
+                                 f"{target['name']}:{kind}")
+        graph.units = []
+        command = generator.feature_variants.parse_command(
+            ["cargo", "test", "-p", "example", "--no-default-features", *arguments]
+        )
+        tests = []
+        with patch.object(generator, "cargo_test_policy", return_value=(False, "")):
+            compiled = graph.emit_root_targets(command, {"example": []}, tests)
+        return command, compiled, tests, graph.emit_target.call_args_list
+
+    def test_named_integrations_compile_binaries_without_unit_harnesses(self):
+        command, compiled, tests, calls = self.emit([
+            "--test", "process_model", "--test", "effect_model", "--locked"
+        ])
+        self.assertEqual(["process_model:test", "effect_model:test", "app:bin"], compiled)
+        self.assertEqual(["process_model:test", "effect_model:test"], tests)
+        self.assertEqual(("process_model", "effect_model"), command.tests)
+        self.assertFalse(command.default_features)
+        self.assertTrue(command.with_dev)
+        for call in calls:
+            self.assertEqual({"example": []}, call.args[1])
+            self.assertEqual([], call.args[-1])
+
+    def test_unavailable_named_targets_fail_instead_of_running_no_tests(self):
+        with self.assertRaisesRegex(ValueError, "unknown --test target.*misspelled"):
+            self.emit(["--test", "misspelled"])
+        with self.assertRaisesRegex(ValueError, "process_model requires missing features.*testing"):
+            self.emit(["--test", "process_model"], required_features=("testing",))
+        with self.assertRaisesRegex(ValueError, "literal --test names"):
+            self.emit(["--test", "*_model"])
+
+    def test_default_and_explicit_unit_selections_remain_runnable(self):
+        for flags in ([], ["--tests"], ["--all-targets"]):
+            with self.subTest(flags=flags):
+                _, compiled, tests, _ = self.emit(flags)
+                self.assertIn("example:unit-test", tests)
+                self.assertIn("app:bin-unit-test", tests)
+                self.assertIn("other:test", tests)
+                self.assertIn("app:bin", compiled)
+        _, compiled, tests, _ = self.emit(["--lib"])
+        self.assertEqual(["example:unit-test"], compiled)
+        self.assertEqual(compiled, tests)
+
+    def test_named_integration_can_be_combined_with_explicit_library_tests(self):
+        _, compiled, tests, _ = self.emit(["--lib", "--test", "process_model"])
+        self.assertEqual(["example:unit-test", "process_model:test", "app:bin"], compiled)
+        self.assertEqual(["example:unit-test", "process_model:test"], tests)
+
+    def test_case_filter_and_harness_arguments_do_not_change_selection(self):
+        command, compiled, tests, calls = self.emit([
+            "--test=process_model", "effect_model", "--", "--exact", "--ignored"
+        ])
+        self.assertEqual(["process_model:test"], tests)
+        self.assertNotIn("effect_model:test", compiled)
+        self.assertEqual(("effect_model", "--exact", "--ignored"), command.test_args)
+        for call in calls:
+            self.assertEqual(list(command.test_args), call.args[-1])
+
+
+class CargoResolutionTests(unittest.TestCase):
+    def test_repeated_tree_markers_preserve_features_and_still_reject_drift(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+
+        plan = {"lane": [{"commands": [["cargo", "check", "-p", "example"]]}]}
+        for features, output, expected in (
+            (["enabled"], "example v1.0.0|enabled\nexample v1.0.0|enabled (*)\n", 0),
+            ([], "example v1.0.0|\nexample v1.0.0| (*)\n", 0),
+            (["enabled"], "example v1.0.0|changed\nexample v1.0.0|changed (*)\n", 1),
+        ):
+            with self.subTest(features=features, expected=expected), \
+                    patch.object(generator.feature_variants.Workspace, "from_metadata", return_value=SimpleNamespace(packages={"example": None})), \
+                    patch.object(generator, "feature_coverage_plan", return_value=plan), \
+                    patch.object(generator.feature_variants, "resolve_request", return_value=SimpleNamespace(sorted_features=lambda: {"example": features})), \
+                    patch.object(generator.subprocess, "run", side_effect=lambda argv, **kwargs: SimpleNamespace(
+                        stdout=output if "--color=never" in argv else output.replace("(*)", "\x1b[33m\x1b[2m(*)\x1b[39m\x1b[22m")
+                    )), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(generator.verify_resolution({}), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -97,8 +97,24 @@ fn delta(v: Option<f64>, b: Option<f64>) -> String {
     }
 }
 #[expect(clippy::expect_used, reason = "writeln! into a String cannot fail")]
-pub(crate) fn markdown(summaries: &[Summary]) -> String {
+pub(crate) fn markdown(
+    summaries: &[Summary],
+    provenance: &crate::provenance::Provenance,
+) -> String {
     let mut out = String::new();
+    let tree = match provenance.lash_dirty {
+        Some(true) => {
+            "DIRTY TREE: uncommitted changes present; rows are not attributable to a committed revision"
+        }
+        Some(false) => "clean tree",
+        None => "tree state unknown; rows are not attributable to a committed revision",
+    };
+    writeln!(
+        out,
+        "Provenance: lash revision {}, {tree}; binary sha256:{}.\n",
+        provenance.lash_revision, provenance.binary_sha256
+    )
+    .expect("writeln into a String cannot fail");
     for model in summaries
         .iter()
         .map(|r| &r.model)
@@ -197,7 +213,15 @@ mod tests {
         assert_eq!((summary.wall_total_s, summary.wall_median_s), (4.0, 2.0));
         assert_eq!(summary.prompt_per_task, Some(350.0));
         assert_eq!(summary.system_prompt_tokens_first_call_mean, Some(150.0));
-        let report = markdown(&[summary]);
+        let provenance = crate::provenance::Provenance {
+            lash_revision: "b4884cb79".into(),
+            lash_dirty: Some(true),
+            binary_sha256: "abc123".into(),
+        };
+        let report = markdown(&[summary], &provenance);
+        assert!(report.contains("Provenance: lash revision b4884cb79"));
+        assert!(report.contains("DIRTY TREE"));
+        assert!(report.contains("binary sha256:abc123"));
         assert!(report.contains("| Prompt total |"));
         assert!(report.contains("| Attempts |"));
         assert!(report.contains("| Attempts/task |"));

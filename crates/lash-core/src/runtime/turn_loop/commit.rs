@@ -516,7 +516,10 @@ impl LashRuntime {
             turn_pipeline.state_mut().token_usage = assembler.token_usage.clone();
         }
 
-        let last_prompt_usage = assembler.last_llm_usage().and_then(normalize_prompt_usage);
+        let last_prompt_usage = assembler
+            .last_llm_usage()
+            .filter(|usage| !usage.is_zero())
+            .cloned();
         turn_pipeline.state_mut().last_prompt_usage = last_prompt_usage;
         let assembled_state = turn_pipeline.export_state_for_assembly();
         let assembled = assembler.finish(

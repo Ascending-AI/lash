@@ -448,8 +448,36 @@ fn foreign_key_lines_round_trip_through_the_artifact_format() {
         parent_table: "lash_processes".to_string(),
         parent_columns: vec!["process_id".to_string()],
         on_delete: ForeignKeyAction::Cascade,
+        deferrable: false,
+        initially_deferred: false,
     };
     assert_eq!(parse_foreign_key_line(&key.to_string()), Some(key));
+}
+
+#[test]
+fn deferred_foreign_key_lines_round_trip_through_the_artifact_format() {
+    let key = ForeignKeyShape {
+        columns: vec!["group_key".to_string()],
+        parent_table: "lash_runtime_effect_group".to_string(),
+        parent_columns: vec!["group_key".to_string()],
+        on_delete: ForeignKeyAction::NoAction,
+        deferrable: true,
+        initially_deferred: true,
+    };
+    assert_eq!(
+        key.to_string(),
+        "(group_key) references lash_runtime_effect_group (group_key) on delete no action \
+         deferrable initially deferred"
+    );
+    let non_initial = ForeignKeyShape {
+        initially_deferred: false,
+        ..key.clone()
+    };
+    assert_eq!(parse_foreign_key_line(&key.to_string()), Some(key));
+    assert_eq!(
+        parse_foreign_key_line(&non_initial.to_string()),
+        Some(non_initial)
+    );
 }
 
 #[test]

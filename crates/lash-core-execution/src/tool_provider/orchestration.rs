@@ -116,10 +116,12 @@ impl<'run> OrchestrationContext<'run> {
     pub fn emit_child_process_started(
         &self,
         process_id: impl Into<ProcessId>,
+        incarnation: crate::ProcessIncarnation,
+        attempt: Option<u32>,
         child_entry_name: Option<String>,
     ) {
         self.context
-            .emit_child_process_started(process_id, child_entry_name);
+            .emit_child_process_started(process_id, incarnation, attempt, child_entry_name);
     }
 
     pub async fn call_tool_batch(

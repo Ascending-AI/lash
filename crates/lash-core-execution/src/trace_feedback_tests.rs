@@ -38,10 +38,3 @@ fn runtime_feedback_composition_identity_includes_instruction_authority() {
     request.instructions = Some(Arc::from(""));
     assert_ne!(trace_composition_key(&request, &[]), absent);
 }
-
-#[test]
-fn runtime_feedback_composition_has_a_new_hash_family() {
-    let previous = Blake3DomainHasher::new("lash-model-facing-composition/v2").finalize();
-    let current = Blake3DomainHasher::new("lash-model-facing-composition/v3").finalize();
-    assert_ne!(previous, current);
-}

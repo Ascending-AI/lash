@@ -12,7 +12,7 @@ occurrence-sequenced keys.
 Lash owns the effect-journal contract; the configured substrate owns the journal.
 Restate supplies its native journal. The SQLite and PostgreSQL substrates implement
 the same contract in `runtime_effect_replay` and `lash_runtime_effect_replay`.
-The inline substrate owns no replay journal. The session commit store does not absorb
+The native substrate owns no replay journal. The session commit store does not absorb
 this responsibility: effect replay and settled session history remain separate seams
 joined by stable operation identity.
 
@@ -71,6 +71,7 @@ that stability must journal the choice before emitting either shape.
 - `EffectReplayOwnership` records only the mechanical fact of whether the runtime or
   its controller owns replay. It is not an end-to-end durability claim. The Host
   Application owns that deployment-level assertion.
+  *(Superseded: this fact is now the one sync `RuntimeEffectController::effect_journaling()` → `EffectJournaling { Local, Journaled }` (FIG-2226).)*
 - Signals are named and typed only: declared per-process as event types with payload
   schemas, validated at send time; the unnamed untyped `wait_signal()` is removed.
 - Waiting is an observability facet on a running process (wait state on the record,

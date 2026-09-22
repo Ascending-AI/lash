@@ -466,6 +466,10 @@ pub struct ToolContext<'run> {
 pub struct ToolChildProcessStarted {
     /// Stable identity of the child process that started.
     pub process_id: ProcessId,
+    /// Store-minted lifetime admitted by the child start.
+    pub incarnation: crate::ProcessIncarnation,
+    /// Durable execution attempt, when the observer saw the child after admission.
+    pub attempt: Option<u32>,
     /// Optional tool-defined name for the child entry point.
     pub child_entry_name: Option<String>,
 }
@@ -877,6 +881,8 @@ impl<'run> ToolContext<'run> {
     pub fn emit_child_process_started(
         &self,
         process_id: impl Into<ProcessId>,
+        incarnation: crate::ProcessIncarnation,
+        attempt: Option<u32>,
         child_entry_name: Option<String>,
     ) {
         let Some(hook) = &self.child_execution_trace_hook else {
@@ -884,6 +890,8 @@ impl<'run> ToolContext<'run> {
         };
         hook.child_process_started(ToolChildProcessStarted {
             process_id: process_id.into(),
+            incarnation,
+            attempt,
             child_entry_name,
         });
     }
@@ -1535,17 +1543,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::RuntimeEffectController for DurableControllerWithoutCompletionKeySupport {
-        async fn runtime_effect_failure_disposition(
-            &self,
-            _code: crate::RuntimeErrorCode,
-        ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
-            Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
-        }
-
-        async fn turn_control_participation(
-            &self,
-        ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
-            Ok(crate::TurnControlParticipation::DurableJournaled)
+        fn effect_journaling(&self) -> crate::EffectJournaling {
+            crate::EffectJournaling::Journaled
         }
 
         async fn execute_effect(

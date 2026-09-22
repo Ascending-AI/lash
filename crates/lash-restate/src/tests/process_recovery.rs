@@ -1450,7 +1450,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
             wake_target_session_id: Some(SessionId::from("wake-session")),
             tool_effect_id: Some("tool-effect".to_string()),
             execution_scope_id: "task-workflow".to_string(),
-            turn_control_participation: lash_core::TurnControlParticipation::Local,
+            effect_journaling: lash_core::EffectJournaling::Local,
         }]
     );
     assert_eq!(

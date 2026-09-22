@@ -32,10 +32,6 @@ UPDATE main.runtime_effect_replay
                  due_at_ms = ?6,
                  updated_at_ms = ?7
              WHERE scope_id = ?1 AND replay_key = ?2
-=== main | effect::replay::ReplayStatements | effect_replay.set_settlement_seq
-UPDATE main.runtime_effect_replay
-             SET settlement_seq = ?3
-             WHERE scope_id = ?1 AND replay_key = ?2
 === main | effect::replay::ReplayStatements | effect_replay.select_group_commit_state
 SELECT group_key, commit_state FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
@@ -66,7 +62,7 @@ SELECT commit_state, commit_seq, drain_input FROM main.runtime_effect_replay
              WHERE group_key = ?1 AND replay_key = ?2
 === main | effect::replay::ReplayStatements | effect_replay.cancel_commit_state
 UPDATE main.runtime_effect_replay
-             SET commit_state = 'cancel_decided'
+             SET commit_state = 'cancel_decided', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
                AND commit_state = 'pending'
 === main | effect::replay::ReplayStatements | effect_replay.settle_drained
@@ -347,10 +343,6 @@ UPDATE effect_journal.runtime_effect_replay
                  due_at_ms = ?6,
                  updated_at_ms = ?7
              WHERE scope_id = ?1 AND replay_key = ?2
-=== effect_journal | effect::replay::ReplayStatements | effect_replay.set_settlement_seq
-UPDATE effect_journal.runtime_effect_replay
-             SET settlement_seq = ?3
-             WHERE scope_id = ?1 AND replay_key = ?2
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_group_commit_state
 SELECT group_key, commit_state FROM effect_journal.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
@@ -381,7 +373,7 @@ SELECT commit_state, commit_seq, drain_input FROM effect_journal.runtime_effect_
              WHERE group_key = ?1 AND replay_key = ?2
 === effect_journal | effect::replay::ReplayStatements | effect_replay.cancel_commit_state
 UPDATE effect_journal.runtime_effect_replay
-             SET commit_state = 'cancel_decided'
+             SET commit_state = 'cancel_decided', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
                AND commit_state = 'pending'
 === effect_journal | effect::replay::ReplayStatements | effect_replay.settle_drained
@@ -662,10 +654,6 @@ UPDATE process_registry.runtime_effect_replay
                  due_at_ms = ?6,
                  updated_at_ms = ?7
              WHERE scope_id = ?1 AND replay_key = ?2
-=== process_registry | effect::replay::ReplayStatements | effect_replay.set_settlement_seq
-UPDATE process_registry.runtime_effect_replay
-             SET settlement_seq = ?3
-             WHERE scope_id = ?1 AND replay_key = ?2
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_group_commit_state
 SELECT group_key, commit_state FROM process_registry.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
@@ -696,7 +684,7 @@ SELECT commit_state, commit_seq, drain_input FROM process_registry.runtime_effec
              WHERE group_key = ?1 AND replay_key = ?2
 === process_registry | effect::replay::ReplayStatements | effect_replay.cancel_commit_state
 UPDATE process_registry.runtime_effect_replay
-             SET commit_state = 'cancel_decided'
+             SET commit_state = 'cancel_decided', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
                AND commit_state = 'pending'
 === process_registry | effect::replay::ReplayStatements | effect_replay.settle_drained

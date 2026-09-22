@@ -83,8 +83,10 @@ impl RuntimeTurnDriver<'_> {
             Err(err) => {
                 let err_string = err.to_string();
                 if self
-                    .should_abort_for_runtime_effect_error(RuntimeErrorCode::ProtocolBeforeLlmCall)
-                    .await?
+                    .scoped_effect_controller
+                    .controller()
+                    .effect_journaling()
+                    == crate::EffectJournaling::Journaled
                 {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::ProtocolBeforeLlmCall,
@@ -207,7 +209,7 @@ impl RuntimeTurnDriver<'_> {
         }
         if let Ok(response) = &result {
             let usage = crate::runtime::effect::token_usage_from_llm(&response.usage);
-            self.latest_prompt_usage = normalize_prompt_usage(&usage);
+            self.latest_prompt_usage = nonzero_usage(usage);
             if !text_streamed {
                 let prose_projector = self.session.plugins().assistant_prose_projector();
                 emit_semantic_response_parts(
@@ -587,12 +589,12 @@ impl RuntimeTurnDriver<'_> {
                             )
                         })?;
                 }
-                let abort_for_error = if cancellation_evidence.is_some() {
-                    self.should_abort_for_runtime_effect_error(err.code.clone())
-                        .await?
-                } else {
-                    false
-                };
+                let abort_for_error = cancellation_evidence.is_some()
+                    && self
+                        .scoped_effect_controller
+                        .controller()
+                        .effect_journaling()
+                        == crate::EffectJournaling::Journaled;
                 if abort_for_error {
                     return Err(err.into_runtime_error());
                 }

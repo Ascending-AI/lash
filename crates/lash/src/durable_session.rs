@@ -173,9 +173,9 @@ impl DurableSession {
             DurableAcquisition::Catalog(catalog) => catalog
                 .open_existing_store_by_id(&self.session_id)
                 .await
-                .map_err(|message| EmbedError::StoreFactory {
+                .map_err(|error| EmbedError::StoreFactory {
                     session_id: self.session_id.clone(),
-                    message,
+                    message: error.to_string(),
                 })?,
         };
         match resolved {

@@ -1,5 +1,6 @@
 use lash_core::store_backend_support::required_constraints::{
-    EXPECTED_CONSTRAINTS, RenderedConstraint,
+    EXPECTED_CONSTRAINTS, EXPECTED_FOREIGN_KEYS, RenderedConstraint, RenderedForeignKey,
+    extract_foreign_key_clauses,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -426,6 +427,135 @@ fn ddl_constraints(source: &str) -> BTreeSet<(&str, &str)> {
     constraints
 }
 
+fn ddl_foreign_keys(
+    source: &str,
+    table: &str,
+    dialect: &str,
+) -> Result<
+    Vec<lash_core::store_backend_support::required_constraints::ParsedForeignKeyClause>,
+    String,
+> {
+    let Some(body) = ddl_table_body(source, table) else {
+        return Err(format!("{dialect} DDL is missing table `{table}`"));
+    };
+    let ddl = format!("CREATE TABLE IF NOT EXISTS {table} (\n{body}\n);");
+    extract_foreign_key_clauses(&ddl).map_err(|detail| {
+        format!("{dialect} DDL table `{table}` has an unparsable clause: {detail}")
+    })
+}
+
+fn validate_expected_foreign_keys(
+    source: &str,
+    registry: &[RenderedForeignKey],
+    dialect: &str,
+    tables: &[&str],
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    let mut declared = BTreeSet::new();
+    for expected in registry {
+        let identity = (
+            expected.table,
+            expected.columns.to_vec(),
+            expected.referenced_table,
+            expected.referenced_columns.to_vec(),
+        );
+        if !declared.insert(identity) {
+            failures.push(format!(
+                "{dialect} expected-foreign-keys registry duplicates {}({}) -> {}",
+                expected.table,
+                expected.columns.join(", "),
+                expected.referenced_table
+            ));
+            continue;
+        }
+        let clauses = match ddl_foreign_keys(source, expected.table, dialect) {
+            Ok(clauses) => clauses,
+            Err(failure) => {
+                failures.push(failure);
+                continue;
+            }
+        };
+        let matching: Vec<_> = clauses
+            .iter()
+            .filter(|clause| {
+                clause.columns == expected.columns
+                    && clause.referenced_table == expected.referenced_table
+                    && clause.referenced_columns == expected.referenced_columns
+            })
+            .collect();
+        let Some(clause) = matching.first() else {
+            failures.push(format!(
+                "{dialect} DDL table `{}` is missing registered foreign key ({}) REFERENCES {}({})",
+                expected.table,
+                expected.columns.join(", "),
+                expected.referenced_table,
+                expected.referenced_columns.join(", ")
+            ));
+            continue;
+        };
+        let mut drift = Vec::new();
+        if clause.on_delete != expected.on_delete {
+            drift.push(format!(
+                "on delete: registered `{}`, declared `{}`",
+                expected.on_delete, clause.on_delete
+            ));
+        }
+        if clause.on_update != expected.on_update {
+            drift.push(format!(
+                "on update: registered `{}`, declared `{}`",
+                expected.on_update, clause.on_update
+            ));
+        }
+        if clause.deferrable != expected.deferrable {
+            drift.push(format!(
+                "deferrable: registered {}, declared {}",
+                expected.deferrable, clause.deferrable
+            ));
+        }
+        if clause.initially_deferred != expected.initially_deferred {
+            drift.push(format!(
+                "initially deferred: registered {}, declared {}",
+                expected.initially_deferred, clause.initially_deferred
+            ));
+        }
+        if !drift.is_empty() {
+            failures.push(format!(
+                "{dialect} DDL table `{}` foreign key ({}) REFERENCES {}({}) drifted: {}",
+                expected.table,
+                expected.columns.join(", "),
+                expected.referenced_table,
+                expected.referenced_columns.join(", "),
+                drift.join("; ")
+            ));
+        }
+    }
+    for table in tables {
+        let Ok(clauses) = ddl_foreign_keys(source, table, dialect) else {
+            continue;
+        };
+        for clause in clauses {
+            if !registry.iter().any(|expected| {
+                expected.table == *table
+                    && clause.columns == expected.columns
+                    && clause.referenced_table == expected.referenced_table
+                    && clause.referenced_columns == expected.referenced_columns
+            }) {
+                failures.push(format!(
+                    "{dialect} DDL table `{table}` declares unregistered foreign key ({}) REFERENCES {}({}); add it to the expected-foreign-keys registry",
+                    clause.columns.join(", "),
+                    clause.referenced_table,
+                    clause.referenced_columns.join(", ")
+                ));
+            }
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
 fn validate_expected_constraints(
     source: &str,
     registry: &[RenderedConstraint],
@@ -768,6 +898,119 @@ fn schema_congruence_expected_constraints_match_both_backends() {
         if let Err(failures) = validate_expected_constraints(source, registry, dialect) {
             panic!("{dialect} expected-constraints validation failed:\n{failures}");
         }
+    }
+}
+
+fn sqlite_expected_foreign_keys() -> Vec<RenderedForeignKey> {
+    EXPECTED_FOREIGN_KEYS
+        .iter()
+        .filter_map(|key| key.sqlite)
+        .collect()
+}
+
+fn postgres_expected_foreign_keys() -> Vec<RenderedForeignKey> {
+    EXPECTED_FOREIGN_KEYS
+        .iter()
+        .filter_map(|key| key.postgres)
+        .collect()
+}
+
+#[test]
+fn schema_congruence_expected_foreign_keys_match_both_backends() {
+    let sqlite_registry = sqlite_expected_foreign_keys();
+    let postgres_registry = postgres_expected_foreign_keys();
+    let sqlite_tables: Vec<&str> = TABLE_REGISTRY
+        .iter()
+        .filter_map(|row| row.sqlite_table)
+        .collect();
+    let postgres_tables: Vec<&str> = TABLE_REGISTRY
+        .iter()
+        .filter_map(|row| row.postgres_table)
+        .collect();
+    for (dialect, source, registry, tables) in [
+        (
+            "SQLite",
+            SQLITE_SCHEMA_SOURCE,
+            &sqlite_registry[..],
+            &sqlite_tables[..],
+        ),
+        (
+            "Postgres",
+            POSTGRES_SCHEMA_SOURCE,
+            &postgres_registry[..],
+            &postgres_tables[..],
+        ),
+    ] {
+        if let Err(failures) = validate_expected_foreign_keys(source, registry, dialect, tables) {
+            panic!("{dialect} expected-foreign-keys validation failed:\n{failures}");
+        }
+    }
+}
+
+#[test]
+fn schema_congruence_rejects_a_dropped_registered_foreign_key() {
+    let sqlite_registry = sqlite_expected_foreign_keys();
+    let postgres_registry = postgres_expected_foreign_keys();
+    for (dialect, source, registry, declaration) in [
+        (
+            "SQLite",
+            SQLITE_SCHEMA_SOURCE,
+            &sqlite_registry[..],
+            "    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,\n",
+        ),
+        (
+            "Postgres",
+            POSTGRES_SCHEMA_SOURCE,
+            &postgres_registry[..],
+            "    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,\n",
+        ),
+    ] {
+        let dropped = source.replacen(declaration, "", 1);
+        assert_ne!(dropped, source, "{dialect} witness did not drop a key");
+        let failure = validate_expected_foreign_keys(&dropped, registry, dialect, &[])
+            .expect_err("dropping a registered foreign key must fail the congruence gate");
+        assert!(
+            failure.contains("missing registered foreign key (group_key) REFERENCES"),
+            "unexpected {dialect} dropped-key failure: {failure}"
+        );
+    }
+}
+
+#[test]
+fn schema_congruence_rejects_an_unregistered_foreign_key() {
+    let sqlite_registry = sqlite_expected_foreign_keys();
+    let postgres_registry = postgres_expected_foreign_keys();
+    for (dialect, source, registry, table) in [
+        (
+            "SQLite",
+            SQLITE_SCHEMA_SOURCE,
+            &sqlite_registry[..],
+            "blobs",
+        ),
+        (
+            "Postgres",
+            POSTGRES_SCHEMA_SOURCE,
+            &postgres_registry[..],
+            "lash_blobs",
+        ),
+    ] {
+        let Some(body) = ddl_table_body(source, table) else {
+            panic!("{dialect} witness table `{table}` is missing");
+        };
+        let tampered = source.replacen(
+            &format!("CREATE TABLE IF NOT EXISTS {table} ({body}\n);"),
+            &format!(
+                "CREATE TABLE IF NOT EXISTS {table} ({body},\n    FOREIGN KEY (orphan_probe) REFERENCES {table}(hash)\n);"
+            ),
+            1,
+        );
+        assert_ne!(tampered, source, "{dialect} witness did not add a key");
+        let failure = validate_expected_foreign_keys(&tampered, registry, dialect, &[table])
+            .expect_err("an unregistered foreign key must fail the congruence gate");
+        assert!(
+            failure.contains("unregistered foreign key"),
+            "unexpected {dialect} unregistered-key failure: {failure}"
+        );
     }
 }
 

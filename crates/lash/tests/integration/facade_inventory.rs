@@ -308,7 +308,7 @@ mod http_transport_inventory {
 // home fails here, in lash CI, instead of in a host's pin bump.
 //
 // The parsers are deliberately small and textual, matching the style of
-// `tests/one_home.rs`; each test asserts the size of the set it derived so a
+// `tests/integration/one_home.rs`; each test asserts the size of the set it derived so a
 // broken parser fails loudly instead of vacuously passing.
 
 mod whole_module_coverage {
@@ -515,7 +515,7 @@ mod whole_module_coverage {
 
     /// Facade re-exports grouped by module home: `(leaf names, glob prefixes)`
     /// per enclosing `pub mod` path in `src/lib.rs` (`"root"` at file scope).
-    /// Mirrors the `collect` logic of `tests/one_home.rs`.
+    /// Mirrors the `collect` logic of `tests/integration/one_home.rs`.
     fn facade_exports() -> BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> {
         let src = uncommented(&read("src/lib.rs"));
         let bytes = src.as_bytes();

@@ -578,18 +578,55 @@ impl PluginSession {
         Ok(())
     }
 
-    pub async fn project_tool_result(
+    /// The presentation boundary (ADR 0099 §6, FIG-3420): folds every
+    /// registered [`ToolPresentationStep`] in registration order, starting
+    /// from `ModelToolReturn::from_output`.
+    ///
+    /// A step error does not abort the chain: the fold continues from the
+    /// recorded fallback text return (`ModelToolReturn::text(call_id, tool,
+    /// err)`), so one broken step settles a refusal the model can read instead
+    /// of losing the whole presentation. Attachment-materialization notices
+    /// are then computed under `attachment_acceptance`, the caller's recorded
+    /// environment, and the refs retained through `ctx.artifacts` ride the
+    /// returned [`crate::runtime::effect::ToolPresentation`] into the journal.
+    pub async fn present_tool_result(
         &self,
         ctx: ToolResultProjectionContext,
-    ) -> Result<crate::ModelToolReturn, PluginError> {
-        let Some(projector) = &self.contributions.tool_result_projector else {
-            return Ok(crate::ModelToolReturn::from_output(
-                ctx.call_id.clone(),
-                ctx.tool_name.clone(),
-                &ctx.output,
-            ));
-        };
-        (projector.hook)(ctx).await
+        settlement: Arc<crate::runtime::effect::ToolSettlement>,
+        attachment_acceptance: &crate::provider::AttachmentCapabilitySnapshot,
+    ) -> crate::runtime::effect::ToolPresentation {
+        use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+
+        let mut model_return = crate::ModelToolReturn::from_output(
+            ctx.call_id.clone(),
+            ctx.tool_name.clone(),
+            &ctx.output,
+        );
+        for registered in &self.contributions.presentation_steps {
+            let input = ToolPresentationInput {
+                previous: model_return,
+                settlement: Arc::clone(&settlement),
+                context: ctx.clone(),
+            };
+            model_return = match (registered.hook)(input).await {
+                Ok(next) => next,
+                Err(err) => crate::ModelToolReturn::text(
+                    ctx.call_id.clone(),
+                    ctx.tool_name.clone(),
+                    err.to_string(),
+                ),
+            };
+        }
+        crate::session::tool_execution::surface_attachment_materialization_notices(
+            attachment_acceptance,
+            &ctx.output,
+            &mut model_return,
+        );
+        crate::runtime::effect::ToolPresentation {
+            version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
+            model_return,
+            artifacts: ctx.artifacts.retained(),
+        }
     }
 
     pub async fn emit_runtime_event(

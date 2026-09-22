@@ -319,7 +319,7 @@ pub(super) fn validate_in_memory_execution_authority(
                 authority.validate_invocation_for_write(process_id, record)
             }
         }
-        ProcessExecutionWriteAuthority::Lease(lease) => {
+        ProcessExecutionWriteAuthority::Lease { lease, .. } => {
             if lease.process_id != process_id {
                 return Err(process_lease_expired(process_id));
             }

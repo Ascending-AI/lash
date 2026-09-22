@@ -353,20 +353,8 @@ impl lash_core::AwaitEventResolver for LiteralFrameController {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for LiteralFrameController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
-        self.inner
-            .controller()
-            .runtime_effect_failure_disposition(code)
-            .await
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        self.inner.controller().turn_control_participation().await
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        self.inner.controller().effect_journaling()
     }
 
     fn wants_segment_boundary(

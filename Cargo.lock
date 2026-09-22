@@ -2077,6 +2077,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-worker",
  "lash-internal-lashlang",
+ "lash-internal-plugin-tool-output-budget",
  "lash-internal-sansio",
  "pretty_assertions",
  "proptest",
@@ -2434,6 +2435,7 @@ dependencies = [
  "lash-internal-sansio",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -5352,6 +5354,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tracing",
  "tracing-subscriber",

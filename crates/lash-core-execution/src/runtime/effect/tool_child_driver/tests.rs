@@ -938,7 +938,7 @@ fn tool_children(host: &Arc<dyn EffectHost>) -> Arc<ToolChildHost> {
     )
 }
 
-/// A controller that reports durable-journaled turn-control participation and
+/// A controller that reports `EffectJournaling::Journaled` and
 /// names the host's await-event authority, so the recorded-authority checks
 /// see the durable arms rather than the native local ones.
 struct DurableReplayController {
@@ -953,10 +953,8 @@ impl crate::AwaitEventResolver for DurableReplayController {
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for DurableReplayController {
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
-        Ok(crate::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> crate::EffectJournaling {
+        crate::EffectJournaling::Journaled
     }
 
     async fn execute_effect(

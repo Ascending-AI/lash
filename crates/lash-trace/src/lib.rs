@@ -42,9 +42,13 @@ pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
 pub use lashlang_graph::{
-    TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
-    TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
-    TraceLashlangNodeObservation,
+    DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, TraceLashlangEdgeSelection, TraceLashlangEventIdentity,
+    TraceLashlangEventTransition, TraceLashlangGraph, TraceLashlangGraphChildLink,
+    TraceLashlangGraphCompleteness, TraceLashlangGraphConflict, TraceLashlangGraphConflictKind,
+    TraceLashlangGraphEdge, TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent,
+    TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
+    TraceLashlangNodeRetention, TraceLashlangNodeSummary, TraceLashlangNodeTerminalSummary,
+    fold_lashlang_graph,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -120,7 +124,12 @@ pub use lashlang_graph::{
 /// carries the failure classification OTel `error.type` projects.
 /// Version 27 (FIG-3460) unifies workflow node identity and adds structured
 /// execution sites, language-node/tool cross-links, and Restate correlation.
-pub const TRACE_SCHEMA_VERSION: u32 = 27;
+/// Version 28 (FIG-3461) adds generation-qualified observation identity,
+/// typed child process identity, and replay-stable bounded graph snapshots.
+/// Version 29 (FIG-1961) renames the compaction decision fields from
+/// `context_budget_tokens` to `used_tokens`: the value is now the checked
+/// provider-reported usage, not a derived budget snapshot.
+pub const TRACE_SCHEMA_VERSION: u32 = 29;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -273,7 +282,8 @@ pub fn tool_node_id(call_id: &str) -> String {
 pub struct TraceRecord {
     pub schema_version: u32,
     pub id: String,
-    pub timestamp: String,
+    #[serde(with = "trace_timestamp_serde")]
+    pub timestamp: chrono::DateTime<chrono::Utc>,
     pub context: TraceContext,
     #[serde(flatten)]
     pub event: TraceEvent,
@@ -283,10 +293,33 @@ pub struct TraceRecord {
 struct TraceRecordWire {
     schema_version: u32,
     id: String,
-    timestamp: String,
+    #[serde(with = "trace_timestamp_serde")]
+    timestamp: chrono::DateTime<chrono::Utc>,
     context: TraceContext,
     #[serde(flatten)]
     event: TraceEvent,
+}
+
+mod trace_timestamp_serde {
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(timestamp: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&timestamp.to_rfc3339())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let timestamp = String::deserialize(deserializer)?;
+        DateTime::parse_from_rfc3339(&timestamp)
+            .map(|timestamp| timestamp.with_timezone(&Utc))
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl<'de> Deserialize<'de> for TraceRecord {
@@ -331,7 +364,7 @@ impl TraceRecord {
         Self {
             schema_version: TRACE_SCHEMA_VERSION,
             id: uuid::Uuid::new_v4().to_string(),
-            timestamp: timestamp.to_rfc3339(),
+            timestamp,
             context,
             event,
         }
@@ -378,7 +411,7 @@ pub enum TraceEvent {
         tool_schemas: Vec<TraceToolSpec>,
     },
     CompactionNeeded {
-        context_budget_tokens: usize,
+        used_tokens: usize,
         max_context_tokens: usize,
         threshold_tokens: usize,
     },
@@ -390,7 +423,7 @@ pub enum TraceEvent {
         summary_nodes: usize,
     },
     PromptViewPruned {
-        context_budget_tokens: usize,
+        used_tokens: usize,
         max_context_tokens: usize,
         dropped_prefix_messages: usize,
         retained_messages: usize,
@@ -1436,7 +1469,30 @@ impl TraceRuntimeSubject {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TraceLanguageExecutionGeneration {
+    attempt: u32,
+    incarnation: u64,
+}
+
+impl TraceLanguageExecutionGeneration {
+    pub const fn new(attempt: u32, incarnation: u64) -> Self {
+        Self {
+            attempt,
+            incarnation,
+        }
+    }
+
+    pub const fn attempt(self) -> u32 {
+        self.attempt
+    }
+
+    pub const fn incarnation(self) -> u64 {
+        self.incarnation
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
@@ -1448,11 +1504,82 @@ pub struct TraceLanguageExecutionIdentity {
     pub entry_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restate_invocation_id: Option<String>,
+    /// Store-minted process lifetime and one-based durable attempt. Absent
+    /// only for a foreground effect execution that is not process-admitted.
+    #[serde(flatten)]
+    pub generation: Option<TraceLanguageExecutionGeneration>,
+}
+
+#[derive(Deserialize)]
+struct TraceLanguageExecutionIdentityWire {
+    scope: TraceRuntimeScope,
+    subject: TraceRuntimeSubject,
+    source_identity: String,
+    module_ref: String,
+    entry_kind: String,
+    entry_ref: Option<String>,
+    entry_name: String,
+    restate_invocation_id: Option<String>,
+    attempt: Option<u32>,
+    incarnation: Option<u64>,
+}
+
+impl<'de> Deserialize<'de> for TraceLanguageExecutionIdentity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = TraceLanguageExecutionIdentityWire::deserialize(deserializer)?;
+        if wire.attempt.is_some() != wire.incarnation.is_some() {
+            return Err(serde::de::Error::custom(
+                "language execution attempt and incarnation must be present together",
+            ));
+        }
+        Ok(Self {
+            scope: wire.scope,
+            subject: wire.subject,
+            source_identity: wire.source_identity,
+            module_ref: wire.module_ref,
+            entry_kind: wire.entry_kind,
+            entry_ref: wire.entry_ref,
+            entry_name: wire.entry_name,
+            restate_invocation_id: wire.restate_invocation_id,
+            generation: match (wire.attempt, wire.incarnation) {
+                (Some(attempt), Some(incarnation)) => {
+                    Some(TraceLanguageExecutionGeneration::new(attempt, incarnation))
+                }
+                (None, None) => None,
+                _ => unreachable!("paired generation was validated above"),
+            },
+        })
+    }
 }
 
 impl TraceLanguageExecutionIdentity {
+    pub const fn attempt(&self) -> Option<u32> {
+        match self.generation {
+            Some(generation) => Some(generation.attempt()),
+            None => None,
+        }
+    }
+
+    pub const fn incarnation(&self) -> Option<u64> {
+        match self.generation {
+            Some(generation) => Some(generation.incarnation()),
+            None => None,
+        }
+    }
+
     pub fn graph_key(&self) -> String {
-        self.subject.graph_key()
+        match self.generation {
+            Some(generation) => format!(
+                "{}:incarnation:{incarnation}:attempt:{attempt}",
+                self.subject.graph_key(),
+                incarnation = generation.incarnation(),
+                attempt = generation.attempt(),
+            ),
+            None => self.subject.graph_key(),
+        }
     }
 }
 
@@ -1516,7 +1643,10 @@ pub enum TraceLanguageExecutionPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
-    pub subject: TraceRuntimeSubject,
+    pub process_id: lash_sansio::ProcessId,
+    pub incarnation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1526,8 +1656,13 @@ pub struct TraceLanguageChildExecution {
 }
 
 impl TraceLanguageChildExecution {
-    pub fn graph_key(&self) -> String {
-        self.subject.graph_key()
+    pub fn graph_key(&self) -> Option<String> {
+        self.attempt.map(|attempt| {
+            format!(
+                "process:{}:incarnation:{}:attempt:{attempt}",
+                self.process_id, self.incarnation,
+            )
+        })
     }
 }
 
@@ -1538,6 +1673,16 @@ pub enum TraceLanguageExecutionStatus {
     Completed,
     Failed,
     Cancelled,
+}
+
+impl TraceLanguageExecutionStatus {
+    /// Whether no later execution status may replace this status.
+    pub const fn is_terminal(self) -> bool {
+        match self {
+            Self::Running => false,
+            Self::Completed | Self::Failed | Self::Cancelled => true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

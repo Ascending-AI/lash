@@ -47,16 +47,16 @@ pub(super) const LASH_ERROR_RAW: &str = "lash.error.raw";
 pub(super) const LASH_ERROR_RETRYABLE: &str = "lash.error.retryable";
 pub(super) const LASH_LANGUAGE_EXECUTION_BRANCH: &str = "lash.language_execution.branch";
 pub(super) const LASH_LANGUAGE_EXECUTION_CALL_ID: &str = "lash.language_execution.call_id";
-pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_ID: &str =
-    "lash.language_execution.child_effect_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_KIND: &str =
     "lash.language_execution.child_effect_kind";
+pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_ATTEMPT: &str =
+    "lash.language_execution.child_attempt";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY: &str =
     "lash.language_execution.child_graph_key";
+pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_INCARNATION: &str =
+    "lash.language_execution.child_incarnation";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID: &str =
     "lash.language_execution.child_process_id";
-pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE: &str =
-    "lash.language_execution.child_subject_type";
 pub(super) const LASH_LANGUAGE_EXECUTION_EDGE_COUNT: &str = "lash.language_execution.edge_count";
 pub(super) const LASH_LANGUAGE_EXECUTION_EDGE_ID: &str = "lash.language_execution.edge_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_EFFECT_ID: &str = "lash.language_execution.effect_id";
@@ -75,6 +75,8 @@ pub(super) const LASH_LANGUAGE_EXECUTION_NODE_COUNT: &str = "lash.language_execu
 pub(super) const LASH_LANGUAGE_EXECUTION_NODE_ID: &str = "lash.language_execution.node_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_NODE_KIND: &str = "lash.language_execution.node_kind";
 pub(super) const LASH_LANGUAGE_EXECUTION_OCCURRENCE: &str = "lash.language_execution.occurrence";
+pub(super) const LASH_LANGUAGE_EXECUTION_ATTEMPT: &str = "lash.language_execution.attempt";
+pub(super) const LASH_LANGUAGE_EXECUTION_INCARNATION: &str = "lash.language_execution.incarnation";
 pub(super) const LASH_LANGUAGE_EXECUTION_PARENT_NODE_ID: &str =
     "lash.language_execution.parent_node_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_PROCESS_ID: &str = "lash.language_execution.process_id";
@@ -122,8 +124,7 @@ pub(super) const LASH_REQUEST_BODY_JSON_OMITTED_REASON: &str =
 pub(super) const LASH_REQUEST_BODY_LEN: &str = "lash.request.body_len";
 pub(super) const LASH_REQUEST_BODY_SHA256: &str = "lash.request.body_sha256";
 pub(super) const LASH_RETRY_ATTEMPTS_JSON: &str = "lash.retry.attempts_json";
-pub(super) const LASH_COMPACTION_CONTEXT_BUDGET_TOKENS: &str =
-    "lash.compaction.context_budget_tokens";
+pub(super) const LASH_COMPACTION_USED_TOKENS: &str = "lash.compaction.used_tokens";
 pub(super) const LASH_COMPACTION_DROPPED_PREFIX_MESSAGES: &str =
     "lash.compaction.dropped_prefix_messages";
 pub(super) const LASH_COMPACTION_INSTRUCTIONS_PRESENT: &str =

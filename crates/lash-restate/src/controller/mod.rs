@@ -22,15 +22,15 @@ use std::time::Duration;
 use lash_core::runtime::effect::RankedGroupSettlement;
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, PluginError,
-    ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord, ProcessRegistry,
-    QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectInvocation,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, ScopedEffectController, SleepSpec, TurnControlParticipation,
-    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
-    facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
+    EffectGroupHandle, EffectHost, EffectJournaling, ExecutionScope, GroupSettlement, LoserPolicy,
+    PluginError, ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord,
+    ProcessRegistry, QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
+    ScopedEffectController, SleepSpec, facade_support::CanonicalRuntimeEffectEnvelope,
+    facade_support::RuntimeAwaitEventOptions, facade_support::RuntimeSleepOptions,
+    facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
 };
 use restate_sdk::context::RunRetryPolicy;
@@ -1014,15 +1014,8 @@ where
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blocked", error))
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        Ok(RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        Ok(TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> EffectJournaling {
+        EffectJournaling::Journaled
     }
 
     fn wants_segment_boundary(
@@ -1640,6 +1633,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
+        | RuntimeEffectCommand::PresentToolResult { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
             RestateEffectExecution::JournaledRun {
                 envelope: RuntimeEffectEnvelope {
@@ -1651,7 +1645,6 @@ pub(crate) fn restate_effect_execution(
         }
     })
 }
-
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {
     format!("lash:{}", invocation.replay_key())
 }

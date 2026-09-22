@@ -76,7 +76,7 @@ fn write_atomic(final_path: &Path, bytes: &[u8]) -> Result<(), AttachmentStoreEr
         // Make the directory entry itself crash-durable: without this, a crash
         // after `rename` can lose the entry even though the bytes are on disk.
         if let Some(parent) = final_path.parent() {
-            fsync_dir(parent);
+            fsync_dir(parent)?;
         }
         Ok(())
     })();
@@ -88,13 +88,45 @@ fn write_atomic(final_path: &Path, bytes: &[u8]) -> Result<(), AttachmentStoreEr
     write_result
 }
 
-/// Best-effort parent-directory fsync. Not every filesystem supports fsync on a
-/// directory handle; a failure to open or sync is tolerated rather than failing
-/// an otherwise-successful write.
-fn fsync_dir(dir: &Path) {
-    if let Ok(handle) = fs::File::open(dir) {
-        let _ = handle.sync_all();
+/// Fsync the directory holding a freshly renamed blob so the new directory
+/// entry itself survives a crash.
+///
+/// Only the "unsupported" class is tolerated: a filesystem that refuses fsync
+/// on a directory handle answers `sync_all` with EINVAL
+/// ([`std::io::ErrorKind::InvalidInput`]) or ENOTSUP/EOPNOTSUPP
+/// ([`std::io::ErrorKind::Unsupported`]), and there the entry can never be
+/// forced out, so the write proceeds without it. Every other failure —
+/// including a failure to open the directory — is a real I/O error: the store
+/// cannot vouch for the entry's durability, so the write fails.
+fn fsync_dir(dir: &Path) -> Result<(), AttachmentStoreError> {
+    let io_err = |source: std::io::Error| AttachmentStoreError::Io {
+        path: dir.to_path_buf(),
+        source,
+    };
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        // A directory handle needs backup semantics on Windows.
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0200_0000); // FILE_FLAG_BACKUP_SEMANTICS
     }
+    let handle = options.open(dir).map_err(io_err)?;
+    match handle.sync_all() {
+        Err(source) if dir_fsync_unsupported(&source) => Ok(()),
+        result => result.map_err(io_err),
+    }
+}
+
+/// The directory-fsync "unsupported" class: EINVAL
+/// ([`std::io::ErrorKind::InvalidInput`]) and ENOTSUP/EOPNOTSUPP
+/// ([`std::io::ErrorKind::Unsupported`]). Anything else is a real I/O failure
+/// the caller must see.
+fn dir_fsync_unsupported(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported
+    )
 }
 
 #[async_trait::async_trait]
@@ -375,6 +407,47 @@ mod tests {
         // The bytes round-trip in full (no truncation from a partial write).
         let stored = store.get(&reference.id).await.expect("get");
         assert_eq!(stored.bytes, vec![9, 8, 7, 6]);
+    }
+
+    /// FIG-3520: the directory fsync tolerates only the "unsupported" class —
+    /// a filesystem that refuses fsync on a directory handle answers EINVAL or
+    /// ENOTSUP/EOPNOTSUPP. A real I/O failure (EIO on `sync_all`, or failing to
+    /// open the directory at all) fails the write instead of letting the store
+    /// report success on a directory entry it cannot vouch for.
+    #[test]
+    fn attachment_dir_fsync_surfaces_io_errors() {
+        for tolerated in [
+            std::io::Error::from(std::io::ErrorKind::InvalidInput), // EINVAL
+            std::io::Error::from(std::io::ErrorKind::Unsupported),  // ENOTSUP
+        ] {
+            assert!(dir_fsync_unsupported(&tolerated), "{tolerated:?}");
+        }
+        #[cfg(unix)]
+        for tolerated in [
+            std::io::Error::from_raw_os_error(22), // EINVAL
+            std::io::Error::from_raw_os_error(95), // ENOTSUP/EOPNOTSUPP
+        ] {
+            assert!(dir_fsync_unsupported(&tolerated), "{tolerated:?}");
+        }
+
+        for real in [
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            std::io::Error::from(std::io::ErrorKind::NotFound),
+        ] {
+            assert!(!dir_fsync_unsupported(&real), "{real:?}");
+        }
+        #[cfg(unix)]
+        assert!(!dir_fsync_unsupported(&std::io::Error::from_raw_os_error(
+            5
+        ))); // EIO
+
+        // Through `fsync_dir` itself: a directory that cannot even be opened
+        // fails the write, while a real directory fsync succeeds.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let error = fsync_dir(&temp.path().join("missing"))
+            .expect_err("a directory open failure must surface");
+        assert!(matches!(error, AttachmentStoreError::Io { .. }));
+        fsync_dir(temp.path()).expect("fsync a real directory");
     }
 
     /// Malformed stored ids are errors; listing must not silently lose blobs.

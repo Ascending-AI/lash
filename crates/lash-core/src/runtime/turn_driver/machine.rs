@@ -135,7 +135,7 @@ impl RuntimeTurnDriver<'_> {
                     } = &event
                     {
                         self.turn_pipeline.state_mut().token_usage = cumulative.clone();
-                        self.latest_prompt_usage = normalize_prompt_usage(usage);
+                        self.latest_prompt_usage = nonzero_usage(usage.clone());
                     }
                     emit!(event)
                 }

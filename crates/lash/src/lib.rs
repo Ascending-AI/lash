@@ -515,7 +515,7 @@ pub mod plugins {
         facade_support::TurnTransformContext,
     };
     pub use lash_plugin_tool_output_budget::{
-        SpillPolicy, ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
+        ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
     };
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
@@ -797,8 +797,9 @@ pub mod process {
     pub use lash_core_worker::ProcessExecutionConcurrencyError;
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
-        LASHLANG_ENGINE_KIND, LashlangProcessInput, lashlang_process_event_types,
-        lashlang_process_signal_event_types,
+        LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageExecutionMapError,
+        lashlang_process_event_types, lashlang_process_signal_event_types,
+        trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
     };
 }
 
@@ -835,9 +836,6 @@ pub mod durability {
 /// Runtime events, errors, and execution controls.
 pub mod runtime {
     pub use crate::core::AdvancedLashCoreBuilder;
-    /// Prompt-token accounting a [`TurnContextTransform`](crate::plugins::TurnContextTransform)
-    /// is handed so a rolling strategy can budget against the last render.
-    pub use lash_core::PromptUsage;
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
@@ -853,25 +851,25 @@ pub mod runtime {
         AssistantResponseHookEvents, AwaitEventResolver, CheckpointClaimSet,
         CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
         DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
-        EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
-        GroupWakePolicy, LashRuntime, LlmRequestSpec, LoserPolicy, NativeQueuedWork,
-        NativeRuntimeEffectController, NativeSubstrateConfig, NativeSubstrateConfigError,
-        NoQueuedWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
-        QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
-        QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,
-        QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure,
-        QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup,
+        EffectJournaling, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
+        GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LoserPolicy,
+        NativeQueuedWork, NativeRuntimeEffectController, NativeSubstrateConfig,
+        NativeSubstrateConfigError, NoQueuedWork, NoopEventSink, NoopTurnActivitySink,
+        ProcessCommand, ProcessEffectOutcome, QueuedLaneAcquisition, QueuedLaneAttempt,
+        QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkExecutionConcurrencyError,
+        QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress,
+        QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended,
+        QueuedWorkWakeFailure, QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig,
+        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectController,
+        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
         RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
         RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
         RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
         RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
         RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
         SessionWorkTarget, SleepSpec, ToolIntentOutcomeSink, ToolIntentPreparation,
-        ToolIntentSubmissionGuard, TurnContext, TurnControlBinding, TurnControlParticipation,
-        WorkCadencePolicy, WorkerSweepPolicy, effect_groups_unsupported,
+        ToolIntentSubmissionGuard, TurnContext, TurnControlBinding, WorkCadencePolicy,
+        WorkerSweepPolicy, effect_groups_unsupported,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for
@@ -918,17 +916,21 @@ pub mod tracing {
     /// variant exists in every build, so its payload types are unconditional
     /// `lash-trace` re-exports rather than `rlm`-gated.
     pub use lash_trace::{
-        ExecCodeFailureReason, TextProjectionMetadata, TraceAgentFrameSwitch,
-        TraceAttemptUsageDisposition, TraceDurableTimerStatus, TraceDurableWaitResolution,
-        TraceExecToolCall, TraceExecutionEvidence, TraceJournaledEffectStatus,
-        TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
+        DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
+        TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageDisposition,
+        TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
+        TraceExecutionEvidence, TraceJournaledEffectStatus, TraceLanguageChildExecution,
+        TraceLanguageExecution, TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
         TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
         TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
-        TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
-        TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
+        TraceLashlangEventIdentity, TraceLashlangEventTransition, TraceLashlangGraph,
+        TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
+        TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
+        TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
+        TraceLashlangNodeObservation, TraceLashlangNodeSummary, TraceLashlangNodeTerminalSummary,
         TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome, TraceToolCallStatus,
         TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
-        TraceTurnOutcome,
+        TraceTurnOutcome, fold_lashlang_graph,
     };
     pub use lash_trace::{
         StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,

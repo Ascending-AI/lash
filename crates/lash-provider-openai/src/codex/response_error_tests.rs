@@ -11,6 +11,25 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[test]
+fn sse_error_event_top_level_code_is_classified() {
+    let mut state = CodexStreamState::default();
+    assert!(!state.output_started());
+
+    let err = CodexProvider::process_sse_event(
+        r#"{"type":"error","code":"server_error","message":"failed","param":null,"sequence_number":1}"#,
+        &mut state,
+        None,
+    )
+    .expect_err("an in-band error event must fail the call");
+
+    assert_eq!(err.retry_verdict, TransportRetryVerdict::RetryableTransient);
+    assert_eq!(
+        err.code.as_ref().map(|code| code.to_string()),
+        Some("provider:server_error".to_string())
+    );
+}
+
+#[test]
 fn codex_error_summary_uses_top_level_detail() {
     let summary =
         CodexProvider::codex_error_summary(400, r#"{"detail":"Unsupported parameter: foo"}"#);
