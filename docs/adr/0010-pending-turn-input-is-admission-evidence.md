@@ -31,7 +31,8 @@ Stores update pending-input rows to `Cancelled` or `Completed` instead of deleti
 
 ADR 0101 overturns this ADR's first rule: pending turn input *is* queued work.
 Host input, process wakes and session commands are kinds of one session ingress
-item in one table with one order. What this ADR established for input now holds
+item in one table with one sequence; commands form a class-level lane applied
+at turn boundaries. What this ADR established for input now holds
 for every kind: the immutable source key (compared through a submission digest
 written once at admission), typed cancel outcomes, tombstones until `vacuum()`,
 `held` as a read projection rather than a state, suffix cancellation in

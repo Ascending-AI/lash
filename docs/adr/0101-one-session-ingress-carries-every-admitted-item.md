@@ -4,8 +4,9 @@
 
 Accepted 2026-09-23 (FIG-3540) as the design freeze for the one-ingress
 cutover. **Not yet implemented**: the FIG-3540 cutover PR series builds it, after
-FIG-3532, FIG-3513 and FIG-3531 land. Nothing below describes current behaviour
-unless it says so.
+FIG-3532, FIG-3513 and FIG-3531 land. The pending follow-on (§3, FIG-3542) may
+land ahead of the table cutover. Nothing below describes current behaviour
+unless it says so. The FIG-3540 arc note is the frozen design this ADR records.
 
 Supersedes [ADR 0010](0010-pending-turn-input-is-admission-evidence.md).
 Strengthens [ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md).
@@ -14,14 +15,17 @@ Amends [ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md),
 [ADR 0046](0046-process-transitions-are-events-record-is-a-fold.md),
 [ADR 0067](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md),
 [ADR 0077](0077-session-state-migrates-totally-at-admission.md), both ADR 0097s
-([commit identity](0097-commit-identity-families-mint-frozen-unframed-preimages.md),
+([commit
+identity](0097-commit-identity-families-mint-frozen-unframed-preimages.md),
 [durable session](0097-durable-session-and-live-session-are-two-authorities.md)),
 [ADR 0098](0098-one-owner-per-sql-table-across-both-stores.md) and the
 `CONTEXT.md` glossary; each carries a short note pointing here. ADR 0016,
 ADR 0023, ADR 0081 and ADR 0099 are unchanged.
 
-The owner rulings are recorded on the FIG-3540 arc (E1, E2, E4, D2, D14, F, G;
-Sam, 2026-09-23). The design changes D1–D17 come from the ingress prospect round
+The owner rulings are recorded on the FIG-3540 arc (E1, E2, E4, D2, D14, F;
+Sam, 2026-09-23). A later ruling the same day replaces G: session commands
+become a class-level lane applied at turn boundaries (§4). The design changes
+D1–D17 come from the ingress prospect round
 (`/workspace/notes/lash/prospect-ingress-2026-09-23.md`), benchmarked against
 Temporal, Pekko, Restate, DBOS and LangGraph. Where a review or the prospect
 report differs from an owner ruling, the ruling is what this ADR records.
@@ -81,7 +85,8 @@ composition unit, and it already spans several rows.
 
 | Column | Rule |
 | --- | --- |
-| `session_id`, `enqueue_seq` | The per-session total order. `enqueue_seq` is the only ordering key. |
+| `session_id`, `enqueue_seq` | One per-session sequence shared by every kind, taken under the session lock. |
+| `lane` | `command \| turn`, fixed by kind (`session_command` → `command`; `input`, `process_wake` → `turn`). Order is `(lane, enqueue_seq)` (§4, §5). |
 | `item_id` | Kind-derived. Input: the FIG-3513 acceptance-derived id. Wake: from the process and event sequence. Command: from its source key. |
 | `kind` | `input \| process_wake \| session_command`. |
 | `source_key` | One namespace, `UNIQUE(session_id, source_key)` over open and terminal rows alike. |
@@ -102,7 +107,8 @@ becomes `AnyBoundary`, and `NextTurn` / `AfterCurrentTurnCommit` become
 `NextTurn`. They are three variants, not two pairs collapsed into one.
 
 **One claim type:** `IngressClaim = WorkClaim<IngressClaimData { mode, items }>`
-with `ClaimMode::{ Idle, Checkpoint { turn_id, checkpoint }, Exact { item_ids } }`.
+with `ClaimMode::{ Idle, Checkpoint { turn_id, checkpoint }, Exact { item_ids }
+}`.
 It replaces `TurnInputClaimMode` and `QueuedWorkClaimBoundary`.
 `IngressDrive::{ Claimed(IngressClaim), Unclaimed(item) }` replaces the two drive
 families, and `WithheldTerminalWork` becomes one list of drives.
@@ -126,7 +132,9 @@ cancel by id, source key or suffix, list (with `held`), vacuum and orphan repair
 | Delivery | `Turn`, `AnyBoundary` or `NextTurn` | `AnyBoundary` | `NextTurn` |
 | Source key | Host-owned, or acceptance-derived (FIG-3513). A reserved system prefix is refused at admission. | `process:{pid}:event:{seq}:wake` | `command:{kind}:{key}` |
 | Digest covers | Submitted delivery and input | The process fact only: process, event sequence, payload. Not the host-configured delivery policy. | The command |
+| Lane | `turn` | `turn` | `command` |
 | Claimed with | Inputs and wakes, as one FIFO prefix | Inputs and wakes, as one FIFO prefix | Nothing, except adjacent `ApplyConfigPatch` commands |
+| Applied / delivered | At turn start or a checkpoint of the turn | At turn start or a checkpoint of the turn | Only at turn boundaries (§4) |
 | Rendered as | Messages; the first input's options win | Wake causes; wakes carry no options | Never rendered |
 | Terminal side-write | None | Floor raise, same transaction (§9) | None |
 | Turn cancel | The accepted request's `undelivered` disposition, for items addressed to the cancelled turn | Always `Defer` (§10) | Never in a turn's claim |
@@ -155,8 +163,7 @@ obligation on the session head, where it is consumed exactly once:
 
 ```
 PendingFollowOn {
-    root_turn_id, follow_on_turn_id, frame_id, task,
-    protocol_turn_options, chain_depth, recoveries,
+    follow_on_turn_id, frame_id, task, options, chain_depth, attempts,
 }
 ```
 
@@ -168,17 +175,18 @@ PendingFollowOn {
 * **Written** by the frame-switch commit, atomically with
   `current_frame_node_id = frame_id`. The switch commit's receipt records the
   value it wrote, so a replayed switch commit returns the same fact.
-* **Turn id.** `follow_on_turn_id` is derived from `root_turn_id` plus the
-  physical-turn index at the switch. It is not derived from a switch count: a
-  FIG-3157 checkpoint follow-on also advances the index, so a switch-count id
-  could equal a turn already committed in the same run. A recovering run
-  continues its index from the stored value.
+* **Turn id.** `follow_on_turn_id` is derived from the root turn of the logical
+  run plus its position in the chain, so the root is recoverable from the id.
+  The position is the physical-turn index, not a switch count: a FIG-3157
+  checkpoint follow-on also advances the index, so a switch-count id could
+  equal a turn already committed in the same run. A recovering run continues
+  its index from the stored value.
 * **Cleared** by the follow-on turn's terminal commit in the same head CAS,
   whatever the outcome (`Finished`, `Failed`, `Stopped(Cancelled)`, the
   frame-switch-limit error). If that turn switches again, the same CAS writes
   the next fact. Nothing else clears it; there is no delete path.
 * **Precedence.** While the fact is set, every ingress claim is refused with the
-  typed non-error `Blocked(FollowOnPending { follow_on_turn_id, recoveries })`,
+  typed non-error `Blocked(FollowOnPending { follow_on_turn_id, attempts })`,
   except a `Checkpoint` claim whose `turn_id == follow_on_turn_id`. Drains see
   "blocked", never an error that a `?` would turn into a failed follow-on.
 * **No overtaking by an unclaimed turn** (derived from F: host input that
@@ -194,10 +202,11 @@ PendingFollowOn {
   unrepresentable.
 * **Recovery.** One check in the lease funnel: after acquiring the lease and
   refreshing the head, a set fact is driven as a logical run before any ingress
-  claim. A Restate drive whose scope owns the chain (`root_turn_id` equals its
-  scope) replays its own chain in order and never starts the fact from the lease
+  claim. A Restate drive whose scope owns the chain (the root turn of
+  `follow_on_turn_id` equals its scope) replays its own chain in order and never
+  starts the fact from the lease
   funnel, so the positional journal cannot mismatch.
-* **Recovery bound.** A drive that recovers the fact raises `recoveries` by one
+* **Recovery bound.** A drive that recovers the fact raises `attempts` by one
   in a fenced head write before the follow-on's first effect; on Restate this is
   the drive's first journaled step. The inline path never raises it. The bound
   is host policy: `max_follow_on_recoveries` lives on the same host durability
@@ -205,7 +214,7 @@ PendingFollowOn {
   a default of 3. When the raised value would exceed it, the drive does not run
   the follow-on. It commits the follow-on as a terminal `Failed` turn whose
   failure is the typed error `FollowOnRecoveryExhausted { follow_on_turn_id,
-  recoveries }`, with the task as its delivered input. That turn receipt is the
+  attempts }`, with the task as its delivered input. That turn receipt is the
   follow-on's terminal record, and the same head CAS clears the fact. The count
   is never reset: no operator action, reopen or policy change resets it, and it
   lives and dies with the fact. Without a bound, a follow-on that crashes its
@@ -221,38 +230,65 @@ PendingFollowOn {
 * **Store-less sessions** carry the same field in memory, so the claimless
   in-memory branch and the `if claimed` guard are gone: one path.
 
-### 4. The command barrier (G, with D7)
+### 4. Session commands are a lane applied at turn boundaries
 
-A session command is claimed only at the FIFO head, and alone, except that
-adjacent `ApplyConfigPatch` commands coalesce up to the existing 64-command cap.
+This section records the owner ruling that replaced G.
 
-**A command at `enqueue_seq = s` that has not settled blocks every idle or
-checkpoint claim of an unaddressed (`AnyBoundary` or `NextTurn`) item with
-seq > s.** Items with seq < s are unaffected. At a checkpoint of turn t,
-`Turn{t}` items still pass while t runs (§5.1). A pending follow-on precedes
-every command.
+**Session commands are a class-level lane in the same table.** Order is
+`(lane, enqueue_seq)` with `lane = command | turn`. Commands keep the one dedup,
+tombstone, cancel and claim vocabulary of every other kind; only their order
+and their application point differ.
 
-**Commands apply only between logical runs** (D8). No config changes between the
-physical turns of one logical run: the claimless pre-turn command drain in
-`turn_loop/accept.rs` is deleted, and the pending follow-on refusal keeps
-commands out of a chain.
+**Commands apply only at turn boundaries:** after a logical run's final commit,
+and at idle. At each boundary the driver first drains **all** open commands in
+`enqueue_seq` order. Adjacent `ApplyConfigPatch` commands in the command lane
+coalesce into one head commit (up to the existing 64-command cap per commit);
+any other command takes a commit of its own. Only once the command lane is empty
+does the driver claim turn-lane items, FIFO (§5).
 
-`ClaimMode::Exact { item_ids }` is the one sanctioned out-of-order selection,
-kept for host-selected drains (`QueuedTurnBuilder` item ids). It is an operator
-or UI tool, never a producer delivery class, and it never jumps the barrier: an
-exact claim is refused with a typed outcome whenever an open `session_command`
-has a lower `enqueue_seq` than the first selected item (D9).
+Commands never apply:
 
-A backend enforces the barrier inside the claim statement over a fixed head set.
-It never uses a skip-locked scan that can pass a locked head row; copy DBOS's
-partitioned-dequeue shape, not its `LIMIT … SKIP LOCKED` one.
+* mid-turn;
+* at a checkpoint — a checkpoint claim never looks at the command lane;
+* between the physical turns of one logical run (D8). The claimless pre-turn
+  command drain in `turn_loop/accept.rs` is deleted. A pending follow-on refuses
+  every claim, command drains included (§3), so commands wait until the chain
+  ends.
 
-The opt-in "next boundary, ahead of queued inputs" lane is rejected (see
-*Alternatives*).
+**Commands never block inputs, and inputs never block commands.** There is no
+command barrier at idle or at checkpoints, and no exception for turn-addressed
+items: a `Turn{t}` item is simply deliverable into its running turn at t's
+checkpoints (§5.1).
+
+**A running turn finishes under its config snapshot.** Config is snapshotted
+when a turn starts. Every item delivered into that turn at a checkpoint, wakes
+included, is seen under that snapshot, even if a command admitted meanwhile
+will change the config at the next boundary.
+
+**The accepted cost.** An input enqueued before a command may run under the
+newer config: a command takes effect at the next turn boundary regardless of the
+turn-lane items queued ahead of it. Config is a per-turn snapshot, not a
+property of the queued item. A host that needs the old config for an input
+waits for that input to run before submitting the command. The precedent is
+Pekko's `ControlMessage`: a
+class-level lane that jumps the ordinary queue but never interrupts the step in
+progress, keeping FIFO within its own class. The strict FIFO barrier this
+replaces is recorded under *Alternatives*.
+
+`ClaimMode::Exact { item_ids }` stays as the one sanctioned out-of-order
+selection within the turn lane, kept for host-selected drains
+(`QueuedTurnBuilder` item ids). It is an operator or UI tool, never a producer
+delivery class. It never selects a command.
+
+A backend evaluates the turn-lane head inside the claim statement over a fixed
+head set. It never uses a skip-locked scan that can pass a locked head row; copy
+DBOS's partitioned-dequeue shape, not its `LIMIT … SKIP LOCKED` one.
 
 ### 5. Ordering and composition (E1, D14, D13)
 
-**`enqueue_seq` is the only order. There is no kind priority.** Enqueue order
+**Within a lane, `enqueue_seq` is the only order. There is no kind priority
+inside the turn lane**; the command lane is the one class-level exception (§4).
+Enqueue order
 equals per-session commit order: every producer, the commit path included, takes
 the session lock before it takes the sequence number. Wall-clock time may bound
 how much a claim takes (the maximum pending age); it never decides order.
@@ -263,9 +299,7 @@ A row's `Delivery::Turn { turn_id: T, min_boundary }` is stored once and never
 rewritten. Its eligibility is derived, not stored:
 
 * **While T is running**, the item is deliverable only into T, at a checkpoint
-  whose boundary is at or after `min_boundary`. It belongs to T, so it passes a
-  pending command barrier: commands never apply mid-turn, so a barrier that held
-  it would keep it from ever entering T.
+  whose boundary is at or after `min_boundary`.
 * **Once T has ended** (its final commit is recorded, whatever the outcome), the
   item is treated as `NextTurn` by rule. The row is not updated; the claim
   statement derives the effective delivery from T's state.
@@ -287,20 +321,20 @@ always matches. The immutable submission digest (§8) stays as defence in depth.
 
 #### 5.2 Composition
 
-**One composition rule for idle and checkpoint claims alike:**
+**One composition rule for idle and checkpoint claims of the turn lane alike.**
+At idle it runs only after the command lane is drained (§4); at a checkpoint the
+command lane is never consulted.
 
 1. **Addressed items.** A checkpoint claim of turn t selects the open `Turn{t}`
    items whose `min_boundary` the checkpoint admits, in seq order, by address.
-   They belong to the running turn; neither the command barrier nor an earlier
-   row holds them back. An idle claim has no addressed items: every `Turn{T}`
+   They belong to the running turn; no earlier row holds them back. An idle
+   claim has no addressed items: every `Turn{T}`
    item whose T has ended is `NextTurn` by rule (§5.1) and joins the prefix
    below at its own position.
-2. **The FIFO prefix of unaddressed turn-producing items** (inputs and wakes).
+2. **The FIFO prefix of unaddressed turn-lane items** (inputs and wakes).
    Starting at the lowest open unaddressed seq, the prefix extends in seq order
    and **stops, never skips**, at the first of (a `Turn{T}` item for an ended T
    counts as `NextTurn`; one for another running turn is not deliverable here):
-   * a `session_command` (the barrier; at idle a command at the head is instead
-     claimed alone, §4);
    * a **delivery mismatch**: a row this claim mode cannot deliver. At idle both
      `AnyBoundary` and `NextTurn` are deliverable, so inputs and wakes share a
      prefix. At a checkpoint only `AnyBoundary` is, so a `NextTurn` row ends the
@@ -315,8 +349,10 @@ always matches. The immutable submission digest (§8) stays as defence in depth.
 `authority` and `merge_key` are per-item data: they reach the drain policy and
 traces. They are not equality gates, and nothing authorizes on them. The two
 per-kind caps and the wake policy fold into one claim policy on the host
-durability object (`QueuedWorkBatchingConfig` today); the literal `64` at the
-checkpoint claim is deleted.
+durability object (`QueuedWorkBatchingConfig`), each cap host-configurable. The
+turn-input cap defaults to 64 (FIG-3532). A backlog beyond a cap stays queued in
+order, and its submitter sees the typed `Queued` outcome; nothing is dropped.
+The literal `64` at the checkpoint claim is deleted.
 
 A checkpoint's addressed items and its prefix are one claim and settle together.
 
@@ -366,7 +402,8 @@ checkpoint path commits input first; both become input-then-wake.
   may use `process:…:wake`, only the command kind `command:…`. A host input
   using a system prefix is refused to the host before it can meet a wake.
 * **Tombstones for every kind.** A terminal row stays until `vacuum()` removes it.
-  Its fields: kind, source key, `enqueue_seq`, delivery, digest, `terminal_cause`, `terminal_at_ms`. An enqueue that meets a `cancelled`
+  Its fields: kind, source key, `enqueue_seq`, delivery, digest,
+  `terminal_cause`, `terminal_at_ms`. An enqueue that meets a `cancelled`
   tombstone returns `Existing` and never reopens it.
 * **Closed terminal cause.** `Delivered` (input or wake rendered by a committed
   turn), `Applied` (command), `StaleConfigRevision { base, head }`
@@ -374,7 +411,7 @@ checkpoint path commits input first; both become input-then-wake.
 * **Tombstones stay off the claim path.** On both SQL backends: a partial index
   over open rows; the unique source-key constraint covers tombstones (no SQLite
   `ON CONFLICT IGNORE`); a CHECK that terminal rows carry no claim and do carry a
-  cause; an open-state predicate on every claim, head and barrier query.
+  cause; an open-state predicate on every claim and head query.
 
 ### 9. The floor invariant (D3)
 
@@ -387,14 +424,16 @@ floor is absorbed. This fixes FIG-3545.
 ### 10. Cancel by author (E2, D12)
 
 * **A turn cancel** (`Immediate` or `AfterStep`) applies the accepted request's
-  `undelivered` disposition to the **host-authored items addressed to the
+  `undelivered` disposition (`Defer` by default, or `Drop`) to the
+  **host-authored items addressed to the
   cancelled turn** that it did not deliver, whether it held them or they were
   still open. `Defer` releases any claim and leaves the row as it is: T has now
   ended, so the item is `NextTurn` by rule (§5.1), at its own position. `Drop`
   tombstones it. Items not addressed to the cancelled turn are outside the
   disposition's scope; any it held are released at their positions. A
   `process_wake` it held is **always deferred**: the claim is released in the
-  cancel commit, the row keeps its `enqueue_seq`, and the floor is unchanged. A wake's event text cannot be recovered by the model once dropped,
+  cancel commit, the row keeps its `enqueue_seq`, and the floor is unchanged. A
+  wake's event text cannot be recovered by the model once dropped,
   so a collateral drop at every turn cancel would silently remove facts the
   model was about to see.
 * **A host withdrawal** (by item id, source key or suffix) may cancel any
@@ -429,8 +468,10 @@ Replay safety comes from the command instead:
   advances it by exactly one. A refused patch settles as a `completed` tombstone
   with `StaleConfigRevision { base, head }`; its submitter receives a typed stale
   outcome (a new `SessionCommandSettlement` variant) and recomputes against the
-  current head. A patch replayed after its tombstone was vacuumed is admitted as
-  a new row and refused at drain by the same check, so it can never apply twice.
+  current head. The first application bumps the revision, so a replayed patch
+  never re-applies: before `vacuum()` it meets its tombstone (`Existing`), and
+  after `vacuum()` it is admitted as a new row and refused at drain by the same
+  check.
 * **`RefreshToolCatalog` is naturally idempotent.** It recomputes the tool
   surface from live sources and carries no revision, as its type already
   documents.
@@ -439,9 +480,9 @@ Replay safety comes from the command instead:
 introduces one.**
 
 * The head's `head_revision` (`SessionHeadMeta::head_revision`, a dedicated
-  column) advances on **every** head commit, turn commits included. Under the
-  §4 barrier a patch submitted while a turn runs always sees at least that turn's
-  commit before it drains, so a compare-and-set against `head_revision` would
+  column) advances on **every** head commit, turn commits included. A patch
+  submitted while a turn runs drains only at the next turn boundary (§4), after
+  that turn's final commit, so a compare-and-set against `head_revision` would
   refuse almost every such patch. It is commit authority, not a config revision.
 * `ApplyConfigPatch::schema_version` is the head wire generation
   (`SESSION_HEAD_META_SCHEMA_VERSION`), a codec discriminator.
@@ -490,6 +531,11 @@ and rides the §15 cutover.
 * `available_at_ms`.
 * The session-command completion marker (`session_command_batch_completion_key`).
 * The claimless pre-turn command drain in `turn_loop/accept.rs`.
+* The command barrier, at idle and at checkpoints (D7), the rule that an exact
+  claim must not jump it (D9), and the exception letting turn-addressed items
+  pass it. Commands are a lane (§4). This also deletes
+  `claim_leading_ready_session_command`'s head-only rule and the checkpoint SQL
+  that returns nothing while a command is pending.
 * The `frame_handoff` kind and `AgentFrameTask` payload, the "handoff options
   take the last" rule, `RuntimeCommit.enqueued_queue_batches` with its result
   field, both store enqueue loops, its commit-budget term, its preimage field and
@@ -523,8 +569,8 @@ One wholehog cutover, one PR series ending in one cutover commit.
 * **Drain in-flight Restate invocations** on the old deployment before the new
   one takes traffic. A journal written by the old binary carries acceptance and
   claim shapes the new binary does not replay.
-* The FIG-3531 lane must not complete withheld wakes on cancel (D10); whatever it
-  ships, the cutover replaces with §10.
+* A cancelled turn must not settle withheld wakes as completed (FIG-3543, D10).
+  Whatever the interim lanes ship, the cutover replaces it with §10.
 
 ### 16. Conformance laws
 
@@ -535,27 +581,29 @@ advisory lock on the merged table.
 
 1. **Order.** `enqueue_seq` is strictly increasing per session and equals commit
    order across every producer.
-2. **FIFO prefix.** An idle claim is a prefix of the open unaddressed rows; no
-   claim skips a row it could not take.
-3. **Stop points.** The prefix ends at the first command, delivery mismatch, kind
-   cap, total bound or policy bound, and never continues past it.
-4. **Barrier.** While a command at seq s is open, no unaddressed item with
-   seq > s is claimed at idle or at a checkpoint, on either backend, including
-   with a locked head row.
-5. **Addressed pass.** A `Turn{t}` item is claimable at t's admitting checkpoints
-   regardless of earlier rows and open commands, and never into another turn
-   while t runs. No write after admission changes a row's delivery; after t's
-   final commit a `Turn{t}` item is claimed exactly where a `NextTurn` item at
-   its position would be.
-   Admission of a `Turn{T}` item succeeds only when T is the session's running
-   turn or a turn whose final commit is recorded (then deliverable as
-   `NextTurn` at once). An unknown T is refused with `TurnAddressUnknown`, and
-   no row, tombstone or sequence number is written.
-6. **Coalescing.** Adjacent config patches share one head commit; any other
-   command is claimed alone.
-7. **Between runs.** No command applies between the physical turns of one
-   logical run.
-8. **Exact.** An exact claim behind an open command is refused, typed.
+2. **FIFO prefix.** An idle turn-lane claim is a prefix of the open unaddressed
+   turn-lane rows; no claim skips a row it could not take.
+3. **Stop points.** The prefix ends at the first delivery mismatch, kind cap,
+   total bound or policy bound, and never continues past it, on either backend,
+   including with a locked head row.
+4. **Command lane.** At every turn boundary (after a logical run's final commit,
+   and at idle), every open command applies in `enqueue_seq` order before any
+   turn-lane claim; an open command never delays a turn-lane claim at a
+   checkpoint, and an open input never delays a command at a boundary.
+5. **Addressed items.** A `Turn{t}` item is claimable at t's admitting
+   checkpoints regardless of earlier rows, and never into another turn while t
+   runs. No write after admission changes a row's delivery; after t's final
+   commit a `Turn{t}` item is claimed exactly where a `NextTurn` item at its
+   position would be. Admission of a `Turn{T}` item succeeds only when T is the
+   session's running turn or a turn whose final commit is recorded (then
+   deliverable as `NextTurn` at once). An unknown T is refused with
+   `TurnAddressUnknown`, and no row, tombstone or sequence number is written.
+6. **Coalescing.** Adjacent config patches in the command lane share one head
+   commit; any other command takes its own.
+7. **Boundaries only.** No command applies mid-turn, at a checkpoint, or
+   between the physical turns of one logical run; items delivered at a
+   checkpoint are seen under the turn's start snapshot.
+8. **Exact.** An exact claim selects only turn-lane items.
 9. **Follow-on precedence.** While a pending follow-on is set, every claim other
    than the follow-on's checkpoint claims returns `Blocked(FollowOnPending)`, and
    every other turn commit is refused.
@@ -611,13 +659,22 @@ advisory lock on the merged table.
   priority starvation, and today's version already inverts command order. If
   reply latency ever outranks uniformity, the only admissible form is Pekko's
   class-level order with `enqueue_seq` as a stable secondary key.
-* **An opt-in "next boundary, ahead of queued inputs" command lane** (G(b)).
-  Rejected. Moving a command ahead of earlier work runs that work under a config
-  it was not queued under, which breaks the one-sequence rule. A per-item flag
-  would also have to pull every earlier command along. The urgent path already
-  exists: cancel the suffix, submit the patch, resubmit with fresh keys, or use
-  turn cancel (ADR 0039). If priority is ever wanted, only a class-level control
-  lane is admissible, never a per-item flag, a second table or a time key.
+* **Commands as a strict FIFO barrier in one sequence** (the earlier G ruling,
+  with D7 and D9). A command at seq s blocked every unaddressed claim with a
+  higher seq, at idle and at checkpoints; turn-addressed items needed an
+  exception to pass it, and exact claims needed a rule not to jump it.
+  Replaced by the owner for two reasons. First, command latency: a config patch
+  waited behind the whole queued backlog, and its settlement waiter mostly
+  returned `Pending`. Second, barrier complexity: a stop rule in every claim
+  statement on both backends, a checkpoint rule, an addressed-item exception
+  and an exact-claim refusal, all for an ordering guarantee — "queued work runs
+  under the config it was queued under" — that config snapshots per turn do not
+  need.
+* **A per-item "ahead of queued inputs" flag, a second table, or a time key for
+  commands.** Rejected. A per-item flag would have to pull every earlier command
+  along, a second table re-creates the split this ADR removes, and a time key
+  is the arbitration being deleted. The class-level lane (§4) is the one
+  admissible form.
 * **The frame handoff as an `Exact`-only queue kind.** Rejected (F). The handoff
   uses almost none of the queue lifecycle, and that lifecycle is where every
   handoff defect comes from. A head fact makes the stranded handoff
@@ -638,7 +695,8 @@ advisory lock on the merged table.
   on either field.
 * **"NextTurn rows block nothing at a checkpoint"** (the prospect's G note).
   Rejected: the owner ruling makes a delivery mismatch a stop point for the
-  unaddressed prefix on both paths. Addressed `Turn{t}` items are what may pass.
+  unaddressed prefix on both paths. Only addressed `Turn{t}` items are selected
+  out of FIFO order.
 * **Uniform `Drop` on wakes at turn cancel** (Fable E.2). Rejected (E2): the
   model cannot recover a dropped wake's event text.
 * **Keep re-deferring addressed items on every final commit.** Rejected (owner
@@ -656,12 +714,13 @@ advisory lock on the merged table.
 * ADR 0069's "sole turn ingress" becomes literal: the session ingress is the
   acceptance row class for host, process and command admissions, and no commit
   writes ingress rows.
-* Idle order becomes strict FIFO. A user message waits behind wake turns
+* Turn-lane order becomes strict FIFO. A user message waits behind wake turns
   enqueued before it, bounded by the drain policy. With the shipped
   `OneAtATime` policy each turn is one row anyway.
-* A config patch submitted while a turn runs applies after that logical run and
-  every item enqueued before it: the FIFO meaning of "next". The settlement
-  waiter returns `Pending` more often; `Pending` is already a documented outcome.
+* A config patch submitted while a turn runs applies right after that logical
+  run's final commit, ahead of every queued input and wake. Queued work
+  enqueued before the patch may therefore run under the newer config; this is
+  the accepted cost of §4.
 * Hosts that retried a config patch against stale resident state now receive a
   typed stale outcome instead of a silent overwrite.
 * Wake tombstones add volume until `vacuum()`; that is a vacuum-scheduling note
@@ -674,8 +733,9 @@ advisory lock on the merged table.
 
 ## Links
 
-* FIG-3540 arc and owner rulings; FIG-3541 (command double-apply), FIG-3542
-  (stranded frame handoff), FIG-3544, FIG-3545.
+* FIG-3540 arc and owner rulings; children FIG-3541 (command double-apply,
+  fixed by §12), FIG-3542 (frame handoff as a queue row, fixed by §3), FIG-3543
+  (cancel completes withheld wakes, fixed by §10), FIG-3544, FIG-3545.
 * Prospect report `/workspace/notes/lash/prospect-ingress-2026-09-23.md` (D1–D17,
   answers to F, G, E1, E2).
 * [ADR 0023](0023-retention-stays-a-parameterized-host-lever.md) — vacuum has no
