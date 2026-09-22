@@ -1800,6 +1800,8 @@ async fn sqlite_turn_runner_fixture() -> SqliteTurnRunnerFixture {
 
 lash_conformance::turn_runner_tests!({ sqlite_turn_runner_fixture().await });
 
+lash_conformance::tool_child_turn_cancel_tests!({ sqlite_turn_runner_fixture().await });
+
 #[tokio::test]
 async fn sqlite_effect_host_and_controller_reject_non_file_backed_path_spellings() {
     for path in [

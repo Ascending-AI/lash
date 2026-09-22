@@ -310,3 +310,13 @@ lash_conformance::turn_runner_tests!({
     };
     fixture
 });
+
+lash_conformance::tool_child_turn_cancel_tests!({
+    let Some(fixture) = postgres_turn_runner_fixture().await else {
+        eprintln!(
+            "skipping Postgres tool-child turn-cancel conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    fixture
+});

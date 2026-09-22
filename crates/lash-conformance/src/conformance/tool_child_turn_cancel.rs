@@ -5,8 +5,10 @@
 //! Restate in the endpoint's dispatch invocations. These laws drive a real
 //! turn on the tier (through its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner))
 //! and pin what turn control means for a child: an after-step stop does not
-//! cut a child's retry sleep short, and a child spawned under a follow-on
-//! agent frame waits under that frame's physical turn-cancel gate.
+//! cut a child's retry sleep short, a child spawned under a follow-on agent
+//! frame waits under that frame's physical turn-cancel gate, and an immediate
+//! cancel closes the turn's group under `Cancel`, dropping a child that
+//! ignores its cancellation token.
 
 use crate::admit;
 use std::collections::VecDeque;
@@ -563,5 +565,135 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
     assert!(
         !outstanding.contains(&follow_gate),
         "the follow-on gate is released with the turn: {outstanding:?}"
+    );
+}
+
+/// Flips its flag when the tool future that owns it is dropped.
+struct DropWitness(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for DropWitness {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+struct IgnoresCancellationTool {
+    started: Arc<AtomicUsize>,
+    dropped: Arc<std::sync::atomic::AtomicBool>,
+}
+
+fn ignores_cancellation_tool() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:conformance_ignores_cancellation",
+        "conformance_ignores_cancellation",
+        "Parks forever without watching its cancellation token.",
+        empty_object_schema(),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for IgnoresCancellationTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![ignores_cancellation_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "conformance_ignores_cancellation")
+            .then(|| Arc::new(ignores_cancellation_tool().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        let _witness = DropWitness(Arc::clone(&self.dropped));
+        self.started.fetch_add(1, Ordering::SeqCst);
+        // Deliberately never polls `call.context.cancellation_token()`: the
+        // law pins that turn cancel does not depend on the tool cooperating.
+        std::future::pending::<()>().await;
+        unreachable!("the parked tool never completes")
+    }
+}
+
+/// An immediate turn cancel closes the turn's tool-child group under
+/// `Cancel`: the turn stops cancelled with the request's evidence, the call
+/// settles cancelled, and a child that never watches its cancellation token
+/// is dropped rather than left running under the turn's session.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
+    prefix: &str,
+    host: Arc<dyn EffectHost>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    // These laws start no process; the substrate is part of the shared
+    // turn-runner fixture.
+    _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let session_id = SessionId::from(format!("{prefix}-ignores-cancel-session"));
+    let turn_id = TurnId::from(format!("{prefix}-ignores-cancel-turn"));
+    let started = Arc::new(AtomicUsize::new(0));
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tool = IgnoresCancellationTool {
+        started: Arc::clone(&started),
+        dropped: Arc::clone(&dropped),
+    };
+    let plugin: Arc<dyn crate::facade_support::PluginFactory> =
+        Arc::new(crate::plugin::StaticPluginFactory::new(
+            "conformance-ignores-cancellation",
+            crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(tool)),
+        ));
+    // The native binding honours an immediate cancel found at the step
+    // boundary by firing the cooperative token, so the next model call may
+    // start before it observes the token; the law does not pin that call.
+    let (model, _model_calls) = scripted_model(vec![
+        tool_call("ignores-cancel-call", "conformance_ignores_cancellation"),
+        text("unreachable after the cancel"),
+    ]);
+    let store = cancellable_store(&host);
+    let runtime = build_runtime(
+        &host,
+        Arc::clone(&store),
+        registry,
+        &session_id,
+        plugin,
+        model,
+    )
+    .await;
+    let turn = spawn_turn(runner, runtime, &session_id, &turn_id, "park and cancel");
+
+    wait_until("the tool child starts", || {
+        started.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    let driver = TurnWorkDriver::for_session(Arc::clone(&host), session_id.clone(), store);
+    let receipt = driver
+        .request_cancel(TurnCancelRequest::new(
+            TurnAddress::new(session_id.clone(), turn_id.clone()),
+            "cancel-ignoring-child",
+            None,
+        ))
+        .await
+        .expect("request an immediate turn cancel");
+    assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+
+    let turn = tokio::time::timeout(Duration::from_secs(30), turn)
+        .await
+        .expect("the cancelled turn stops although its tool ignores cancellation")
+        .expect("join the turn task")
+        .expect("the turn assembles");
+    let TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) = &turn.outcome else {
+        panic!("turn did not stop on cancellation: {:?}", turn.outcome);
+    };
+    assert_eq!(evidence.request_id, "cancel-ignoring-child");
+    assert_eq!(evidence.mode, TurnCancelMode::Immediate);
+    wait_until("the cancel-ignoring tool child is dropped", || {
+        dropped.load(Ordering::SeqCst)
+    })
+    .await;
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        1,
+        "the cancelled child is not re-run"
     );
 }

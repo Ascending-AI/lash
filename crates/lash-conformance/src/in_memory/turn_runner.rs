@@ -46,3 +46,5 @@ fn native_turn_runner_fixture() -> NativeTurnRunnerFixture {
 }
 
 crate::turn_runner_tests!({ native_turn_runner_fixture() });
+
+crate::tool_child_turn_cancel_tests!({ native_turn_runner_fixture() });

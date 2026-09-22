@@ -2043,14 +2043,23 @@ macro_rules! store_effect_group_closing_tests {
 #[macro_export]
 macro_rules! turn_runner_tests {
     ($(#[$attr:meta])* $fixture:block) => {
-        $crate::turn_runner_tests!(@expand [$(#[$attr])*] $fixture; [
-            (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"),
-            (an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration, "tool-child-after-step-retry-sleep"),
-            (a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate, "tool-child-follow-on-cancel-gate"),
-        ]);
+        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
+            (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"));
+        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
+            (an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration, "tool-child-after-step-retry-sleep"));
+        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
+            (a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate, "tool-child-follow-on-cancel-gate"));
     };
-    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $($crate::__turn_runner_register!($attrs $fixture; ($law, $label));)*
+}
+
+/// Register the turn-cancel law for a tool child that ignores cancellation,
+/// with [`turn_runner_tests!`]'s fixture. The in-process tiers own their
+/// children's tasks, so dropping one is theirs to prove.
+#[macro_export]
+macro_rules! tool_child_turn_cancel_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
+            (a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation, "tool-child-turn-cancel-drops-child"));
     };
 }
 
@@ -2062,7 +2071,6 @@ macro_rules! __turn_runner_register {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
             let (_guard, prefix, host, registry, work, runner, verify) = $fixture;
-            let _ = $label;
             $crate::registration_macro_support::$law(prefix, host, registry, work, runner).await;
             verify(stringify!($law)).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
