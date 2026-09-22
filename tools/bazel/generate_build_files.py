@@ -2057,6 +2057,20 @@ class FeatureLaneGraph:
         package_name = command.package
         package = self.by_name[package_name]
         features = set(resolution[package_name])
+        for name in command.tests:
+            if any(character in name for character in "*?[]"):
+                raise ValueError(f"feature lanes require literal --test names, got {name!r}")
+            target = next((
+                target for target in package["targets"]
+                if target["kind"][0] == "test" and target["name"] == name
+            ), None)
+            if target is None:
+                raise ValueError(f"{package_name}: unknown --test target {name!r}")
+            missing = set(target.get("required-features", [])) - features
+            if missing:
+                raise ValueError(
+                    f"{package_name}: --test {name} requires missing features {sorted(missing)}"
+                )
         kinds = set(command.kinds)
         labels = []
         library = self.library_of(package_name)

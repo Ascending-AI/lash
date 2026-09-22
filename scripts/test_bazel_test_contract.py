@@ -1189,7 +1189,7 @@ class FocusedClippyVerdicts(unittest.TestCase):
             self.assertFalse(any(arg.startswith("--build_event_json_file=") for arg in arguments))
 
 class CargoTargetSelectionTests(unittest.TestCase):
-    def emit(self, arguments):
+    def emit(self, arguments, required_features=()):
         from unittest.mock import Mock, patch
 
         sys.path.insert(0, str(ROOT / "tools/bazel"))
@@ -1200,6 +1200,7 @@ class CargoTargetSelectionTests(unittest.TestCase):
             {"name": name, "kind": ["test"], "test": True}
             for name in ("process_model", "effect_model", "other")
         ), {"name": "app", "kind": ["bin"], "test": True}]
+        targets[1]["required-features"] = list(required_features)
         graph = generator.FeatureLaneGraph.__new__(generator.FeatureLaneGraph)
         graph.by_name = {"example": {"targets": targets}}
         graph.library_of = Mock(return_value=library)
@@ -1226,6 +1227,14 @@ class CargoTargetSelectionTests(unittest.TestCase):
         for call in calls:
             self.assertEqual({"example": []}, call.args[1])
             self.assertEqual([], call.args[-1])
+
+    def test_unavailable_named_targets_fail_instead_of_running_no_tests(self):
+        with self.assertRaisesRegex(ValueError, "unknown --test target.*misspelled"):
+            self.emit(["--test", "misspelled"])
+        with self.assertRaisesRegex(ValueError, "process_model requires missing features.*testing"):
+            self.emit(["--test", "process_model"], required_features=("testing",))
+        with self.assertRaisesRegex(ValueError, "literal --test names"):
+            self.emit(["--test", "*_model"])
 
     def test_default_and_explicit_unit_selections_remain_runnable(self):
         for flags in ([], ["--tests"], ["--all-targets"]):
