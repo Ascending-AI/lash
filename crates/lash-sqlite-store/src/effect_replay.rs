@@ -120,6 +120,20 @@ lash_store_sql::statements! {
                AND lease_expires_at_ms > ?10
              RETURNING group_key";
 
+        /// Release an ungrouped, uncommitted derivation under the complete live lease fence.
+        release_uncommitted_derivation = "UPDATE runtime_effect_replay
+             SET lease_expires_at_ms = 0,
+                 updated_at_ms = ?6
+             WHERE scope_id = ?1
+               AND replay_key = ?2
+               AND envelope_hash = ?3
+               AND lease_owner_id = ?4
+               AND lease_token = ?5
+               AND status = 'in_progress'
+               AND group_key IS NULL
+               AND commit_state = 'pending'
+               AND lease_expires_at_ms > ?6";
+
         /// Extend the lease of `?1` / `?2` to `?6`, stamping `?7`, if `?4` /
         /// `?5` still hold it at `?8`. Forks for the same reason
         /// [`ReplaySqliteStatements::finalize_terminal`] does.

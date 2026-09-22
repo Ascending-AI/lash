@@ -105,6 +105,35 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     ///
     /// Everything runs inside one `BEGIN IMMEDIATE` write transaction, so the
     /// decision cannot interleave with a sibling's regardless.
+    async fn release_uncommitted_derivation(
+        &self,
+        fence: &EffectLeaseFence,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let fence = fence.clone();
+        let clock = Arc::clone(&self.clock);
+        self.conn
+            .write(move |tx| {
+                let now = clock.timestamp_ms();
+                let changed = tx.execute(
+                    effect_sql(Schema::Main)
+                        .replay_sqlite
+                        .release_uncommitted_derivation
+                        .sql(),
+                    params![
+                        fence.scope_id,
+                        fence.replay_key,
+                        fence.envelope_hash,
+                        fence.owner_id,
+                        fence.lease_token,
+                        now as i64
+                    ],
+                )?;
+                Ok(changed == 1)
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
     async fn finalize(
         &self,
         fence: &EffectLeaseFence,

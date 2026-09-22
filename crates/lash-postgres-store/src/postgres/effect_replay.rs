@@ -140,6 +140,20 @@ lash_store_sql::statements! {
              WHERE scope_id = ?1 AND replay_key = ?2
              FOR UPDATE";
 
+        /// Release an ungrouped, uncommitted derivation under the complete live lease fence.
+        release_uncommitted_derivation = "UPDATE runtime_effect_replay
+             SET lease_expires_at_ms = 0,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = ?1
+               AND replay_key = ?2
+               AND envelope_hash = ?3
+               AND lease_owner_id = ?4
+               AND lease_token = ?5
+               AND status = 'in_progress'
+               AND group_key IS NULL
+               AND commit_state = 'pending'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint";
+
         /// Extend the lease of `?1` / `?2` by `?6` milliseconds if `?4` / `?5`
         /// still hold it. Forks for the same reason
         /// [`ReplayPostgresStatements::finalize_terminal`] does.

@@ -877,6 +877,15 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         replay_key: &str,
     ) -> Result<bool, RuntimeEffectControllerError>;
 
+    /// Expire an ungrouped pending derivation claim without sealing an error.
+    /// Match all five fence columns and the live lease at write time. Retain
+    /// the canonical envelope and pending row; a subsequent claim rotates its
+    /// owner and token. Refuse committed, cancelled, grouped or expired rows.
+    async fn release_uncommitted_derivation(
+        &self,
+        fence: &EffectLeaseFence,
+    ) -> Result<bool, RuntimeEffectControllerError>;
+
     /// Write `terminal` and release the lease, guarded by `fence`; for a
     /// grouped child, contest the group's §4 linearization point in the same
     /// transaction.
@@ -1783,6 +1792,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 }
                 PreparedEffect::ReplayError(err) => return Err(err),
                 PreparedEffect::Claimed(claim) => {
+                    let command_kind = envelope.command.kind();
                     let execution =
                         self.execute_claimed_effect_with_renewal(&claim, envelope, local_executor);
                     let result = match cancel {
@@ -1831,7 +1841,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                             }
                         }
                     };
-                    let finalize = self.finalize_effect(&claim, &result).await;
+                    let finalize = self.finalize_effect(&claim, command_kind, &result).await;
                     return match (result, finalize) {
                         (Ok(outcome), Ok(())) => Ok(EffectRun::Terminal(outcome)),
                         (Err(err), Ok(())) => Err(err),
@@ -1979,6 +1989,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     async fn finalize_effect(
         &self,
         claim: &ClaimedEffect,
+        command_kind: crate::RuntimeEffectKind,
         outcome: &Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
     ) -> Result<(), RuntimeEffectControllerError> {
         let fence = &claim.fence;
@@ -2030,6 +2041,24 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 }
                 EffectCommitState::Pending => {}
             }
+        }
+        if claim.group_key.is_none()
+            && let Err(error) = outcome
+            && error
+                .journal_disposition(command_kind)
+                .is_retryable_derivation()
+        {
+            return if self.row_store.release_uncommitted_derivation(fence).await? {
+                Ok(())
+            } else {
+                Err(vocabulary.error(
+                    EffectReplayFailure::LeaseLost,
+                    format!(
+                        "runtime effect replay lease was lost before releasing derivation `{}`",
+                        fence.replay_key
+                    ),
+                ))
+            };
         }
         match self.row_store.finalize(fence, &terminal).await? {
             EffectFinalizeOutcome::Written { commit_seq: _ } => {

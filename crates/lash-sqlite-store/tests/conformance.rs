@@ -2238,6 +2238,14 @@ lash_conformance::effect_controller_replay_tests!({
     })
 });
 
+lash_conformance::effect_controller_response_derivation_tests!({
+    let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
+    let (controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
+    (controller_dir, move || {
+        sqlite_conformance_invocation(controller.clone(), scope.clone())
+    })
+});
+
 #[tokio::test]
 async fn sqlite_effect_controller_replays_without_local_executor() {
     let scope = durable_turn_scope("session", "turn");

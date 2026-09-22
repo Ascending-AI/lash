@@ -1940,6 +1940,19 @@ lash_conformance::effect_controller_replay_tests!({
     })
 });
 
+lash_conformance::effect_controller_response_derivation_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres effect replay conformance: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    let scope = ExecutionScope::runtime_operation("postgres-effect-controller-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
+    (database_lock, move || {
+        postgres_conformance_invocation(controller.clone(), scope.clone())
+    })
+});
+
 lash_conformance::effect_controller_replay_mismatch_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres effect mismatch conformance: database URL is not set");

@@ -1443,9 +1443,25 @@ pub struct RuntimeEffectReplayMismatchReport {
     pub first_divergent_paths: Vec<String>,
 }
 
+/// Journal treatment of an executor failure before a terminal is committed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EffectErrorJournalDisposition {
+    #[default]
+    Terminal,
+    RetryUncommittedResponseDerivation,
+}
+
+impl EffectErrorJournalDisposition {
+    pub fn is_retryable_derivation(self) -> bool {
+        matches!(self, Self::RetryUncommittedResponseDerivation)
+    }
+}
+
 #[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
 #[error("{code}: {message}")]
 pub struct RuntimeEffectControllerError {
+    #[serde(skip)]
+    journal_disposition: EffectErrorJournalDisposition,
     pub code: RuntimeErrorCode,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1457,10 +1473,32 @@ pub struct RuntimeEffectControllerError {
 impl RuntimeEffectControllerError {
     pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
+            journal_disposition: EffectErrorJournalDisposition::Terminal,
             code,
             message: message.into(),
             summary: None,
             cause: None,
+        }
+    }
+
+    /// Marks a failed, uncommitted host response derivation as safe to execute again.
+    /// This authority is local to the executor; decoding a stored error cannot mint it.
+    pub fn retryable_response_derivation(message: impl Into<String>) -> Self {
+        let mut error = Self::new(
+            RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
+            message,
+        );
+        error.journal_disposition =
+            EffectErrorJournalDisposition::RetryUncommittedResponseDerivation;
+        error
+    }
+
+    /// Only the assistant-response command can consume derivation retry authority.
+    pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
+        if kind == RuntimeEffectKind::AssistantResponseHooks {
+            self.journal_disposition
+        } else {
+            EffectErrorJournalDisposition::Terminal
         }
     }
 
@@ -1491,6 +1529,7 @@ impl RuntimeEffectControllerError {
 
     pub fn into_runtime_error(self) -> RuntimeError {
         let Self {
+            journal_disposition: _,
             code,
             message,
             summary,
@@ -1508,6 +1547,7 @@ impl RuntimeEffectControllerError {
 impl From<RuntimeError> for RuntimeEffectControllerError {
     fn from(err: RuntimeError) -> Self {
         Self {
+            journal_disposition: EffectErrorJournalDisposition::Terminal,
             code: err.code,
             message: err.message,
             summary: err.summary,
@@ -1556,6 +1596,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             _ => crate::RuntimeErrorCode::RuntimeStore,
         };
         Self {
+            journal_disposition: EffectErrorJournalDisposition::Terminal,
             code,
             message: err.to_string(),
             summary: None,
