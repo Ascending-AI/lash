@@ -234,6 +234,13 @@ pub enum EffectGroupRegisterRefusalResponse {
 pub enum EffectGroupAdmissionResponse {
     Admitted,
     NotYetRecorded,
+    /// The index retains a *different* invocation id for this position: the
+    /// retained invocation's retention expired and the idempotency-keyed
+    /// re-dispatch minted a fresh one. Distinct from `Refused` because the
+    /// successor must surface the typed `AttachExpired` failure rather than
+    /// exit silently — the rank it would never settle is a caller's wait
+    /// (ADR 0099 §8).
+    AttachExpired,
     Refused,
     Retired,
 }
@@ -879,44 +886,11 @@ impl EffectGroupIndex {
         let Some(record) = load_index(&ctx).await? else {
             return Ok(Json(EffectGroupAdmissionResponse::Refused));
         };
-        let response = match &record.lifecycle {
-            EffectGroupLifecycle::Preparing {
-                dispatch: EffectGroupDispatchState::Adopted { dispatched, .. },
-                ..
-            } => match dispatched.get(&request.position) {
-                None => EffectGroupAdmissionResponse::NotYetRecorded,
-                Some(id) if id == &request.invocation_id => EffectGroupAdmissionResponse::Admitted,
-                Some(_) => EffectGroupAdmissionResponse::Refused,
-            },
-            EffectGroupLifecycle::Ready { addresses, .. } => {
-                match addresses.get(&request.position) {
-                    Some(id) if id == &request.invocation_id => {
-                        EffectGroupAdmissionResponse::Admitted
-                    }
-                    _ => EffectGroupAdmissionResponse::Refused,
-                }
-            }
-            EffectGroupLifecycle::Closed {
-                effective,
-                addresses,
-                ..
-            } => match effective {
-                EffectGroupCloseDisposition::RunToCompletion => {
-                    match addresses.get(&request.position) {
-                        Some(id) if id == &request.invocation_id => {
-                            EffectGroupAdmissionResponse::Admitted
-                        }
-                        _ => EffectGroupAdmissionResponse::Refused,
-                    }
-                }
-                EffectGroupCloseDisposition::Cancel
-                | EffectGroupCloseDisposition::Refused { .. } => {
-                    EffectGroupAdmissionResponse::Refused
-                }
-            },
-            EffectGroupLifecycle::Preparing { .. } => EffectGroupAdmissionResponse::NotYetRecorded,
-            EffectGroupLifecycle::Retired { .. } => EffectGroupAdmissionResponse::Retired,
-        };
+        let response = decide_group_child_admission(
+            &record.lifecycle,
+            request.position,
+            &request.invocation_id,
+        );
         #[cfg(test)]
         if response == EffectGroupAdmissionResponse::NotYetRecorded {
             notify_admission_witness(&group_key);
