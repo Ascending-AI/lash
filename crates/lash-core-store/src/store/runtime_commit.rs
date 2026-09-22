@@ -135,6 +135,17 @@ pub struct RuntimeCommit {
     pub queued_run: Option<Box<super::QueuedRunCommit>>,
     pub completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
     pub completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
+    /// Turn input the interrupted turn claimed at its terminal checkpoint and
+    /// withheld for a follow-on turn that its cancellation means never runs
+    /// (FIG-3531). The model never saw it, so it is never completed: in the
+    /// same transaction the backend releases each claim under its own fence,
+    /// and the cancellation's undelivered disposition then settles and
+    /// records the rows exactly as it does an unclaimed active-turn row.
+    /// Whole claims rather than completions: the release needs the claim
+    /// identity and the rows it covers. Meaningful only beside
+    /// `interrupted_turn_input_turn_id`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub undelivered_turn_input_claims: Vec<crate::turn_input_vocabulary::TurnInputClaim>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

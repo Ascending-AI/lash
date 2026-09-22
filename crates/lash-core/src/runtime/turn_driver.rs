@@ -63,7 +63,12 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
     /// FIG-3157: work claimed at a terminal checkpoint and withheld from its
     /// delivery, so the committed finish stays this turn's answer. It is never
-    /// settled by this turn; the logical run drives it in a follow-on turn.
+    /// settled as this turn's completed work. A finished turn's logical run
+    /// drives it in a follow-on turn. When this turn is cancelled that
+    /// follow-on never runs for turn input: the final commit settles withheld
+    /// turn input through the cancellation's undelivered disposition, like an
+    /// unclaimed active-turn row (FIG-3531). Withheld queued work keeps its
+    /// own cancellation path, which is tracked separately.
     pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
     pub(super) session_execution_lease: Option<crate::SessionExecutionLeaseAuthority>,

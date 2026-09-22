@@ -1215,6 +1215,18 @@ macro_rules! direct_turn_acceptance_tests {
     };
 }
 
+/// Register one independently reported test per cancelled-turn withheld-input
+/// law (FIG-3531). The fixture shape is the direct-turn one, so the catalogue
+/// arm is shared.
+#[macro_export]
+macro_rules! cancelled_turn_withheld_input_tests {
+    ($fixture:block) => {
+        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+            (immediate_cancel_defers_withheld_inject_now_input, "cancel-defers-withheld-input"),
+        ]);
+    };
+}
+
 /// Register the portable durable effect-controller replay laws.
 #[macro_export]
 macro_rules! effect_controller_replay_tests {

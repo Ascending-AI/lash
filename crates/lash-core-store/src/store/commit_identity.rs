@@ -1220,6 +1220,10 @@ struct RuntimeCommitIntent<'a> {
     queued_run: Option<QueuedRunIntent<'a>>,
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
+    /// Withheld input a cancelled turn settles through the undelivered
+    /// disposition (FIG-3531). Absent from every other commit's identity.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    undelivered_turn_inputs: Vec<&'a crate::InputId>,
     enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,
     interrupted_turn_input_turn_id: Option<&'a TurnId>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1271,6 +1275,11 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 .completed_turn_input_claims
                 .iter()
                 .map(CompletedTurnInputIntent::from)
+                .collect(),
+            undelivered_turn_inputs: commit
+                .undelivered_turn_input_claims
+                .iter()
+                .flat_map(|claim| claim.inputs.iter().map(|input| &input.input_id))
                 .collect(),
             enqueued_queue_batches: commit
                 .enqueued_queue_batches

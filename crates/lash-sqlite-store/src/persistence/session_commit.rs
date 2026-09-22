@@ -883,6 +883,13 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                 });
                             }
                         }
+                        // Withheld claims are released first, under their
+                        // own fence, so the disposition below settles them
+                        // exactly as it settles an unclaimed row (FIG-3531).
+                        release_undelivered_turn_input_claims_conn(
+                            tx,
+                            &commit.undelivered_turn_input_claims,
+                        )?;
                         let input_ids = {
                             let mut stmt = tx
                                 .prepare(
@@ -1133,6 +1140,36 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         Store::load_session_meta(self).await
     }
+}
+
+/// Release the turn-input claims a cancelled turn withheld from its terminal
+/// checkpoint (FIG-3531), each under its own fence, inside the commit
+/// transaction.
+///
+/// Each row returns to the open spelling its ingress carries —
+/// `pending_active` for the active-turn rows a terminal checkpoint claims — so
+/// the cancellation's disposition, which runs next, settles and records it
+/// exactly as it does an unclaimed row. A claim this turn no longer holds
+/// matches no row and is left to its new holder.
+fn release_undelivered_turn_input_claims_conn(
+    tx: &rusqlite::Connection,
+    claims: &[lash_core::TurnInputClaim],
+) -> Result<(), StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    for claim in claims {
+        tx.execute(
+            sql.pending_inputs_sqlite.abandon_claim.sql(),
+            params![
+                claim.session_id.as_str(),
+                claim.claim_id.as_str(),
+                claim.lease_token,
+                lash_core::TurnInputStateKind::PendingActive.as_str(),
+                lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
+            ],
+        )
+        .map_err(sqlite_error)?;
+    }
+    Ok(())
 }
 
 /// The subset of `nodes` whose ids already occupy a `graph_nodes` row.

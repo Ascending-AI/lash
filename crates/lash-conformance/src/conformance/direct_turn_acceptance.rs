@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// The session every conformance store in this suite is exercised under.
 const SESSION_ID: &str = "root";
 
-fn text_response(text: &str) -> crate::LlmResponse {
+pub(super) fn text_response(text: &str) -> crate::LlmResponse {
     crate::LlmResponse {
         parts: vec![crate::LlmOutputPart::Text {
             text: text.to_string(),
@@ -48,7 +48,7 @@ fn fixed_text_provider(text: &str) -> crate::ProviderHandle {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn acceptance_runtime(
+pub(super) async fn acceptance_runtime(
     store: &Arc<dyn crate::RuntimePersistence>,
     effect_host: &Arc<dyn crate::EffectHost>,
     provider: crate::ProviderHandle,
@@ -91,7 +91,7 @@ async fn acceptance_runtime(
     .expect("build the direct-turn acceptance conformance runtime")
 }
 
-fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
+pub(super) fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
     let mut input = crate::TurnInput::text(text);
     input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
     input

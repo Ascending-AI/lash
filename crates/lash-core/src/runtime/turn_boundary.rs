@@ -717,6 +717,8 @@ impl TurnBoundary {
         }
         commit.completed_queue_claims = claim_settlement.queued.completions.clone();
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
+        commit.undelivered_turn_input_claims =
+            std::mem::take(&mut claim_settlement.undelivered_turn_inputs);
         commit.enqueued_queue_batches = enqueued_queue_batches;
         if queued_run.is_some() {
             commit.session_execution_lease_fence = current_session_lease_fence.clone();

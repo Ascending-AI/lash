@@ -876,7 +876,10 @@ impl LashRuntime {
                 .await;
         }
         finish_result.map(|mut execution| {
-            execution.withheld_terminal_work = pending_claims.withheld_terminal_work.take();
+            execution.withheld_terminal_work = pending_claims.take_follow_on_work(matches!(
+                execution.turn.outcome,
+                TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+            ));
             execution
         })
     }
