@@ -492,11 +492,18 @@ async fn the_commit_seq_check_holds_grouped_rows_to_their_position() {
         EffectClaimObservation::Claimed { .. }
     ));
     for commit_state in ["committed", "drained"] {
-        sqlx::query(
+        // The rank-pairing CHECK seats a settlement rank on `drained` even
+        // without a group: the state, not the grouping, owns that pairing.
+        let settlement = if commit_state == "drained" {
+            ", settlement_seq = 1"
+        } else {
+            ""
+        };
+        sqlx::query(&format!(
             "UPDATE lash_runtime_effect_replay
-             SET commit_state = $2, commit_seq = NULL
-             WHERE scope_id = $1 AND replay_key = 'u1'",
-        )
+             SET commit_state = $2, commit_seq = NULL{settlement}
+             WHERE scope_id = $1 AND replay_key = 'u1'"
+        ))
         .bind(&fixture.scope_id)
         .bind(commit_state)
         .execute(&fixture.store.pool)

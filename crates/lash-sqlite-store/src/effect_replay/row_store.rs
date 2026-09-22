@@ -333,7 +333,9 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 )?;
                 // Group row, then the replay row's CAS: the rank bump ahead
                 // of it keeps the shared lock order, and a losing CAS rolls
-                // the bump back with the speculative terminal.
+                // the bump back with the speculative terminal. The rank rides
+                // the CAS itself — the rank-pairing CHECK admits no
+                // `cancel_decided` row without a rank, even transiently.
                 let settlement_seq = bump_group_rank(tx, &request.group_key)?;
                 let won = tx.execute(
                     effect_sql(Schema::Main).replay.cancel_commit_state.sql(),
@@ -341,6 +343,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         group.scope_id.as_str(),
                         request.replay_key.as_str(),
                         request.group_key.as_str(),
+                        settlement_seq,
                     ],
                 )?;
                 if won == 0 {
@@ -396,14 +399,6 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         ),
                     )));
                 }
-                tx.execute(
-                    effect_sql(Schema::Main).replay.set_settlement_seq.sql(),
-                    params![
-                        group.scope_id.as_str(),
-                        request.replay_key.as_str(),
-                        settlement_seq,
-                    ],
-                )?;
                 Ok(TxOutcome::Commit(EffectCancelOutcome::Decided {
                     settlement_seq: u64_from_sql("RuntimeEffectGroup", "next_seq", settlement_seq)?,
                 }))

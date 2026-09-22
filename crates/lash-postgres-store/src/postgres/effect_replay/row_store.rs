@@ -275,12 +275,15 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .rows_affected();
         // Group row, then the replay row's CAS: the rank bump ahead of it
         // keeps the shared lock order, and a losing CAS rolls the bump back
-        // with the speculative terminal.
+        // with the speculative terminal. The rank rides the CAS itself — the
+        // rank-pairing CHECK admits no `cancel_decided` row without a rank,
+        // even transiently.
         let settlement_seq = bump_group_rank(&mut tx, &request.group_key).await?;
         let won = sqlx::query(effect_sql().replay.cancel_commit_state.sql())
             .bind(&group.scope_id)
             .bind(&request.replay_key)
             .bind(&request.group_key)
+            .bind(settlement_seq)
             .execute(&mut *tx)
             .await
             .map_err(effect_store_error)?
@@ -332,13 +335,6 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 request.replay_key, request.group_key
             )));
         }
-        sqlx::query(effect_sql().replay.set_settlement_seq.sql())
-            .bind(&group.scope_id)
-            .bind(&request.replay_key)
-            .bind(settlement_seq)
-            .execute(&mut *tx)
-            .await
-            .map_err(effect_store_error)?;
         tx.commit().await.map_err(effect_store_error)?;
         Ok(EffectCancelOutcome::Decided {
             settlement_seq: u64::try_from(settlement_seq).map_err(|_| {

@@ -5,8 +5,9 @@ use std::path::Path;
 
 use lash_core::StoreError;
 use lash_core::store_backend_support::required_constraints::{
-    EXPECTED_CONSTRAINTS, InspectedConstraint, RequiredConstraintReport, SqliteConstraintDatabase,
-    compare_required_constraints, extract_named_check_expressions,
+    EXPECTED_CONSTRAINTS, EXPECTED_FOREIGN_KEYS, InspectedConstraint, InspectedForeignKey,
+    RequiredConstraintReport, SqliteConstraintDatabase, compare_required_constraints,
+    compare_required_foreign_keys, extract_foreign_key_clauses, extract_named_check_expressions,
 };
 
 use crate::{SqliteDatabase, conn::SqliteConnection, sqlite_error};
@@ -88,7 +89,49 @@ pub async fn inspect_required_constraints_at(
             });
         }
     }
-    compare_required_constraints("sqlite", &expected, actual)
+    let mut report = compare_required_constraints("sqlite", &expected, actual)?;
+
+    let mut expected_foreign_keys = Vec::new();
+    for key in EXPECTED_FOREIGN_KEYS {
+        if key
+            .sqlite_databases
+            .iter()
+            .any(|component| sqlite_database(*component) == database)
+            && let Some(sqlite) = key.sqlite
+        {
+            expected_foreign_keys.push(sqlite);
+        }
+    }
+    let mut actual_foreign_keys = Vec::new();
+    for (table, ddl) in &tables {
+        for clause in extract_foreign_key_clauses(ddl).map_err(|detail| {
+            StoreError::RequiredConstraintInspectionInconclusive {
+                backend: "sqlite",
+                table: table.clone(),
+                constraint: "<foreign key>".to_string(),
+                detail,
+            }
+        })? {
+            actual_foreign_keys.push(InspectedForeignKey {
+                table: table.clone(),
+                columns: clause.columns,
+                referenced_table: clause.referenced_table,
+                referenced_columns: clause.referenced_columns,
+                on_delete: clause.on_delete,
+                on_update: clause.on_update,
+                deferrable: clause.deferrable,
+                initially_deferred: clause.initially_deferred,
+                validated: true,
+                enforced: true,
+            });
+        }
+    }
+    report.set_foreign_key_findings(compare_required_foreign_keys(
+        "sqlite",
+        &expected_foreign_keys,
+        actual_foreign_keys,
+    )?);
+    Ok(report)
 }
 
 fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {

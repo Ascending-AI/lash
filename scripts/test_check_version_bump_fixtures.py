@@ -29,6 +29,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[],
         source_missing_guards: &[],
         introduced_relations: &["lash_fence"],
+        introduced_constraints: &[],
         statements: &[
             FENCE_DDL,
             r#"UPDATE lash_schema_versions
@@ -52,6 +53,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_plans",
             "idx_lash_sessions_order",
         ],
+        introduced_constraints: &[],
         statements: &[PLANS_DDL, PLANS_INDEX_DDL, SESSIONS_ORDER_INDEX_DDL, FENCE_DDL],
     },
 ];
@@ -84,11 +86,25 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
 }
 """
 
+SCHEMA_DDL_SOURCE = """\
+CREATE TABLE lash_sessions (
+    session_id     TEXT PRIMARY KEY,
+    enqueued_at_ms INTEGER
+);
+CREATE TABLE lash_fence (
+    fence_id TEXT PRIMARY KEY
+);
+CREATE TABLE lash_plans (
+    plan_id TEXT PRIMARY KEY
+);
+"""
+
 FIXTURE_SOURCE = """\
 const MIGRATION_FLOOR_VERSION: i32 = 50;
 const POST_FLOOR_TABLES: [&str; 2] = ["lash_fence", "lash_plans"];
 const POST_FLOOR_INDEXES: [&str; 1] = ["idx_lash_sessions_order"];
 const POST_FLOOR_COLUMNS: [(&str, &str); 1] = [("lash_sessions", "enqueued_at_ms")];
+const POST_FLOOR_CONSTRAINTS: [(&str, &str); 0] = [];
 const POST_FLOOR_ARTIFACTS: [&str; 4] = [
     "idx_lash_plans",
     "idx_lash_sessions_order",
@@ -168,6 +184,7 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         store_test: str | None = None,
         fixture_dump: str | None = None,
         fixture_manifest: str | None = None,
+        schema_ddl: str = SCHEMA_DDL_SOURCE,
     ) -> tuple[bool, str]:
         # The component pins track whatever generation the case declares unless
         # the case is about a stale pin and says so; every other case is then
@@ -189,6 +206,7 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
                 (MODULE.RENDERERS_SOURCE, migrations),
                 (MODULE.FIXTURE_SOURCE, fixture),
                 (MODULE.GATE_SOURCE, gate),
+                (MODULE.DDL_SOURCE, schema_ddl),
                 (STORE_TEST_PATH, store_test),
                 (FIXTURE_DUMP_PATH, fixture_dump),
                 (FIXTURE_MANIFEST_PATH, fixture_manifest),
@@ -231,6 +249,7 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
                 (MODULE.VERSION_SOURCE, VERSION_SOURCE),
                 (MODULE.MIGRATIONS_SOURCE, MIGRATIONS_SOURCE),
                 (MODULE.RENDERERS_SOURCE, MIGRATIONS_SOURCE),
+                (MODULE.DDL_SOURCE, SCHEMA_DDL_SOURCE),
                 (MODULE.FIXTURE_SOURCE, FIXTURE_SOURCE),
                 (MODULE.GATE_SOURCE, GATE_SOURCE),
                 (STORE_TEST_PATH, STORE_TEST_SOURCE),

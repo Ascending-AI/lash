@@ -126,16 +126,6 @@ crate::statements! {
                  updated_at_ms = ?7
              WHERE scope_id = ?1 AND replay_key = ?2";
 
-        /// Stamp the settlement rank `?3` allocated for `?1` / `?2`.
-        ///
-        /// `decide_cancel`'s rank write: a cancel-decided child is rankable
-        /// immediately, so its rank lands in the same transaction as the
-        /// `cancel_decided` CAS but stays a separate statement — the rank was
-        /// allocated by the group-row bump that ran between them.
-        set_settlement_seq = "UPDATE runtime_effect_replay
-             SET settlement_seq = ?3
-             WHERE scope_id = ?1 AND replay_key = ?2";
-
         /// The group `?1` / `?2` (scope, replay key) belongs to and its
         /// commit state, if the row exists.
         ///
@@ -224,11 +214,17 @@ crate::statements! {
         select_child_drain = "SELECT commit_state, commit_seq, drain_input FROM runtime_effect_replay
              WHERE group_key = ?1 AND replay_key = ?2";
 
-        /// Win the §4 point for a cancel disposition: `?1` scope, `?2`
-        /// replay key, `?3` the group the row belongs to. Same guard, same
-        /// meaning of a miss.
+        /// Win the §4 point for a cancel disposition and seat the settlement
+        /// rank in one write: `?1` scope, `?2` replay key, `?3` the group the
+        /// row belongs to, `?4` the rank allocated from `next_seq`. Same
+        /// guard, same meaning of a miss.
+        ///
+        /// Rank and `cancel_decided` land atomically: the rank-pairing CHECK
+        /// rejects a `cancel_decided` row that holds no rank, so the CAS and
+        /// the rank seat are one statement even though the rank was allocated
+        /// by the group-row bump that ran before it.
         cancel_commit_state = "UPDATE runtime_effect_replay
-             SET commit_state = 'cancel_decided'
+             SET commit_state = 'cancel_decided', settlement_seq = ?4
              WHERE scope_id = ?1 AND replay_key = ?2 AND group_key = ?3
                AND commit_state = 'pending'";
 

@@ -567,6 +567,9 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
     CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK (((commit_seq IS NULL) OR (commit_state = ANY (ARRAY['committed'::text, 'drained'::text])))),
     CONSTRAINT ck_runtime_effect_replay_commit_state CHECK ((commit_state = ANY (ARRAY['pending'::text, 'committed'::text, 'drained'::text, 'cancel_decided'::text]))),
     CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (((drain_input IS NULL) OR ((group_key IS NOT NULL) AND (commit_state = ANY (ARRAY['committed'::text, 'drained'::text]))))),
+    CONSTRAINT ck_runtime_effect_replay_error_json CHECK ((((status = 'failed'::text) AND (error_json IS NOT NULL)) OR ((status <> 'failed'::text) AND (error_json IS NULL)))),
+    CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK ((((status = 'completed'::text) AND (outcome_json IS NOT NULL)) OR ((status <> 'completed'::text) AND (outcome_json IS NULL)))),
+    CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK ((((settlement_seq IS NULL) AND (NOT (commit_state = ANY (ARRAY['drained'::text, 'cancel_decided'::text])))) OR ((settlement_seq IS NOT NULL) AND (commit_state = ANY (ARRAY['drained'::text, 'cancel_decided'::text]))))),
     CONSTRAINT ck_runtime_effect_replay_status CHECK ((status = ANY (ARRAY['in_progress'::text, 'completed'::text, 'failed'::text])))
 );
 
@@ -1156,7 +1159,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 114);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 115);
 
 
 --
@@ -2170,6 +2173,22 @@ CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_commit_seq ON lash_durable_rea
 --
 
 CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_group_seq ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (group_key, settlement_seq) WHERE ((group_key IS NOT NULL) AND (settlement_seq IS NOT NULL));
+
+
+--
+-- Name: lash_runtime_effect_group_child fk_runtime_effect_group_child_group; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_group_child
+    ADD CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES lash_durable_read_fixture.lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: lash_runtime_effect_replay fk_runtime_effect_replay_group; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_replay
+    ADD CONSTRAINT fk_runtime_effect_replay_group FOREIGN KEY (group_key) REFERENCES lash_durable_read_fixture.lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED;
 
 
 --
