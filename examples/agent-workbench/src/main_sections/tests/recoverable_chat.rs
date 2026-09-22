@@ -1006,7 +1006,8 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .await
         .expect("reload and project committed durable tool trajectory");
 
-    let output = std::process::Command::new("node")
+    let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
+    let output = std::process::Command::new(node)
         .arg("--test")
         .arg(&script)
         .env(

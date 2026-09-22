@@ -198,10 +198,8 @@ class ClassifyTests(unittest.TestCase):
         """The pool owns the workbench unit suite, so `rust` cannot be false.
 
         `rust` gates `Test Bazel partition`, which runs every agent-workbench
-        unit case except the Node-gated browser-projection ones. Skipping it on
-        a workbench-only diff would leave the workbench's own tests unrun on
-        the diff that changed them, with a green Cargo job that executed one
-        test standing in for the suite. The store, functional-E2E and
+        unit case with a pinned Node interpreter for the browser-projection
+        test. The store, functional-E2E and
         worker-E2E breadth families stay off: the workbench is an example
         host, not a store or a worker.
         """
@@ -298,6 +296,7 @@ def successful_needs() -> dict[str, dict[str, object]]:
         | ci_plan.BAZEL_TEST_JOBS
     }
     needs["plan"]["outputs"] = plan_outputs
+    needs["workspace-tests"]["result"] = "skipped"
     return needs
 
 
@@ -317,6 +316,7 @@ class ConclusionTests(unittest.TestCase):
         untrusted = successful_needs()
         for job in ci_plan.BAZEL_TEST_JOBS:
             untrusted[job]["result"] = "skipped"
+        untrusted["workspace-tests"]["result"] = "success"
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(untrusted, bazel_is_trusted=False)
         )
@@ -373,15 +373,16 @@ class ConclusionTests(unittest.TestCase):
     def test_wrongly_skipped_job_fails(self) -> None:
         needs = successful_needs()
         needs["workspace-tests"]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs)
+        for job in ci_plan.BAZEL_TEST_JOBS:
+            needs[job]["result"] = "skipped"
+        problems = ci_plan.evaluate_conclusion(needs, bazel_is_trusted=False)
         self.assertTrue(any("workspace-tests" in problem for problem in problems))
 
     def test_a_trusted_rust_event_expects_no_cargo_workspace_run(self) -> None:
         """The Bazel partition owns every deterministic Rust binary.
 
-        On a trusted event the Cargo job runs only for the agent-workbench
-        binary, so a rust-only diff must expect it skipped -- and a Cargo run
-        that happened anyway is a policy violation, not a bonus.
+        On a trusted event Bazel owns the browser-projection case too, so a
+        Cargo run is a policy violation.
         """
         needs = successful_needs()
         needs["plan"]["outputs"]["workbench"] = "false"
@@ -477,7 +478,6 @@ class ProducerConclusionTests(unittest.TestCase):
     def test_skipped_consumer_cascade_rejected(self):
         for event in ("workflow_dispatch", "pull_request"):
             consumers = [
-                "workspace-tests",
                 "restate-postgres-workers",
                 "restate-postgres-workers-summary",
             ]
@@ -974,7 +974,8 @@ class WorkflowRegistrationTests(unittest.TestCase):
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())
         job = workflow["jobs"]["workspace-tests"]
         self.assertNotIn("github.event_name", job["if"])
-        self.assertIn("needs.plan.outputs.workbench == 'true'", job["if"])
+        self.assertIn("needs.plan.outputs.bazel_trusted != 'true'", job["if"])
+        self.assertIn("needs.plan.outputs.rust == 'true'", job["if"])
         classify = next(
             step for step in workflow["jobs"]["plan"]["steps"]
             if step.get("id") == "classify"

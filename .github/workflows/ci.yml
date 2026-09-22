@@ -959,26 +959,20 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
-  # The Cargo-owned partition. On trusted events that is the agent-workbench
-  # binary alone: its Node.js browser projection gate keeps it Cargo-owned,
-  # while every deterministic Rust binary is now executed by the Bazel
-  # partition above. There is deliberately no parallel Cargo run of the Rust
-  # workspace on a trusted event. Untrusted pull requests receive no cache
-  # credentials and therefore no Bazel partition, so they keep running the full
-  # Cargo workspace suite exactly as they do today.
+  # The Cargo fallback for untrusted pull requests, which receive no shared
+  # cache credentials or Bazel partition. Trusted events run every deterministic
+  # Rust test, including workbench browser projection with pinned Node, above.
   #
   # `plan.workbench` is the workbench binary's compiled dependency closure, read
   # out of the workspace manifests by scripts/ci_plan.py, not a path prefix: a
-  # change to any crate the binary links selects this job, on every event that
-  # runs it.
+  # change to any crate the binary links includes workbench on an untrusted
+  # event that runs this job.
   workspace-tests:
     name: Test Cargo workspace partition
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
-    if: >-
-      needs.plan.outputs.workbench == 'true'
-      || (needs.plan.outputs.bazel_trusted != 'true' && needs.plan.outputs.rust == 'true')
+    if: needs.plan.outputs.bazel_trusted != 'true' && needs.plan.outputs.rust == 'true'
     steps:
       - name: Check out repository
         env:
@@ -1083,18 +1077,12 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # Trusted events select the generated workbench partition, which is now
-      # the Node-gated browser-projection cases alone: every other
-      # agent-workbench case runs on the pool in `Test Bazel partition`. The
-      # selection lives in one binary, so the build is scoped to that one
-      # package -- a `--workspace` build compiled and linked every crate's test
-      # binaries on a 2-core runner to execute a single test. Untrusted pull
-      # requests omit the filter, keep the full-workspace build (the
-      # `sqlite-await-event-helper` example included, which the store
-      # conformance tests spawn) and retain full-workspace coverage. In either
-      # mode profile.ci excludes the nested-Cargo fault-matrix chunks run by
-      # heavy-tests below and the trybuild ui binary run by `check`'s seal
-      # step.
+      # Trusted events run the workbench browser-projection case in Bazel with
+      # a pinned Node interpreter in the test action. Untrusted pull requests
+      # retain the full Cargo workspace suite, including the
+      # `sqlite-await-event-helper` example spawned by store conformance.
+      # profile.ci excludes nested-Cargo fault matrices and the trybuild UI
+      # binary, which have their own jobs.
       - name: Test workspace
         env:
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
@@ -1102,14 +1090,8 @@ jobs:
           workbench="${{ needs.plan.outputs.workbench }}"
           case "${BAZEL_TRUSTED}" in
             true)
-              if [ "${workbench}" != "true" ]; then
-                echo "cargo partition selected on a trusted event without workbench" >&2
-                exit 1
-              fi
-              filter="$(tr -d '\n' < tools/bazel/workbench_nextest_filter.txt)"
-              scope=(--package agent-workbench)
-              build_args=("${scope[@]}" --tests)
-              nextest_args=("${scope[@]}" -E "${filter}")
+              echo "trusted event must use the Bazel partition" >&2
+              exit 1
               ;;
             false)
               skip='not (package(lash-internal-postgres-store) + package(lash-internal-s3-store) + test(cross_backend) + (package(lash-runtime) & binary(ui)))'

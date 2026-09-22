@@ -160,10 +160,9 @@ def _requested_features(
 def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
     """The first-party manifest directories the workbench partition compiles.
 
-    The Cargo workspace partition builds `agent-workbench` and runs its tests,
-    so a change to any workspace crate in that binary's transitive dependency
-    closure — plus the workbench's own dev-dependencies — changes what the job
-    would execute. The closure is read out of the workspace manifests rather
+    The untrusted Cargo workspace partition includes `agent-workbench` when a
+    change reaches its transitive dependency closure or its dev-dependencies.
+    The closure is read out of the workspace manifests rather
     than kept as a hand list: `scripts/test_ci_plan.py` cross-checks it against
     `cargo metadata` so the two can never drift apart.
 
@@ -526,11 +525,10 @@ def classify(
     if run_everything:
         outputs.update({family: "true" for family in FAMILIES})
         return outputs
-    # `rust` gates the Bazel partition, which now owns every agent-workbench
-    # unit case except the Node-gated browser-projection ones. A workbench-only
-    # diff therefore has to run it -- the Cargo job alone would execute one
-    # test and leave the other 259 unrun. The breadth families stay off for
-    # such a diff: the workbench is an example host, not a store or a worker.
+    # `rust` gates the Bazel partition, which owns every agent-workbench unit
+    # case, including browser projection with a pinned Node interpreter. The
+    # breadth families stay off a workbench-only diff: the workbench is an
+    # example host, not a store or a worker.
     breadth = not only_workbench
     outputs.update(
         {
@@ -653,17 +651,10 @@ def evaluate_conclusion(
             continue
         if job == "workspace-tests":
             # On a trusted event the Bazel partition owns every deterministic
-            # Rust binary -- the agent-workbench unit cases included -- so the
-            # Cargo job runs only the workbench's Node-gated browser-projection
-            # cases, which need a Node toolchain and the Cargo-relative asset
-            # tree. Those cases exercise the workbench's own projection code,
-            # which compiles against the whole dependency closure, so the
-            # `workbench` family stays closure-derived; the build is scoped to
-            # the one package instead. An untrusted event has no Bazel
+            # Rust binary -- the agent-workbench Node-gated case included --
+            # with a pinned Node interpreter. An untrusted event has no Bazel
             # partition and keeps the full Cargo workspace run.
-            required = plan_outputs.get("workbench") == "true" or (
-                not bazel_is_trusted and plan_outputs.get("rust") == "true"
-            )
+            required = not bazel_is_trusted and plan_outputs.get("rust") == "true"
             wanted = "success" if required else "skipped"
             if result != wanted:
                 problems.append(
