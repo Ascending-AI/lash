@@ -373,11 +373,9 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
     // A batch is a durable group now (FIG-3397): its children execute as
     // `ToolInvocation` leaves under the opener's host-bound controller rather
     // than as a `ToolBatch` command on the turn-scoped one.
+    // The `ToolInvocation` child itself runs on the native group substrate,
+    // never through a wrapping double; its attempt crosses the host's.
     assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::ToolBatch), 0);
-    assert_eq!(
-        default_recorder.count_kind(RuntimeEffectKind::ToolInvocation),
-        1
-    );
     assert_eq!(
         default_recorder.count_kind(RuntimeEffectKind::ToolAttempt),
         1
@@ -494,20 +492,6 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
                 .push(serde_json::to_value(&outcome).expect("serialize tool outcome"));
             return Ok(outcome);
         }
-        // A group child is a ToolInvocation envelope; capture its recorded
-        // outcome exactly as the batch outcome was captured — the settlement's
-        // `triggers` is where a child's drained emissions are journaled (ADR
-        // 0099 §6).
-        if matches!(
-            &envelope.command,
-            RuntimeEffectCommand::ToolInvocation { .. }
-        ) {
-            let outcome = self.native.execute_effect(envelope, local_executor).await?;
-            self.tool_outcomes
-                .lock_recover()
-                .push(serde_json::to_value(&outcome).expect("serialize tool outcome"));
-            return Ok(outcome);
-        }
 
         match envelope.command {
             RuntimeEffectCommand::PeekAwaitEvent { .. } => {
@@ -580,6 +564,15 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
                     ))
                     .await
             }
+            // The consumer journals its incorporated prefix and each child its
+            // recorded presentation; this double runs both locally, as the
+            // shared recording double does.
+            command @ (RuntimeEffectCommand::IncorporateGroupSettlements { .. }
+            | RuntimeEffectCommand::PresentToolResult { .. }) => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
+                    .await
+            }
             other => Err(RuntimeEffectControllerError::foreign(
                 "unexpected_effect",
                 format!("unexpected effect {}", other.kind().as_str()),
@@ -606,7 +599,17 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
         handle: &mut lash_core::EffectGroupHandle,
         cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.native.await_next_settlement(handle, cancel).await
+        // A group child is a `ToolInvocation` the native substrate runs
+        // itself, so its recorded outcome is captured where the consumer
+        // reads it: the settlement's `triggers` is where a child's drained
+        // emissions are journaled (ADR 0099 §6).
+        let settlement = self.native.await_next_settlement(handle, cancel).await?;
+        if let Ok(outcome @ RuntimeEffectOutcome::ToolInvocation { .. }) = &settlement.outcome {
+            self.tool_outcomes
+                .lock_recover()
+                .push(serde_json::to_value(outcome).expect("serialize tool outcome"));
+        }
+        Ok(settlement)
     }
 
     async fn close_effect_group(
@@ -1108,7 +1111,10 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
             attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }),
         transport,
-        EmbeddedRuntimeHost::new(test_runtime_host_config()),
+        // The host shares the scoped recorder's group substrate: the turn's
+        // tool group opens there, where the host's tool-child resolver is
+        // registered (FIG-3397).
+        host_with_effect_recorder(recorder.clone()),
     )
     .await;
 
@@ -1206,8 +1212,8 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     // The batch is a durable group of `ToolInvocation` children now
-    // (FIG-3397); each leaf's attempt records as before.
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolInvocation), 2);
+    // (FIG-3397). The children run on the native group substrate, not through
+    // this wrapping double; each leaf's attempt crosses it as before.
     assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolAttempt), 2);
     let tool_keys = recorder
         .records()
