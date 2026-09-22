@@ -549,7 +549,7 @@ impl<'run> DirectCompletionClient<'run> {
     }
 
     /// Test seam for the raw `LlmRequest` lane used by callers (such as
-    /// rolling-history compaction) that build the provider request themselves.
+    /// context compaction) that build the provider request themselves.
     #[cfg(any(test, feature = "testing"))]
     pub fn from_llm_fn<F>(invoke: F) -> Self
     where

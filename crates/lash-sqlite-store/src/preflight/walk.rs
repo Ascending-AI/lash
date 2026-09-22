@@ -25,10 +25,10 @@
 //! walked past rather than raised as an error.
 //!
 //! The framing a walk *does* unwrap is storage bookkeeping rather than durable
-//! format: the [`StoredBlobEnvelope`](crate::StoredBlobEnvelope) wrapper and its
-//! optional zlib frame. Those are this crate's own invention, no version manifest
-//! describes them, and a caller handed the wrapped bytes would be looking at a
-//! SQLite implementation detail instead of the payload. An item whose envelope
+//! payload format: the [`StoredBlobEnvelope`](crate::StoredBlobEnvelope) wrapper
+//! and its optional zlib frame. The durable-core schema version guards that
+//! storage format. A caller handed the wrapped bytes would see SQLite framing
+//! instead of the payload. An item whose envelope
 //! cannot be read is reported as [`DurablePayload::Missing`], not as bare logical
 //! bytes, because the legacy bare-blob shape is not valid in an admitted database.
 //!

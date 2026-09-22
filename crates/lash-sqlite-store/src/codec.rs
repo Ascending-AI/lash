@@ -153,3 +153,72 @@ pub(crate) fn encode_msgpack<T: serde::Serialize>(
 pub(crate) fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     rmp_serde::from_slice(bytes).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blob_envelope_stores_hints_without_payload_family() {
+        #[derive(serde::Deserialize)]
+        struct WireEnvelope {
+            descriptor: serde_json::Value,
+            compression: BlobCompression,
+        }
+        let content = vec![b'x'; 8192];
+        for (profile, compression) in [
+            (BuiltinBlobProfile::LowLatency, BlobCompression::None),
+            (BuiltinBlobProfile::Balanced, BlobCompression::Zlib),
+            (BuiltinBlobProfile::Compact, BlobCompression::Zlib),
+        ] {
+            for (descriptor, expected_descriptor, expected_compression) in [
+                (
+                    BlobArtifactDescriptor::checkpoint_component(),
+                    serde_json::json!({"hints": ["Compressible", "LargePayload"]}),
+                    compression,
+                ),
+                (
+                    BlobArtifactDescriptor::new(Vec::new()),
+                    serde_json::json!({}),
+                    BlobCompression::None,
+                ),
+            ] {
+                let encoded = encode_artifact_blob(&descriptor, profile, &content)
+                    .expect("encode artifact blob");
+                let wire: WireEnvelope =
+                    rmp_serde::from_slice(&encoded).expect("inspect named MessagePack envelope");
+                assert_eq!(wire.descriptor, expected_descriptor);
+                assert_eq!(wire.compression, expected_compression);
+                assert_eq!(decode_artifact_blob(&encoded).unwrap(), content);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn blob_identity_uses_logical_content_across_storage_profiles() {
+        let content = vec![b'x'; 8192];
+        let expected = BlobRef::for_content(&content);
+        for blob_profile in [BuiltinBlobProfile::LowLatency, BuiltinBlobProfile::Compact] {
+            let store = Store::memory_with_options(StoreOptions {
+                blob_profile,
+                ..StoreOptions::default()
+            })
+            .await
+            .expect("open blob store");
+            for descriptor in [
+                BlobArtifactDescriptor::checkpoint_component(),
+                BlobArtifactDescriptor::new(Vec::new()),
+            ] {
+                let reference = store
+                    .put_unrooted_artifact_blob_for_testing(descriptor, &content)
+                    .await
+                    .expect("store logical payload");
+                assert_eq!(reference, expected);
+                assert_eq!(
+                    store.get_blob(&reference).await.unwrap(),
+                    Some(content.clone())
+                );
+            }
+        }
+    }
+}

@@ -90,7 +90,7 @@ turn outcome is.
 3. **Distinction needs two observations.** The control turn must stop as `provider_error`
    on the same harness. One outcome observed alone proves nothing about distinguishability;
    if both arms report the same stop, that is a real-defect stop.
-4. **Recovery is plugin-owned (FIG-2950).** The registered rolling-history
+4. **Recovery is plugin-owned (FIG-2950).** The registered standard-compaction
    plugin owns the recovery policy: its `after_turn` trigger records the
    durable marker for a persisted `context_overflow` outcome, and the next
    turn re-derives the pending recovery from that durable state — one bounded

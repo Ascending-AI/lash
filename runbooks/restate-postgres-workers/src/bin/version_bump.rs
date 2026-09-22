@@ -99,22 +99,15 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
 ///
-/// Under the component-111 boundary the retained generation is 110, and the
-/// 109 → 110 arm introduces the arbitration guards FIG-3409 installs (ADR
-/// 0099 §§4–5): the final-commit-order unique over the replay rows of one
-/// group and the replay-key unique on the retained membership. A
-/// component-109 catalog therefore diverges from the retained catalog by
-/// exactly those relations, and the refusal must name them.
-const DIVERGENT_ARTIFACTS: [&str; 2] = [
-    "uq_lash_runtime_effect_replay_commit_seq",
-    "uq_lash_runtime_effect_group_child_replay_key",
-];
+/// Under the component-112 boundary the retained generation is 111. Its
+/// immediate predecessor has the same relational shape; only the journaled
+/// encoding changed, so no introduced relational artifacts are enumerated.
+const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
-/// reject-and-recreate boundary. Component 111 is destructive (journaled
-/// settlement-fact carriage, FIG-3411): no arm leaves from component 110, so
-/// the component-110 stamp is refused as having no applicable migration.
+/// reject-and-recreate boundary. Component 112 is destructive (ordered message parts): no arm leaves
+/// from component 111, so the component-111 stamp is refused as having no applicable migration.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even

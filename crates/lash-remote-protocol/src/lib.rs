@@ -230,7 +230,7 @@ pub use usage_activity::*;
 // beneath a cancel-decided group child. A window-84 peer refuses the unknown
 // reason tag when decoding a turn report that carries it, so peers must adopt
 // 85.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 85;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 86;
 
 /// One versioned remote-protocol message.
 ///

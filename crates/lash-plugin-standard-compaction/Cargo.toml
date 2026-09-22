@@ -1,5 +1,5 @@
 [package]
-name = "lash-internal-plugin-rolling-history"
+name = "lash-internal-plugin-standard-compaction"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,12 +9,12 @@ homepage.workspace = true
 documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Rolling-history context plugin for the lash agent runtime."
+description = "Standard-compaction context plugin for the lash agent runtime."
 keywords = ["lash", "agent", "context", "plugin", "llm"]
 categories = ["asynchronous", "api-bindings"]
 
 [lib]
-name = "lash_plugin_rolling_history"
+name = "lash_plugin_standard_compaction"
 doctest = false
 
 [lints]

@@ -13,34 +13,34 @@ load("@rules_rust//rust:defs.bzl", "rust_doc")
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_library(
-    name = "lash-plugin-rolling-history",
+    name = "lash-plugin-standard-compaction",
     build_script = None,
     crate_features = [],
-    crate_name = "lash_plugin_rolling_history",
+    crate_name = "lash_plugin_standard_compaction",
     declared_features = [],
     extra_compile_data = [],
-    manifest_dir = "crates/lash-plugin-rolling-history",
-    package_name = "lash-internal-plugin-rolling-history",
+    manifest_dir = "crates/lash-plugin-standard-compaction",
+    package_name = "lash-internal-plugin-standard-compaction",
     version = "0.0.0-dev",
 )
 
 rust_doc(
-    name = "lash-plugin-rolling-history__doc",
-    crate = ":lash-plugin-rolling-history",
+    name = "lash-plugin-standard-compaction__doc",
+    crate = ":lash-plugin-standard-compaction",
     testonly = True,
 )
 
 lash_rust_unit_test(
-    name = "lash-plugin-rolling-history__unit_test",
+    name = "lash-plugin-standard-compaction__unit_test",
     build_script = None,
     crate_features = [],
-    crate_name = "lash_plugin_rolling_history",
+    crate_name = "lash_plugin_standard_compaction",
     crate_root = "src/lib.rs",
     declared_features = [],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
-    manifest_dir = "crates/lash-plugin-rolling-history",
-    package_name = "lash-internal-plugin-rolling-history",
+    manifest_dir = "crates/lash-plugin-standard-compaction",
+    package_name = "lash-internal-plugin-standard-compaction",
     tags = [],
     version = "0.0.0-dev",
 )
@@ -64,14 +64,14 @@ load(
 )
 
 lash_rust_feature_library(
-    name = "lash-plugin-rolling-history__fv_db49feda",
+    name = "lash-plugin-standard-compaction__fv_6277216a",
     build_script = None,
     crate_features = [],
-    crate_name = "lash_plugin_rolling_history",
+    crate_name = "lash_plugin_standard_compaction",
     declared_features = [],
     extra_compile_data = [],
-    manifest_dir = "crates/lash-plugin-rolling-history",
-    package_name = "lash-internal-plugin-rolling-history",
+    manifest_dir = "crates/lash-plugin-standard-compaction",
+    package_name = "lash-internal-plugin-standard-compaction",
     tags = [
         "feature-lane",
         "manual",

@@ -50,6 +50,6 @@ pub use lash_core::{
 pub mod sources {
     /// Parent's own LLM calls.
     pub const TURN: &str = "turn";
-    /// Rolling-history compaction passes.
+    /// Standard-compaction compaction passes.
     pub const COMPACTION: &str = "compaction";
 }

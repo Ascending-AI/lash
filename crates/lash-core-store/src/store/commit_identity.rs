@@ -24,8 +24,7 @@ pub struct OperationId {
     pub key: String,
 }
 
-pub(super) const LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 5;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).
 /// These are `FAMILY_DOMAINS`-registered names whose preimages carry no
@@ -498,37 +497,7 @@ fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: 
     });
 }
 
-fn push_prune_state(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    state: &crate::PruneState,
-) {
-    match state {
-        crate::PruneState::Intact => identity.tag(0),
-        crate::PruneState::Cleared => identity.tag(1),
-        crate::PruneState::Deleted {
-            breadcrumb,
-            archive_hash,
-        } => {
-            identity.tag(2);
-            identity.string(breadcrumb);
-            identity.string(archive_hash);
-        }
-        crate::PruneState::Summarized {
-            summary,
-            archive_hash,
-        } => {
-            identity.tag(3);
-            identity.string(summary);
-            identity.string(archive_hash);
-        }
-    }
-}
-
-fn push_part(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    part: &crate::Part,
-    encoding_version: u32,
-) {
+fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crate::Part) {
     identity.string(part.id());
     push_part_kind(identity, part.kind());
     identity.string(part.content());
@@ -548,11 +517,8 @@ fn push_part(
         } = replay;
         identity.optional(item_id.as_ref(), |identity, value| identity.string(value));
         identity.optional(opaque.as_ref(), |identity, value| identity.string(value));
-        if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-        }
+        identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
     });
-    push_prune_state(identity, part.prune_state());
     identity.optional(part.reasoning_meta(), |identity, replay| {
         let lash_sansio::llm::types::ProviderReasoningReplay {
             item_id,
@@ -569,9 +535,7 @@ fn push_part(
         identity.optional(signature.as_ref(), |identity, value| identity.string(value));
         identity.u8(u8::from(*redacted));
         identity.sequence(summary, |identity, value| identity.string(value));
-        if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-        }
+        identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
     });
     identity.optional(part.response_meta(), |identity, response| {
         let lash_sansio::llm::types::ResponseTextMeta {
@@ -591,30 +555,17 @@ fn push_part(
         ] {
             identity.optional(value, crate::stable_identity::IdentityEncoder::string);
         }
-        if encoding_version == LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            // ResponseTextMeta carried provider/model before the unified
-            // route. Project those two legacy leaves and deliberately omit
-            // endpoint so migrated values retain their exact v1 preimage.
-            let provider = legacy_origin_provider
-                .as_ref()
-                .map(String::as_str)
-                .or_else(|| origin.as_ref().map(|route| route.provider.as_ref()));
-            let model = legacy_origin_model
-                .as_ref()
-                .map(String::as_str)
-                .or_else(|| origin.as_ref().map(|route| route.model.as_ref()));
-            identity.optional(provider, crate::stable_identity::IdentityEncoder::string);
-            identity.optional(model, crate::stable_identity::IdentityEncoder::string);
-        } else {
-            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-        }
+        identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
+        identity.optional(legacy_origin_provider.as_ref(), |identity, value| {
+            identity.string(value)
+        });
+        identity.optional(legacy_origin_model.as_ref(), |identity, value| {
+            identity.string(value)
+        });
     });
 }
 
-fn append_node_identity_bytes_with_version(
-    node: &crate::SessionAppendNode,
-    encoding_version: u32,
-) -> Result<Vec<u8>, StoreError> {
+fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>, StoreError> {
     let mut identity =
         crate::stable_identity::IdentityEncoder::new_unframed(APPEND_REQUEST_IDENTITY_DOMAIN);
     match node {
@@ -622,20 +573,14 @@ fn append_node_identity_bytes_with_version(
             let crate::PluginMessage {
                 id,
                 role,
-                content,
                 origin,
                 parts,
-                attachments,
             } = message;
             identity.tag(0);
             identity.optional(id.as_ref(), |identity, value| identity.string(value));
             push_message_role(&mut identity, *role);
-            identity.string(content);
             identity.optional(origin.as_ref(), push_message_origin);
-            identity.sequence(parts, |identity, part| {
-                push_part(identity, part, encoding_version)
-            });
-            identity.sequence(attachments, push_attachment_source);
+            identity.sequence(parts, push_part);
         }
         crate::SessionAppendNode::ProtocolEvent { event } => {
             let crate::ProtocolEvent { plugin_id, payload } = event;
@@ -650,40 +595,6 @@ fn append_node_identity_bytes_with_version(
         }
     }
     Ok(identity.finish())
-}
-
-#[cfg(test)]
-fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>, StoreError> {
-    append_node_identity_bytes_with_version(node, LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION)
-}
-
-pub(super) fn append_request_identity_encoding_version(nodes: &[crate::SessionAppendNode]) -> u32 {
-    let has_current_identity_vocabulary = nodes.iter().any(|node| match node {
-        crate::SessionAppendNode::Message { message } => {
-            matches!(
-                message.origin.as_ref(),
-                Some(crate::MessageOrigin::Process {
-                    caused_by: Some(crate::CausalRef::Effect { .. }),
-                    ..
-                })
-            ) || message.parts.iter().any(|part| {
-                part.tool_replay()
-                    .and_then(|replay| replay.origin.as_ref())
-                    .or_else(|| {
-                        part.reasoning_meta()
-                            .and_then(|replay| replay.origin.as_ref())
-                    })
-                    .or_else(|| part.response_meta().and_then(|meta| meta.origin.as_ref()))
-                    .is_some()
-            })
-        }
-        _ => false,
-    });
-    if has_current_identity_vocabulary {
-        APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-    } else {
-        LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-    }
 }
 
 /// Canonical request bytes, in order:
@@ -707,7 +618,6 @@ fn append_request_identity_bytes(
     requested_ancestor_node_id: Option<&str>,
     nodes: &[crate::SessionAppendNode],
 ) -> Result<Vec<u8>, StoreError> {
-    let encoding_version = append_request_identity_encoding_version(nodes);
     let operation_key = operation.storage_key()?;
     let mut identity =
         crate::stable_identity::IdentityEncoder::new_unframed(APPEND_REQUEST_IDENTITY_DOMAIN);
@@ -717,7 +627,7 @@ fn append_request_identity_bytes(
     });
     identity.u64(nodes.len() as u64);
     for node in nodes {
-        let semantic_node = append_node_identity_bytes_with_version(node, encoding_version)?;
+        let semantic_node = append_node_identity_bytes(node)?;
         identity.bytes(&semantic_node);
     }
     Ok(identity.finish())
@@ -735,8 +645,8 @@ pub(super) fn append_request_identity_hash(
 }
 
 #[cfg(test)]
-#[path = "commit_identity_v4_effect_tests.rs"]
-mod commit_identity_v4_effect_tests;
+#[path = "commit_identity_effect_tests.rs"]
+mod commit_identity_effect_tests;
 
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
@@ -895,8 +805,8 @@ mod append_request_identity_tests {
     }
 
     #[test]
-    fn append_request_identity_v1_golden_byte_corpus() {
-        // Versioned durability corpus. These are the exact v1 bytes, not merely
+    fn append_request_identity_v5_golden_byte_corpus() {
+        // Versioned durability corpus. These are the exact v5 bytes, not merely
         // relational hashes. Any projection change requires an explicit
         // APPEND_REQUEST_IDENTITY_ENCODING_VERSION bump and corpus replacement.
         let numeric_payload: serde_json::Value = serde_json::from_str(
@@ -915,99 +825,87 @@ mod append_request_identity_tests {
         )
         .expect("numeric JSON fixture");
         let comprehensive_message = node_fixture(serde_json::json!({
-            "kind": "message",
-            "message": {
-                "id": "message-id",
-                "role": "Assistant",
-                "content": "message-content",
-                "origin": {
-                    "kind": "process",
-                    "process_id": "process-id",
-                    "event_type": "event-type",
-                    "sequence": 18446744073709551615_u64,
-                    "wake_id": "wake-id",
-                    "caused_by": {
-                        "type": "trigger_occurrence",
-                        "occurrence_id": "occurrence-id",
-                        "subscription_id": "subscription-id",
-                        "subscription_incarnation": "incarnation-id",
-                        "subscription_revision": 18446744073709551615_u64
-                    }
-                },
-                "parts": [
-                    {
-                        "id": "p0", "kind": "ToolCall", "content": "tool-call",
-                        "tool_call_id": "call-id",
-                        "tool_name": "tool-name",
-                        "tool_replay": {"item_id": "item-id", "opaque": "opaque"},
-                        "prune_state": {"Deleted": {"breadcrumb": "crumb", "archive_hash": "archive"}}
-                    },
-                    {
-                        "id": "p1", "kind": "Text", "content": "text",
-                        "response_meta": {
-                            "id": "response-id", "status": "complete", "phase": "final_answer",
-                            "provider_payload": "payload",
-                            "origin_provider": "provider", "origin_model": "model"
-                        },
-                        "prune_state": "Intact"
-                    },
-                    {
-                        "id": "p2", "kind": "Attachment", "content": "attachment",
-                        "attachment": {"source": {
-                            "source": "stored",
-                            "attachment_ref": {
-                                "id": "attachment-id", "media_type": "image/png",
-                                "byte_len": 18446744073709551615_u64,
-                                "type_metadata": {"type": "image", "width": 0, "height": 4294967295_u32},
-                                "label": "attachment-label"
+                    "kind": "message",
+                    "message": {
+                        "id": "message-id",
+                        "role": "Assistant",
+                        "origin": {
+                            "kind": "process",
+                            "process_id": "process-id",
+                            "event_type": "event-type",
+                            "sequence": 18446744073709551615_u64,
+                            "wake_id": "wake-id",
+                            "caused_by": {
+                                "type": "trigger_occurrence",
+                                "occurrence_id": "occurrence-id",
+                                "subscription_id": "subscription-id",
+                                "subscription_incarnation": "incarnation-id",
+                                "subscription_revision": 18446744073709551615_u64
                             }
-                        }},
-                        "prune_state": "Cleared"
-                    },
-                    {"id": "p3", "kind": "Code", "content": "code", "prune_state": {"Summarized": {"summary": "short", "archive_hash": "hash"}}},
-                    {"id": "p4", "kind": "Output", "content": "output", "prune_state": "Intact"},
-                    {"id": "p5", "kind": "Error", "content": "error", "prune_state": "Intact"},
-                    {"id": "p6", "kind": "Prose", "content": "prose", "prune_state": "Intact"},
-                    {
-                        "id": "p7", "kind": "ToolResult", "content": "tool-result",
-                        "tool_call_id": "call-id", "tool_name": "tool-name",
-                        "prune_state": "Intact"
-                    },
-                    {
-                        "id": "p8", "kind": "Reasoning", "content": "reasoning",
-                        "reasoning_meta": {
-                            "item_id": "reason-id", "encrypted_content": "encrypted",
-                            "signature": "signature", "redacted": true,
-                            "summary": ["summary-a", "summary-b"]
                         },
-                        "prune_state": "Intact"
+                        "parts": [
+                            {
+                                "id": "p0", "kind": "ToolCall", "content": "tool-call",
+                                "tool_call_id": "call-id",
+                                "tool_name": "tool-name",
+                                "tool_replay": {"item_id": "item-id", "opaque": "opaque"}
+                            },
+                            {
+                                "id": "p1", "kind": "Text", "content": "text",
+                                "response_meta": {
+                                    "id": "response-id", "status": "complete", "phase": "final_answer",
+                                    "provider_payload": "payload",
+                                    "origin_provider": "provider", "origin_model": "model"
+                                }
+                            },
+                            {
+                                "id": "p2", "kind": "Attachment", "content": "attachment",
+                                "attachment": {"source": {
+                                    "source": "stored",
+                                    "attachment_ref": {
+                                        "id": "attachment-id", "media_type": "image/png",
+                                        "byte_len": 18446744073709551615_u64,
+                                        "type_metadata": {"type": "image", "width": 0, "height": 4294967295_u32},
+                                        "label": "attachment-label"
+                                    }
+                                }}
+                            },
+                            {"id": "p3", "kind": "Code", "content": "code"},
+                            {"id": "p4", "kind": "Output", "content": "output"},
+                            {"id": "p5", "kind": "Error", "content": "error"},
+                            {"id": "p6", "kind": "Prose", "content": "prose"},
+                            {
+                                "id": "p7", "kind": "ToolResult", "content": "tool-result",
+                                "tool_call_id": "call-id", "tool_name": "tool-name"
+                            },
+                            {
+                                "id": "p8", "kind": "Reasoning", "content": "reasoning",
+                                "reasoning_meta": {
+                                    "item_id": "reason-id", "encrypted_content": "encrypted",
+                                    "signature": "signature", "redacted": true,
+                                    "summary": ["summary-a", "summary-b"]
+                                }
+                            }
+        ,
+                            {"id":"p9", "kind":"Attachment", "content":"", "attachment":{"source":
+                                {"source":"inline", "media_type":"application/octet-stream", "bytes":[0,255]}}},
+                            {"id":"p10", "kind":"Attachment", "content":"", "attachment":{"source":
+                                {"source":"stored", "attachment_ref":{"id":"stored-min", "media_type":"text/plain", "byte_len":0}}}},
+                            {"id":"p11", "kind":"Attachment", "content":"", "attachment":{"source":
+                                {"source":"external_url", "media_type":"image/jpeg", "url":"https://example.test/image.jpg"}}},
+                            {"id":"p12", "kind":"Attachment", "content":"", "attachment":{"source":
+                                {"source":"provider_file", "provider_scope":{"provider":"openai", "credential_scope":"account"}, "id":"file-id", "media_type":"application/pdf"}}}
+                        ]
                     }
-                ],
-                "attachments": [
-                    {"source": "inline", "media_type": "application/octet-stream", "bytes": [0, 255]},
-                    {"source": "stored", "attachment_ref": {
-                        "id": "stored-min", "media_type": "text/plain", "byte_len": 0
-                    }},
-                    {"source": "external_url", "media_type": "image/jpeg", "url": "https://example.test/image.jpg"},
-                    {"source": "provider_file", "provider_scope": {
-                        "provider": "openai", "credential_scope": "account"
-                    }, "id": "file-id", "media_type": "application/pdf"}
-                ]
-            }
-        }));
+                }));
         let plugin_origin_message = node_fixture(serde_json::json!({
             "kind": "message",
             "message": {
                 "role": "Event",
-                "content": "event",
+                "parts": [{"id":"", "kind":"Text", "content":"event"}],
                 "origin": {"kind": "plugin", "plugin_id": "plugin-id", "transient": true}
             }
         }));
-        assert_eq!(
-            append_request_identity_encoding_version(std::slice::from_ref(&comprehensive_message)),
-            LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
-            "actual base-era ResponseTextMeta JSON must stay in the v1 family"
-        );
         let system_message = crate::SessionAppendNode::message(crate::PluginMessage::text(
             crate::MessageRole::System,
             "system",
@@ -1118,62 +1016,31 @@ mod append_request_identity_tests {
             .chain(whole_requests)
             .chain(std::iter::once(empty_request))
             .collect::<Vec<_>>();
-        let expected = include_str!("testdata/append_request_identity_v1.hex")
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| line.split_once('=').expect("name=hex golden corpus row"))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(
-            expected.get("causal_variant_1"),
-            Some(&"0100000000000000017300000000000000000165"),
-            "the unrepresentable pre-address Effect cause remains frozen as historical v1 bytes"
-        );
-        let rendered_len = rendered.len();
-        for (name, actual) in rendered {
-            let Some(expected) = expected.get(name) else {
-                panic!("missing golden corpus row {name}={actual}");
-            };
-            assert_eq!(actual, **expected, "v1 bytes moved for {name}");
+        let mut rendered = rendered
+            .into_iter()
+            .map(|(name, value)| format!("{name}={value}\n"))
+            .collect::<String>();
+        rendered.push_str(&route_identity_rows());
+        rendered.push_str(&super::commit_identity_effect_tests::effect_identity_rows());
+        if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_GOLDEN").is_some() {
+            std::fs::write(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src/store/testdata/append_request_identity_v5.hex"),
+                &rendered,
+            )
+            .expect("write golden corpus");
         }
         assert_eq!(
-            rendered_len + 1,
-            expected.len(),
-            "golden corpus row count includes one historical Effect cause that current types cannot manufacture"
+            rendered,
+            include_str!("testdata/append_request_identity_v5.hex")
         );
     }
 
-    #[test]
-    fn base_response_text_meta_json_retains_its_exact_v1_preimage() {
-        // This is the ResponseTextMeta vocabulary emitted by 01aaf70cc: the
-        // provider/model leaves are siblings and no endpoint exists.
-        let node = node_fixture(
-            serde_json::from_str(
-                r#"{"kind":"message","message":{"role":"Assistant","content":"base-era response","parts":[{"id":"p0","kind":"Prose","content":"answer","prune_state":"Intact","response_meta":{"id":"response-id","status":"complete","phase":"final_answer","provider_payload":"signature","origin_provider":"google_oauth","origin_model":"gemini-base"}}]}}"#,
-            )
-            .expect("literal base-commit JSON"),
-        );
-        assert_eq!(
-            append_request_identity_encoding_version(std::slice::from_ref(&node)),
-            LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-        );
-        assert_eq!(
-            hex(&append_node_identity_bytes(&node).expect("encode legacy node")),
-            include_str!("testdata/response_text_meta_base_v1.hex").trim(),
-            "the v1 preimage of actual base-era JSON must never move"
-        );
-    }
-
-    #[test]
-    fn append_request_identity_v2_golden_byte_corpus() {
-        // To refresh after an intentional v2 grammar change:
-        // UPDATE_APPEND_REQUEST_IDENTITY_V2_GOLDEN=1 cargo test -p lash-core \
-        //   append_request_identity_v2_golden_byte_corpus -- --exact
-        // The v1 corpus above is never regenerated by this procedure.
+    fn route_identity_rows() -> String {
         let node = node_fixture(serde_json::json!({
             "kind": "message",
             "message": {
                 "role": "Assistant",
-                "content": "route-owned replay",
                 "parts": [
                     {
                         "id": "p0",
@@ -1189,8 +1056,7 @@ mod append_request_identity_tests {
                                 "endpoint": "https://gateway.example/v1",
                                 "model": "shared-model"
                             }
-                        },
-                        "prune_state": "Intact"
+                        }
                     },
                     {
                         "id": "p1",
@@ -1203,8 +1069,7 @@ mod append_request_identity_tests {
                                 "endpoint": "https://gateway.example/v1",
                                 "model": "shared-model"
                             }
-                        },
-                        "prune_state": "Intact"
+                        }
                     },
                     {
                         "id": "p2",
@@ -1219,24 +1084,15 @@ mod append_request_identity_tests {
                                 "endpoint": "https://gateway.example/v1",
                                 "model": "shared-model"
                             }
-                        },
-                        "prune_state": "Intact"
+                        }
                     }
                 ]
             }
         }));
-        assert_eq!(
-            append_request_identity_encoding_version(std::slice::from_ref(&node)),
-            APPEND_REQUEST_IDENTITY_ENCODING_VERSION
-        );
         let rows = [
             (
                 "route_node",
-                hex(&append_node_identity_bytes_with_version(
-                    &node,
-                    APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
-                )
-                .expect("encode v2 node")),
+                hex(&append_node_identity_bytes(&node).expect("encode current node")),
             ),
             (
                 "route_request",
@@ -1245,28 +1101,14 @@ mod append_request_identity_tests {
                     Some("ancestor"),
                     std::slice::from_ref(&node),
                 )
-                .expect("encode v2 request")),
+                .expect("encode current request")),
             ),
         ];
-        let rendered = rows
-            .iter()
+        rows.iter()
             .map(|(name, value)| format!("{name}={value}"))
             .collect::<Vec<_>>()
             .join("\n")
-            + "\n";
-        if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_V2_GOLDEN").is_some() {
-            std::fs::write(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("src/store/testdata/append_request_identity_v2.hex"),
-                &rendered,
-            )
-            .expect("write v2 golden corpus");
-        }
-        assert_eq!(
-            rendered,
-            include_str!("testdata/append_request_identity_v2.hex"),
-            "v2 bytes moved; use the documented refresh command only for an intentional grammar change"
-        );
+            + "\n"
     }
 
     #[test]

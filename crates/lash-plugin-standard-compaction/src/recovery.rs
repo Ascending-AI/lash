@@ -1,5 +1,5 @@
 //! Plugin-owned recovery of an exhausted RLM context (FIG-2950): the third
-//! context policy of `lash-plugin-rolling-history`.
+//! context policy of `lash-plugin-standard-compaction`.
 
 use super::*;
 
@@ -43,7 +43,7 @@ pub(crate) fn recovery_record_message(record: OverflowRecoveryRecord) -> lash_co
     let payload = serde_json::to_string(&record).unwrap_or_else(|_| "{}".to_string());
     lash_core::PluginMessage::text(MessageRole::System, format!("{title}\n{payload}")).with_origin(
         MessageOrigin::Plugin {
-            plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
             transient: false,
         },
     )
@@ -57,7 +57,7 @@ pub(crate) fn recovery_record_payload(message: &Message) -> Option<&str> {
     if !matches!(
         message.origin,
         Some(MessageOrigin::Plugin { ref plugin_id, .. })
-            if plugin_id == ROLLING_HISTORY_PLUGIN_ID
+            if plugin_id == STANDARD_COMPACTION_PLUGIN_ID
     ) {
         return None;
     }
@@ -248,7 +248,7 @@ pub(crate) async fn append_recovery_record(
             |(_, tail)| tail.to_string(),
         );
     let request = lash_core::AppendSessionNodesRequest {
-        operation_id: format!("rolling-history-overflow-recovery/{suffix}/{discriminator}"),
+        operation_id: format!("standard-compaction-overflow-recovery/{suffix}/{discriminator}"),
         nodes,
         requires_ancestor_node_id: None,
     };
@@ -269,7 +269,7 @@ pub(crate) fn recovered_prompt_window(
     current_request: &[Message],
 ) -> Vec<Message> {
     let prefix_len = leading_system_prefix_len(history_messages);
-    let message_id = "m_rolling_history_overflow_recovery_summary";
+    let message_id = "m_standard_compaction_overflow_recovery_summary";
     let summary_message = Message {
         id: message_id.to_string(),
         role: MessageRole::Assistant,
@@ -280,7 +280,7 @@ pub(crate) fn recovered_prompt_window(
         )]
         .into(),
         origin: Some(MessageOrigin::Plugin {
-            plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
             transient: false,
         }),
     };
@@ -577,14 +577,14 @@ async fn switch_recovery_frame(
         );
     let frame_key = lash_core::FrameKey::from_compaction_material(
         session_id,
-        &format!("rolling-history-overflow-recovery:{discriminator}"),
+        &format!("standard-compaction-overflow-recovery:{discriminator}"),
         current_frame_node_id.unwrap_or_default(),
     );
     session_graph
         .switch_agent_frame(
             session_id,
             lash_core::SwitchAgentFrameRequest::new(
-                format!("rolling-history-overflow-recovery/switch/{discriminator}"),
+                format!("standard-compaction-overflow-recovery/switch/{discriminator}"),
                 frame_key,
                 lash_core::AgentFrameReason::compaction(),
             )

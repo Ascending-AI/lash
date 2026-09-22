@@ -40,7 +40,7 @@ pub(crate) fn configure_workbench_plugins(
     approvals: approvals::WorkbenchApprovals,
     mcp: Arc<dyn PluginFactory>,
 ) {
-    plugins.push(Arc::new(RollingHistoryPluginFactory::default()));
+    plugins.push(Arc::new(StandardCompactionPluginFactory::default()));
     plugins.push(Arc::new(
         WorkbenchPluginFactory::new()
             .with_mail_world(mail_world)
@@ -700,7 +700,7 @@ pub(crate) fn context_window_tokens_from(
 
 pub(crate) fn invalid_context_window_error(problem: std::fmt::Arguments<'_>) -> anyhow::Error {
     anyhow!(
-        "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} {problem}: rolling-history compaction_needed fires at max_context - {ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS}, so the workbench requires a context window at least twice the plugin's compaction buffer"
+        "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} {problem}: standard-compaction compaction_needed fires at max_context - {STANDARD_COMPACTION_BUFFER_TOKENS}, so the workbench requires a context window at least twice the plugin's compaction buffer"
     )
 }
 
@@ -757,7 +757,7 @@ mod startup_tests {
         );
         assert!(
             message.contains(&format!(
-                "compaction_needed fires at max_context - {ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS}"
+                "compaction_needed fires at max_context - {STANDARD_COMPACTION_BUFFER_TOKENS}"
             )),
             "startup refusal must explain the buffer predicate: {error:#}"
         );
@@ -781,7 +781,7 @@ mod startup_tests {
         );
         assert!(
             message.contains(&format!(
-                "compaction_needed fires at max_context - {ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS}"
+                "compaction_needed fires at max_context - {STANDARD_COMPACTION_BUFFER_TOKENS}"
             )),
             "parse refusal must explain the buffer predicate: {error:#}"
         );

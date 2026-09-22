@@ -163,7 +163,7 @@ fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
 }
 
 #[test]
-fn turn_checkpoint_stamps_v4() {
+fn turn_checkpoint_stamps_current_generation() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
@@ -172,7 +172,7 @@ fn turn_checkpoint_stamps_v4() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 5);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 6);
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
     );
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
 
-    for actual in [1, 2, 99, u32::MAX] {
+    for actual in [1, 2, 5, 99, u32::MAX] {
         let mut incompatible = encoded.clone();
         incompatible["schema_version"] = serde_json::json!(actual);
         let checkpoint: TurnCheckpoint =

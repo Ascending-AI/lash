@@ -28,7 +28,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
                 messages,
                 checkpoint: lash_core::CheckpointKind::AfterWork,
             },
-            serde_json::json!({"type":"queued_messages_committed","messages":[{"role":"Event","content":"ready"}],"checkpoint":"after_work"}),
+            serde_json::json!({"type":"queued_messages_committed","messages":[{"role":"Event","parts":[{"id":"","kind":"Text","content":"ready"}]}],"checkpoint":"after_work"}),
         ),
         (
             lash_core::TurnEvent::PluginRuntime {
@@ -62,7 +62,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
             RemoteTurnActivity::decode_json(&serde_json::to_vec(&old).unwrap()),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 52,
-                expected: 85
+                expected: 86
             })
         ));
     }
@@ -149,30 +149,6 @@ fn queued_event_closed_vocabularies_have_independent_literal_pins() {
             origin
         );
     }
-    for (state, literal) in [
-        (RemotePruneState::Intact, serde_json::json!("Intact")),
-        (RemotePruneState::Cleared, serde_json::json!("Cleared")),
-        (
-            RemotePruneState::Deleted {
-                breadcrumb: "b".into(),
-                archive_hash: "a".into(),
-            },
-            serde_json::json!({"Deleted":{"breadcrumb":"b","archive_hash":"a"}}),
-        ),
-        (
-            RemotePruneState::Summarized {
-                summary: "s".into(),
-                archive_hash: "a".into(),
-            },
-            serde_json::json!({"Summarized":{"summary":"s","archive_hash":"a"}}),
-        ),
-    ] {
-        assert_eq!(serde_json::to_value(&state).unwrap(), literal);
-        assert_eq!(
-            serde_json::from_value::<RemotePruneState>(literal).unwrap(),
-            state
-        );
-    }
 }
 
 #[test]
@@ -181,4 +157,24 @@ fn queued_message_parts_keep_the_core_payload() {
     let expected = serde_json::to_value(&part).unwrap();
     let remote = RemotePart::from(part);
     assert_eq!(serde_json::to_value(remote).unwrap(), expected);
+}
+
+#[test]
+fn legacy_queued_message_and_part_fields_are_rejected() {
+    let current = serde_json::to_value(RemotePluginMessage::from(lash_core::PluginMessage::text(
+        lash_core::MessageRole::User,
+        "hello",
+    )))
+    .unwrap();
+    for (field, value) in [
+        ("content", serde_json::json!("ignored")),
+        ("attachments", serde_json::json!([])),
+    ] {
+        let mut legacy = current.clone();
+        legacy[field] = value;
+        assert!(serde_json::from_value::<RemotePluginMessage>(legacy).is_err());
+    }
+    let mut legacy = current;
+    legacy["parts"][0]["prune_state"] = serde_json::json!("Intact");
+    assert!(serde_json::from_value::<RemotePluginMessage>(legacy).is_err());
 }

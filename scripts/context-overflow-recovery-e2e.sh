@@ -149,7 +149,7 @@ if control["control_stop"] != "provider_error":
 if control["control_stop"] == observed["overflow_stop"]:
     fail(f"overflow and provider error collapsed into one outcome: {control}")
 
-# Plugin-owned recovery (FIG-2950): the registered rolling-history policy
+# Plugin-owned recovery (FIG-2950): the registered standard-compaction policy
 # derives the pending trigger from the durable marker, spends one bounded
 # out-of-band summarizer, and appends its summary plus a terminal record. The
 # host only observes the durable state and the same session continues.

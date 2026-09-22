@@ -524,7 +524,7 @@ fn unstamped_stored_bodies_are_refused() {
 /// whose fields the flattened payload family reaches furthest into.
 #[test]
 fn unstamped_conversation_bodies_are_refused() {
-    let legacy = r#"{"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_legacy","role":"User","parts":[{"id":"m_legacy.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}]}}}"#;
+    let legacy = r#"{"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_legacy","role":"User","parts":[{"id":"m_legacy.p0","kind":"Text","content":"durable read user message"}]}}}"#;
 
     let error = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
         .expect_err("a pre-stamp conversation body must be refused");

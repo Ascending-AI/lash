@@ -1,4 +1,4 @@
-//! Unit tests for the rolling-history plugin and its context-overflow
+//! Unit tests for the standard-compaction plugin and its context-overflow
 //! recovery policy.
 
 use super::*;
@@ -21,7 +21,7 @@ fn prompt_usage(context_budget_tokens: usize) -> PromptUsage {
 }
 
 /// Mirrors what the turn transform asks of the pressure: no pressure, no decisions.
-fn rolling_history_decisions(
+fn standard_compaction_decisions(
     usage: Option<&PromptUsage>,
     max_context_tokens: Option<usize>,
 ) -> (bool, bool) {
@@ -35,7 +35,7 @@ fn zero_context_window_yields_no_pressure_and_no_decisions() {
     let usage = prompt_usage(130_000);
     assert_eq!(ContextPressure::derive(Some(&usage), Some(0)), None);
     assert_eq!(
-        rolling_history_decisions(Some(&usage), Some(0)),
+        standard_compaction_decisions(Some(&usage), Some(0)),
         (false, false)
     );
 }
@@ -44,33 +44,33 @@ fn zero_context_window_yields_no_pressure_and_no_decisions() {
 fn missing_usage_or_window_yields_no_decisions() {
     let usage = prompt_usage(130_000);
     assert_eq!(
-        rolling_history_decisions(None, Some(200_000)),
+        standard_compaction_decisions(None, Some(200_000)),
         (false, false)
     );
     assert_eq!(
-        rolling_history_decisions(Some(&usage), None),
+        standard_compaction_decisions(Some(&usage), None),
         (false, false)
     );
-    assert_eq!(rolling_history_decisions(None, None), (false, false));
+    assert_eq!(standard_compaction_decisions(None, None), (false, false));
 }
 
 #[test]
 fn non_zero_window_still_drives_both_decisions() {
     let quiet = prompt_usage(10_000);
     assert_eq!(
-        rolling_history_decisions(Some(&quiet), Some(200_000)),
+        standard_compaction_decisions(Some(&quiet), Some(200_000)),
         (false, false)
     );
 
     let pruning_only = prompt_usage(130_000);
     assert_eq!(
-        rolling_history_decisions(Some(&pruning_only), Some(200_000)),
+        standard_compaction_decisions(Some(&pruning_only), Some(200_000)),
         (true, false)
     );
 
     let both = prompt_usage(190_000);
     assert_eq!(
-        rolling_history_decisions(Some(&both), Some(200_000)),
+        standard_compaction_decisions(Some(&both), Some(200_000)),
         (true, true)
     );
 }
@@ -219,12 +219,12 @@ fn build_turn_ctx_with_graph(
         session_graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::AdmittedScope::turn(session_id, "rolling-history-test-turn"),
+            lash_core::AdmittedScope::turn(session_id, "standard-compaction-test-turn"),
         )
         .expect("test scoped effect controller"),
         direct_completions: lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
             Err(lash_core::PluginError::Session(
-                "direct completions are unavailable in rolling history tests".to_string(),
+                "direct completions are unavailable in standard compaction tests".to_string(),
             ))
         }),
         system_prompt: None,
@@ -270,7 +270,7 @@ fn build_compaction_ctx_with_services(
         session_graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::AdmittedScope::runtime_operation("rolling-history-compact-test"),
+            lash_core::AdmittedScope::runtime_operation("standard-compaction-compact-test"),
         )
         .expect("test scoped effect controller"),
         direct_completions,
@@ -348,7 +348,7 @@ impl RecordingLlmCompletions {
 }
 
 #[tokio::test]
-async fn rolling_turn_transform_strips_old_image_attachments() {
+async fn standard_compaction_turn_transform_strips_old_image_attachments() {
     let messages = vec![
         image_message("u0", MessageRole::User, &[1, 2, 3]),
         text_message("u1", MessageRole::User, "recent"),
@@ -359,7 +359,7 @@ async fn rolling_turn_transform_strips_old_image_attachments() {
         lash_core::TurnBudget::Unbounded,
     ));
     let manager = Arc::new(mock_manager());
-    let transform = RollingTurnTransform::new(RollingHistoryConfig);
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let ctx = build_turn_ctx(
         &SessionId::from("root"),
         state,
@@ -390,9 +390,9 @@ async fn rolling_turn_transform_strips_old_image_attachments() {
 }
 
 #[tokio::test]
-async fn rolling_turn_transform_projects_tail_without_summary() {
+async fn standard_compaction_turn_transform_projects_tail_without_summary() {
     let manager = Arc::new(mock_manager());
-    let transform = RollingTurnTransform::new(RollingHistoryConfig);
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -444,10 +444,10 @@ async fn rolling_turn_transform_projects_tail_without_summary() {
 }
 
 #[tokio::test]
-async fn rolling_turn_transform_traces_threshold_and_prompt_pruning() {
+async fn standard_compaction_turn_transform_traces_threshold_and_prompt_pruning() {
     let manager = Arc::new(mock_manager());
     let trace = Arc::new(RecordingSessionGraph::default());
-    let transform = RollingTurnTransform::new(RollingHistoryConfig);
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -487,11 +487,11 @@ async fn rolling_turn_transform_traces_threshold_and_prompt_pruning() {
     assert_eq!(events[0].0.session_id.as_deref(), Some("root"));
     assert_eq!(
         events[0].0.turn_id.as_deref(),
-        Some("rolling-history-test-turn")
+        Some("standard-compaction-test-turn")
     );
     assert_eq!(
         events[0].1,
-        lash_core::TraceEvent::RollingHistoryCompactionNeeded {
+        lash_core::TraceEvent::CompactionNeeded {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
@@ -499,7 +499,7 @@ async fn rolling_turn_transform_traces_threshold_and_prompt_pruning() {
     );
     assert_eq!(
         events[1].1,
-        lash_core::TraceEvent::RollingHistoryPromptPruned {
+        lash_core::TraceEvent::PromptViewPruned {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 2,
@@ -509,10 +509,10 @@ async fn rolling_turn_transform_traces_threshold_and_prompt_pruning() {
 }
 
 #[tokio::test]
-async fn rolling_turn_transform_records_needed_when_no_cut_point_exists() {
+async fn standard_compaction_turn_transform_records_needed_when_no_cut_point_exists() {
     let manager = Arc::new(mock_manager());
     let trace = Arc::new(RecordingSessionGraph::default());
-    let transform = RollingTurnTransform::new(RollingHistoryConfig);
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -550,7 +550,7 @@ async fn rolling_turn_transform_records_needed_when_no_cut_point_exists() {
     assert_eq!(events.len(), 2);
     assert_eq!(
         events[1].1,
-        lash_core::TraceEvent::RollingHistoryPromptPruned {
+        lash_core::TraceEvent::PromptViewPruned {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 0,
@@ -560,7 +560,7 @@ async fn rolling_turn_transform_records_needed_when_no_cut_point_exists() {
 }
 
 #[tokio::test]
-async fn rolling_compactor_returns_summary_seed_for_new_frame() {
+async fn standard_compactor_returns_summary_seed_for_new_frame() {
     let manager = Arc::new(mock_manager());
     let trace = Arc::new(RecordingSessionGraph::default());
     let messages = vec![
@@ -575,7 +575,7 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
         ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     let compaction_scope =
-        lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test");
+        lash_core::ExecutionScope::runtime_operation("standard-compaction-compact-test");
     let instructions = "focus on latest request";
     let (request_snapshot, prompt_text) =
         prepare_compaction_request(&state, messages.clone(), Some(instructions))
@@ -656,7 +656,7 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
         trace.clone(),
         RecordingLlmCompletions::client(&captured),
     );
-    let compactor = RollingContextCompactor::new(RollingHistoryConfig);
+    let compactor = StandardContextCompactor::new(StandardCompactionConfig);
 
     let compaction = compactor
         .compact(&ctx)
@@ -671,13 +671,15 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     assert_eq!(message.role, MessageRole::Assistant);
     assert!(
         message
-            .first_text()
+            .parts
+            .first()
+            .map(Part::content)
             .expect("summary text")
             .contains("Compacted work summary")
     );
     assert!(matches!(
         message.origin.as_ref(),
-        Some(MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == ROLLING_HISTORY_PLUGIN_ID
+        Some(MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == STANDARD_COMPACTION_PLUGIN_ID
     ));
 
     // FIG-3374: compaction is one direct completion on the calling session.
@@ -708,14 +710,14 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     assert_eq!(events[0].0.turn_id, None);
     assert_eq!(
         events[0].1,
-        lash_core::TraceEvent::RollingHistoryCompactionStarted {
+        lash_core::TraceEvent::CompactionStarted {
             source_messages: 3,
             instructions_present: true,
         }
     );
     assert_eq!(
         events[1].1,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 }
+        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 1 }
     );
 }
 
@@ -755,7 +757,7 @@ fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
 }
 
 #[tokio::test]
-async fn rolling_compactor_records_zero_node_completion_for_none() {
+async fn standard_compactor_records_zero_node_completion_for_none() {
     let manager = Arc::new(mock_manager());
     let trace = Arc::new(RecordingSessionGraph::default());
     let state = SessionSnapshot {
@@ -773,7 +775,7 @@ async fn rolling_compactor_records_zero_node_completion_for_none() {
         RecordingLlmCompletions::client(&captured),
     );
 
-    let compaction = RollingContextCompactor::new(RollingHistoryConfig)
+    let compaction = StandardContextCompactor::new(StandardCompactionConfig)
         .compact(&ctx)
         .await
         .expect("empty history is a successful no-op");
@@ -781,12 +783,12 @@ async fn rolling_compactor_records_zero_node_completion_for_none() {
     assert!(compaction.is_none());
     assert_eq!(
         trace.events()[1].1,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 }
     );
 }
 
 #[tokio::test]
-async fn rolling_compactor_records_zero_node_completion_before_error() {
+async fn standard_compactor_records_zero_node_completion_before_error() {
     let manager = Arc::new(mock_manager());
     let trace = Arc::new(RecordingSessionGraph::default());
     let messages = vec![
@@ -816,7 +818,7 @@ async fn rolling_compactor_records_zero_node_completion_before_error() {
         RecordingLlmCompletions::client(&captured),
     );
 
-    let error = RollingContextCompactor::new(RollingHistoryConfig)
+    let error = StandardContextCompactor::new(StandardCompactionConfig)
         .compact(&ctx)
         .await
         .expect_err("scripted completion failure must propagate");
@@ -828,7 +830,7 @@ async fn rolling_compactor_records_zero_node_completion_before_error() {
     );
     assert_eq!(
         trace.events()[1].1,
-        lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 }
     );
 }
 
@@ -858,7 +860,7 @@ fn transform_state_ctx_with_services(
         session_graph: graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::AdmittedScope::runtime_operation("rolling-history-recovery-test"),
+            lash_core::AdmittedScope::runtime_operation("standard-compaction-recovery-test"),
         )
         .expect("test scoped effect controller"),
         direct_completions: RecordingLlmCompletions::client(&direct),
@@ -892,14 +894,9 @@ fn empty_direct() -> Arc<RecordingLlmCompletions> {
 fn recovery_record_node_message(record: OverflowRecoveryRecord) -> Message {
     let plugin_message = recovery_record_message(record);
     Message {
-        id: format!("m_recover_record_{}", plugin_message.content.len()),
+        id: "m_recover_record".into(),
         role: MessageRole::System,
-        parts: vec![Part::text(
-            format!("m_recover_record_{}p.p0", plugin_message.content.len()),
-            plugin_message.content,
-            None,
-        )]
-        .into(),
+        parts: plugin_message.parts.into(),
         origin: plugin_message.origin,
     }
 }
@@ -967,7 +964,9 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
     };
     assert!(
         marker
-            .first_text()
+            .parts
+            .first()
+            .map(Part::content)
             .unwrap()
             .starts_with(OVERFLOW_RECOVERY_MARKER)
     );
@@ -1054,7 +1053,7 @@ fn recovery_record_reads_its_serde_payload_only() {
         role: MessageRole::System,
         parts: vec![Part::text("m.p0".to_string(), text, None)].into(),
         origin: Some(MessageOrigin::Plugin {
-            plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
             transient: false,
         }),
     };
@@ -1101,7 +1100,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
         .into(),
         ..Default::default()
     };
-    let built = RollingTurnTransform::new(RollingHistoryConfig)
+    let built = StandardCompactionTurnTransform::new(StandardCompactionConfig)
         .transform(&ctx, prepared)
         .await
         .expect("recovery transform runs")
@@ -1141,10 +1140,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
     let request = &requests[0];
     assert_eq!(request.scope.session_id, SessionId::from("root"));
     assert!(
-        request
-            .scope
-            .request_id
-            .contains("rolling-history-compaction:"),
+        request.scope.request_id.contains("standard-compaction:"),
         "the replay key keeps the compaction attempt identity: {:?}",
         request.scope.request_id
     );
@@ -1175,13 +1171,13 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
     assert_eq!(appends[0].1.nodes.len(), 1);
     let completed_kind = match &appends[0].1.nodes[0] {
         lash_core::SessionAppendNode::Message { message } => {
-            message.first_text().and_then(|text| {
+            message.parts.first().map(Part::content).and_then(|text| {
                 recovery_record_kind(&Message {
                     id: "probe".to_string(),
                     role: MessageRole::System,
                     parts: vec![Part::text("probe.p0".to_string(), text.to_string(), None)].into(),
                     origin: Some(MessageOrigin::Plugin {
-                        plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+                        plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
                         transient: false,
                     }),
                 })
@@ -1211,7 +1207,9 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
     );
     assert_eq!(switches[0].1.initial_nodes.len(), 1);
     let seed_summary = match &switches[0].1.initial_nodes[0] {
-        lash_core::SessionAppendNode::Message { message } => message.first_text(),
+        lash_core::SessionAppendNode::Message { message } => {
+            message.parts.first().map(Part::content)
+        }
         _ => None,
     };
     assert!(
@@ -1261,7 +1259,7 @@ async fn recovery_summarizer_request_does_not_carry_the_pending_marker() {
     let direct = recovered_direct();
     let ctx = transform_state_ctx_with_services(state, direct.clone(), trace.clone(), 200_000);
 
-    RollingTurnTransform::new(RollingHistoryConfig)
+    StandardCompactionTurnTransform::new(StandardCompactionConfig)
         .transform(&ctx, recovery_test_input())
         .await
         .expect("recovery transform runs");
@@ -1290,7 +1288,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
             trace.clone(),
             200_000,
         );
-        let built = RollingTurnTransform::new(RollingHistoryConfig)
+        let built = StandardCompactionTurnTransform::new(StandardCompactionConfig)
             .transform(&ctx, recovery_test_input())
             .await
             .expect("a failed recovery must not fail the turn");
@@ -1337,7 +1335,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
         trace.clone(),
         200_000,
     );
-    RollingTurnTransform::new(RollingHistoryConfig)
+    StandardCompactionTurnTransform::new(StandardCompactionConfig)
         .transform(&ctx, recovery_test_input())
         .await
         .expect("capped recovery must not fail the turn");
@@ -1391,7 +1389,7 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
             .into(),
             ..Default::default()
         };
-        let built = RollingTurnTransform::new(RollingHistoryConfig)
+        let built = StandardCompactionTurnTransform::new(StandardCompactionConfig)
             .transform(&ctx, prepared)
             .await
             .expect("transform runs");
@@ -1450,7 +1448,7 @@ async fn compaction_request_carries_the_core_resolved_system_prompt() {
         RecordingLlmCompletions::client(&captured),
     );
     ctx.system_prompt = Some(Arc::from("resolved capability+core+session stack"));
-    RollingContextCompactor::new(RollingHistoryConfig)
+    StandardContextCompactor::new(StandardCompactionConfig)
         .compact(&ctx)
         .await
         .expect("compact")
@@ -1465,7 +1463,7 @@ async fn compaction_request_carries_the_core_resolved_system_prompt() {
 }
 
 #[tokio::test]
-async fn rolling_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() {
+async fn standard_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() {
     for reason in [
         lash_sansio::llm::types::LlmTerminalReason::OutputLimit,
         lash_sansio::llm::types::LlmTerminalReason::ContentFilter,
@@ -1485,7 +1483,7 @@ async fn rolling_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() {
             Arc::new(RecordingSessionGraph::default()),
             RecordingLlmCompletions::client(&captured),
         );
-        let err = RollingContextCompactor::new(RollingHistoryConfig)
+        let err = StandardContextCompactor::new(StandardCompactionConfig)
             .compact(&ctx)
             .await
             .expect_err("an incomplete completion must not seed a durable frame");
@@ -1494,4 +1492,19 @@ async fn rolling_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() {
             "error names the terminal reason: {err}"
         );
     }
+}
+
+#[test]
+fn summary_recognition_requires_standard_compaction_origin() {
+    let mut summary = text_message("summary", MessageRole::Assistant, COMPACTION_SUMMARY_TITLE);
+    summary.origin = Some(MessageOrigin::Plugin {
+        plugin_id: "standard_compaction".into(),
+        transient: false,
+    });
+    assert!(is_compaction_summary_message(&summary));
+    summary.origin = Some(MessageOrigin::Plugin {
+        plugin_id: "other_plugin".into(),
+        transient: false,
+    });
+    assert!(!is_compaction_summary_message(&summary));
 }

@@ -929,7 +929,7 @@ pub(crate) async fn build_runtime_with_store(
         .tool_catalog_observer
         .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
     let mut plugin_stack = runtime_perf_plugin_stack(
-        scenario.uses_rolling_history(),
+        scenario.uses_standard_compaction(),
         execution_mode.is_standard(),
     );
     for factory in benchmark_plugin_factories(
@@ -1340,7 +1340,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let mode_id = scenario.execution_mode();
     let provider = benchmark_provider(scenario).into_handle();
     let mut plugin_stack =
-        runtime_perf_plugin_stack(scenario.uses_rolling_history(), mode_id.is_standard());
+        runtime_perf_plugin_stack(scenario.uses_standard_compaction(), mode_id.is_standard());
     let sessions_root = root.join("sessions");
     let attachments_root = root.join("attachments");
     let artifacts_db = root.join("artifacts.db");
@@ -1479,7 +1479,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let attachment_store = Arc::new(lash::persistence::InMemoryAttachmentStore::new());
     let commit_budget = lash::CommitBudget::bounded(1024 * 1024, 512);
     let mut plugin_stack =
-        runtime_perf_plugin_stack(scenario.uses_rolling_history(), mode_id.is_standard());
+        runtime_perf_plugin_stack(scenario.uses_standard_compaction(), mode_id.is_standard());
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);
     }

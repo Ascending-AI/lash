@@ -590,7 +590,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
             !matches!(
                 event,
                 lash_core::facade_support::SessionStreamEvent::InjectedMessagesCommitted { messages, .. }
-                    if messages.iter().any(|message| message.content == expected_text)
+                    if messages.iter().any(|message| message.parts.iter().any(|part| part.content() == expected_text))
             )
         }),
         "durable wake events must not be bridged as injected plugin messages"

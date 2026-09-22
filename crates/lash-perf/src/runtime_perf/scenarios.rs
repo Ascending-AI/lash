@@ -1006,7 +1006,7 @@ impl RuntimePerfScenario {
         self.metadata().wiring
     }
 
-    pub(crate) fn uses_rolling_history(self) -> bool {
+    pub(crate) fn uses_standard_compaction(self) -> bool {
         self.execution_mode().is_standard()
     }
 }

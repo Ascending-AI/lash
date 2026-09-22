@@ -247,17 +247,17 @@ fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {
     }
 }
 
-fn rolling_history_provider(responses: Vec<LlmResponse>) -> ProviderHandle {
-    rolling_history_provider_counted(responses).0
+fn standard_compaction_provider(responses: Vec<LlmResponse>) -> ProviderHandle {
+    standard_compaction_provider_counted(responses).0
 }
 
-fn rolling_history_provider_counted(
+fn standard_compaction_provider_counted(
     responses: Vec<LlmResponse>,
 ) -> (ProviderHandle, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let responses = Arc::new(TokioMutex::new(VecDeque::from(responses)));
     let provider = crate::testing::TestProvider::builder()
-        .kind("rolling-history-persistence-test")
+        .kind("standard-compaction-persistence-test")
         .complete({
             let responses = Arc::clone(&responses);
             let calls = Arc::clone(&calls);
@@ -270,7 +270,7 @@ fn rolling_history_provider_counted(
                         .lock()
                         .await
                         .pop_front()
-                        .expect("queued rolling-history response"))
+                        .expect("queued standard-compaction response"))
                 }
             }
         })
@@ -353,9 +353,9 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
 ) -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = match scope_kind {
-        RepeatedAdminCompactionScope::ParentTurn => "rolling-history-repeat-parent-turn",
+        RepeatedAdminCompactionScope::ParentTurn => "standard-compaction-repeat-parent-turn",
         RepeatedAdminCompactionScope::RuntimeOperation => {
-            "rolling-history-repeat-runtime-operation"
+            "standard-compaction-repeat-runtime-operation"
         }
     };
     let effect_host = Arc::new(
@@ -373,10 +373,10 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
             .map(|summary| response_with_usage(summary, 1)),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(responses))
-        .model(model_spec("rolling-history-model", None, 40_000))
+        .provider(standard_compaction_provider(responses))
+        .model(model_spec("standard-compaction-model", None, 40_000))
         .plugin(Arc::new(
-            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             dir.path().join("sessions"),
@@ -385,8 +385,8 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     for (turn_id, text) in [
-        ("rolling-history-same-parent-one", "first request"),
-        ("rolling-history-same-parent-two", "second request"),
+        ("standard-compaction-same-parent-one", "first request"),
+        ("standard-compaction-same-parent-two", "second request"),
     ] {
         session
             .turn(TurnInput::text(text))
@@ -396,11 +396,11 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
     }
     let execution_scope = match scope_kind {
         RepeatedAdminCompactionScope::ParentTurn => {
-            lash_core::ExecutionScope::turn(session_id, "rolling-history-same-parent-two")
+            lash_core::ExecutionScope::turn(session_id, "standard-compaction-same-parent-two")
         }
         RepeatedAdminCompactionScope::RuntimeOperation => {
             lash_core::ExecutionScope::runtime_operation(format!(
-                "rolling-history-repeat-admin:{session_id}"
+                "standard-compaction-repeat-admin:{session_id}"
             ))
         }
     };
@@ -460,9 +460,10 @@ async fn repeated_admin_compaction_with_runtime_scope_distinguishes_changed_snap
 }
 
 #[tokio::test]
-async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redrive() -> Result<()> {
+async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_redrive()
+-> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-projection-redrive";
+    let session_id = "standard-compaction-projection-redrive";
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
@@ -470,7 +471,7 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
     let provider_call = Arc::new(AtomicUsize::new(0));
     let checkpointed_projection_bases = Arc::new(StdMutex::new(Vec::new()));
     let checkpoint_probe = Arc::new(crate::plugins::StaticPluginFactory::new(
-        "rolling-history-checkpoint-probe",
+        "standard-compaction-checkpoint-probe",
         lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new({
             let checkpointed_projection_bases = Arc::clone(&checkpointed_projection_bases);
             move |context| {
@@ -487,7 +488,7 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
         })),
     ));
     let provider = crate::testing::TestProvider::builder()
-        .kind("rolling-history-projection-redrive-test")
+        .kind("standard-compaction-projection-redrive-test")
         .complete({
             let provider_requests = Arc::clone(&provider_requests);
             let provider_call = Arc::clone(&provider_call);
@@ -538,10 +539,14 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
     let build_core = |store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>| {
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
             .provider(provider.clone())
-            .model(model_spec("rolling-history-redrive-model", None, 40_000))
+            .model(model_spec(
+                "standard-compaction-redrive-model",
+                None,
+                40_000,
+            ))
             .tools(Arc::new(AppTools))
             .plugin(Arc::new(
-                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
             ))
             .plugin(checkpoint_probe.clone())
             .store_factory(store_factory.clone())
@@ -594,10 +599,14 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
     let reopened_core =
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
             .provider(provider.clone())
-            .model(model_spec("rolling-history-redrive-model", None, 40_000))
+            .model(model_spec(
+                "standard-compaction-redrive-model",
+                None,
+                40_000,
+            ))
             .tools(Arc::new(AppTools))
             .plugin(Arc::new(
-                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
             ))
             .plugin(checkpoint_probe.clone())
             .effect_host(effect_host.clone())
@@ -666,24 +675,24 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
 }
 
 #[tokio::test]
-async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_compaction()
+async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unblocks_compaction()
 -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-durable-parent";
+    let session_id = "standard-compaction-durable-parent";
     let trace_path = dir.path().join("trace.jsonl");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let provider = rolling_history_provider(vec![
+    let provider = standard_compaction_provider(vec![
         response_with_usage("first response", 20_000),
         response_with_usage("threshold response", 1),
         response_with_usage("durable summary", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
-        .model(model_spec("rolling-history-model", None, 40_000))
+        .model(model_spec("standard-compaction-model", None, 40_000))
         .plugin(Arc::new(
-            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .store_factory(store_factory.clone())
         .trace_jsonl_path(trace_path.clone())
@@ -692,7 +701,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
 
     session
         .turn(TurnInput::text("first request"))
-        .turn_id("rolling-history-first")
+        .turn_id("standard-compaction-first")
         .run()
         .await?;
     let (durable_leaf_before_threshold, max_generation_before_threshold) =
@@ -700,7 +709,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
 
     session
         .turn(TurnInput::text("threshold request"))
-        .turn_id("rolling-history-threshold")
+        .turn_id("standard-compaction-threshold")
         .run()
         .await?;
 
@@ -733,24 +742,21 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
     assert!(
         Box::pin(session.admin().state().compact_context(
             Some("retain the durable ancestry result".to_string()),
-            runtime_operation_scope(&core, "rolling-history-explicit-compaction"),
+            runtime_operation_scope(&core, "standard-compaction-explicit-compaction"),
         ))
         .await?,
-        "rolling-history compaction should open a summary frame after the threshold turn commits"
+        "standard-compaction compaction should open a summary frame after the threshold turn commits"
     );
     let (post_compaction_leaf, post_compaction_max_generation) =
         sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
     core.flush_trace_sink()?;
 
-    let trace = std::fs::read_to_string(trace_path).expect("read rolling-history trace");
+    let trace = std::fs::read_to_string(trace_path).expect("read standard-compaction trace");
     let records = trace
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("decode trace record"))
         .collect::<Vec<_>>();
-    for event_type in [
-        "rolling_history_compaction_started",
-        "rolling_history_compaction_completed",
-    ] {
+    for event_type in ["compaction_started", "compaction_completed"] {
         let record = records
             .iter()
             .find(|record| {
@@ -769,7 +775,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
             context
                 .get("parent_graph_node_id")
                 .and_then(serde_json::Value::as_str),
-            Some("session:rolling-history-durable-parent")
+            Some("session:standard-compaction-durable-parent")
         );
     }
 
@@ -798,20 +804,20 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
     drop(core);
     let reopened_core =
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(rolling_history_provider(vec![response_with_usage(
+            .provider(standard_compaction_provider(vec![response_with_usage(
                 "response after reopen",
                 1,
             )]))
-            .model(model_spec("rolling-history-model", None, 40_000))
+            .model(model_spec("standard-compaction-model", None, 40_000))
             .plugin(Arc::new(
-                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
             ))
             .store_factory(store_factory.clone())
             .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     reopened_session
         .turn(TurnInput::text("continue after compaction"))
-        .turn_id("rolling-history-reopened")
+        .turn_id("standard-compaction-reopened")
         .run()
         .await?;
     let conn = rusqlite::Connection::open(store_factory.catalog_path())
@@ -830,23 +836,23 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
 }
 
 #[tokio::test]
-async fn rolling_history_compaction_accepts_parent_turn_authority() -> Result<()> {
+async fn compaction_accepts_parent_turn_authority() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-turn-parent";
+    let session_id = "standard-compaction-turn-parent";
     let effect_host = Arc::new(
         lash_sqlite_store::SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
             .await
             .expect("open SQLite effect host"),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(vec![
+        .provider(standard_compaction_provider(vec![
             response_with_usage("first response", 1),
             response_with_usage("second response", 1),
             response_with_usage("turn-authorized summary", 1),
         ]))
-        .model(model_spec("rolling-history-model", None, 40_000))
+        .model(model_spec("standard-compaction-model", None, 40_000))
         .plugin(Arc::new(
-            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             dir.path().join("sessions"),
@@ -857,18 +863,18 @@ async fn rolling_history_compaction_accepts_parent_turn_authority() -> Result<()
 
     session
         .turn(TurnInput::text("first request"))
-        .turn_id("rolling-history-parent-one")
+        .turn_id("standard-compaction-parent-one")
         .run()
         .await?;
     session
         .turn(TurnInput::text("second request"))
-        .turn_id("rolling-history-parent-two")
+        .turn_id("standard-compaction-parent-two")
         .run()
         .await?;
     let parent_scope = effect_host
         .scoped_static(lash_core::AdmittedScope::turn(
             session_id,
-            "rolling-history-parent-two",
+            "standard-compaction-parent-two",
         ))?
         .expect("SQLite host supplies an owned parent Turn scope");
 
@@ -894,14 +900,14 @@ async fn rolling_history_compaction_accepts_parent_turn_authority() -> Result<()
 #[tokio::test]
 async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_parents() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-repeated-shared-scope";
+    let session_id = "standard-compaction-repeated-shared-scope";
     let effect_host = Arc::new(
         lash_sqlite_store::SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
             .await
             .expect("open SQLite effect host"),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(vec![
+        .provider(standard_compaction_provider(vec![
             response_with_usage("first response", 1),
             response_with_usage("second response", 1),
             response_with_usage("first summary", 1),
@@ -909,9 +915,9 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
             response_with_usage("fourth response", 1),
             response_with_usage("second summary", 1),
         ]))
-        .model(model_spec("rolling-history-model", None, 40_000))
+        .model(model_spec("standard-compaction-model", None, 40_000))
         .plugin(Arc::new(
-            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             dir.path().join("sessions"),
@@ -921,13 +927,13 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
     let session = core.session(session_id).open().await?;
     let shared_scope = effect_host
         .scoped_static(lash_core::AdmittedScope::runtime_operation(
-            "rolling-history-repeated-compaction",
+            "standard-compaction-repeated-compaction",
         ))?
         .expect("SQLite host supplies an owned shared scope");
 
     for (turn_id, text) in [
-        ("rolling-history-repeat-one", "first request"),
-        ("rolling-history-repeat-two", "second request"),
+        ("standard-compaction-repeat-one", "first request"),
+        ("standard-compaction-repeat-two", "second request"),
     ] {
         session
             .turn(TurnInput::text(text))
@@ -946,8 +952,8 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
     );
 
     for (turn_id, text) in [
-        ("rolling-history-repeat-three", "third request"),
-        ("rolling-history-repeat-four", "fourth request"),
+        ("standard-compaction-repeat-three", "third request"),
+        ("standard-compaction-repeat-four", "fourth request"),
     ] {
         session
             .turn(TurnInput::text(text))
@@ -977,19 +983,19 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
 #[tokio::test]
 async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-attachment-prune";
+    let session_id = "standard-compaction-attachment-prune";
     let trace_path = dir.path().join("trace.jsonl");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(vec![
+        .provider(standard_compaction_provider(vec![
             response_with_usage("first response", 60_000),
             response_with_usage("second response", 1),
         ]))
         .model(model_spec("attachment-prune-model", None, 100_000))
         .plugin(Arc::new(
-            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .store_factory(store_factory.clone())
         .trace_jsonl_path(trace_path.clone())
@@ -1067,7 +1073,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
 async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> Result<()> {
     const THRESHOLD_TURNS: usize = 3;
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-plugin-message-ids";
+    let session_id = "standard-compaction-plugin-message-ids";
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
@@ -1091,17 +1097,17 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         })
     };
     let injection_plugin = crate::plugins::StaticPluginFactory::new(
-        "rolling-history-injection-test",
+        "standard-compaction-injection-test",
         lash_core::facade_support::PluginSpec::new().with_before_turn(injection_hook),
     );
     let responses = (0..=THRESHOLD_TURNS)
         .map(|ordinal| response_with_usage(&format!("response {ordinal}"), 20_000))
         .collect();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(responses))
+        .provider(standard_compaction_provider(responses))
         .model(model_spec("plugin-message-id-model", None, 40_000))
         .plugin(Arc::new(
-            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .plugin(Arc::new(injection_plugin))
         .store_factory(store_factory.clone())
@@ -1142,13 +1148,14 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<()> {
+async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durable_leaf()
+-> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-continue-as-parent";
+    let session_id = "standard-compaction-continue-as-parent";
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let provider = rolling_history_provider(vec![
+    let provider = standard_compaction_provider(vec![
         response_with_usage(&typescript_block(r#"finish("primed");"#), 20_000),
         response_with_usage(
             &typescript_block(
@@ -1163,9 +1170,9 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
         rlm_factory(),
     ))
     .provider(provider)
-    .model(model_spec("rolling-history-rlm-model", None, 40_000))
+    .model(model_spec("standard-compaction-rlm-model", None, 40_000))
     .plugin(Arc::new(
-        lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
     .store_factory(store_factory.clone())
     .build(crate::testing::runtime_lease_owner())?;
@@ -1173,7 +1180,7 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
 
     let primed = session
         .turn(TurnInput::text("prime durable history"))
-        .turn_id("rolling-history-rlm-first")
+        .turn_id("standard-compaction-rlm-first")
         .run()
         .await?;
     assert_eq!(primed.final_value(), Some(&serde_json::json!("primed")));
@@ -1182,7 +1189,7 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
 
     let continued = session
         .turn(TurnInput::text("cross the threshold and continue"))
-        .turn_id("rolling-history-rlm-threshold")
+        .turn_id("standard-compaction-rlm-threshold")
         .run()
         .await?;
     assert_eq!(
@@ -1276,7 +1283,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(vec![
+        .provider(standard_compaction_provider(vec![
             response_with_usage("first response", 1),
             response_with_usage("second response", 1),
         ]))
@@ -1408,7 +1415,7 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(vec![
+        .provider(standard_compaction_provider(vec![
             response_with_usage("first response", 1),
             response_with_usage("second response", 1),
         ]))
@@ -1540,7 +1547,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(vec![
+        .provider(standard_compaction_provider(vec![
             response_with_usage("first response", 1),
             response_with_usage("second response", 1),
         ]))
@@ -1662,7 +1669,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(rolling_history_provider(vec![response_with_usage(
+        .provider(standard_compaction_provider(vec![response_with_usage(
             "first response",
             1,
         )]))
@@ -1802,14 +1809,14 @@ impl lash_core::AttachmentRootSet for FailArmedCommitFactory {
 async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_on_retry()
 -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let session_id = "rolling-history-commit-failure";
+    let session_id = "standard-compaction-commit-failure";
     let effect_host = Arc::new(
         lash_sqlite_store::SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
             .await
             .expect("open SQLite effect host"),
     );
     let commit_failure = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let (provider, provider_calls) = rolling_history_provider_counted(vec![
+    let (provider, provider_calls) = standard_compaction_provider_counted(vec![
         response_with_usage("first response", 1),
         response_with_usage("second response", 1),
         response_with_usage("rolled-back-then-summarized", 1),
@@ -1819,9 +1826,9 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
-        .model(model_spec("rolling-history-model", None, 40_000))
+        .model(model_spec("standard-compaction-model", None, 40_000))
         .plugin(Arc::new(
-            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .store_factory(Arc::new(FailArmedCommitFactory {
             inner: lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions")),
@@ -1832,17 +1839,17 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
     let session = core.session(session_id).open().await?;
     session
         .turn(TurnInput::text("first request"))
-        .turn_id("rolling-history-commit-failure-one")
+        .turn_id("standard-compaction-commit-failure-one")
         .run()
         .await?;
     session
         .turn(TurnInput::text("second request"))
-        .turn_id("rolling-history-commit-failure-two")
+        .turn_id("standard-compaction-commit-failure-two")
         .run()
         .await?;
     let shared_scope = effect_host
         .scoped_static(lash_core::AdmittedScope::runtime_operation(
-            "rolling-history-commit-failure:admin",
+            "standard-compaction-commit-failure:admin",
         ))?
         .expect("SQLite host supplies the admin scope");
     let usage_before = session.usage_report().usage.usage.output_tokens;

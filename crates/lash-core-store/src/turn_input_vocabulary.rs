@@ -851,29 +851,31 @@ pub struct QueuedCheckpointTurnInput {
     pub turn_causes: Vec<TurnCause>,
 }
 pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<PluginMessage> {
-    let mut text = Vec::new();
-    let mut attachments = Vec::new();
-    for item in &input.items {
-        match item {
-            crate::InputItem::Text { text: item_text } if !item_text.is_empty() => {
-                text.push(item_text.clone());
-            }
-            crate::InputItem::Text { .. } => {}
-            crate::InputItem::Attachment { source } => attachments.push(source.clone()),
-        }
-    }
-    if text.is_empty() && attachments.is_empty() {
+    let parts: Vec<_> = input
+        .items
+        .iter()
+        .map(|item| match item {
+            crate::InputItem::Text { text } => crate::Part::text(String::new(), text.clone(), None),
+            crate::InputItem::Attachment { source } => crate::Part::attachment_part(
+                String::new(),
+                String::new(),
+                Some(lash_sansio::PartAttachment {
+                    source: source.clone(),
+                }),
+            ),
+        })
+        .collect();
+    if parts.is_empty() {
         return None;
     }
     Some(PluginMessage {
         id: None,
         role: crate::MessageRole::User,
-        content: text.join("\n"),
         origin: None,
-        parts: Vec::new(),
-        attachments,
+        parts,
     })
 }
+
 async fn committed_message_from_pending_input(
     pending: &PendingTurnInput,
     turn_id: &crate::TurnId,

@@ -508,7 +508,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
     let seed_node = crate::SessionAppendNode::message(
         crate::PluginMessage::text(MessageRole::Assistant, "Compaction summary:\nold work")
             .with_origin(crate::MessageOrigin::Plugin {
-                plugin_id: "rolling_history".to_string(),
+                plugin_id: "standard_compaction".to_string(),
                 transient: false,
             }),
     );
@@ -548,7 +548,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
     );
     assert!(matches!(
         current_read.messages[0].origin.as_ref(),
-        Some(crate::MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == "rolling_history"
+        Some(crate::MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == "standard_compaction"
     ));
 
     let previous_read = state
@@ -659,7 +659,7 @@ async fn final_commit_refuses_a_second_frame_switch_author_naming_another_frame(
             &session_id,
             current_frame_node_id.as_deref(),
             &switch_request(
-                "rolling-history:recovery",
+                "standard-compaction:recovery",
                 frame_key("frame-plugin"),
                 AgentFrameReason::compaction(),
                 vec![seed_node("compaction summary")],
@@ -724,7 +724,7 @@ async fn final_commit_refuses_a_second_frame_switch_author_with_other_seed_nodes
             &session_id,
             current_frame_node_id.as_deref(),
             &switch_request(
-                "rolling-history:recovery",
+                "standard-compaction:recovery",
                 frame_key("frame-next"),
                 AgentFrameReason::compaction(),
                 vec![seed_node("compaction summary")],
@@ -785,7 +785,7 @@ async fn final_commit_opens_one_frame_for_two_agreeing_switch_authors() {
             &session_id,
             current_frame_node_id.as_deref(),
             &switch_request(
-                "rolling-history:recovery",
+                "standard-compaction:recovery",
                 frame_key("frame-next"),
                 AgentFrameReason::compaction(),
                 seeds.clone(),

@@ -50,6 +50,7 @@ pub enum RemoteMessageOrigin {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemotePart {
     pub id: String,
     pub kind: RemotePartKind,
@@ -62,7 +63,6 @@ pub struct RemotePart {
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_replay: Option<RemoteProviderReplayMeta>,
-    pub prune_state: RemotePruneState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_meta: Option<RemoteProviderReasoningReplay>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,31 +88,14 @@ pub struct RemotePartAttachment {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub enum RemotePruneState {
-    Intact,
-    Cleared,
-    Deleted {
-        breadcrumb: String,
-        archive_hash: String,
-    },
-    Summarized {
-        summary: String,
-        archive_hash: String,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemotePluginMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     pub role: RemoteMessageRole,
-    pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<RemoteMessageOrigin>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<RemotePart>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<RemoteAttachmentSource>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

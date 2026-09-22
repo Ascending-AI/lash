@@ -436,7 +436,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
 /// FIG-3107: a read view carries the session graph, so the snapshot it projects
 /// must carry the frame identity derived from that graph. Dropping it made a
 /// durable frame switch invisible to every read-view consumer, and left the
-/// rolling-history recovery deriving its next frame key from an empty parent.
+/// standard-compaction recovery deriving its next frame key from an empty parent.
 #[test]
 fn read_view_snapshot_projects_frame_identity_from_the_graph() {
     let mut state = RuntimeSessionState {

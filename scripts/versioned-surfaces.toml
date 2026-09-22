@@ -110,7 +110,7 @@ must_cover = [
 [[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-description = "SQLite session-store tables, columns, constraints, and unique indexes"
+description = "SQLite session-store DDL and stored blob envelopes"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -120,6 +120,11 @@ paths = [
 ]
 symbols = ["SCHEMA", "AWAIT_EVENT_TABLES"]
 elide = "sql_idempotent_index"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sqlite-store/src/lib.rs"]
+symbols = ["StoredBlobEnvelope", "BlobArtifactDescriptor", "BlobStorageHint", "BlobCompression"]
 
 [[surface]]
 constant = "PROCESS_SCHEMA_VERSION"
@@ -202,7 +207,6 @@ symbols = [
   "push_attachment_ref",
   "push_attachment_source",
   "push_part_kind",
-  "push_prune_state",
   "push_part",
   "append_node_identity_bytes",
   "append_request_identity_bytes",
@@ -533,7 +537,6 @@ symbols = [
   "FlatPartRef",
   "PartAttachment",
   "PartKind",
-  "PruneState",
   "TokenUsage",
   "LlmCallId",
   "AttachmentSource",
@@ -617,7 +620,6 @@ symbols = [
   "FlatPartRef",
   "PartAttachment",
   "PartKind",
-  "PruneState",
   "AttachmentSource",
   "ProviderFileScope",
   "ProviderReplayMeta",
@@ -797,6 +799,12 @@ kind = "rust_items"
 paths = ["crates/lash-sansio/src/llm/types.rs"]
 symbols = ["StreamBlockIdentity", "StreamBlockKind"]
 
+# Checkpoints persist messages and pending effects containing plugin messages.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/session_model/message.rs", "crates/lash-sansio/src/plugin.rs"]
+symbols = ["Part", "FlatPart", "FlatPartRef", "PluginMessage"]
+
 [[surface]]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
@@ -900,9 +908,10 @@ symbols = [
   "MessageRole",
   "MessageOrigin",
   "Part",
+  "FlatPart",
+  "FlatPartRef",
   "PartKind",
   "PartAttachment",
-  "PruneState",
 ]
 
 [[surface.guard]]

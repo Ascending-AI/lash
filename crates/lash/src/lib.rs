@@ -536,7 +536,7 @@ pub mod plugins {
 pub mod messages {
     pub use lash_core::session_graph::{SessionMessageTreeNode, SharedJsonValue};
     pub use lash_core::{
-        Message, MessageOrigin, MessageRole, Part, PartKind, PruneState, TurnOutputSource,
+        Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource,
         facade_support::MessageSequence, session_model::message::PartAttachment,
     };
 }
@@ -715,8 +715,8 @@ pub mod remote {
     pub mod usage {
         pub use lash_remote_protocol::queued_events::{
             RemoteMessageOrigin, RemoteMessageRole, RemotePart, RemotePartAttachment,
-            RemotePartKind, RemotePluginMessage, RemotePruneState, RemoteQueuedWorkClaimBoundary,
-            RemoteTurnCause, RemoteTurnOutputSource,
+            RemotePartKind, RemotePluginMessage, RemoteQueuedWorkClaimBoundary, RemoteTurnCause,
+            RemoteTurnOutputSource,
         };
         pub use lash_remote_protocol::usage_activity::{
             RemoteTurnActivity, RemoteTurnEvent, RemoteUsage,

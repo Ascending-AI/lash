@@ -500,7 +500,6 @@ fn process_encode_json<T: serde::Serialize>(value: &T) -> Result<String, lash_co
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PersistedArtifactKind {
-    GenericBlob,
     CheckpointManifest,
     CheckpointComponent,
     LashlangModule,
@@ -522,45 +521,37 @@ enum BlobCompression {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BlobArtifactDescriptor {
-    pub kind: PersistedArtifactKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hints: Vec<BlobStorageHint>,
 }
 
 impl BlobArtifactDescriptor {
-    pub fn new(kind: PersistedArtifactKind, hints: impl Into<Vec<BlobStorageHint>>) -> Self {
+    pub fn new(hints: impl Into<Vec<BlobStorageHint>>) -> Self {
         Self {
-            kind,
             hints: hints.into(),
         }
     }
 
     pub fn checkpoint_manifest() -> Self {
-        Self::new(
-            PersistedArtifactKind::CheckpointManifest,
-            vec![BlobStorageHint::Compressible],
-        )
+        Self::new(vec![BlobStorageHint::Compressible])
     }
 
     pub fn checkpoint_component() -> Self {
-        Self::new(
-            PersistedArtifactKind::CheckpointComponent,
-            vec![BlobStorageHint::Compressible, BlobStorageHint::LargePayload],
-        )
+        Self::new(vec![
+            BlobStorageHint::Compressible,
+            BlobStorageHint::LargePayload,
+        ])
     }
 
     pub fn lashlang_module() -> Self {
-        Self::new(
-            PersistedArtifactKind::LashlangModule,
-            vec![BlobStorageHint::Compressible, BlobStorageHint::LargePayload],
-        )
+        Self::new(vec![
+            BlobStorageHint::Compressible,
+            BlobStorageHint::LargePayload,
+        ])
     }
 
     pub fn process_execution_env() -> Self {
-        Self::new(
-            PersistedArtifactKind::ProcessExecutionEnv,
-            vec![BlobStorageHint::Compressible],
-        )
+        Self::new(vec![BlobStorageHint::Compressible])
     }
 }
 

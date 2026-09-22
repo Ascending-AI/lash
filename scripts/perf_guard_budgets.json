@@ -545,11 +545,11 @@
               "budget_ms": 60.778,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.76,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 0.766,
               "required": true
             },
@@ -751,11 +751,11 @@
               "budget_ms": 229.974,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.783,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.66,
               "required": false
             },
@@ -2567,11 +2567,11 @@
               "budget_ms": 187.574,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.778,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.64,
               "required": false
             },
@@ -2631,11 +2631,11 @@
               "budget_ms": 702.116,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.813,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.924,
               "required": false
             },
@@ -2699,11 +2699,11 @@
               "budget_ms": 174.866,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.748,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 9.944,
               "required": true
             },
@@ -2763,11 +2763,11 @@
               "budget_ms": 110.264,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.768,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.936,
               "required": false
             },
@@ -2827,11 +2827,11 @@
               "budget_ms": 264.806,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.788,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.728,
               "required": false
             },
@@ -2891,11 +2891,11 @@
               "budget_ms": 62.266,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.77,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.618,
               "required": false
             },
@@ -3083,11 +3083,11 @@
               "budget_ms": 160.812,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.789,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 4.56,
               "required": false
             },
@@ -3159,11 +3159,11 @@
               "budget_ms": 822.078,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.816,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 5.308,
               "required": false
             },
@@ -3307,7 +3307,7 @@
               "budget_ms": 233.922,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 2.092,
               "required": false
             },
@@ -3339,7 +3339,7 @@
               "budget_ms": 2.36,
               "required": false
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.774,
               "required": true
             }
@@ -3375,7 +3375,7 @@
               "budget_ms": 107.216,
               "required": false
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.682,
               "required": false
             },
@@ -3407,7 +3407,7 @@
               "budget_ms": 5.304,
               "required": true
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.742,
               "required": true
             }
@@ -3527,11 +3527,11 @@
               "budget_ms": 187.596,
               "required": false
             },
-            "plugin_hook.after_turn.rolling_history": {
+            "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.75,
               "required": true
             },
-            "plugin_hook.context_transform.rolling_history": {
+            "plugin_hook.context_transform.standard_compaction": {
               "budget_ms": 1.804,
               "required": false
             },

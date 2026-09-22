@@ -932,13 +932,14 @@ impl SessionAdmin {
 
 fn turn_input_from_plugin_message(message: PluginMessage) -> TurnInput {
     let mut input = TurnInput::empty();
-    if !message.content.is_empty() {
-        input.items.push(InputItem::Text {
-            text: message.content,
-        });
-    }
-    for source in message.attachments {
-        input.items.push(InputItem::attachment(source));
+    for part in message.parts {
+        if let Some(attachment) = part.attachment() {
+            input
+                .items
+                .push(InputItem::attachment(attachment.source.clone()));
+        } else if !part.content().is_empty() {
+            input.items.push(InputItem::text(part.content()));
+        }
     }
     input
 }
@@ -1610,5 +1611,46 @@ impl ProtocolAdmin {
         self.control
             .apply_protocol_session_extension(extension)
             .await
+    }
+}
+
+#[cfg(test)]
+mod injected_message_tests {
+    use super::*;
+
+    #[test]
+    fn parts_only_injection_preserves_text() {
+        let mut message = PluginMessage::text(lash_core::MessageRole::User, "");
+        message.parts = vec![lash_core::Part::text(
+            "input.p0".into(),
+            "injected text".into(),
+            None,
+        )];
+        let input = turn_input_from_plugin_message(message);
+        assert!(
+            matches!(input.items.as_slice(), [InputItem::Text { text }] if text == "injected text")
+        );
+    }
+    #[test]
+    fn mixed_parts_injection_preserves_order_and_attachment_sources() {
+        let source = lash_core::AttachmentSource::Inline {
+            media_type: "image/png".parse().unwrap(),
+            bytes: vec![0, 255, 42],
+        };
+        let mut message = PluginMessage::text(lash_core::MessageRole::User, "before");
+        message.parts.push(lash_core::Part::attachment_part(
+            String::new(),
+            String::new(),
+            Some(lash_core::session_model::message::PartAttachment {
+                source: source.clone(),
+            }),
+        ));
+        message
+            .parts
+            .push(lash_core::Part::text(String::new(), "after".into(), None));
+        let input = turn_input_from_plugin_message(message);
+        assert!(matches!(input.items.as_slice(),
+            [InputItem::Text { text: before }, InputItem::Attachment { source: actual }, InputItem::Text { text: after }]
+                if before == "before" && actual == &source && after == "after"));
     }
 }
