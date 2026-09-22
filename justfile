@@ -89,11 +89,7 @@ workflow-graph-roundtrip port='3031':
     cargo run -p workflow-graph-roundtrip --profile judged
 
 workflow-graph-integration-verify:
-  npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" ci
-  npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" test
-  npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" run build
-  cargo test -p workflow-graph-roundtrip --all-targets --locked
-  bash "{{repo}}/scripts/check-workflow-graph-model.sh"
+  bash "{{repo}}/scripts/workflow-graph-integration-verify.sh"
 
 # Generate the checked-in host contract schemas.
 workflow-schema-generate:

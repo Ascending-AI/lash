@@ -633,6 +633,16 @@ artifacts, while Cargo `check` normally stops at metadata. Cargo release or
 judged timings are not comparable to this graph.
 
 
+## Schema checks in portable functional E2E
+
+The workflow-graph functional E2E job remains a Cargo-owned full-profile gate
+without pool credentials. Its integration recipe explicitly checks the example
+schemas through the portable generator before checking generated TypeScript,
+running Vitest, and building with Vite. This route requires a GitHub workflow
+dispatch; it does not turn a missing local Kiln installation into a Cargo fallback.
+Ordinary forks use the shared schema actions, and untrusted Lint retains its
+separate portable path for both host and example schemas.
+
 ## Remote action diagnostics
 
 Use an explicit bundle and baseline when a compile unexpectedly repeats or a
