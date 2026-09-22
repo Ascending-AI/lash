@@ -176,7 +176,10 @@ def summarize(binary, bundle):
     errors = []
     manifest = bundle / "manifest.json"
     if manifest.is_file():
-        state = json.loads(manifest.read_text()).get("state")
+        capture = json.loads(manifest.read_text())
+        state = capture.get("state")
+        if capture.get("source_identity_error"):
+            errors.append(f"Source identity unavailable: {capture['source_identity_error']}")
         if state in ("running", "interrupted"):
             errors.append(
                 f"Build {state}; unfinished actions may be absent from the logs"

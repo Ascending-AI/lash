@@ -147,6 +147,20 @@ class AttributionTest(unittest.TestCase):
             self.assertFalse(report["complete"])
             self.assertIn("unfinished actions", report["errors"][0])
 
+    def test_source_identity_failure_remains_incomplete_when_reported_again(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(diag, "decoded", return_value=iter([])),
+            patch("sys.stdout", io.StringIO()),
+        ):
+            bundle = Path(directory)
+            (bundle / "manifest.json").write_text(json.dumps({
+                "state": "failed", "source_identity_error": "source removed"
+            }))
+            report = diag.summarize("bb", bundle)
+            self.assertFalse(report["complete"])
+            self.assertIn("Source identity unavailable", report["errors"][0])
+
     def test_interrupt_during_post_build_hash_is_saved(self):
         script_spec = importlib.util.spec_from_file_location(
             "capture", ROOT / "scripts/bazel-diagnose.py"
@@ -180,6 +194,42 @@ class AttributionTest(unittest.TestCase):
             self.assertEqual("interrupted", manifest["state"])
             self.assertEqual(0, manifest["build_exit_code"])
             self.assertFalse(manifest["diagnostics_complete"])
+
+    def test_post_build_hash_failure_preserves_build_status_and_handlers(self):
+        script_spec = importlib.util.spec_from_file_location(
+            "capture", ROOT / "scripts/bazel-diagnose.py"
+        )
+        capture = importlib.util.module_from_spec(script_spec)
+        script_spec.loader.exec_module(capture)
+        original = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        child = SimpleNamespace(pid=123, wait=lambda: 42)
+        try:
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                patch.object(capture, "source_identity", side_effect=[
+                    {"revision": "same", "content_sha256": "same"},
+                    FileNotFoundError("source removed while hashing"),
+                ]),
+                patch.object(capture.subprocess, "Popen", return_value=child),
+                patch.object(capture, "summarize", return_value={"complete": True}),
+                patch("sys.stdout", io.StringIO()),
+            ):
+                output = Path(directory) / "bundle"
+                args = SimpleNamespace(
+                    output=output, baseline=None, operation="build", bazel_args=["//:probe"]
+                )
+                self.assertEqual(42, capture.capture(args, "bb"))
+                manifest = json.loads((output / "manifest.json").read_text())
+                self.assertEqual("failed", manifest["state"])
+                self.assertEqual(42, manifest["build_exit_code"])
+                self.assertIsNone(manifest["source_changed_during_build"])
+                self.assertIn("source removed", manifest["source_identity_error"])
+                self.assertFalse(manifest["diagnostics_complete"])
+                for sig, handler in original.items():
+                    self.assertEqual(handler, signal.getsignal(sig))
+        finally:
+            for sig, handler in original.items():
+                signal.signal(sig, handler)
 
     def test_streaming_json_rejects_truncated_tail(self):
         source = io.StringIO(json.dumps({"nested": {"text": "}"}}) + '\n{"unfinished":')

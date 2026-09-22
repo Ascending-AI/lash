@@ -116,54 +116,63 @@ def capture(args, binary):
         sig: signal.signal(sig, forward) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        with (bundle / "build.log").open("w") as log:
-            child = subprocess.Popen(
-                command,
-                cwd=ROOT,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
+        try:
+            with (bundle / "build.log").open("w") as log:
+                child = subprocess.Popen(
+                    command,
+                    cwd=ROOT,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                print(f"Bundle: {bundle}\nBuild output: {bundle / 'build.log'}", flush=True)
+                status = child.wait()
+            manifest.update(
+                build_exit_code=status,
+                build_seconds=time.monotonic() - started,
+                state="interrupted"
+                if interrupted
+                else ("succeeded" if status == 0 else "failed"),
             )
-            print(f"Bundle: {bundle}\nBuild output: {bundle / 'build.log'}", flush=True)
-            status = child.wait()
-        manifest.update(
-            build_exit_code=status,
-            build_seconds=time.monotonic() - started,
-            state="interrupted"
-            if interrupted
-            else ("succeeded" if status == 0 else "failed"),
-        )
-    except OSError as error:
-        status = 127
-        manifest.update(build_exit_code=status, state="failed", error=str(error))
-    finally:
-        manifest["finished_unix"] = time.time()
-        manifest["source_after"] = source_identity()
-        manifest["source_changed_during_build"] = (
-            manifest["source"] != manifest["source_after"]
-        )
+        except OSError as error:
+            status = 127
+            manifest.update(build_exit_code=status, state="failed", error=str(error))
+        finally:
+            manifest["finished_unix"] = time.time()
+            try:
+                manifest["source_after"] = source_identity()
+                manifest["source_changed_during_build"] = (
+                    manifest["source"] != manifest["source_after"]
+                )
+            except (OSError, subprocess.CalledProcessError) as error:
+                manifest.update(
+                    source_changed_during_build=None, source_identity_error=str(error)
+                )
+            if interrupted:
+                manifest["state"] = "interrupted"
+            save_manifest(bundle, manifest)
+        decoded_at = time.monotonic()
+        try:
+            result = summarize(binary, bundle)
+            manifest["diagnostics_complete"] = (
+                result["complete"] and "source_identity_error" not in manifest
+            )
+            if args.baseline:
+                compare(binary, args.baseline, bundle)
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            manifest.update(diagnostics_complete=False, diagnostics_error=str(error))
+        manifest["analysis_seconds"] = time.monotonic() - decoded_at
         if interrupted:
-            manifest["state"] = "interrupted"
+            manifest.update(state="interrupted", diagnostics_complete=False)
         save_manifest(bundle, manifest)
-    decoded_at = time.monotonic()
-    try:
-        result = summarize(binary, bundle)
-        manifest["diagnostics_complete"] = result["complete"]
-        if args.baseline:
-            compare(binary, args.baseline, bundle)
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        manifest.update(diagnostics_complete=False, diagnostics_error=str(error))
-    manifest["analysis_seconds"] = time.monotonic() - decoded_at
-    if interrupted:
-        manifest.update(state="interrupted", diagnostics_complete=False)
-    save_manifest(bundle, manifest)
-    for sig, handler in handlers.items():
-        signal.signal(sig, handler)
-    return (
-        (128 + interrupted[-1])
-        if interrupted
-        else (status if status >= 0 else 128 - status)
-    )
+        return (
+            (128 + interrupted[-1])
+            if interrupted
+            else (status if status >= 0 else 128 - status)
+        )
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
 
 
 def compare(binary, baseline, bundle):
