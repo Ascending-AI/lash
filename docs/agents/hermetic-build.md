@@ -80,7 +80,10 @@ floor` is the pre-push floor: the dev and feature-lane test and clippy
 partitions, `kiln fmt -- --check`, `git diff --check`, the repository-script
 gates CI runs as `Test repository scripts`
 (`scripts/ci/repository-gates.sh` extracts the command list from
-`.github/workflows/ci.yml` so the local run cannot drift), and the two
+`.github/workflows/ci.yml` so the local run cannot drift), minus
+`scripts/test-agent-workbench-dev-reset.sh`, which the local run skips and
+names in its table row because it alone took 170 s — CI still runs it,
+`scripts/ci/repository-gates.sh --all` restores it — and the two
 version-bump checks, all run concurrently and reported as one PASS/FAIL
 table — run it on a committed head because `check_version_bumps.py` reads
 committed state. `just bump-check` narrows that to the store-bump gates: both

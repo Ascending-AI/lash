@@ -448,6 +448,23 @@ def target_support(
         "lash-internal-sqlite-store",
     ) and target["name"] == "durable_read_fixture":
         extra_compile_data.append("//:durable_fixtures")
+    # Architecture lints that read sibling crates' sources at run time. A
+    # library's runfiles carry only its non-Rust package files (a `.rs` is a
+    # compile input, not a runtime one), so a test that scans another crate's
+    # sources names that crate's `rust_sources` filegroup here; every other
+    # test stops re-running when an unrelated crate's test file changes.
+    if package["name"] == "lash-internal-core" and target["name"] in (
+        "runtime_effect",
+        "runtime_scenarios",
+    ):
+        extra_data.append("//crates/lash-core-execution:rust_sources")
+    if package["name"] == "lash-runtime" and target["name"] == "facade_inventory":
+        extra_data.extend([
+            "//crates/lash-remote-protocol:rust_sources",
+            "//crates/lash-sansio:rust_sources",
+            "//crates/lash-tool-support:rust_sources",
+            "//crates/lash-trace:rust_sources",
+        ])
     target_args = []
     if (
         package["name"] == "lash-internal-core"

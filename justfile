@@ -361,7 +361,11 @@ seal:
 # clippy partitions on the shared pool plus the quick script gates. Frontend
 # dependencies are installed first so npm does not replace node_modules while
 # Bazel scans the example package; the remaining gates run concurrently and
-# are reported as one table. Run it on a COMMITTED head —
+# are reported as one table. The repository-gates leg skips
+# `scripts/test-agent-workbench-dev-reset.sh` locally (170 s, it alone
+# bounded the floor) and says so in its table row; CI's `Test repository
+# scripts` job still runs it, and `scripts/ci/repository-gates.sh --all`
+# restores it here. Run it on a COMMITTED head —
 # check_version_bumps.py reads committed state, so work that exists only in
 # the worktree is invisible to that leg.
 floor:
