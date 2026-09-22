@@ -250,6 +250,8 @@ impl ReqwestHttpTransport {
         }
     }
 
+    /// A caller-built client keeps its own redirect policy; only clients
+    /// built through [`http_client_builder`] get the same-origin guard.
     pub fn from_client(client: reqwest::Client) -> Self {
         Self { client }
     }
@@ -387,8 +389,34 @@ pub fn build_http_client() -> reqwest::Client {
 
 /// Build a reqwest client with Lash's shared connection safeguards while
 /// leaving authentication and other host policy configurable.
+///
+/// Redirects are followed only within the configured endpoint's origin
+/// (scheme, host and port): a cross-origin hop is refused as a request error
+/// rather than replaying credential headers or the request body to a host
+/// that was never configured. reqwest's built-in cross-host stripping covers
+/// only `Authorization`-family headers, so Anthropic `x-api-key` and custom
+/// auth headers would otherwise follow a 307/308.
 pub fn http_client_builder() -> reqwest::ClientBuilder {
     http_client_builder_with(&HttpTransportPolicy::default())
+}
+
+/// The redirect guard behind [`http_client_builder`]: every hop must keep the
+/// original request URL's origin, so credentials can never be replayed off
+/// the configured endpoint. Within the origin, reqwest's default hop limit
+/// still applies.
+fn same_origin_redirect(attempt: reqwest::redirect::Attempt<'_>) -> reqwest::redirect::Action {
+    let next = attempt.url().clone();
+    let same_origin = attempt
+        .previous()
+        .first()
+        .is_some_and(|origin| origin.origin() == next.origin());
+    if same_origin {
+        reqwest::redirect::Policy::default().redirect(attempt)
+    } else {
+        attempt.error(format!(
+            "redirect to {next} refused: target leaves the configured endpoint's origin"
+        ))
+    }
 }
 
 pub fn http_client_builder_with(policy: &HttpTransportPolicy) -> reqwest::ClientBuilder {
@@ -396,7 +424,8 @@ pub fn http_client_builder_with(policy: &HttpTransportPolicy) -> reqwest::Client
         .connect_timeout(policy.connect_timeout)
         .tcp_keepalive(policy.tcp_keepalive)
         .pool_idle_timeout(policy.pool_idle_timeout)
-        .pool_max_idle_per_host(policy.pool_max_idle_per_host);
+        .pool_max_idle_per_host(policy.pool_max_idle_per_host)
+        .redirect(reqwest::redirect::Policy::custom(same_origin_redirect));
 
     if let Some(proxy) = policy.proxy.clone() {
         builder = builder.proxy(proxy);
@@ -501,6 +530,119 @@ mod tests {
         assert_eq!(err.message, "request timed out");
         assert_eq!(err.code, Some(FailureCode::lash(TurnFailureCode::Timeout)));
         assert_eq!(err.retry_verdict, TransportRetryVerdict::RetryableTransient);
+    }
+
+    /// One captured HTTP/1.1 request: headers and body as the server saw them.
+    #[derive(Debug)]
+    struct CapturedRequest {
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    }
+
+    /// Serve HTTP/1.1 requests on an ephemeral loopback port, reporting each
+    /// request's headers and body and replying with `response`.
+    fn spawn_capture_server(
+        response: String,
+    ) -> (String, std::sync::mpsc::Receiver<CapturedRequest>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback bind");
+        let base = format!("http://{}", listener.local_addr().expect("local addr"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.expect("accept");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .expect("read timeout");
+                let mut raw = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let head_end = loop {
+                    if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break pos;
+                    }
+                    let read = stream.read(&mut chunk).expect("read request head");
+                    assert!(read > 0, "connection closed before request head");
+                    raw.extend_from_slice(&chunk[..read]);
+                };
+                let head = String::from_utf8_lossy(&raw[..head_end]).into_owned();
+                let headers: Vec<(String, String)> = head
+                    .lines()
+                    .skip(1)
+                    .filter_map(|line| line.split_once(':'))
+                    .map(|(name, value)| (name.trim().to_string(), value.trim().to_string()))
+                    .collect();
+                let content_length = headers
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .and_then(|(_, value)| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let mut body = raw.split_off(head_end + 4);
+                while body.len() < content_length {
+                    let read = stream.read(&mut chunk).expect("read request body");
+                    assert!(read > 0, "connection closed before request body");
+                    body.extend_from_slice(&chunk[..read]);
+                }
+                body.truncate(content_length);
+                tx.send(CapturedRequest { headers, body })
+                    .expect("report request");
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+            }
+        });
+        (base, rx)
+    }
+
+    #[tokio::test]
+    async fn cross_host_redirect_does_not_carry_credentials() {
+        let (target_base, target_requests) = spawn_capture_server(
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string(),
+        );
+        let (gateway_base, gateway_requests) = spawn_capture_server(format!(
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: {target_base}/moved\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ));
+        let transport = ReqwestHttpTransport::new();
+
+        for credential_headers in [
+            // Anthropic-style
+            vec![("x-api-key", "sk-ant-secret")],
+            // OpenAI-style custom `auth_header_name`
+            vec![("x-custom-auth", "sk-openai-secret")],
+        ] {
+            let request = HttpRequest::post(
+                format!("{gateway_base}/v1/messages"),
+                Bytes::from_static(b"{\"prompt\":\"secret\"}"),
+            )
+            .with_headers(credential_headers.clone());
+            let err = transport
+                .send(request, Some(Duration::from_secs(10)))
+                .await
+                .expect_err("a cross-origin redirect must be refused, not followed");
+            assert_eq!(err.kind, ProviderFailureKind::Transport);
+            assert!(!err.is_retryable());
+
+            let gateway_request = gateway_requests
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the configured endpoint saw the request");
+            for (name, value) in &credential_headers {
+                assert!(
+                    gateway_request
+                        .headers
+                        .iter()
+                        .any(|(n, v)| { n.eq_ignore_ascii_case(name) && v == value }),
+                    "credential header {name} must reach the configured endpoint"
+                );
+            }
+            assert_eq!(gateway_request.body, b"{\"prompt\":\"secret\"}");
+
+            assert!(
+                target_requests
+                    .recv_timeout(Duration::from_millis(250))
+                    .is_err(),
+                "the redirected request — credentials and body — reached another origin"
+            );
+        }
     }
 
     #[test]
