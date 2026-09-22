@@ -479,6 +479,7 @@ jobs:
           python3 scripts/test_check_feature_coverage.py
           python3 scripts/test_fast_test.py
           python3 scripts/test_bazel_test_contract.py
+          python3 scripts/test_bazel_profile_digest.py
           python3 scripts/test_runtime_off_graph.py ManifestInheritance
           python3 scripts/test_bazel_source_ownership.py
           python3 scripts/test_bazel_diagnostics.py
@@ -721,6 +722,7 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
+            --profile="${RUNNER_TEMP}/bazel-feature-profile.json.gz" \
             //:feature_lanes
 
       # The lane commands that are `cargo test`, not `cargo check`. They are
@@ -742,6 +744,19 @@ jobs:
       - name: Hold the feature-lane test-case floors
         shell: bash
         run: python3 scripts/ci/check_feature_lane_test_floors.py
+
+      - name: Summarize feature-lane build profile
+        if: always()
+        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-feature-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload feature-lane build profile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-feature-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Remove client credentials
         if: always()
@@ -835,7 +850,11 @@ jobs:
       # 30+ minutes after it started with only ~90 remote actions executed;
       # the job log names no crate, and the critical path a partition pays is
       # invisible below job granularity without this. Load the file at
-      # chrome://tracing or with `bazel analyze-profile`.
+      # chrome://tracing; the digest below puts the longest path in the job summary.
+      - name: Summarize Bazel profile
+        if: always()
+        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
+
       - name: Upload Bazel profile
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -921,7 +940,11 @@ jobs:
       # 30+ minutes after it started with only ~90 remote actions executed;
       # the job log names no crate, and the critical path a partition pays is
       # invisible below job granularity without this. Load the file at
-      # chrome://tracing or with `bazel analyze-profile`.
+      # chrome://tracing; the digest below puts the longest path in the job summary.
+      - name: Summarize Bazel profile
+        if: always()
+        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
+
       - name: Upload Bazel profile
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1425,6 +1448,10 @@ jobs:
         if: always()
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+      - name: Summarize compiler and schema action profile
+        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-lint-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload compiler and schema action profile
         if: always() && needs.plan.outputs.bazel_trusted == 'true'
