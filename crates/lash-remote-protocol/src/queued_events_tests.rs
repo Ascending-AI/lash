@@ -28,7 +28,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
                 messages,
                 checkpoint: lash_core::CheckpointKind::AfterWork,
             },
-            serde_json::json!({"type":"queued_messages_committed","messages":[{"role":"Event","content":"ready"}],"checkpoint":"after_work"}),
+            serde_json::json!({"type":"queued_messages_committed","messages":[{"role":"Event","parts":[{"id":"","kind":"Text","content":"ready"}]}],"checkpoint":"after_work"}),
         ),
         (
             lash_core::TurnEvent::PluginRuntime {
