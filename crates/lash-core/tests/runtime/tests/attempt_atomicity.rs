@@ -92,17 +92,8 @@ impl lash_core::AwaitEventResolver for ControllerOwnedTier {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for ControllerOwnedTier {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
-        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        lash_core::EffectJournaling::Journaled
     }
 
     async fn execute_effect(
@@ -1174,17 +1165,8 @@ impl lash_core::AwaitEventResolver for OrdinalJournaledTier {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
-        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        lash_core::EffectJournaling::Journaled
     }
 
     async fn execute_effect(

@@ -239,12 +239,12 @@ pub enum ToolChildCompletionRouting {
     /// The child may defer, and its completion key is routed durably — a
     /// completion still resolves after the worker that issued it is gone.
     ///
-    /// Valid only when the claim's admitted scope participates in durable
-    /// turn-control journaling; the driver refuses a durable routing request
-    /// whose scoped controller reports [`TurnControlParticipation::Local`].
+    /// Valid only when the claim's admitted scope journals its effects
+    /// durably; the driver refuses a durable routing request whose scoped
+    /// controller reports [`EffectJournaling::Local`].
     ///
-    /// [`TurnControlParticipation::Local`]:
-    ///     crate::runtime::effect::TurnControlParticipation::Local
+    /// [`EffectJournaling::Local`]:
+    ///     crate::runtime::effect::EffectJournaling::Local
     Durable,
     /// The child may defer, and its completion key lives only as long as the OS
     /// process that issued it (`NativeEffectHost::allow_process_lifetime_completion_keys`,
@@ -454,11 +454,10 @@ pub struct ToolChildRequest {
     /// shape may not carry an unvalidated identity.
     ///
     /// **`None` is legal in exactly one case**: the opener's controller
-    /// participates in turn control *locally*
-    /// (`TurnControlParticipation::Local`) rather than through a durable
-    /// journaled authority, so there is no durable address to record and a
-    /// recovered child has no cancellation to honour. Every
-    /// `DurableJournaled` opener records `Some`.
+    /// journals *locally* (`EffectJournaling::Local`) rather than through a
+    /// durable journaled authority, so there is no durable address to record
+    /// and a recovered child has no cancellation to honour. Every `Journaled`
+    /// opener records `Some`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancellation_authority: Option<TurnControlBindingId>,
     /// The captured process-execution environment this child resolves, retained

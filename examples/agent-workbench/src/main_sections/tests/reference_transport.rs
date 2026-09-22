@@ -48,11 +48,10 @@ use lash::provider::{
     ProviderReliability, TransportRetryVerdict,
 };
 use lash::runtime::{
-    AwaitEventResolver, EffectGroupHandle, ExecutionScope, GroupSettlement, LoserPolicy,
-    NativeRuntimeEffectController, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, TurnControlParticipation, effect_groups_unsupported,
+    AwaitEventResolver, EffectGroupHandle, EffectJournaling, ExecutionScope, GroupSettlement,
+    LoserPolicy, NativeRuntimeEffectController, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, effect_groups_unsupported,
 };
 use lash_remote_protocol::{RemoteSessionObservationEventPayload, RemoteTurnEvent};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -635,7 +634,7 @@ fn redrive_provider(
 /// The journaled half of a recovery re-drive: every effect a turn makes —
 /// input admission included — is journaled under its replay key, and the
 /// `fail_on_new_llm_call`-th *new* provider call aborts the invocation the way
-/// a crashed workflow runner abandons one — `AbortInvocation`, so the turn
+/// a crashed workflow runner abandons one — `Journaled`, so the turn
 /// never reaches a terminal commit.
 ///
 /// The recovery drive under the same turn id replays each journaled effect
@@ -743,15 +742,8 @@ impl AwaitEventResolver for JournaledRedriveController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for JournaledRedriveController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        Ok(RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        Ok(TurnControlParticipation::DurableJournaled)
+    fn effect_journaling(&self) -> EffectJournaling {
+        EffectJournaling::Journaled
     }
 
     async fn execute_effect(

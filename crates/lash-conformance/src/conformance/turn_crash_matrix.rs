@@ -1221,17 +1221,8 @@ impl crate::AwaitEventResolver for SeamEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for SeamEffectController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: crate::RuntimeErrorCode,
-    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
-        self.inner.runtime_effect_failure_disposition(code).await
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
-        self.inner.turn_control_participation().await
+    fn effect_journaling(&self) -> crate::EffectJournaling {
+        self.inner.effect_journaling()
     }
 
     async fn execute_effect(
@@ -1423,19 +1414,6 @@ impl crate::AwaitEventResolver for StoreOwnedTurnControlController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for StoreOwnedTurnControlController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: crate::RuntimeErrorCode,
-    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
-        self.inner.runtime_effect_failure_disposition(code).await
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
-        Ok(crate::TurnControlParticipation::Local)
-    }
-
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -1553,17 +1531,8 @@ impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        code: crate::RuntimeErrorCode,
-    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
-        self.inner.runtime_effect_failure_disposition(code).await
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
-        self.inner.turn_control_participation().await
+    fn effect_journaling(&self) -> crate::EffectJournaling {
+        self.inner.effect_journaling()
     }
 
     async fn execute_effect(
@@ -1930,19 +1899,15 @@ async fn build_runtime_with_lease_timings(
 ) -> crate::LashRuntime {
     super::bind_conformance_session(&store, &identity.session_id).await;
     // The live host watcher must share the turn controller's await-event registry.
-    let effect_host: Arc<dyn crate::EffectHost> = match effect_controller
-        .turn_control_participation()
-        .await
-        .expect("fixture turn control participation")
-    {
-        crate::TurnControlParticipation::Local => {
+    let effect_host: Arc<dyn crate::EffectHost> = match effect_controller.effect_journaling() {
+        crate::EffectJournaling::Local => {
             lash_core::facade_support::bind_store_turn_control_authority(
                 Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller))),
                 store.as_ref(),
             )
             .expect("bind crash fixture cancellation authority")
         }
-        crate::TurnControlParticipation::DurableJournaled => {
+        crate::EffectJournaling::Journaled => {
             assert!(
                 effect_controller
                     .await_event_authority_binding_id()

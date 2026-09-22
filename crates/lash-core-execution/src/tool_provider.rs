@@ -1543,17 +1543,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::RuntimeEffectController for DurableControllerWithoutCompletionKeySupport {
-        async fn runtime_effect_failure_disposition(
-            &self,
-            _code: crate::RuntimeErrorCode,
-        ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
-            Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
-        }
-
-        async fn turn_control_participation(
-            &self,
-        ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
-            Ok(crate::TurnControlParticipation::DurableJournaled)
+        fn effect_journaling(&self) -> crate::EffectJournaling {
+            crate::EffectJournaling::Journaled
         }
 
         async fn execute_effect(

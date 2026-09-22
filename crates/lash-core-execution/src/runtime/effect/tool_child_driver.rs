@@ -658,14 +658,10 @@ async fn validate_recorded_authorities(
     controller: &ScopedEffectController<'_>,
     request: &ToolChildRequest,
 ) -> Result<(), RuntimeEffectControllerError> {
-    use crate::runtime::effect::TurnControlParticipation;
-    let participation = controller
-        .controller()
-        .turn_control_participation()
-        .await
-        .map_err(RuntimeEffectControllerError::from)?;
-    match (request.cancellation_authority.as_ref(), participation) {
-        (Some(recorded), TurnControlParticipation::DurableJournaled) => {
+    use crate::runtime::effect::EffectJournaling;
+    let journaling = controller.controller().effect_journaling();
+    match (request.cancellation_authority.as_ref(), journaling) {
+        (Some(recorded), EffectJournaling::Journaled) => {
             let effect_host = host.effect_host()?;
             let binding = effect_host
                 .turn_control_binding(controller)
@@ -685,7 +681,7 @@ async fn validate_recorded_authorities(
                 ));
             }
         }
-        (Some(recorded), TurnControlParticipation::Local) => {
+        (Some(recorded), EffectJournaling::Local) => {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
                 format!(
@@ -698,7 +694,7 @@ async fn validate_recorded_authorities(
                 ),
             ));
         }
-        (None, TurnControlParticipation::DurableJournaled) => {
+        (None, EffectJournaling::Journaled) => {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
                 format!(
@@ -712,12 +708,12 @@ async fn validate_recorded_authorities(
         // `None` records that no cooperative authority existed at admission;
         // there is nothing to re-derive and the child simply is not wired to
         // the cooperative signal.
-        (None, TurnControlParticipation::Local) => {}
+        (None, EffectJournaling::Local) => {}
     }
     match &request.completion_routing {
         crate::runtime::effect::ToolChildCompletionRouting::Inline => {}
         crate::runtime::effect::ToolChildCompletionRouting::Durable => {
-            if participation != TurnControlParticipation::DurableJournaled
+            if journaling != EffectJournaling::Journaled
                 || controller
                     .controller()
                     .await_event_authority_binding_id()
@@ -736,13 +732,13 @@ async fn validate_recorded_authorities(
         }
         crate::runtime::effect::ToolChildCompletionRouting::ProcessLifetime { issuer } => {
             let current = host.effect_host()?.turn_control_binding_id();
-            if participation != TurnControlParticipation::Local || current != issuer.as_str() {
+            if journaling != EffectJournaling::Local || current != issuer.as_str() {
                 return Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
                     format!(
                         "tool child `{}` was admitted under a process-lifetime key issued by \
                          registry `{issuer}`; this host is registry `{current}` with \
-                         {participation:?} turn-control participation — a process-lifetime \
+                         {journaling:?} effect journaling — a process-lifetime \
                          key resolves only while its issuing local registry lives, so a \
                          durable journal or a foreign issuer makes it unresolvable here and \
                          a fresh one would double dispatch",

@@ -14,8 +14,8 @@ use super::super::group::{
     EffectGroupHandle, GroupSettlement, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
 };
 use super::await_event_support::await_event_scope_not_retirable;
+use super::{EffectJournaling, TurnControlAuthorityOwner, TurnControlBinding};
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
-use super::{TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation};
 
 mod handle;
 pub use handle::RuntimeEffectControllerHandle;
@@ -160,8 +160,8 @@ pub trait EffectHost: AwaitEventResolver {
             &self.turn_control_binding_id(),
             scoped.execution_scope(),
         )?;
-        match scoped.controller().turn_control_participation().await? {
-            TurnControlParticipation::Local => {
+        match scoped.controller().effect_journaling() {
+            EffectJournaling::Local => {
                 let resolver = self.await_event_resolver();
                 Ok(TurnControlBinding::host_owned(
                     binding_id,
@@ -170,7 +170,7 @@ pub trait EffectHost: AwaitEventResolver {
                     self.turn_attach(),
                 ))
             }
-            TurnControlParticipation::DurableJournaled => {
+            EffectJournaling::Journaled => {
                 let resolver = scoped.controller();
                 let Some(controller_authority_id) = resolver.await_event_authority_binding_id()
                 else {
@@ -401,15 +401,10 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         false
     }
 
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: RuntimeErrorCode,
-    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
-        Ok(RuntimeEffectFailureDisposition::RecordTurnFailure)
-    }
-
-    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
-        Ok(TurnControlParticipation::Local)
+    /// Whether this controller journals its effects durably. Only durable
+    /// replay engines answer `Journaled`; forwarding wrappers forward it.
+    fn effect_journaling(&self) -> EffectJournaling {
+        EffectJournaling::Local
     }
 
     /// Advises an engine to end the current in-process execution segment at a

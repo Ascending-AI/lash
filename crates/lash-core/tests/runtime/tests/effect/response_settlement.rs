@@ -356,7 +356,6 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         (runtime, result)
     });
     executor.wait_for_first_execution().await;
-    controller.fail_failure_disposition();
     turn_driver
         .request_cancel(lash_core::facade_support::TurnCancelRequest::new(
             lash_core::facade_support::TurnAddress::new("root", turn_id),
@@ -364,7 +363,7 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
             Some("test-user".to_string()),
         ))
         .await
-        .expect("record cancellation before the failed disposition lookup");
+        .expect("record cancellation before the failed handoff settles");
     let (mut runtime, first_result) = first.await.expect("first turn task");
     let first = first_result.expect("the cancellation path assembles its terminal");
     assert!(matches!(

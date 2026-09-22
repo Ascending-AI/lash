@@ -29,9 +29,9 @@ pub use control::{
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition,
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
-    ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
-    ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
+    ResolveOutcome, RuntimeEffectController, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
@@ -66,8 +66,8 @@ pub use native_controller::NativeRuntimeEffectController;
 pub(crate) use native_controller::{NativeEffectGroups, NativeGroupClosing};
 pub use trigger::TriggerLocalExecution;
 pub use turn_control_authority::{
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlParticipation, concrete_turn_cancellation_authority,
+    EffectJournaling, TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
+    TurnControlBinding, concrete_turn_cancellation_authority,
 };
 
 use crate::LlmRequest as CoreLlmRequest;

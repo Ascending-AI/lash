@@ -60,9 +60,3 @@ pub enum ToolIntentPreparation {
         _guard: ToolIntentSubmissionGuard,
     },
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RuntimeEffectFailureDisposition {
-    AbortInvocation,
-    RecordTurnFailure,
-}

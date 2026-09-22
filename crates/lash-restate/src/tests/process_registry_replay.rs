@@ -745,7 +745,7 @@ pub(super) struct RecordedProcessRun {
     pub(super) wake_target_session_id: Option<SessionId>,
     pub(super) tool_effect_id: Option<String>,
     pub(super) execution_scope_id: String,
-    pub(super) turn_control_participation: lash_core::TurnControlParticipation,
+    pub(super) effect_journaling: lash_core::EffectJournaling,
 }
 
 #[derive(Default)]
@@ -764,11 +764,7 @@ impl RestateProcessRunner for RecordingRunner {
         _handover: Option<lash_core::SegmentHandover>,
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        let turn_control_participation = scoped_effect_controller
-            .controller()
-            .turn_control_participation()
-            .await
-            .map_err(PluginError::Runtime)?;
+        let effect_journaling = scoped_effect_controller.controller().effect_journaling();
         self.ran.lock_recover().push(RecordedProcessRun {
             process_id: registration.id.clone(),
             wake_target_session_id: registration.wake_session_id.clone(),
@@ -776,7 +772,7 @@ impl RestateProcessRunner for RecordingRunner {
                 .causal_invocation
                 .and_then(|invocation| invocation.effect_id().map(str::to_string)),
             execution_scope_id: scoped_effect_controller.scope_id().to_string(),
-            turn_control_participation,
+            effect_journaling,
         });
         Ok(process_success(serde_json::json!({"ok": true})).into())
     }

@@ -33,7 +33,7 @@ cd "$repo_root"
 clock_forbidden='tokio::time::(sleep|sleep_until|interval)|tokio::task::yield_now|use[[:space:]]+tokio::time::\{[^}]*(sleep|sleep_until|interval)'
 containment_forbidden='(^|[^[:alnum:]_])(NativeQueuedWork|NoQueuedWork|NativeProcessWork|NativeProcessAwaiter|NativeSubstrateSetup|NativeSubstrateSlot|WakeDeliveryDriver)([^[:alnum:]_]|$)'
 fallback_forbidden='ProcessAwaiter::polling|Option[[:space:]]*<[[:space:]]*Arc[[:space:]]*<[[:space:]]*dyn[[:space:]]+(QueuedWorkSubstrate|ProcessWorkSubstrate)[[:space:]]*>[[:space:]]*>|Option[[:space:]]*<[[:space:]]*(ProcessWorkDriver|QueuedWorkDriver)[[:space:]]*>'
-capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys'
+capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys|turn_control_participation|runtime_effect_failure_disposition'
 capability_forbidden="fn[[:space:]]+(${capability_names})([^[:alnum:]_]|$)|\.(${capability_names})[[:space:]]*\(|(^|[^[:alnum:]_])(${capability_names})[[:space:]]*:"
 test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)'
 containment_test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)|_tests\.rs$'
