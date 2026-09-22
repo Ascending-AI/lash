@@ -427,6 +427,18 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         true
     }
 
+    /// Testing hook: a controller double that forwards effect-group operations
+    /// to an inner [`NativeRuntimeEffectController`] exposes it here so test
+    /// builders can give the context's `EffectHost` the same native group
+    /// substrate (bound-child admission writes through the native group state
+    /// that opened the group). Production controllers leave this `None`.
+    #[cfg(any(test, feature = "testing"))]
+    fn shared_native_group_substrate(
+        &self,
+    ) -> Option<std::sync::Arc<crate::runtime::NativeRuntimeEffectController>> {
+        None
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

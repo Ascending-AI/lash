@@ -843,6 +843,7 @@ mod tests {
             .expect("plugin session");
         let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
         let host = Arc::new(crate::testing::MockSessionManager::default());
+        let controller = Arc::new(crate::NativeRuntimeEffectController::default());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
             plugins,
             tools: Arc::new(GrantedLeafTool),
@@ -857,9 +858,13 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::NativeRuntimeEffectController::default(),
-            )),
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::Shared {
+                controller: controller.clone(),
+                admitted: crate::AdmittedScope::turn(
+                    SessionId::from("granted-call-session"),
+                    crate::TurnId::from("test-turn"),
+                ),
+            },
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -878,18 +883,31 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
         };
-        (
-            crate::RuntimeExecutionContext::new(
-                SessionId::from("granted-call-session"),
-                Arc::new(dispatch),
-                Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-                attachment_store,
-                Arc::new(crate::ChronologicalProjection::default()),
-                None,
-                crate::TurnContext::default(),
-            ),
-            executions,
-        )
+        let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let dispatch = Arc::new(dispatch);
+        let effect_host: Arc<dyn crate::EffectHost> = Arc::new(
+            crate::runtime::NativeEffectHost::with_native_controller(controller),
+        );
+        let wiring =
+            crate::testing::wire_test_tool_children(&dispatch, &process_env_store, &effect_host);
+        let mut context = crate::RuntimeExecutionContext::new(
+            SessionId::from("granted-call-session"),
+            dispatch,
+            process_env_store,
+            attachment_store,
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        );
+        context = context.with_tool_child_host(effect_host);
+        if let Some((guard, issuer)) = wiring {
+            context = context.with_live_opener_guard(Arc::new(guard));
+            if let Some(issuer) = issuer {
+                context = context.with_tool_child_completion_issuer(issuer);
+            }
+        }
+        (context, executions)
     }
 
     fn granted_call() -> crate::ToolExecutionGrant {
@@ -1378,7 +1396,7 @@ mod tests {
         ));
         let context = batch_failure_context(Arc::clone(&controller));
         let replies = context
-            .call_tool_batch(
+            .call_tool_batch_via_batch_effect(
                 vec![ToolInvocation::new(
                     "call",
                     crate::ToolId::from("tool:batch_failure"),
@@ -1414,7 +1432,7 @@ mod tests {
             BatchFailureResponse::MalformedSettlementOrder,
         )));
         let replies = context
-            .call_tool_batch(
+            .call_tool_batch_via_batch_effect(
                 vec![ToolInvocation::new(
                     "call",
                     crate::ToolId::from("tool:batch_failure"),
@@ -1440,7 +1458,7 @@ mod tests {
             BatchFailureResponse::EffectDecodeError,
         )));
         let replies = context
-            .call_tool_batch(
+            .call_tool_batch_via_batch_effect(
                 vec![ToolInvocation::new(
                     "call",
                     crate::ToolId::from("tool:batch_failure"),
