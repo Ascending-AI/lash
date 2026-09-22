@@ -86,3 +86,11 @@ single_version_override(
     patches = ["//tools/bazel:patches/rules-rs-reachable-features.patch"],
     patch_strip = 1,
 )
+
+# Carry hermetic-llvm 0.8.18's opt-in switch for Bazel's built-in Swift dependency.
+single_version_override(
+    module_name = "rules_swift",
+    version = "3.1.2",
+    patches = ["//tools/bazel:patches/rules-swift-opt-in-autoconfiguration.patch"],
+    patch_strip = 1,
+)

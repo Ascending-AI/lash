@@ -1420,6 +1420,8 @@ jobs:
           bazel_output_base="$(bazel --output_user_root="$RUNNER_TEMP/bazel-output" info output_base)"
           python3 scripts/test_runtime_off_graph.py \
             --resolver "$bazel_output_base/external/rules_rs+/rs/private/resolver.bzl"
+          python3 scripts/test_swift_autoconfiguration.py \
+            --source "$bazel_output_base/external/rules_swift+/swift/internal/swift_autoconfiguration.bzl"
 
       - name: Remove client credentials
         if: always()

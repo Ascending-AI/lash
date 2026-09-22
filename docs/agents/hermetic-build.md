@@ -781,3 +781,21 @@ and shared `runtime_support` helpers. The turns suite also owns its two
 `#[path]` modules outside the turns directory. Editing one suite still reruns
 other tests that scan its source at runtime, but does not recompile unrelated
 suite binaries.
+
+### Linux Swift toolchain discovery
+
+Bazel 9.1 brings `rules_swift` 3.1.2 as a built-in dependency and registers its
+local toolchains. On Linux hosts with `swiftc` installed, that registration
+compiles a Swift feature probe even for Rust-only analysis. Fresh CI lint and
+tail jobs spent 27s and 55s on that probe.
+
+Lash has no Swift targets. Its Linux Bazel configuration sets
+`--repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1`, using the opt-in patch shipped
+by [hermetic-llvm 0.8.18](https://github.com/hermeticbuild/hermetic-llvm/blob/v0.8.18/3rd_party/rules_swift/0001-allow-disabling-autoconfiguration.patch).
+The patch is retained byte-for-byte at
+`tools/bazel/patches/rules-swift-opt-in-autoconfiguration.patch`. LLVM's own
+module override is a development dependency and does not propagate to Lash.
+Darwin receives no disable flag, preserving upstream Xcode and Swift discovery.
+An explicit `--repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=0` restores upstream
+discovery when diagnosing Swift consumers. Rust, C/C++, and bindgen toolchain
+registrations are unchanged.
