@@ -612,7 +612,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         Arc::new(InMemoryLashlangArtifactStore::new());
     let linked = lashlang::LinkedModule::link(
         module,
-        &lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostEnvironment::new(
             recovery_echo_catalog(),
             lashlang::LashlangAbilities::default(),
         ),
@@ -706,12 +706,16 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         .await
         .expect("failed process settles")
         .expect("await failed process");
-        let graph = graphs.graphs().into_iter().find(|graph| {
-            graph.history.first().is_some_and(|record| {
-                matches!(&record.event.identity.subject,
-                    lash_trace::TraceRuntimeSubject::Process { process_id: id } if id == &process_id)
+        let graph = graphs
+            .graphs()
+            .into_iter()
+            .find(|graph| {
+                graph.history.first().is_some_and(|record| {
+                    matches!(&record.event.identity.subject,
+                    lash_trace::TraceRuntimeSubject::Process { process_id: id } if id == process_id)
+                })
             })
-        }).expect("failed process graph");
+            .expect("failed process graph");
         let (call_id, failure) = graph
             .history
             .iter()
