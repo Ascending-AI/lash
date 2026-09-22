@@ -1180,9 +1180,12 @@ impl NativeEffectGroups {
     /// obligation — without bound. Recomputed on every wake, so a body that
     /// returned early stops being waited for the moment its notify lands.
     async fn await_local_obligations(state: &Arc<NativeEffectGroup>, budget: Duration) {
-        let notified = state.task_finished.notified();
-        tokio::pin!(notified);
         loop {
+            // A fresh `notified()` each pass: a `Notified` that already resolved
+            // stays ready forever, so re-arming the same future would spin
+            // instead of sleeping.
+            let notified = state.task_finished.notified();
+            tokio::pin!(notified);
             notified.as_mut().enable();
             let deadline = {
                 let inner = state.state.lock_recover();
