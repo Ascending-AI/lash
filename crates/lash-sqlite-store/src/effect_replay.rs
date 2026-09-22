@@ -476,9 +476,15 @@ impl SqliteEffectHost {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
+        // Opening creates the database before the host is returned, so the
+        // canonical path is a stable identity across relative paths and
+        // symlinked deployment configuration. Fall back only for platforms
+        // that cannot canonicalize an already-open file.
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let registry = Arc::new(RegistryAttachment::default());
         let inner = open_effect_replay_driver(
             path,
+            &binding_path,
             StoreBacking::File,
             options,
             clock,
@@ -487,11 +493,6 @@ impl SqliteEffectHost {
         .await?;
         let closure_lifecycle = SqliteConnection::open(path).await?;
         let closure_registry = Arc::new(RegistryAttachment::default());
-        // Opening creates the database before the host is returned, so the
-        // canonical path is a stable identity across relative paths and
-        // symlinked deployment configuration. Fall back only for platforms
-        // that cannot canonicalize an already-open file.
-        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
             inner,
             fence_database: Some(path.to_path_buf()),
@@ -583,9 +584,11 @@ impl SqliteRuntimeEffectController {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
             inner: open_effect_replay_driver(
                 path,
+                &binding_path,
                 StoreBacking::File,
                 options,
                 clock,
@@ -593,12 +596,7 @@ impl SqliteRuntimeEffectController {
             )
             .await?,
             scope,
-            turn_control_binding_id: Arc::from(format!(
-                "sqlite:{}",
-                std::fs::canonicalize(path)
-                    .unwrap_or_else(|_| path.to_path_buf())
-                    .display()
-            )),
+            turn_control_binding_id: Arc::from(format!("sqlite:{}", binding_path.display())),
         })
     }
 
@@ -666,6 +664,7 @@ fn validate_effect_host_path(path: &Path) -> tokio_rusqlite::Result<()> {
 
 async fn open_effect_replay_driver(
     path: &Path,
+    binding_path: &Path,
     backing: StoreBacking,
     options: SqliteEffectReplayOptions,
     clock: Arc<dyn lash_core::Clock>,
@@ -693,7 +692,7 @@ async fn open_effect_replay_driver(
         signing_secret,
         CompletionKeys::Issued,
         registry,
-        settlement_notify::SettlementNotifierKey::for_file(path),
+        settlement_notify::SettlementNotifierKey::for_file(binding_path),
     )))
 }
 

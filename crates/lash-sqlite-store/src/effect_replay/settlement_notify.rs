@@ -20,23 +20,28 @@ use tokio::sync::Notify;
 
 /// What a notifier belongs to, beneath the group key.
 ///
-/// `File` is the canonical database path, so two hosts opened on the same
-/// file through different spellings share one notifier. `Memory` is a
-/// per-open token: two in-memory connections never share a file, so sharing
-/// a key between them would only name a wake that can never happen.
+/// `File` is the resolved database path the opener already computed — the
+/// same canonical identity the replay binding and turn-control binding are
+/// keyed on — so two hosts opened on the same file through different
+/// spellings share one notifier without this module touching the filesystem.
+/// `Memory` is a per-open token: two in-memory connections never share a
+/// file, so sharing a key between them would only name a wake that can never
+/// happen.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SettlementNotifierKey {
-    /// The canonical path of the journal's database file.
+    /// The resolved path of the journal's database file, as the opener
+    /// canonicalized it.
     File(PathBuf),
     /// A fresh identity for an in-memory journal; scoped to the open.
     Memory(u64),
 }
 
 impl SettlementNotifierKey {
-    /// Key for a file-backed journal, canonicalized so relative paths and
-    /// symlinked spellings of one file share its notifiers.
-    pub(crate) fn for_file(path: &Path) -> Self {
-        Self::File(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+    /// Key for a file-backed journal. `resolved` is the canonical path the
+    /// open already computed for the binding identity — this type performs no
+    /// filesystem access of its own (FIG-2971).
+    pub(crate) fn for_file(resolved: &Path) -> Self {
+        Self::File(resolved.to_path_buf())
     }
 
     /// Key for the in-memory backing: never shared, by construction.
@@ -46,13 +51,16 @@ impl SettlementNotifierKey {
     }
 }
 
-/// The process-wide notifier table: `(store, group_key) -> Notify`.
+/// The process-wide notifier table's row type: `(store, group_key) ->
+/// Notify`.
+type SettlementNotifiers = HashMap<(SettlementNotifierKey, String), Weak<Notify>>;
+
+/// The process-wide notifier table.
 ///
 /// `Weak` so a group nobody waits on holds no entry's weight — a dead entry
 /// is replaced on the next lookup rather than swept.
-fn registry() -> MutexGuard<'static, HashMap<(SettlementNotifierKey, String), Weak<Notify>>> {
-    static REGISTRY: OnceLock<Mutex<HashMap<(SettlementNotifierKey, String), Weak<Notify>>>> =
-        OnceLock::new();
+fn registry() -> MutexGuard<'static, SettlementNotifiers> {
+    static REGISTRY: OnceLock<Mutex<SettlementNotifiers>> = OnceLock::new();
     REGISTRY
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
