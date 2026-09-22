@@ -900,7 +900,13 @@ impl NativeEffectGroups {
                 }),
                 tracing::Span::current(),
             );
-            task_owner.tasks.lock_recover().spawn(child_task);
+            // A child runs on its own task but inside its opener's process
+            // execution permit, exactly as a batch leaf did: a nested process
+            // await releases and reacquires the same permit rather than a
+            // second slot the worker never granted.
+            task_owner.tasks.lock_recover().spawn(
+                lash_core_ids::execution_permit::inherit_process_execution_permit(child_task),
+            );
         }
     }
 
