@@ -53,6 +53,41 @@ impl LashRuntime {
             "queue_drain.parent_end",
         );
 
+        // An empty poll ends nothing — unless the drain already owns
+        // children, which means this is the retry of a drain that ran,
+        // crashed before its end, and now finds the queue drained. `ran`
+        // covers the common case; the registry read is what distinguishes a
+        // first empty poll from a resumed one. It runs before the obligations
+        // reads on purpose: a fresh empty poll is the common idle case and
+        // costs one indexed read rather than a closing-group resume plus a
+        // quiescence scan.
+        if !ran {
+            let Some(registry) = self.host.process_registry() else {
+                return;
+            };
+            let parent = crate::ParentScope::queue_drain(session_id.clone(), drain_id.clone());
+            let filter = crate::ProcessListFilter {
+                parent_scope: Some(parent),
+                status: crate::ProcessStatusFilter::Any,
+                ..Default::default()
+            };
+            match registry.list_processes(&filter).await {
+                Ok(children) if children.is_empty() => {
+                    return;
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        drain_id = %drain_id,
+                        error = %error,
+                        "queue drain end withheld: could not list the drain's children",
+                    );
+                    return;
+                }
+            }
+        }
+
         // §7's ordering: the drain's protected obligations — closing groups
         // under its scope — finish before the end fact lands. A group still
         // `closing` with obligations this host cannot discharge reports
@@ -114,38 +149,6 @@ impl LashRuntime {
                         drain_id = %drain_id,
                         error = %error,
                         "queue drain end withheld: quiescence read failed",
-                    );
-                    return;
-                }
-            }
-        }
-
-        // An empty poll ends nothing — unless the drain already owns
-        // children, which means this is the retry of a drain that ran,
-        // crashed before its end, and now finds the queue drained. `ran`
-        // covers the common case; the registry read is what distinguishes a
-        // first empty poll from a resumed one.
-        if !ran {
-            let Some(registry) = self.host.process_registry() else {
-                return;
-            };
-            let parent = crate::ParentScope::queue_drain(session_id.clone(), drain_id.clone());
-            let filter = crate::ProcessListFilter {
-                parent_scope: Some(parent),
-                status: crate::ProcessStatusFilter::Any,
-                ..Default::default()
-            };
-            match registry.list_processes(&filter).await {
-                Ok(children) if children.is_empty() => {
-                    return;
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    tracing::warn!(
-                        session_id = %session_id,
-                        drain_id = %drain_id,
-                        error = %error,
-                        "queue drain end withheld: could not list the drain's children",
                     );
                     return;
                 }
