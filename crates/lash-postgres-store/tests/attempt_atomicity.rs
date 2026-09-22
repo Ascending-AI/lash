@@ -207,6 +207,30 @@ impl EffectHost for CrashingEffectHost {
         )
         .map(Some)
     }
+
+    fn scoped_for_group_child(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        let inner = self
+            .inner
+            .scoped_for_group_child(admitted.clone(), binding)?
+            .expect("PostgreSQL exposes static scopes");
+        lash_core::ScopedEffectController::shared(
+            Arc::new(CrossingController {
+                inner: Arc::new(ScopedControllerAdapter(inner)),
+                signal_frames: Arc::new(Mutex::new(Vec::new())),
+                crash_after: Some(self.crash_after),
+                cancel_after_batch_failure: None,
+                interrupt_after_batch_failure: false,
+                force_serial: self.force_serial,
+                fired: Arc::clone(&self.fired),
+            }),
+            admitted,
+        )
+        .map(Some)
+    }
 }
 
 struct ScopedControllerAdapter(lash_core::ScopedEffectController<'static>);

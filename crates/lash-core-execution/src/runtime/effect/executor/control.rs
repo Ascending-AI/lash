@@ -79,6 +79,35 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(None)
     }
 
+    /// The group-child-bound twin of [`scoped_static`](Self::scoped_static)
+    /// (ADR 0099 §4, FIG-3470).
+    ///
+    /// A controller minted here mints every semantic admission it serves —
+    /// the child's nested attempts, its intents' sinks — *under* `binding`'s
+    /// recorded child, fenced by the substrate's own arbitration: the SQL
+    /// claim refuses the insert once the minting replay row's cancel
+    /// disposition has committed, the native controller serializes admission
+    /// against the group mutex, and the Restate handler asks the serialized
+    /// group index. A bound controller is the only controller a group child's
+    /// nested work may run through: an unbound one would admit semantic writes
+    /// whose minting child was already cancel-decided.
+    ///
+    /// The default refuses rather than lending an unfenced controller, the
+    /// same posture as
+    /// [`commit_group_child_final`](RuntimeEffectController::commit_group_child_final):
+    /// a host without substrate-owned admission has no group-child controller
+    /// to lend.
+    fn scoped_for_group_child(
+        &self,
+        _admitted: AdmittedScope,
+        _binding: crate::GroupChildBinding,
+    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
+        Err(
+            super::effect_groups_unsupported("durable group-child admission binding")
+                .into_runtime_error(),
+        )
+    }
+
     /// Installs — or returns the already-installed — tool-child wiring for this
     /// host, and registers it as the host's group-executor resolver
     /// (ADR 0099 §2, FIG-2266).

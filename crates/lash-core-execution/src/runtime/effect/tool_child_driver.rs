@@ -140,22 +140,30 @@ impl ToolChildHost {
         })
     }
 
-    /// The child's own admitted controller (ADR 0099 §2).
+    /// The child's own admitted controller, bound to the child's recorded
+    /// identity (ADR 0099 §2, §4; FIG-3470).
     ///
     /// Built by the host for the child's *own* claim, never re-scoped from
     /// the opener's: an opener's controller carries the opener's retirement
     /// fence, and a child claimed under a different scope that inherited that
     /// fence would be refused — or admitted — for reasons that have nothing
-    /// to do with it. The argument is the request's recorded
+    /// to do with it. `admitted` is the request's recorded
     /// [`AdmittedScope`]: the claim *and* its pin, one checked pair, so a
     /// process claim reaches the controller with the incarnation it was
     /// admitted under rather than whatever process carries the name now.
+    ///
+    /// `binding` carries the child's envelope address and retained
+    /// membership — one journaled fact — and the returned controller mints
+    /// every nested semantic admission *under* it, fenced by the substrate's
+    /// own arbitration for that child rather than by any `caused_by` lineage
+    /// an envelope happens to carry.
     fn child_controller(
         &self,
         admitted: &AdmittedScope,
+        binding: crate::GroupChildBinding,
     ) -> Result<ScopedEffectController<'static>, RuntimeEffectControllerError> {
         self.effect_host()?
-            .scoped_static(admitted.clone())
+            .scoped_for_group_child(admitted.clone(), binding)
             .map_err(RuntimeEffectControllerError::from)?
             .ok_or_else(|| {
                 RuntimeEffectControllerError::new(
@@ -165,6 +173,28 @@ impl ToolChildHost {
                 )
             })
     }
+}
+
+/// The [`GroupChildBinding`](crate::GroupChildBinding) a tool-child envelope
+/// carries: the child's own `ToolInvocation` address plus its retained
+/// membership, one journaled pair (ADR 0099 §4, FIG-3470). A `ToolInvocation`
+/// without `envelope.group` is a shape error — such an envelope was never
+/// recorded as a group child, and a child without retained membership is
+/// refused rather than run unbound.
+fn envelope_group_child_binding(
+    envelope: &RuntimeEffectEnvelope,
+) -> Result<crate::GroupChildBinding, RuntimeEffectControllerError> {
+    let Some(membership) = envelope.group.as_deref().cloned() else {
+        return Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+            "a tool child without retained group membership has no child \
+             identity to bind a controller to and is never run unbound",
+        ));
+    };
+    Ok(crate::GroupChildBinding {
+        child: envelope.invocation.address.clone(),
+        membership,
+    })
 }
 
 impl std::fmt::Debug for ToolChildHost {
@@ -257,6 +287,7 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let binding = envelope_group_child_binding(&envelope)?;
         let RuntimeEffectCommand::ToolInvocation { request } = envelope.command else {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
@@ -268,7 +299,8 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
             &self.context,
             &request,
             envelope.invocation.address.clone(),
-            self.host.child_controller(&request.scope.admitted_scope)?,
+            self.host
+                .child_controller(&request.scope.admitted_scope, binding)?,
             self.context.cancellation().child_token(),
         ))
         .await
@@ -297,21 +329,23 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        // Boxed: the driver future carries the whole dispatch, and a group
+        // child is spawned per member — 21 kB of stack per pending child is a
+        // real cost, not a lint's taste.
+        let binding = envelope_group_child_binding(&envelope)?;
         let RuntimeEffectCommand::ToolInvocation { request } = envelope.command else {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 "the tool-child driver was handed an envelope that is not a tool invocation",
             ));
         };
-        // Boxed: the driver future carries the whole dispatch, and a group
-        // child is spawned per member — 21 kB of stack per pending child is a
-        // real cost, not a lint's taste.
         Box::pin(run_tool_child(
             &self.host,
             &self.live,
             &request,
             envelope.invocation.address.clone(),
-            self.host.child_controller(&request.scope.admitted_scope)?,
+            self.host
+                .child_controller(&request.scope.admitted_scope, binding)?,
             self.live.cancellation().child_token(),
         ))
         .await

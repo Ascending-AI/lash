@@ -1497,15 +1497,22 @@ fn decode_child_arbitration(
 /// serializes against `decide_cancel`'s replay-row write the same way the
 /// commit-state CAS does — a claim can never observe a pre-decision parent
 /// while its insert survives the decision's commit. `false` when the request
-/// names no minting effect, or when the minting effect is no group child:
-/// the fence answers only the question §4 asks, and "not a group child" is
-/// not a cancelled one.
+/// names no minting effect: the fence answers only the question §4 asks.
+///
+/// The minting reference is minted from a `GroupChildBinding` — the child's
+/// own journaled address — so a named row that is missing or is no group
+/// child is journal corruption, not "not a group child": a bound child's own
+/// replay row cannot be absent, and silently admitting under it would run
+/// nested work outside the fence the binding exists to enforce.
 pub(super) fn minting_child_cancel_decided(
     tx: &rusqlite::Transaction<'_>,
     request: &EffectClaimRequest,
 ) -> rusqlite::Result<bool> {
     let Some(minting) = &request.minting_effect else {
         return Ok(false);
+    };
+    let corrupt = |detail: String| {
+        sqlite_conversion_error(stored_data_corrupt("RuntimeEffectReplay", detail))
     };
     let arbitration = tx
         .query_row(
@@ -1523,13 +1530,29 @@ pub(super) fn minting_child_cancel_decided(
             },
         )
         .optional()?
-        .flatten();
+        .ok_or_else(|| {
+            corrupt(format!(
+                "a bound group-child admission names minting replay row `{}` \
+                 under scope `{}`, which does not exist; a bound child's row \
+                 cannot be missing",
+                minting.replay_key, minting.scope_id
+            ))
+        })?
+        .ok_or_else(|| {
+            corrupt(format!(
+                "a bound group-child admission names minting replay row `{}` \
+                 under scope `{}`, but that row is no group child; the binding \
+                 derives from a retained membership and cannot name an \
+                 ungrouped row",
+                minting.replay_key, minting.scope_id
+            ))
+        })?;
     Ok(matches!(
         arbitration,
-        Some(StoredChildArbitration {
+        StoredChildArbitration {
             commit_state: EffectCommitState::CancelDecided,
             ..
-        })
+        }
     ))
 }
 

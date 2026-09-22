@@ -989,6 +989,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
                         })),
                     })
                 }),
+                None,
             )
             .await
     });

@@ -759,6 +759,9 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::AttachTerminal => {
                 return Err(Self::outside_protocol_outcome("attach_terminal"));
             }
+            lash_core::ProcessEffectOutcome::RegisterDefinition { .. } => {
+                return Err(Self::outside_protocol_outcome("register_definition"));
+            }
         };
         if recorded_kind != kind {
             return Err(RealizationFailure::Refused(
@@ -805,6 +808,9 @@ impl ToolIntentIngress {
             }
             lash_core::ProcessEffectOutcome::AttachTerminal => {
                 return Err(Self::outside_protocol_outcome("attach_terminal"));
+            }
+            lash_core::ProcessEffectOutcome::RegisterDefinition { .. } => {
+                return Err(Self::outside_protocol_outcome("register_definition"));
             }
         };
         let outcome = lash_core::ToolIntentExecutionOutcome::Executed {

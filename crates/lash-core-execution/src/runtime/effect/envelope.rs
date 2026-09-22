@@ -545,6 +545,19 @@ pub enum ProcessCommand {
         process_id: ProcessId,
         request: crate::ProcessEventAppendRequest,
     },
+    /// The journaled CAS write a `RegisterProcessDefinition` intent realizes
+    /// through (FIG-3470): the intent resolves the pinned reference and its
+    /// compare-and-swap expectation first, then the durable write crosses the
+    /// runtime-effect seam like every other journaled admission, so a redrive
+    /// replays the same registration instead of issuing a second write.
+    RegisterDefinition {
+        owner_scope: crate::TriggerOwnerScope,
+        name: String,
+        /// The engine-resolved definition reference the row pins.
+        pinned: crate::ProcessDefinitionRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expectation: Option<crate::ProcessDefinitionExpectation>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -601,6 +614,13 @@ enum ProcessCommandDecode {
     EmitEvent {
         process_id: ProcessId,
         request: crate::ProcessEventAppendRequest,
+    },
+    RegisterDefinition {
+        owner_scope: crate::TriggerOwnerScope,
+        name: String,
+        pinned: crate::ProcessDefinitionRef,
+        #[serde(default)]
+        expectation: Option<crate::ProcessDefinitionExpectation>,
     },
 }
 
@@ -699,6 +719,17 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 process_id,
                 request,
             },
+            ProcessCommandDecode::RegisterDefinition {
+                owner_scope,
+                name,
+                pinned,
+                expectation,
+            } => Self::RegisterDefinition {
+                owner_scope,
+                name,
+                pinned,
+                expectation,
+            },
         })
     }
 }
@@ -788,6 +819,12 @@ impl ProcessCommand {
                     .map(|replay| replay.key.as_str())
                     .unwrap_or("missing-replay-key")
             ),
+            Self::RegisterDefinition {
+                owner_scope, name, ..
+            } => format!(
+                "process:register-definition:{}:{name}",
+                owner_scope.namespace()
+            ),
         }
     }
 }
@@ -835,6 +872,9 @@ pub enum ProcessEffectOutcome {
         event: Box<crate::ProcessEvent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         wake_delivery: Option<Box<crate::ProcessWakeDelivery>>,
+    },
+    RegisterDefinition {
+        registration: Box<crate::ProcessDefinitionRegistration>,
     },
 }
 

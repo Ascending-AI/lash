@@ -2101,6 +2101,10 @@ macro_rules! tool_child_invocation_tests {
                 drains_are_admitted_in_recorded_commit_order,
                 "tool-child-commit-order"
             ),
+            (
+                a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink,
+                "tool-child-admission-fence"
+            ),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

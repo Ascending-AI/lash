@@ -76,6 +76,7 @@
 //! backoff, and the lease renewal interval.
 
 use crate::SessionId;
+use crate::runtime::effect::ProcessCommand;
 mod adapter;
 pub use adapter::{
     StoreReplayAdapter, StoreReplayController, StoreReplayHost, store_replay_capabilities,
@@ -1637,11 +1638,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         scope: &ExecutionScope,
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
+        binding: Option<&crate::GroupChildBinding>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // Not boxed here: `execute_effect_cancellable` boxes the claim loop
         // itself, which is where the large future is, so a second box on the way
         // in would only add an allocation and an indirection to the same call.
-        self.execute_effect_cancellable(scope, envelope, local_executor, None)
+        self.execute_effect_cancellable(scope, envelope, local_executor, None, binding)
             .await
     }
 
@@ -1673,6 +1675,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             local_executor,
             None,
             BusyPolicy::Yield,
+            None,
         ))
         .await?
         {
@@ -1699,6 +1702,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
         cancel: Option<&CancellationToken>,
+        binding: Option<&crate::GroupChildBinding>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match Box::pin(self.execute_effect_with_policy(
             scope,
@@ -1706,6 +1710,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             local_executor,
             cancel,
             BusyPolicy::Queue,
+            binding,
         ))
         .await?
         {
@@ -1734,6 +1739,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         local_executor: RuntimeEffectLocalExecutor<'_>,
         cancel: Option<&CancellationToken>,
         busy: BusyPolicy,
+        binding: Option<&crate::GroupChildBinding>,
     ) -> Result<EffectRun, RuntimeEffectControllerError> {
         envelope.invocation.validate_execution_scope(scope)?;
         scope
@@ -1750,7 +1756,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         let cancel_membership = cancel.and_then(|_| envelope.group.clone());
         loop {
             match self
-                .prepare_effect(scope, &envelope, &reconstructed_envelope)
+                .prepare_effect(scope, &envelope, &reconstructed_envelope, binding)
                 .await?
             {
                 PreparedEffect::ReplayMismatch {
@@ -1845,6 +1851,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         scope: &ExecutionScope,
         envelope: &RuntimeEffectEnvelope,
         reconstructed_envelope: &CanonicalRuntimeEffectEnvelope,
+        binding: Option<&crate::GroupChildBinding>,
     ) -> Result<PreparedEffect, RuntimeEffectControllerError> {
         let vocabulary = self.vocabulary();
         let replay_key = envelope.invocation.replay_key().to_string();
@@ -1867,17 +1874,18 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 .group
                 .as_deref()
                 .map(|membership| membership.group_key.clone()),
-            minting_effect: match envelope.invocation.caused_by.as_ref() {
-                Some(crate::CausalRef::Effect { address }) => Some(MintingEffectRef {
-                    scope_id: address
+            minting_effect: match binding {
+                Some(binding) => Some(MintingEffectRef {
+                    scope_id: binding
+                        .child
                         .execution_scope
                         .journal_identity()
                         .map_err(RuntimeEffectControllerError::from)?
                         .key()
                         .to_string(),
-                    replay_key: address.replay_key.clone(),
+                    replay_key: binding.child.replay_key.clone(),
                 }),
-                _ => None,
+                None => None,
             },
             strict_replay: self.replay_mode.load(Ordering::SeqCst),
         };
@@ -2180,7 +2188,15 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
             }
             RuntimeEffectCommand::Process { command } => {
-                let result = local_executor.into_process()?.execute(*command).await?;
+                let result =
+                    if matches!(command.as_ref(), ProcessCommand::RegisterDefinition { .. }) {
+                        local_executor
+                            .into_process_definitions()?
+                            .execute(envelope.invocation.replay_key(), *command)
+                            .await?
+                    } else {
+                        local_executor.into_process()?.execute(*command).await?
+                    };
                 Ok(RuntimeEffectOutcome::Process { result })
             }
             _ => local_executor.execute(envelope).await,

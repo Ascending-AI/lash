@@ -467,11 +467,54 @@ impl ProcessLocalExecution {
                     result.realization,
                 ))
             }
+            ProcessCommand::RegisterDefinition { .. } => Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "register-definition requires the process-definition registry executor",
+            )),
         };
         if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
             observer(outcome, *realization);
         }
         outcome.map(|(outcome, _)| outcome)
+    }
+}
+
+impl ProcessDefinitionLocalExecution {
+    /// Runs the journaled definition CAS write (FIG-3470).
+    ///
+    /// `operation_id` is the envelope's replay key: the registry keys the
+    /// idempotent CAS on it, so a redrive of the same admission re-attaches to
+    /// the recorded registration instead of writing a second one.
+    pub async fn execute(
+        self,
+        operation_id: &str,
+        command: ProcessCommand,
+    ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
+        let ProcessCommand::RegisterDefinition {
+            owner_scope,
+            name,
+            pinned,
+            expectation,
+        } = command
+        else {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "process-definition registry serves only the register-definition command",
+            ));
+        };
+        let registration = self
+            .registry
+            .register_definition(
+                operation_id,
+                owner_scope,
+                &name,
+                pinned,
+                expectation.as_ref(),
+            )
+            .await?;
+        Ok(ProcessEffectOutcome::RegisterDefinition {
+            registration: Box::new(registration),
+        })
     }
 }
 

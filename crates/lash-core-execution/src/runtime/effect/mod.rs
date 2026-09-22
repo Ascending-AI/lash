@@ -57,8 +57,8 @@ pub use executor::{
     turn_control_binding_id_for_scope,
 };
 pub use group::{
-    EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,
-    RuntimeEffectGroup, refuse_unhonored_group_membership,
+    EffectGroupHandle, EffectGroupMembership, GroupChildBinding, GroupSettlement, GroupWakePolicy,
+    LoserPolicy, RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
 pub use group_drain::{
     ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,

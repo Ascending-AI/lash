@@ -1,5 +1,6 @@
 use crate::SessionId;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::ToolDispatchContext;
 
@@ -25,11 +26,13 @@ pub async fn execute_final_tool_intents(
 
     // ADR 0099 §4: once the group child whose emission minted this batch is
     // cancel-decided, no new semantic admission may be created beneath it. The
-    // fence is not a read this executor performs — every intent's sink admits
-    // itself under the substrate's own arbitration (the minting replay-row
-    // claim, the native group mutex, or the serialized index handler), so a
-    // cancel that lands between intents surfaces as the typed
-    // `RuntimeEffectGroupChildCancelDecided` refusal from the next admission.
+    // fence is not a read this executor performs — the controller lent to this
+    // child carries its `GroupChildBinding`, so every intent's journaled sink
+    // admits itself under the substrate's own arbitration of the child's own
+    // replay row (the minting replay-row claim, the native group mutex, or the
+    // serialized index handler), and a cancel that lands between intents
+    // surfaces as the typed `RuntimeEffectGroupChildCancelDecided` refusal
+    // from the next admission.
     // The decision can land mid-batch, so the refusal latches: once one
     // admission reports it, the remaining intents refuse without reaching
     // their sinks — `Cancelled` is terminal.
@@ -391,8 +394,7 @@ async fn execute_one(
                 .clone()
                 .ok_or_else(|| process_definition_registry_unavailable(&intent.engine_kind))?;
             Ok(serde_json::to_value(
-                realize_register_process_definition(context, intent, identity, registry.as_ref())
-                    .await?,
+                realize_register_process_definition(context, intent, identity, registry).await?,
             )
             .unwrap_or(serde_json::Value::Null))
         }
@@ -435,11 +437,15 @@ fn process_definition_registry_unavailable(engine_kind: &str) -> crate::PluginEr
 /// compare-and-swap expectation, so a stale expected revision, or a
 /// take-over of a name without the caller's endorsement, refuses with the
 /// registry's typed conflict instead of rewriting silently.
+#[expect(
+    clippy::expect_used,
+    reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+)]
 async fn realize_register_process_definition(
     context: &ToolDispatchContext<'_>,
     intent: &crate::RegisterProcessDefinitionIntent,
     identity: &crate::ToolIntentIdentity,
-    registry: &dyn crate::ProcessDefinitionRegistry,
+    registry: Arc<dyn crate::ProcessDefinitionRegistry>,
 ) -> Result<crate::ProcessDefinitionRegistration, crate::PluginError> {
     let name = intent
         .name
@@ -455,9 +461,12 @@ async fn realize_register_process_definition(
     // A name resolves once, at intent execution. An existing slot under this
     // name resolves its pinned record; a fresh registration resolves through
     // the engine directly.
-    let existing =
-        crate::process_registry::resolve_named_definition(registry, &intent.session_id, name)
-            .await?;
+    let existing = crate::process_registry::resolve_named_definition(
+        registry.as_ref(),
+        &intent.session_id,
+        name,
+    )
+    .await?;
     let pinned = match existing.as_ref() {
         Some(existing) => {
             if existing.definition.engine_kind.as_str() != intent.engine_kind {
@@ -502,16 +511,46 @@ async fn realize_register_process_definition(
         }
         None => None,
     };
-    let registration = registry
-        .register_definition(
-            &identity.replay_key,
-            crate::TriggerOwnerScope::session(intent.session_id.clone()),
-            name,
-            pinned,
-            expectation.as_ref(),
+    // The CAS write crosses the runtime-effect seam exactly like
+    // `register_recorded_trigger` (FIG-3470): the journaled admission — not
+    // this call — owns the durable write, so a redrive replays the recorded
+    // registration and a group child admits it under its own binding.
+    let scoped = context.effect_controller.scoped();
+    let invocation = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            scoped.execution_scope().clone(),
+            identity.replay_key.clone(),
         )
-        .await?;
-    Ok(registration)
+        .expect("tool-intent execution carries an admitted effect scope"),
+        context.parentless_attribution(),
+        identity.replay_key.clone(),
+    )
+    .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
+        identity.clone(),
+    ));
+    let outcome = scoped
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::process(crate::ProcessCommand::RegisterDefinition {
+                    owner_scope: crate::TriggerOwnerScope::session(intent.session_id.clone()),
+                    name: name.to_string(),
+                    pinned,
+                    expectation,
+                }),
+            ),
+            crate::RuntimeEffectLocalExecutor::process_definitions(registry),
+        )
+        .await
+        .map_err(crate::PluginError::RuntimeEffectController)?
+        .into_process()
+        .map_err(crate::PluginError::RuntimeEffectController)?;
+    match outcome {
+        crate::ProcessEffectOutcome::RegisterDefinition { registration } => Ok(*registration),
+        other => Err(crate::PluginError::Session(format!(
+            "process definition registration returned a non-registration outcome: {other:?}"
+        ))),
+    }
 }
 
 /// Install one recorded subscription draft through the trigger effect the
