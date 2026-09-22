@@ -899,6 +899,10 @@ fn opener_dispatch(
 
 /// The same dispatch context with the process service the caller supplies —
 /// how a law installs a [`GatedProcessService`] over the tier's registry.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn opener_dispatch_with_processes(
     host: &Arc<dyn crate::EffectHost>,
     admitted: &crate::AdmittedScope,
@@ -938,6 +942,10 @@ fn opener_dispatch_with_processes(
 }
 
 /// [`register_opener`] with the process service the caller supplies.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn register_opener_with_processes(
     host: &Arc<dyn crate::EffectHost>,
     scope: &crate::ExecutionScope,
