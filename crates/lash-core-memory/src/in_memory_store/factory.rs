@@ -604,6 +604,35 @@ impl InMemorySessionStoreFactory {
         Ok(points.into_values().collect())
     }
 
+    /// Live holders of `node_id`'s observer lineage: sessions whose head sits
+    /// at the node plus live sessions whose fork lineage passes through it
+    /// (FIG-1281).
+    pub async fn fork_point_observer_sources(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<crate::SessionId>, crate::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let mut sources = std::collections::BTreeSet::new();
+        let stores = self.stores.lock_recover();
+        for (session_id, store) in stores.iter() {
+            let head = store.session_head_meta.lock_recover();
+            if head.as_ref().and_then(|head| head.leaf_node_id.as_deref()) == Some(node_id) {
+                sources.insert(session_id.clone());
+            }
+        }
+        for (session_id, plan) in self.fork_plans.lock_recover().iter() {
+            if stores.contains_key(session_id)
+                && plan
+                    .ancestors()
+                    .iter()
+                    .any(|ancestor| ancestor.fork_node_id.as_str() == node_id)
+            {
+                sources.insert(session_id.clone());
+            }
+        }
+        Ok(sources.into_iter().collect())
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "a graph node selected as a frame is non-empty"

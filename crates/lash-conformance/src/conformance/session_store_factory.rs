@@ -2045,6 +2045,19 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .delete_session(&source_request.session_id)
         .await
         .expect("delete superseded source");
+    // Observer inheritance resolves against live holders of the point, not
+    // its recorded provenance: the rewind just deleted that session, and the
+    // branch carries the point's observer lineage through its fork rows even
+    // though its head has since advanced (FIG-1281).
+    assert_eq!(
+        factory
+            .fork_point_observer_sources(&root_node_id)
+            .await
+            .expect("observer sources for the retained point"),
+        vec![fork_request.session_id.clone()],
+        "the live replacement branch, not the deleted provenance session, \
+         holds the point's observer lineage"
+    );
     let orphaned_source_point = factory
         .fork_points()
         .await

@@ -214,6 +214,23 @@ pub(super) async fn fork_points_in_catalog(
     .map_err(sqlite_error)?
 }
 
+pub(super) async fn observer_sources_in_catalog(
+    root: &Path,
+    node_id: &str,
+    policy: SqliteConnectionPolicy,
+) -> Result<Vec<SessionId>, lash_core::StoreError> {
+    let conn = open_factory_catalog(root, policy).await?;
+    let node_id = node_id.to_string();
+    conn.call(move |conn| {
+        let mut stmt = conn.prepare(session_sql().head.select_observer_sources.sql())?;
+        let rows = stmt.query_map(params![node_id], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map(|ids| ids.into_iter().map(SessionId::from).collect())
+    })
+    .await
+    .map_err(sqlite_error)
+}
+
 pub(super) async fn fork_at_in_catalog(
     root: &Path,
     request: &lash_core::ForkSessionRequest,

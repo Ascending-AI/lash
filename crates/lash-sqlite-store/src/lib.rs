@@ -1210,6 +1210,13 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         fork_points_in_catalog(&self.root, self.options.connection_policy).await
     }
 
+    async fn fork_point_observer_sources(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<SessionId>, lash_core::StoreError> {
+        observer_sources_in_catalog(&self.root, node_id, self.options.connection_policy).await
+    }
+
     async fn fork_at(
         &self,
         request: &lash_core::ForkSessionRequest,

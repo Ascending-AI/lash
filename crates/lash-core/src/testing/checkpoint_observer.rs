@@ -397,6 +397,13 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
         self.inner.fork_points().await
     }
 
+    async fn fork_point_observer_sources(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        self.inner.fork_point_observer_sources(node_id).await
+    }
+
     async fn fork_at(
         &self,
         request: &ForkSessionRequest,

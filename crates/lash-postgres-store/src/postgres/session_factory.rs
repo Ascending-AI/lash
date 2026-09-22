@@ -274,6 +274,18 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         Ok(points)
     }
 
+    async fn fork_point_observer_sources(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        sqlx::query_scalar::<_, String>(session_sql().head.select_observer_sources.sql())
+            .bind(node_id)
+            .fetch_all(&self.pool)
+            .await
+            .map(|ids| ids.into_iter().map(SessionId::from).collect())
+            .map_err(store_sqlx_error)
+    }
+
     async fn fork_at(
         &self,
         request: &lash_core::ForkSessionRequest,

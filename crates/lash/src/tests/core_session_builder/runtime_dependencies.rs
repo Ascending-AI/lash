@@ -1166,6 +1166,191 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     Ok(())
 }
 
+/// A rewind forks a retained point, deletes the superseded source session,
+/// then forks the same point again. The point's recorded provenance still
+/// names that deleted session, so inheritance that resolved against it would
+/// come back empty (FIG-1281). Resolution must run against the live sessions
+/// that hold the point's observer lineage — here the replacement branch,
+/// whose fork-inherited copy of the observer edge survived the deletion.
+#[tokio::test]
+async fn fork_observer_inheritance_after_rewind_resolves_live_holders() -> Result<()> {
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
+        .build(crate::testing::runtime_lease_owner())?;
+    let policy = lash_core::SessionPolicy {
+        provider_id: "embed-test".to_string(),
+        model: mock_model_spec(),
+        session_id: Some(SessionId::from("rewind-observer-source")),
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+    };
+    let source_store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from("rewind-observer-source"),
+            relation: lash_core::SessionRelation::Root,
+            policy: policy.clone(),
+        })
+        .await
+        .expect("create rewind observer source");
+    let mut source_state = lash_core::RuntimeSessionState {
+        session_id: SessionId::from("rewind-observer-source"),
+        policy,
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    source_state.ensure_agent_frame_initialized();
+    source_store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &source_state,
+            &[],
+        ))
+        .await
+        .expect("commit rewind observer source");
+    let fork_node_id = source_state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("rewind source leaf");
+    core.pin(&fork_node_id).await?;
+
+    registry
+        .register_process(lash_core::ProcessRegistration::new(
+            "rewind-observed-process",
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        ))
+        .await
+        .expect("register rewind-observed process");
+    registry
+        .add_observer(
+            &SessionId::from("rewind-observer-source"),
+            &ProcessId::from("rewind-observed-process"),
+            lash_core::ProcessObserverBy::host("rewind-test-source"),
+        )
+        .await
+        .expect("observe process from the original source");
+
+    let any_status = || lash_core::ProcessListFilter {
+        status: lash_core::ProcessStatusFilter::Any,
+        ..Default::default()
+    };
+
+    // The first fork is the replacement branch: it inherits the observer copy
+    // while the source is still live.
+    let replacement = core
+        .fork_at(&fork_node_id, "rewind-replacement")
+        .await
+        .expect("fork replacement branch");
+    assert_eq!(
+        replacement
+            .observed_processes
+            .iter()
+            .map(|observed| observed.process_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["rewind-observed-process"]
+    );
+    assert_eq!(
+        registry
+            .list_observed_by(&SessionId::from("rewind-replacement"), &any_status())
+            .await
+            .expect("list replacement observers")
+            .len(),
+        1,
+        "the replacement branch must hold its own observer edge"
+    );
+
+    // Rewind: delete the superseded source. Both halves a host delete runs —
+    // the session rows and the session's process-registry state — go together.
+    factory
+        .delete_session(&SessionId::from("rewind-observer-source"))
+        .await
+        .expect("delete superseded source");
+    registry
+        .delete_session_process_state(&SessionId::from("rewind-observer-source"))
+        .await
+        .expect("delete source process state");
+    assert!(
+        registry
+            .list_observed_by(&SessionId::from("rewind-observer-source"), &any_status())
+            .await
+            .expect("list deleted source observers")
+            .is_empty(),
+        "the deleted source no longer holds observer edges"
+    );
+
+    // Re-fork the retained point: `All` must find the live replacement's copy
+    // even though the recorded provenance session is gone.
+    let rewound = core
+        .fork_at(&fork_node_id, "rewind-all-branch")
+        .await
+        .expect("re-fork the retained point after the rewind");
+    assert_eq!(
+        rewound
+            .observed_processes
+            .iter()
+            .map(|observed| observed.process_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["rewind-observed-process"],
+        "inheritance must resolve against the live holder, not deleted provenance"
+    );
+    assert_eq!(
+        rewound.observed_processes[0].attribution,
+        lash_core::test_support::SessionObserverIntentAttribution::ForkInherited
+    );
+
+    // `Only` intersects the same live-holder union with the requested set.
+    let only = core
+        .fork_at_with_observer_inheritance(
+            &fork_node_id,
+            "rewind-only-branch",
+            lash_core::ObserverInheritance::Only(vec![ProcessId::from("rewind-observed-process")]),
+        )
+        .await
+        .expect("re-fork with the Only selector");
+    assert_eq!(only.observed_processes.len(), 1);
+    let only_miss = core
+        .fork_at_with_observer_inheritance(
+            &fork_node_id,
+            "rewind-only-miss-branch",
+            lash_core::ObserverInheritance::Only(vec![ProcessId::from("never-observed")]),
+        )
+        .await
+        .expect("re-fork with an unobserved Only selector");
+    assert!(only_miss.observed_processes.is_empty());
+
+    // `None` stays empty regardless of live holders.
+    let none = core
+        .fork_at_with_observer_inheritance(
+            &fork_node_id,
+            "rewind-none-branch",
+            lash_core::ObserverInheritance::None,
+        )
+        .await
+        .expect("re-fork with the None selector");
+    assert!(none.observed_processes.is_empty());
+    assert!(
+        registry
+            .list_observed_by(&SessionId::from("rewind-none-branch"), &any_status())
+            .await
+            .expect("list None-branch observers")
+            .is_empty()
+    );
+    Ok(())
+}
+
 async fn duplicate_only_fork_intents_are_canonical(
     case: &str,
     factory: Arc<dyn lash_core::SessionStoreFactory>,

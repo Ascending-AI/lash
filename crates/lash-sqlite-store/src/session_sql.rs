@@ -232,6 +232,17 @@ lash_store_sql::statements! {
                      )
                      ORDER BY priority, source_session_id LIMIT 1";
 
+        /// Live holders of `?1`'s observer lineage: sessions whose head sits
+        /// at the node plus live sessions whose fork lineage passes through
+        /// it (FIG-1281).
+        select_observer_sources = "SELECT session_id FROM session_head
+                     WHERE leaf_node_id = ?1
+                     UNION
+                     SELECT lineage.session_id FROM fork_lineage AS lineage
+                     JOIN session_head AS head ON head.session_id = lineage.session_id
+                     WHERE lineage.fork_node_id = ?1
+                     ORDER BY session_id";
+
         /// Every retained fork point, pinned ones first.
         select_fork_points = "SELECT node_id, checkpoint_ref, source_session_id, pinned
              FROM (

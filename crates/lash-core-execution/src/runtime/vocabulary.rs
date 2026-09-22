@@ -623,6 +623,24 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         })
     }
 
+    /// Live sessions that hold the observer lineage of the retained point
+    /// `node_id`: every session whose head still sits at the node plus every
+    /// live session whose recorded fork lineage passes through it.
+    ///
+    /// Observer inheritance resolves against this set — a point's recorded
+    /// provenance may name a session a rewind has since deleted, while the
+    /// observer edges it carried live on as the copies its branches settled
+    /// (FIG-1281). Deletion removes a session's head and lineage rows, so a
+    /// store answers with live sessions only.
+    async fn fork_point_observer_sources(
+        &self,
+        _node_id: &str,
+    ) -> Result<Vec<SessionId>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "fork_point_observer_sources",
+        })
+    }
+
     /// Add a new session-head root at a retained point without writing graph nodes.
     async fn fork_at(
         &self,

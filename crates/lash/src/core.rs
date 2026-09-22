@@ -403,31 +403,46 @@ impl LashCore {
             })?;
         let inherited = match (&observer_inheritance, self.process_registry()) {
             (lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),
-            (lash_core::ObserverInheritance::All, Some(process_registry)) => process_registry
-                .list_observed_by(
-                    &point.source_session_id,
-                    &lash_core::ProcessListFilter {
-                        status: lash_core::ProcessStatusFilter::Any,
-                        ..Default::default()
-                    },
-                )
-                .await?
-                .into_iter()
-                .map(|record| record.id)
-                .collect(),
+            (lash_core::ObserverInheritance::All, Some(process_registry)) => {
+                let mut inherited = std::collections::BTreeSet::new();
+                for source in
+                    observer_sources_for_fork_point(store_factory.as_ref(), &point).await?
+                {
+                    inherited.extend(
+                        process_registry
+                            .list_observed_by(
+                                &source,
+                                &lash_core::ProcessListFilter {
+                                    status: lash_core::ProcessStatusFilter::Any,
+                                    ..Default::default()
+                                },
+                            )
+                            .await?
+                            .into_iter()
+                            .map(|record| record.id),
+                    );
+                }
+                inherited.into_iter().collect()
+            }
             (lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {
-                let observed = process_registry
-                    .list_observed_by(
-                        &point.source_session_id,
-                        &lash_core::ProcessListFilter {
-                            status: lash_core::ProcessStatusFilter::Any,
-                            ..Default::default()
-                        },
-                    )
-                    .await?
-                    .into_iter()
-                    .map(|record| record.id)
-                    .collect::<std::collections::HashSet<_>>();
+                let mut observed = std::collections::BTreeSet::new();
+                for source in
+                    observer_sources_for_fork_point(store_factory.as_ref(), &point).await?
+                {
+                    observed.extend(
+                        process_registry
+                            .list_observed_by(
+                                &source,
+                                &lash_core::ProcessListFilter {
+                                    status: lash_core::ProcessStatusFilter::Any,
+                                    ..Default::default()
+                                },
+                            )
+                            .await?
+                            .into_iter()
+                            .map(|record| record.id),
+                    );
+                }
                 let mut seen_inherited = std::collections::HashSet::new();
                 ids.iter()
                     .filter(|id| observed.contains(*id) && seen_inherited.insert(id.as_str()))
@@ -703,6 +718,32 @@ impl LashCore {
             self.substrate_slot.setup.config.clone(),
         )
     }
+}
+
+/// The sessions a fork at `point` resolves inherited observers against: every
+/// live holder of the point's observer lineage, plus its recorded provenance.
+///
+/// The recorded source may name a session a rewind has since deleted
+/// (FIG-1281); it contributes nothing then because its observer edges were
+/// removed with it, while the copies a settled branch holds remain reachable
+/// through the store's live-holder answer. A factory without the holder query
+/// resolves against provenance alone, which is the pre-FIG-1281 behaviour.
+async fn observer_sources_for_fork_point(
+    store_factory: &dyn SessionStoreFactory,
+    point: &lash_core::ForkPoint,
+) -> Result<Vec<SessionId>> {
+    let mut sources = match store_factory
+        .fork_point_observer_sources(point.node_id.as_str())
+        .await
+    {
+        Ok(sources) => sources,
+        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => Vec::new(),
+        Err(error) => return Err(error.into()),
+    };
+    sources.push(point.source_session_id.clone());
+    sources.sort();
+    sources.dedup();
+    Ok(sources)
 }
 
 #[derive(Clone)]
