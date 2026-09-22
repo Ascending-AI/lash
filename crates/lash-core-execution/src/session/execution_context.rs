@@ -68,6 +68,18 @@ pub struct RuntimeExecutionContext<'run> {
     /// `to_static`, so a rebound or handed-over context incorporates against
     /// the same set.
     pub(crate) incorporation_ledger: Arc<std::sync::Mutex<crate::session::IncorporationLedger>>,
+    /// The turn-control binding id of the effect host this execution was built
+    /// against, recorded onto a group child's `ProcessLifetime` completion
+    /// routing (ADR 0099 §14). `None` where no host was in scope at context
+    /// construction; a leaf that then needs the issuer is a typed formation
+    /// refusal, never a silent `Inline` downgrade.
+    pub(crate) tool_child_completion_issuer: Option<crate::TurnControlBindingId>,
+    /// Keeps this context's live-opener registration alive for the context's
+    /// lifetime: a `LiveOpenerGuard` deregisters on drop, and a test context
+    /// that opened a tool-child group while its guard was already dropped
+    /// would route children to a dead opener.
+    #[cfg(any(test, feature = "testing"))]
+    live_opener_guard: Option<Arc<crate::runtime::effect::LiveOpenerGuard>>,
 }
 
 #[derive(Clone)]
@@ -430,6 +442,9 @@ impl<'run> RuntimeExecutionContext<'run> {
             issuing_language_node_id: None,
             batch_parent_call_id: None,
             process_work: None,
+            tool_child_completion_issuer: None,
+            #[cfg(any(test, feature = "testing"))]
+            live_opener_guard: None,
         }
     }
 
@@ -459,6 +474,9 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
+            tool_child_completion_issuer: self.tool_child_completion_issuer.clone(),
+            #[cfg(any(test, feature = "testing"))]
+            live_opener_guard: self.live_opener_guard.clone(),
         })
     }
 
@@ -639,6 +657,29 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn with_parent_invocation(mut self, metadata: crate::RuntimeInvocation) -> Self {
         self.parent_invocation = Some(metadata);
+        self
+    }
+
+    /// The issuer identity recorded onto a group child's `ProcessLifetime`
+    /// completion routing (ADR 0099 §14): the effect host's
+    /// `turn_control_binding_id`, threaded in where the context is built with
+    /// a host in scope.
+    pub fn with_tool_child_completion_issuer(
+        mut self,
+        issuer: crate::TurnControlBindingId,
+    ) -> Self {
+        self.tool_child_completion_issuer = Some(issuer);
+        self
+    }
+
+    /// Retains a live-opener registration for this context's lifetime (test
+    /// and conformance contexts only).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_live_opener_guard(
+        mut self,
+        guard: Arc<crate::runtime::effect::LiveOpenerGuard>,
+    ) -> Self {
+        self.live_opener_guard = Some(guard);
         self
     }
 

@@ -29,6 +29,19 @@ pub struct TestExecutionContextBuilder<'run> {
     session_host_mode: TestSessionHostMode,
     session_lifecycle: Option<Arc<dyn crate::plugin::SessionLifecycleService>>,
     effect_controller: TestEffectController<'run>,
+    /// An explicit effect host the context's group wiring is built against.
+    /// `None` wraps the shared controller in a `NativeEffectHost` when it is
+    /// the built-in native one (tracked concretely, because an
+    /// `Arc<dyn RuntimeEffectController>` cannot be downcast); a `Borrowed`
+    /// controller or a foreign shared one has no host to lend a `'static`
+    /// controller or register a resolver on, and the context simply routes no
+    /// tool children.
+    effect_host: Option<Arc<dyn crate::EffectHost>>,
+    /// The concrete native controller behind `effect_controller`, kept so the
+    /// builder can wrap it in a `NativeEffectHost::with_native_controller` —
+    /// the constructor that wires the group-admin handles a bound group-child
+    /// controller needs.
+    native_controller: Option<Arc<crate::runtime::NativeRuntimeEffectController>>,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     /// Which cell of the turn this context executes.
@@ -59,6 +72,14 @@ pub struct BuiltTestExecutionContext<'run> {
     /// Which cell of the turn this context executes; see
     /// [`TestExecutionContextBuilder::protocol_iteration`].
     pub protocol_iteration: usize,
+    /// The live-opener registration this context's tool children route
+    /// through; kept here so [`into_runtime`](Self::into_runtime) can pin it
+    /// to the context's lifetime.
+    tool_child_guard: Option<crate::runtime::effect::LiveOpenerGuard>,
+    /// The issuer identity a group child records on a `ProcessLifetime`
+    /// completion route (ADR 0099 §14): the host's binding id, when the
+    /// context was built against a host.
+    tool_child_completion_issuer: Option<crate::TurnControlBindingId>,
 }
 
 impl<'run> Default for TestExecutionContextBuilder<'run> {
@@ -69,6 +90,10 @@ impl<'run> Default for TestExecutionContextBuilder<'run> {
 
 impl<'run> TestExecutionContextBuilder<'run> {
     pub fn new() -> Self {
+        let controller = Arc::new(
+            crate::runtime::NativeRuntimeEffectController::default()
+                .allow_process_lifetime_completion_keys(),
+        );
         Self {
             session_id: SessionId::from("test-session"),
             provider: Arc::new(EmptyToolProvider),
@@ -87,10 +112,9 @@ impl<'run> TestExecutionContextBuilder<'run> {
             turn_context: crate::TurnContext::default(),
             session_host_mode: TestSessionHostMode::Independent,
             session_lifecycle: None,
-            effect_controller: TestEffectController::Shared(Arc::new(
-                crate::NativeRuntimeEffectController::default()
-                    .allow_process_lifetime_completion_keys(),
-            )),
+            effect_controller: TestEffectController::Shared(controller.clone()),
+            native_controller: Some(controller),
+            effect_host: None,
             dispatch_parent_invocation: None,
             runtime_parent_invocation: None,
             protocol_iteration: 0,
@@ -189,6 +213,19 @@ impl<'run> TestExecutionContextBuilder<'run> {
         mut self,
         effect_controller: Arc<dyn crate::RuntimeEffectController>,
     ) -> Self {
+        self.native_controller = None;
+        self.effect_controller = TestEffectController::Shared(effect_controller);
+        self
+    }
+
+    /// Shares the built-in native controller, keeping the concrete `Arc` so
+    /// the context can wrap it in the admin-wired `NativeEffectHost` a group
+    /// child's bound controller needs.
+    pub fn shared_native_effect_controller(
+        mut self,
+        effect_controller: Arc<crate::runtime::NativeRuntimeEffectController>,
+    ) -> Self {
+        self.native_controller = Some(Arc::clone(&effect_controller));
         self.effect_controller = TestEffectController::Shared(effect_controller);
         self
     }
@@ -197,7 +234,22 @@ impl<'run> TestExecutionContextBuilder<'run> {
         mut self,
         effect_controller: crate::ScopedEffectController<'run>,
     ) -> Self {
+        self.native_controller = None;
         self.effect_controller = TestEffectController::Borrowed(effect_controller);
+        self
+    }
+
+    /// Supplies the effect host the built context routes tool children
+    /// through (ADR 0099 §2/§3): its controller serves the context's effects,
+    /// the tool-child host is installed on it, and the context's opener is
+    /// registered in its live-opener registry for the context's lifetime.
+    ///
+    /// A conformance or differential fixture running `call_tool_batch` against
+    /// a tier's host must pass it here — the default wiring builds a native
+    /// host over the shared controller, which is wrong for a fixture that is
+    /// proving a store backend.
+    pub fn effect_host(mut self, host: Arc<dyn crate::EffectHost>) -> Self {
+        self.effect_host = Some(host);
         self
     }
 
@@ -293,6 +345,25 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 (sessions, session_lifecycle, session_graph)
             }
         };
+        // The scope the context's controller admits: the scope the installed
+        // parent invocation claims, else the default test turn. A fixture that
+        // installs an invocation naming a scope the unpinned constructors
+        // cannot admit (a process scope needs its incarnation) must hand the
+        // builder an already-scoped `Borrowed` controller instead.
+        let default_admitted = || {
+            self.runtime_parent_invocation
+                .as_ref()
+                .and_then(crate::RuntimeInvocation::effect_address)
+                .and_then(|address| {
+                    crate::AdmittedScope::unpinned(address.execution_scope.clone()).ok()
+                })
+                .unwrap_or_else(|| {
+                    crate::AdmittedScope::turn(
+                        self.session_id.clone(),
+                        crate::TurnId::from("test-turn"),
+                    )
+                })
+        };
         let effect_controller = match self.effect_controller {
             TestEffectController::Shared(effect_controller) => {
                 // The admitted pair must match the scope the installed parent
@@ -300,26 +371,16 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 // scopes its controller to the same scope the code-execution
                 // effect runs under, and `HostBridge` refuses a claim/opener
                 // disagreement rather than re-pairing the two halves itself.
-                // A fixture that installs an invocation naming a scope the
-                // unpinned constructors cannot admit (a process scope needs
-                // its incarnation) must hand the builder an already-scoped
-                // `Borrowed` controller instead.
-                let admitted = self
-                    .runtime_parent_invocation
-                    .as_ref()
-                    .and_then(crate::RuntimeInvocation::effect_address)
-                    .and_then(|address| {
-                        crate::AdmittedScope::unpinned(address.execution_scope.clone()).ok()
-                    })
-                    .unwrap_or_else(|| {
-                        crate::AdmittedScope::turn(
-                            self.session_id.clone(),
-                            crate::TurnId::from("test-turn"),
-                        )
-                    });
-                crate::runtime::RuntimeEffectControllerHandle::Shared {
-                    controller: effect_controller,
-                    admitted,
+                match self.effect_host.as_ref() {
+                    Some(host) => crate::runtime::RuntimeEffectControllerHandle::borrowed(
+                        host.scoped_static(default_admitted())
+                            .expect("the supplied host binds the fixture's admitted scope")
+                            .expect("the supplied host lends a static controller"),
+                    ),
+                    None => crate::runtime::RuntimeEffectControllerHandle::Shared {
+                        controller: effect_controller,
+                        admitted: default_admitted(),
+                    },
                 }
             }
             TestEffectController::Borrowed(effect_controller) => {
@@ -358,6 +419,49 @@ impl<'run> TestExecutionContextBuilder<'run> {
             turn_context: self.turn_context.clone(),
             clock: self.clock,
         });
+
+        // Tool-child routing (ADR 0099 §2/§3): the context's children resolve
+        // through a `ToolChildHost` installed on an effect host, and the
+        // context's opener is registered live so `context_for` answers for
+        // them. The wiring is deliberately best-effort, mirroring production's
+        // registration sites: a controller that accepts no group-executor
+        // resolver, a scope that names no opener, or a host that lends no
+        // `'static` controller each mean this context routes no tool children
+        // — and a group opened anyway fails closed at `open_effect_group`.
+        let host: Option<Arc<dyn crate::EffectHost>> = match self.effect_host {
+            Some(host) => Some(host),
+            None => self.native_controller.map(|controller| {
+                Arc::new(crate::runtime::NativeEffectHost::with_native_controller(
+                    controller,
+                )) as Arc<dyn crate::EffectHost>
+            }),
+        };
+        let (tool_child_guard, tool_child_completion_issuer) = host
+            .and_then(|host| {
+                let tool_children = host.install_tool_child_host(
+                    crate::runtime::effect::ToolChildHost::new(
+                        &host,
+                        Arc::clone(&self.process_env_store),
+                    )
+                    .with_clock(Arc::clone(&dispatch.clock)),
+                )?;
+                let admitted = dispatch.effect_controller.scoped().admitted_scope().clone();
+                let opener = crate::runtime::effect::opener_for_execution_scope(&admitted)?;
+                let lent = host.scoped_static(admitted).ok()??;
+                let (guard, _ended) = tool_children.openers().register(
+                    opener,
+                    crate::runtime::effect::LiveOpenerContext::capture(
+                        dispatch.as_ref(),
+                        lent,
+                        tokio_util::sync::CancellationToken::new(),
+                    ),
+                );
+                let issuer = crate::TurnControlBindingId::new(host.turn_control_binding_id()).ok();
+                Some((guard, issuer))
+            })
+            .map(|(guard, issuer)| (Some(guard), issuer))
+            .unwrap_or((None, None));
+
         BuiltTestExecutionContext {
             dispatch,
             process_env_store: self.process_env_store,
@@ -365,6 +469,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
             turn_context: self.turn_context,
             runtime_parent_invocation: self.runtime_parent_invocation,
             protocol_iteration: self.protocol_iteration,
+            tool_child_guard,
+            tool_child_completion_issuer,
         }
     }
 }
@@ -387,6 +493,12 @@ impl<'run> BuiltTestExecutionContext<'run> {
             .runtime_parent_invocation
             .unwrap_or_else(|| code_execution_invocation(&session_id, self.protocol_iteration));
         context = context.with_parent_invocation(parent_invocation);
+        if let Some(issuer) = self.tool_child_completion_issuer {
+            context = context.with_tool_child_completion_issuer(issuer);
+        }
+        if let Some(guard) = self.tool_child_guard {
+            context = context.with_live_opener_guard(Arc::new(guard));
+        }
         context
     }
 }

@@ -62,11 +62,13 @@ pub enum GroupWakePolicy {
 /// only mechanism available on engine tiers that keep no group row.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupMembership {
-    /// `{scope_id}:group:{batch_id}:{occurrence}`.
+    /// `{scope_id}:group:[{parent_effect_id}:]{batch_id}`.
     ///
-    /// The occurrence ordinal is load-bearing: `batch_id` is a content hash of
-    /// the calls, so two textually identical `race` calls in one protocol
-    /// iteration hash identically and would otherwise share a group.
+    /// The occurrence ordinal is load-bearing and rides inside `batch_id`:
+    /// the batch id is a content hash of the calls *and* their
+    /// `ToolBatchOccurrence` under `TOOL_BATCH_FAMILY_VERSION` 2 (FIG-3394),
+    /// so two textually identical `race` calls in one protocol iteration mint
+    /// different batch ids and would otherwise share a group.
     pub group_key: String,
     /// This child's position in [`RuntimeEffectGroup::children`].
     pub position: usize,
@@ -274,8 +276,10 @@ impl RuntimeEffectGroup {
         &self.invocation
     }
 
-    /// `{scope_id}:group:{batch_id}:{occurrence}` — the key the host records the
-    /// group and its settlement counter under.
+    /// `{scope_id}:group:[{parent_effect_id}:]{batch_id}` — the key the host
+    /// records the group and its settlement counter under. The occurrence
+    /// ordinal rides inside `batch_id` (FIG-3394); it is not a separate
+    /// segment.
     #[must_use]
     pub fn group_key(&self) -> &str {
         &self.group_key

@@ -84,6 +84,13 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         }
     }
 
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
+    }
+
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());

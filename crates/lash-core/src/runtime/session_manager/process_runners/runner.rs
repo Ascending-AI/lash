@@ -171,6 +171,18 @@ impl RuntimeSessionServices {
                     .process_wake_delivery_policy,
                 clock: Arc::clone(&services.current.host.core.clock),
             };
+            // The host's binding id is what a group child records as its
+            // `ProcessLifetime` completion-key issuer (ADR 0099 §14).
+            let tool_child_completion_issuer = crate::TurnControlBindingId::new(
+                services
+                    .current
+                    .host
+                    .core
+                    .control
+                    .effect_host
+                    .turn_control_binding_id(),
+            )
+            .ok();
             let mut context = crate::RuntimeExecutionContext::new(
                 services.current.session_id.clone(),
                 Arc::clone(&dispatch),
@@ -189,6 +201,9 @@ impl RuntimeSessionServices {
             .with_cancellation_token(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
             .with_process_work(services.current.host.work.process_wiring().cloned());
+            if let Some(issuer) = tool_child_completion_issuer {
+                context = context.with_tool_child_completion_issuer(issuer);
+            }
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }
