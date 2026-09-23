@@ -566,6 +566,7 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
             }
             other => Err(RuntimeEffectControllerError::foreign(
                 "unexpected_effect",
+                lash_core::TurnFailureCause::Outcome,
                 format!("unexpected effect {}", other.kind().as_str()),
             )),
         }

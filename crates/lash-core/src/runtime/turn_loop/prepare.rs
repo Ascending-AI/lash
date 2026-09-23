@@ -403,9 +403,7 @@ impl LashRuntime {
                 self.turn_phase_probe.clone(),
             )
             .await
-            .map_err(|err| {
-                RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, err.to_string())
-            })?;
+            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
         self.mark_phase_end(RuntimeTurnPhase::ContextTransform);
         // Release the read-view's graph clone before the rest of the turn
         // runs. Keeping it alive into `stream_prepared_turn` forces the

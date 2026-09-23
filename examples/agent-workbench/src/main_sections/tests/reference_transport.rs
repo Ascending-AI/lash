@@ -766,6 +766,7 @@ impl RuntimeEffectController for JournaledRedriveController {
                 self.mismatched_replays.fetch_add(1, Ordering::SeqCst);
                 return Err(RuntimeEffectControllerError::foreign(
                     "reference_transport_replay_mismatch",
+                    lash::runtime::TurnFailureCause::LiveFault,
                     "a re-driven effect diverged from its journaled envelope",
                 ));
             }
@@ -777,8 +778,10 @@ impl RuntimeEffectController for JournaledRedriveController {
         if matches!(&envelope.command, RuntimeEffectCommand::LlmCall { .. })
             && self.new_llm_calls.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_on_new_llm_call
         {
+            // A crash is a live fault: the drive aborts with its journal intact.
             return Err(RuntimeEffectControllerError::foreign(
                 "reference_transport_drive_crashed",
+                lash::runtime::TurnFailureCause::LiveFault,
                 "injected crash: the drive dies mid-turn with its journal intact",
             ));
         }

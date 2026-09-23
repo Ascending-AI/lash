@@ -39,6 +39,15 @@ use tokio_util::sync::CancellationToken;
 use lash_core::testing::conformance_support::{EffectGroupLifecycle, StoreEffectGroupClosing};
 
 use super::helpers::admit;
+
+/// A store failure a plugin hook ran into: a live fault, which leaves a queued
+/// run pending for a redrive instead of settling it (FIG-3575).
+fn live_store_fault(message: &str) -> PluginError {
+    PluginError::Runtime(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::StoreCommitFailed,
+        message,
+    ))
+}
 use crate::facade_support::PluginFactory;
 use crate::store::RuntimePersistence;
 use crate::testing::store_fixtures::bind_conformance_session;
@@ -717,10 +726,11 @@ pub async fn an_empty_drain_writes_nothing_and_a_retried_one_ends(
 }
 
 /// **L5 — failed run that retains ownership.** A drain whose run fails with
-/// an unclassified error — a `before_turn` refusal, which leaves the run
-/// pending rather than settling it — writes neither receipt nor row
-/// (interrupted, not ended), and its children stay live. The retry under the
-/// same `drain_id` is the drain that ends. A terminal failure is L8's.
+/// a live fault — a store failure its `before_turn` hook ran into, which
+/// leaves the run pending for a redrive rather than settling it (FIG-3575) —
+/// writes neither receipt nor row (interrupted, not ended), and its children
+/// stay live. The retry under the same `drain_id` is the drain that ends. A
+/// terminal failure is L8's.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -744,8 +754,8 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
                 let fail = Arc::clone(&fail);
                 Box::pin(async move {
                     if fail.swap(false, Ordering::SeqCst) {
-                        Err(PluginError::Invoke(
-                            "conformance drain failure before the run commits".to_string(),
+                        Err(live_store_fault(
+                            "conformance drain failure before the run commits",
                         ))
                     } else {
                         Ok(Vec::new())
@@ -1225,8 +1235,8 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
 /// **L9 — an abandoned drain ends.** A host that no longer wants a pending
 /// run recovered abandons it through `abandon_queued_run`, which settles it
 /// durably `Failed`; that settlement is terminal, so it is the drain's end
-/// exactly as L8's is. Here the drain's run is left pending by an
-/// unclassified failure while a tool child is still live under a `closing`
+/// exactly as L8's is. Here the drain's run is left pending by a live
+/// fault while a tool child is still live under a `closing`
 /// group of its scope; the abandonment waits out that protected obligation,
 /// then writes the receipt and the ledger row, and the sweep cancels the
 /// drain's `Cancel` child. No drain under the abandoned `drain_id` ever runs
@@ -1252,14 +1262,14 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "a drain its host abandons").await;
 
-    // A `before_turn` refusal is unclassified: the run stays pending, owned
-    // by the drain, for a recovery the host then declines.
+    // A live fault in `before_turn` keeps the run pending, owned by the
+    // drain, for a recovery the host then declines.
     let refuse: Arc<dyn PluginFactory> = Arc::new(crate::plugin::StaticPluginFactory::new(
         "conformance-drain-end-refuse",
         crate::facade_support::PluginSpec::new().with_before_turn(Arc::new(|_ctx| {
             Box::pin(async {
-                Err(PluginError::Invoke(
-                    "conformance drain refused before the run commits".to_string(),
+                Err(live_store_fault(
+                    "conformance drain refused before the run commits",
                 ))
             })
         })),

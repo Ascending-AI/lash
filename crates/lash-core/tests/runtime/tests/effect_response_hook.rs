@@ -181,37 +181,21 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
         &TurnId::from("response-hook-failure"),
     )
     .await
-    .expect("a failing hook is an assembled failed turn, not a runtime abort");
+    .expect_err("a failing hook aborts the turn so a redrive re-derives phase 2");
 
     assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.hook_calls.load(Ordering::SeqCst), 1);
-    assert!(failed.assistant_output.safe_text.is_empty());
 
     // The host-visible shape of a failed hook, pinned because this change moved
     // it: before the split a hook failure was an `LlmCallError` with
     // `code: "plugin_assistant_response"` and surfaced as
-    // `TurnStop::ProviderError`. It is now a runtime-effect-controller failure
-    // carrying the retryable phase-2 diagnostic, and under a controller that
-    // owns replay it raises a runtime abort instead of assembling at all.
-    assert!(
-        matches!(failed.outcome, TurnOutcome::Stopped(TurnStop::RuntimeError)),
-        "unexpected host-visible outcome: {:?}",
-        failed.outcome
-    );
-    assert!(
-        failed.errors.iter().any(|issue| {
-            format!("{issue:?}")
-                .contains(RuntimeErrorCode::RuntimeEffectAssistantResponseHook.as_str())
-        }),
-        "the turn must name the phase-2 diagnostic: {:?}",
-        failed.errors
-    );
-    assert!(
-        active_conversation_messages(&failed.state)
-            .iter()
-            .flat_map(|message| message.parts.iter())
-            .all(|part| !part.content().contains("paid completion 1")),
-        "an underived completion must not survive in committed history"
+    // `TurnStop::ProviderError`. It is now the retryable phase-2 diagnostic,
+    // a live fault on every host (FIG-3575): the turn aborts instead of
+    // recording a failure a redrive repairs.
+    assert_eq!(
+        failed.code,
+        RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
+        "the abort must name the phase-2 diagnostic: {failed:?}"
     );
 
     // The decisive assertion: the paid completion — not our post-processing's
@@ -227,11 +211,6 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
         ))
         .is_none(),
         "an incomplete derivation must not be sealed into phase 2's entry"
-    );
-    assert_eq!(failed.llm_calls.len(), 1);
-    assert_eq!(
-        failed.llm_calls[0].attempts[0].outcome,
-        lash_core::AttemptOutcome::Completed
     );
 
     let redriven = drive_turn(
@@ -276,7 +255,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
 
     let crashed = drive_turn(&mut runtime, &recorder, &TurnId::from("phase-crash"))
         .await
-        .expect("the crashed phase is an assembled failed turn");
+        .expect_err("the crashed phase aborts the turn: a host crash is a live fault");
 
     assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -284,7 +263,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
         0,
         "the host died before post-processing ran"
     );
-    assert!(crashed.assistant_output.safe_text.is_empty());
+    assert_eq!(crashed.code, RuntimeErrorCode::RuntimeEffectLocalTaskClosed);
     assert_eq!(
         journaled_raw_completion(&recorder).full_text(),
         "paid completion 1",

@@ -394,6 +394,7 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
 fn foreign_effect_controller_codes_remain_explicit_extensions() {
     let error = lash::runtime::RuntimeEffectControllerError::foreign(
         "workbench_extension_abort",
+        lash::runtime::TurnFailureCause::Outcome,
         "extension refused the effect",
     );
 

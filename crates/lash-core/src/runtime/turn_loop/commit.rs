@@ -628,10 +628,7 @@ impl LashRuntime {
             Ok(finalized) => finalized,
             Err(err) => {
                 self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::PluginFinalizeTurn,
-                    err.to_string(),
-                ));
+                return Err(err.into_turn_failure(RuntimeErrorCode::PluginFinalizeTurn));
             }
         };
         let returned_turn = finalized.turn;

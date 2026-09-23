@@ -864,6 +864,7 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
                 Some(recorded) => {
                     return Err(lash_core::RuntimeEffectControllerError::foreign(
                         "test_admission_envelope_hash_conflict",
+                        lash_core::TurnFailureCause::Outcome,
                         format!(
                             "replay key `{}` was admitted with envelope hash `{}` but redriven with `{}`",
                             recorded.replay_key,

@@ -1377,6 +1377,7 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
 mod cancellation_and_effects;
 mod conformance_and_poison;
 mod effect_execution;
+mod failure_settlement;
 mod process_await_redrive;
 mod process_child_residency;
 mod process_recovery;

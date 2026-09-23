@@ -853,6 +853,9 @@ pub mod runtime {
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
+    /// How a failed turn settles (FIG-3575): an outcome is recorded, a live
+    /// fault aborts. A host minting a foreign error code chooses its class.
+    pub use lash_core::TurnFailureCause;
     /// Assistant-output state exposed by assembled runtime turns.
     pub use lash_core::facade_support::OutputState;
     /// Wall-clock milliseconds since the Unix epoch, as the runtime stamps its

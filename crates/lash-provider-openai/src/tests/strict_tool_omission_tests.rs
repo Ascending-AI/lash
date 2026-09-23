@@ -693,6 +693,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                         .map_err(|error| {
                             RuntimeEffectControllerError::foreign(
                                 "strict_provider_call_failed",
+                                lash_core::TurnFailureCause::Outcome,
                                 error.to_string(),
                             )
                         })?;
@@ -730,6 +731,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                         .map_err(|error| {
                             RuntimeEffectControllerError::foreign(
                                 "toggled_provider_call_failed",
+                                lash_core::TurnFailureCause::Outcome,
                                 error.to_string(),
                             )
                         })?;

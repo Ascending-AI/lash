@@ -118,6 +118,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
         let crate::RuntimeEffectCommand::Process { command } = envelope.command else {
             return Err(crate::RuntimeEffectControllerError::foreign(
                 "fig790_test_command",
+                crate::TurnFailureCause::Outcome,
                 "recording controller only accepts process commands",
             ));
         };
@@ -186,6 +187,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
             }
             command => Err(crate::RuntimeEffectControllerError::foreign(
                 "fig790_test_command",
+                crate::TurnFailureCause::Outcome,
                 format!("unexpected process command: {command:?}"),
             )),
         }

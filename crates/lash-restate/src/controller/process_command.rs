@@ -143,6 +143,7 @@ where
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
                         "process_env_store_unavailable",
+lash_core::TurnFailureCause::Outcome,
                         "admitted Restate process start carries an execution environment but the executor has no environment store",
                     )
                 })?;
@@ -179,6 +180,7 @@ where
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
                         "process_env_store_unavailable",
+lash_core::TurnFailureCause::Outcome,
                         "admitted Restate process start references an execution environment but the executor has no environment store",
                     )
                 })?;
@@ -211,6 +213,7 @@ where
                     let process_engines = process_engines.as_ref().ok_or_else(|| {
                         RuntimeEffectControllerError::foreign(
                             "process_engine_registry_unavailable",
+lash_core::TurnFailureCause::Outcome,
                             "admitted Restate process start requires an engine but the executor has no process-engine registry",
                         )
                     })?;

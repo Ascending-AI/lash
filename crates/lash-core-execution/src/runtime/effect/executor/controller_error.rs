@@ -165,13 +165,15 @@ mod tests {
     fn foreign_constructor_preserves_extension_code_as_foreign() {
         let runtime_error = RuntimeEffectControllerError::foreign(
             "plugin_defined_abort",
+            crate::TurnFailureCause::Outcome,
             "extension refused the effect",
         )
         .into_runtime_error();
 
         assert_eq!(runtime_error.code.as_str(), "plugin_defined_abort");
         assert!(!runtime_error.is_retryable());
-        assert!(!runtime_error.is_terminal());
+        // The host chose an outcome, so the code is terminal (FIG-3575).
+        assert!(runtime_error.is_terminal());
     }
 
     #[test]
@@ -191,7 +193,7 @@ mod tests {
         .into_runtime_error();
 
         assert!(runtime_error.code.is_replay_mismatch());
-        assert_eq!(runtime_error.summary, Some(summary));
+        assert_eq!(runtime_error.summary.as_deref(), Some(&summary));
         assert!(runtime_error.to_string().contains("command.duration_ms"));
     }
 
@@ -205,7 +207,7 @@ mod tests {
             crate::RuntimeErrorCode::WorkerReplacementAbort,
             "replacement reconstructed a different turn index",
         );
-        runtime_error.summary = Some(summary.clone());
+        runtime_error.summary = Some(Box::new(summary.clone()));
 
         let controller_error = RuntimeEffectControllerError::from(runtime_error);
 

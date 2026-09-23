@@ -893,6 +893,7 @@ fn failing_executor() -> RuntimeEffectLocalExecutor<'static> {
     RuntimeEffectLocalExecutor::testing(|_| async move {
         Err(RuntimeEffectControllerError::foreign(
             "test_local_executor_called",
+            lash_core::TurnFailureCause::Outcome,
             "replay must not invoke the local executor",
         ))
     })

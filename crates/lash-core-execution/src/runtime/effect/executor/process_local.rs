@@ -65,6 +65,7 @@ impl ProcessLocalExecution {
                     let env_store = process_env_store.as_ref().ok_or_else(|| {
                         RuntimeEffectControllerError::foreign(
                             "process_env_store_unavailable",
+crate::TurnFailureCause::Outcome,
                             "admitted process start carries an execution environment but the local executor has no environment store",
                         )
                     })?;
@@ -99,6 +100,7 @@ impl ProcessLocalExecution {
                     let env_store = process_env_store.as_ref().ok_or_else(|| {
                         RuntimeEffectControllerError::foreign(
                             "process_env_store_unavailable",
+crate::TurnFailureCause::Outcome,
                             "admitted process start references an execution environment but the local executor has no environment store",
                         )
                     })?;
@@ -318,6 +320,7 @@ impl ProcessLocalExecution {
                 let effect_controller = effect_controller.clone().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
                         "process_attach_resolver_unavailable",
+                        crate::TurnFailureCause::Outcome,
                         "arming a process terminal needs the effect controller that owns the wait",
                     )
                 })?;

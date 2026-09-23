@@ -222,7 +222,7 @@ fn ingress_runtime_error(error: crate::EmbedError) -> lash_core::RuntimeError {
         crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => error,
         crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error)) => {
             let mut runtime = lash_core::RuntimeError::new(error.code, error.message);
-            runtime.summary = error.summary;
+            runtime.summary = error.summary.map(Box::new);
             match error.cause {
                 Some(cause) => runtime.with_cause(cause),
                 None => runtime,

@@ -61,6 +61,7 @@ impl RuntimeEffectController for RecordingEffectHostController {
             RuntimeEffectCommand::Sleep { .. } => Ok(RuntimeEffectOutcome::Sleep),
             command => Err(RuntimeEffectControllerError::foreign(
                 "recording_effect_host_unsupported_command",
+                crate::TurnFailureCause::Outcome,
                 format!(
                     "recording effect host cannot synthesize {} outcomes",
                     command.kind().as_str()
@@ -815,6 +816,7 @@ where
             RuntimeEffectLocalExecutor::testing(|_| async {
                 Err(RuntimeEffectControllerError::foreign(
                     "journaled_effect_replay_error",
+                    crate::TurnFailureCause::Outcome,
                     "recorded journaled-effect error",
                 ))
             }),
@@ -2283,6 +2285,7 @@ fn replay_conformance_failing_executor(
             .push(envelope.invocation.effect_id().to_string());
         Err(RuntimeEffectControllerError::foreign(
             "conformance_replay_local_executor_called",
+            crate::TurnFailureCause::Outcome,
             "recorded replay must not invoke local effect execution",
         ))
     })

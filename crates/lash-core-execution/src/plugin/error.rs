@@ -270,6 +270,75 @@ pub enum PluginError {
 }
 
 impl PluginError {
+    /// Settles a plugin hook's failure by its cause (FIG-3575).
+    ///
+    /// A live fault the hook ran into aborts the turn under a live code, so a
+    /// redrive repairs it: a carried runtime or controller error keeps its own
+    /// code, a lost session lease is `SessionExecutionLeaseLost`, and an opaque
+    /// session-seam failure (store I/O behind a plugin service) or a lost
+    /// process lease is `PluginSessionManager`. Every other variant is a
+    /// deliberate refusal over the turn's inputs or durable state: an outcome
+    /// spelled as `refusal`, recorded or settled once instead of retried.
+    pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
+        use crate::TurnFailureCause::LiveFault;
+        match self {
+            Self::Runtime(error) if error.turn_failure_cause() == LiveFault => error,
+            Self::RuntimeEffectController(error) if error.turn_failure_cause() == LiveFault => {
+                error.into_runtime_error()
+            }
+            error @ Self::SessionExecutionLeaseLost { .. } => crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
+                error.to_string(),
+            ),
+            error @ (Self::Session(_) | Self::ProcessLeaseSuperseded { .. }) => {
+                crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::PluginSessionManager,
+                    error.to_string(),
+                )
+            }
+            refused @ (Self::Runtime(_)
+            | Self::RuntimeEffectController(_)
+            | Self::ProcessCancelConflict { .. }
+            | Self::ParentEnded { .. }
+            | Self::InvalidToolDiscovery { .. }
+            | Self::ResidentToolContractUnavailable { .. }
+            | Self::ResidentToolDuplicateId { .. }
+            | Self::ResidentToolDuplicateName { .. }
+            | Self::ResidentToolRouteUnavailable { .. }
+            | Self::Registration(_)
+            | Self::Invoke(_)
+            | Self::BeforeToolCallReplacementConflict { .. }
+            | Self::AfterToolCallReplacementConflict { .. }
+            | Self::MissingSessionInit { .. }
+            | Self::SessionInitTooLarge { .. }
+            | Self::MissingSessionStore { .. }
+            | Self::MissingRecordedSessionConfig { .. }
+            | Self::RecordedSessionConfigConflict { .. }
+            | Self::AppendOperationIdentityConflict { .. }
+            | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
+            | Self::StoredDataCorrupt { .. }
+            | Self::UnstagedUsageConfirmation { .. }
+            | Self::ClockBeforeUnixEpoch { .. }
+            | Self::ProcessNotVisible { .. }
+            | Self::ProcessUnknown { .. }
+            | Self::ProcessIncarnationSuperseded { .. }
+            | Self::ProcessChangeCursorPruned { .. }
+            | Self::ProcessAlreadyStarted { .. }
+            | Self::ProcessAttemptsExhausted { .. }
+            | Self::MonotonicCounterOverflow { .. }
+            | Self::ProcessNoLongerRetained { .. }
+            | Self::ProcessCallerDeparted { .. }
+            | Self::ProcessAlreadyTerminal { .. }
+            | Self::ProcessTerminalOutcomeMismatch { .. }
+            | Self::ReservedProcessEvent { .. }
+            | Self::InvalidProcessWakeIdentity { .. }
+            | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
+            | Self::ProcessWorklistCursorBackendMismatch { .. }) => {
+                crate::RuntimeError::new(refusal, refused.to_string())
+            }
+        }
+    }
+
     /// Whether retrying the identical plugin operation is explicitly safe.
     pub fn is_retryable(&self) -> bool {
         match self {
@@ -286,9 +355,7 @@ impl PluginError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::Runtime(error) => error.is_terminal(),
-            Self::RuntimeEffectController(error) => {
-                error.cause.is_some() || error.code.is_terminal()
-            }
+            Self::RuntimeEffectController(error) => error.is_terminal(),
             Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }
             | Self::MissingSessionStore { .. }

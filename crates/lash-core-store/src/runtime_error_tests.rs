@@ -36,7 +36,9 @@ fn retired_restate_hash_mismatch_wire_code_decodes_to_the_current_classification
     assert_eq!(code, RuntimeErrorCode::WorkerReplacementAbort);
     assert_eq!(code.as_str(), "worker_replacement_abort");
     assert!(code.is_replay_mismatch());
-    assert!(code.is_terminal());
+    // A replaced worker's journal disagreeing is live: a fresh drive succeeds
+    // (FIG-3575).
+    assert!(!code.is_terminal());
     let encoded = serde_json::to_value(&code).expect("serialize retired wire code");
     assert_eq!(encoded, serde_json::json!("worker_replacement_abort"));
 }
@@ -110,15 +112,14 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
         assert_eq!(&decoded, code, "typed round trip for {code}");
     }
 
-    let foreign = RuntimeErrorCode::from_wire_code("plugin_defined_abort");
-    assert_eq!(foreign.classification(), RuntimeErrorClass::Unclassified);
+    let decoded = RuntimeErrorCode::from_wire_code("plugin_defined_abort");
+    assert_eq!(decoded.classification(), RuntimeErrorClass::Terminal);
 }
 
 /// A failed assistant-response hook is an incomplete derivation over a
 /// completion the journal already holds, so the only correct recovery is to
 /// redrive phase 2 (FIG-1276). That is a claim about `is_retryable`, not
-/// merely about staying out of `is_terminal`: an unclassified code is
-/// `Unknown`, which durable hosts are free to settle either way.
+/// merely about staying out of `is_terminal`.
 #[test]
 fn assistant_response_hook_failures_are_retryable_not_terminal() {
     let code = RuntimeErrorCode::RuntimeEffectAssistantResponseHook;
@@ -137,16 +138,19 @@ fn assistant_response_hook_failures_are_retryable_not_terminal() {
     );
 }
 
+/// FIG-3575: a lost journal lease is a live fault. The identical call is not
+/// safe to repeat, so it is not retryable, but a redrive under a fresh lease
+/// succeeds, so it is not terminal either. A durable timeout is terminal.
 #[test]
-fn unsafe_effect_replay_and_durable_timeout_codes_are_terminal() {
+fn journal_lease_loss_is_redrivable_and_a_durable_timeout_is_terminal() {
     for code in [
         RuntimeErrorCode::PostgresEffectReplayLeaseLost,
         RuntimeErrorCode::SqliteEffectReplayLeaseLost,
-        RuntimeErrorCode::ProcessSignalWaitTimeout,
     ] {
-        assert!(!code.is_retryable(), "{code} must not be retried");
-        assert!(code.is_terminal(), "{code} must settle terminally");
+        assert!(!code.is_retryable(), "{code} must not be retried unchanged");
+        assert!(!code.is_terminal(), "{code} must stay redrivable");
     }
+    assert!(RuntimeErrorCode::ProcessSignalWaitTimeout.is_terminal());
 }
 
 #[test]
@@ -286,4 +290,115 @@ fn turn_input_source_key_conflict_is_a_typed_identity_conflict() {
         .code,
         RuntimeErrorCode::StoreCommitFailed
     );
+}
+
+/// FIG-3575: one answer per code. A code is terminal exactly when a failed
+/// turn settles it as an outcome, with no exceptions, for every first-party
+/// code and for a foreign code of either class. A retryable code is a live
+/// fault by construction.
+#[test]
+fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
+    use crate::runtime_error::TurnFailureCause;
+
+    let decoded = [RuntimeErrorCode::from_wire_code("recorded_host_failure")];
+    for code in RuntimeErrorCode::ALL_FIRST_PARTY.iter().chain(&decoded) {
+        let cause = code.turn_failure_cause();
+        assert_eq!(
+            code.is_terminal(),
+            cause == TurnFailureCause::Outcome,
+            "{code}: terminal and outcome must agree"
+        );
+        if code.is_retryable() {
+            assert_eq!(cause, TurnFailureCause::LiveFault, "{code}");
+        }
+    }
+    // A foreign code carries the class its minting host chose on the error.
+    for (cause, terminal) in [
+        (TurnFailureCause::Outcome, true),
+        (TurnFailureCause::LiveFault, false),
+    ] {
+        let minted = RuntimeError::foreign("host_code", cause, "minted");
+        assert_eq!(minted.turn_failure_cause(), cause);
+        assert_eq!(minted.is_terminal(), terminal);
+        let controller = crate::runtime_error::RuntimeEffectControllerError::foreign(
+            "host_code",
+            cause,
+            "minted",
+        );
+        assert_eq!(controller.turn_failure_cause(), cause);
+        assert_eq!(controller.into_runtime_error().turn_failure_cause(), cause);
+    }
+    for outcome in [
+        RuntimeErrorCode::ProtocolBeforeLlmCall,
+        RuntimeErrorCode::SqliteEffectReplayHashConflict,
+        RuntimeErrorCode::PostgresEffectReplayHashConflict,
+        RuntimeErrorCode::RestateProcessJournalIdentityDrift,
+        RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
+    ] {
+        assert_eq!(
+            outcome.turn_failure_cause(),
+            TurnFailureCause::Outcome,
+            "{outcome}"
+        );
+    }
+    for live in [
+        RuntimeErrorCode::SessionExecutionLeaseLost,
+        RuntimeErrorCode::StoreCommitFailed,
+        RuntimeErrorCode::ExecutionStateCaptureFailed,
+        RuntimeErrorCode::SqliteEffectReplayStore,
+        RuntimeErrorCode::PostgresEffectReplayStore,
+        RuntimeErrorCode::SqliteEffectReplayLeaseLost,
+        RuntimeErrorCode::PostgresEffectReplayLeaseLost,
+        RuntimeErrorCode::RuntimeEffectTaskJoin,
+        RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
+        RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
+        RuntimeErrorCode::RuntimeEffectAttachmentStore,
+        RuntimeErrorCode::RestateEffectController,
+        RuntimeErrorCode::RestateProcessAwait,
+        RuntimeErrorCode::WorkerReplacementAbort,
+        RuntimeErrorCode::RuntimeEffectSleepCancelled,
+        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+    ] {
+        assert_eq!(
+            live.turn_failure_cause(),
+            TurnFailureCause::LiveFault,
+            "{live}"
+        );
+    }
+}
+
+/// FIG-3528 principle: a journaled controller error is the recorded outcome
+/// of its effect whatever its code, so a redrive replays it instead of
+/// aborting on it forever.
+#[test]
+fn a_journaled_controller_error_is_an_outcome_whatever_its_code() {
+    use crate::runtime_error::{RuntimeEffectControllerError, TurnFailureCause};
+
+    let live = RuntimeEffectControllerError::new(RuntimeErrorCode::SqliteEffectReplayStore, "io");
+    assert_eq!(live.turn_failure_cause(), TurnFailureCause::LiveFault);
+    assert_eq!(
+        live.into_journaled().turn_failure_cause(),
+        TurnFailureCause::Outcome
+    );
+}
+
+/// FIG-3575: the acceptance an aborted direct turn returns rides the error and
+/// is absent from the wire form of every other error.
+#[test]
+fn an_aborted_turn_error_carries_its_acceptance_receipt() {
+    let plain = RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, "commit failed");
+    let json = serde_json::to_value(&plain).expect("serialize runtime error");
+    assert!(json.get("turn_input_acceptance").is_none());
+
+    let receipt = crate::turn_input_vocabulary::TurnInputAcceptanceReceipt {
+        input_id: crate::InputId::from("input-1"),
+        session_id: SessionId::from("session-1"),
+        source_key: None,
+        ingress: crate::turn_input_vocabulary::TurnInputIngress::NextTurn,
+    };
+    let aborted = plain.with_turn_input_acceptance(receipt.clone());
+    let decoded: RuntimeError =
+        serde_json::from_value(serde_json::to_value(&aborted).expect("serialize"))
+            .expect("decode runtime error");
+    assert_eq!(decoded.turn_input_acceptance.as_deref(), Some(&receipt));
 }
