@@ -34,6 +34,8 @@ mod store_effect_group_drain_conformance;
 mod store_gc;
 #[path = "store_maintenance_outcome.rs"]
 mod store_maintenance_outcome;
+#[path = "tool_attempt_store_fault.rs"]
+mod tool_attempt_store_fault;
 #[path = "tool_child_invocation.rs"]
 mod tool_child_invocation;
 #[path = "turn_control_binding.rs"]

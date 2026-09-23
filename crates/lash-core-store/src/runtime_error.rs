@@ -1528,6 +1528,15 @@ pub struct RuntimeEffectControllerError {
     pub summary: Option<crate::RuntimeEffectReplayMismatchReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<crate::RuntimeErrorCause>,
+    /// `true` when this error is the journaled record of a failed effect —
+    /// decoded out of a settled `Failed` terminal — rather than a live fault
+    /// that left nothing recorded. Consumers keep a journaled error on the
+    /// result surface because it replays identically on every redrive; a
+    /// live fault instead aborts like a crash so recovery can re-run the
+    /// attempt (FIG-3528). Never persisted: the flag is stamped at the
+    /// journal's replay boundary, not read back out of the row.
+    #[serde(skip)]
+    pub journaled: bool,
 }
 
 impl RuntimeEffectControllerError {
@@ -1538,6 +1547,7 @@ impl RuntimeEffectControllerError {
             message: message.into(),
             summary: None,
             cause: None,
+            journaled: false,
         }
     }
 
@@ -1569,6 +1579,15 @@ impl RuntimeEffectControllerError {
         Self::new(RuntimeErrorCode::ForeignCode(code.into()), message)
     }
 
+    /// Marks this error as the journaled record of a failed effect — the
+    /// `Failed` terminal a settled row replays — so consumers surface it as
+    /// the attempt's recorded outcome instead of treating it as a live
+    /// journal fault.
+    pub fn into_journaled(mut self) -> Self {
+        self.journaled = true;
+        self
+    }
+
     /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
     /// while executing or replaying a runtime effect.
     pub fn with_summary(mut self, summary: crate::RuntimeEffectReplayMismatchReport) -> Self {
@@ -1594,6 +1613,7 @@ impl RuntimeEffectControllerError {
             message,
             summary,
             cause,
+            journaled: _,
         } = self;
         let mut runtime = RuntimeError::new(code, message);
         runtime.summary = summary;
@@ -1612,6 +1632,7 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
             message: err.message,
             summary: err.summary,
             cause: err.cause,
+            journaled: false,
         }
     }
 }
@@ -1661,6 +1682,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             message: err.to_string(),
             summary: None,
             cause,
+            journaled: false,
         }
     }
 }

@@ -2023,7 +2023,7 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
 }
 
 #[tokio::test]
-async fn retry_sleep_controller_rejection_returns_explicit_tool_failure() {
+async fn retry_sleep_controller_rejection_aborts_as_controller_error() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut context = exact_dispatch_context(Arc::new(RetryProbeTools {
@@ -2052,7 +2052,10 @@ async fn retry_sleep_controller_rejection_returns_explicit_tool_failure() {
     let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
         panic!("expected failure");
     };
-    assert_eq!(failure.code, "tool_retry_sleep_failed");
+    // A live controller rejection of the retry-sleep effect is a crash-class
+    // fault, not a tool-produced outcome: it carries the controller's code
+    // rather than `tool_retry_sleep_failed` (FIG-3528).
+    assert_eq!(failure.code, "test_sleep_rejected");
 }
 
 #[tokio::test]

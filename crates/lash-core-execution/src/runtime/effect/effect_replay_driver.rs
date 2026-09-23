@@ -1845,7 +1845,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     self.sleep_until_due(due_at_ms).await;
                     return Ok(EffectRun::Terminal(*outcome));
                 }
-                PreparedEffect::ReplayError(err) => return Err(err),
+                // A `Failed` terminal decoded off a settled row is the
+                // effect's journaled record, not a live fault: stamp it so
+                // consumers keep it on the result surface (it replays
+                // identically on every redrive) while unrecorded claim,
+                // renew and finalize faults abort like a crash (FIG-3528).
+                PreparedEffect::ReplayError(err) => return Err(err.into_journaled()),
                 PreparedEffect::Claimed(claim) => {
                     let command_kind = envelope.command.kind();
                     let execution =
