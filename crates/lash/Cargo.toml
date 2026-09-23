@@ -102,7 +102,7 @@ lashlang = { workspace = true, features = ["testing"] }
 lash-llm-tools = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-subagents = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-anthropic = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }

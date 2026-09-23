@@ -2107,7 +2107,6 @@ fn system_text(request: &LlmRequest) -> String {
         .to_owned()
 }
 
-#[cfg(feature = "rlm")]
 fn request_text(request: &LlmRequest) -> String {
     request
         .messages

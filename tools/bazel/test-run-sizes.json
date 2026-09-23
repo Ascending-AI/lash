@@ -860,7 +860,7 @@
     "peak_bytes": 50896896,
     "samples": 3
   },
-  "//crates/lash:integration__test__fv_74a71485": {
+  "//crates/lash:integration__test__fv_8a6221af": {
     "cpu_count": 3,
     "memory_kb": 1048576,
     "p95_cores": 2.6,
@@ -874,7 +874,7 @@
     "peak_bytes": 189743104,
     "samples": 18
   },
-  "//crates/lash:lash__unit_test__fv_74a71485": {
+  "//crates/lash:lash__unit_test__fv_8a6221af": {
     "cpu_count": 4,
     "memory_kb": 1048576,
     "p95_cores": 3.65,
