@@ -2414,6 +2414,8 @@ lash_conformance::effect_controller_lease_fencing_tests!({
     let make_path = path.clone();
     let steal_path = path.clone();
     let expire_path = path.clone();
+    let fail_path = path.clone();
+    let heal_path = path.clone();
     (
         dirs,
         lash_conformance::EffectLeaseFencingBackend {
@@ -2471,6 +2473,36 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                         )
                         .expect("expire lease row");
                     assert_eq!(changed, 1);
+                })
+            }),
+            // A renewal is the only update that keeps the row `in_progress`
+            // under the same lease token while moving its expiry; a takeover
+            // changes the token and a finalize changes the status.
+            fail_renewals: Box::new(move |replay_key| {
+                let path = fail_path.clone();
+                Box::pin(async move {
+                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
+                    conn.execute_batch(&format!(
+                        "CREATE TRIGGER lash_conformance_fail_effect_renewal
+                         BEFORE UPDATE OF lease_expires_at_ms ON runtime_effect_replay
+                         WHEN OLD.replay_key = '{replay_key}'
+                          AND NEW.status = 'in_progress'
+                          AND OLD.lease_token IS NEW.lease_token
+                         BEGIN
+                           SELECT RAISE(ABORT, 'injected effect lease renewal fault');
+                         END;"
+                    ))
+                    .expect("install renewal fault");
+                })
+            }),
+            heal_renewals: Box::new(move |_replay_key| {
+                let path = heal_path.clone();
+                Box::pin(async move {
+                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
+                    conn.execute_batch(
+                        "DROP TRIGGER IF EXISTS lash_conformance_fail_effect_renewal;",
+                    )
+                    .expect("remove renewal fault");
                 })
             }),
         },
