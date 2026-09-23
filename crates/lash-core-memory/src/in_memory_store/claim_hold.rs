@@ -1,4 +1,4 @@
-use crate::LeaseOwnerIdentity;
+use crate::{InputId, LeaseOwnerIdentity, TurnId};
 
 /// Ownership and predecessor identity are distinct states. An interrupted
 /// predecessor is never live, even when abandon restores its token.
@@ -22,6 +22,10 @@ enum HoldState {
         token: String,
         owner: LeaseOwnerIdentity,
         generation: u64,
+        /// The aborted direct turn this claim is bound to, and the input its
+        /// receipt names (FIG-3589): the claim no longer lapses with its
+        /// generation, and only that turn's redrive re-takes it.
+        bound_to: Option<(TurnId, InputId)>,
     },
 }
 
@@ -75,8 +79,48 @@ impl ClaimHold {
             .is_some_and(|held| held != 0 && Some(held) == generation)
     }
 
+    /// Whether a claim under `generation` may take this row: never while
+    /// that generation holds it, and never while an aborted turn is bound to
+    /// it (FIG-3589).
     pub(super) fn claimable_by(&self, generation: u64) -> bool {
-        !self.live_under(Some(generation))
+        !self.live_under(Some(generation)) && self.bound_turn().is_none()
+    }
+
+    /// The aborted direct turn this claim is bound to, if any (FIG-3589).
+    pub(super) fn bound_turn(&self) -> Option<&TurnId> {
+        self.binding().map(|(turn_id, _)| turn_id)
+    }
+
+    /// The aborted direct turn this claim is bound to and the input its
+    /// receipt names, if any (FIG-3589).
+    pub(super) fn binding(&self) -> Option<&(TurnId, InputId)> {
+        match &self.state {
+            HoldState::Held { bound_to, .. } => bound_to.as_ref(),
+            HoldState::Unheld { .. } => None,
+        }
+    }
+
+    /// Bind this hold to the aborted turn `turn_id`, whose receipt names
+    /// `receipt_input_id`, when it is still the claim `claim_id`/`token`; any
+    /// other hold is left alone.
+    pub(super) fn bind(
+        &mut self,
+        claim_id: &str,
+        token: &str,
+        turn_id: &TurnId,
+        receipt_input_id: &InputId,
+    ) {
+        if let HoldState::Held {
+            claim_id: held_id,
+            token: held_token,
+            bound_to,
+            ..
+        } = &mut self.state
+            && held_id == claim_id
+            && held_token == token
+        {
+            *bound_to = Some((turn_id.clone(), receipt_input_id.clone()));
+        }
     }
 
     pub(super) fn owned_by(&self, claim_id: &str, token: &str) -> bool {
@@ -108,6 +152,7 @@ impl ClaimHold {
             token,
             owner,
             generation,
+            bound_to: None,
         };
     }
 

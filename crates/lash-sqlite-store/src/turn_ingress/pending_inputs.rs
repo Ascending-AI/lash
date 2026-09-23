@@ -113,6 +113,7 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
+               AND claim_bound_turn_id IS NULL
              ORDER BY enqueue_seq ASC
              LIMIT ?3";
 
@@ -135,6 +136,7 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
+               AND claim_bound_turn_id IS NULL
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?4
                AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work')
@@ -155,12 +157,26 @@ lash_store_sql::statements! {
                     claim_token IS NULL
                     OR claim_session_lease_generation <> ?2
                )
+               AND claim_bound_turn_id IS NULL
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?4
                AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work')
                    IN ('after_work', 'before_completion')
              ORDER BY enqueue_seq ASC
              LIMIT ?3";
+
+        /// Session `?1`'s open rows bound to the aborted turn `?2`, which
+        /// that turn's redrive re-takes (FIG-3589). Same lock fork as
+        /// [`settlement_facts`](Self::settlement_facts).
+        select_turn_bound = "SELECT enqueue_seq, input_id, session_id, source_key,
+                    ingress_json, state, input_json, enqueued_at_ms, claim_id,
+                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
+                    claim_token, claim_session_lease_generation
+             FROM pending_turn_inputs
+             WHERE session_id = ?1
+               AND claim_bound_turn_id = ?2
+               AND {{deferred_next_turn_turn_input_state(state)}}
+             ORDER BY enqueue_seq ASC";
 
         /// Give up claim `?2`/`?3` on session `?1`, restoring each row to the
         /// open spelling its own ingress carries (FIG-1573).
@@ -181,7 +197,9 @@ lash_store_sql::statements! {
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
-                 claim_session_lease_generation = 0
+                 claim_session_lease_generation = 0,
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3";
 
         /// The batch form of [`abandon_claim`](Self::abandon_claim), over the
@@ -207,7 +225,9 @@ lash_store_sql::statements! {
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
-                 claim_session_lease_generation = 0
+                 claim_session_lease_generation = 0,
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE (session_id, claim_id, claim_token) IN (
                  SELECT json_extract(abandoned.value, '$[0]'),
                         json_extract(abandoned.value, '$[1]'),

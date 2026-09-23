@@ -461,7 +461,8 @@ pub struct PendingTurnInput {
 /// durable lifecycle state and its read-time claim status answer different
 /// questions. A live matching session-execution-lease generation makes the
 /// row held; an expired, released, or mismatched generation leaves it pending
-/// for successor reclaim under ADR 0029.
+/// for successor reclaim under ADR 0029, unless an aborted direct turn's
+/// binding reserves it for that turn (FIG-3589).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct PendingTurnInputRead {
@@ -489,6 +490,22 @@ impl PendingTurnInputRead {
             },
         }
     }
+
+    /// Project an open row whose claim is bound to the aborted direct turn
+    /// `turn_id`, whose acceptance receipt names `receipt_input_id` (FIG-3589).
+    pub fn turn_bound(
+        input: PendingTurnInput,
+        turn_id: crate::TurnId,
+        receipt_input_id: crate::InputId,
+    ) -> Self {
+        Self {
+            input,
+            status: PendingTurnInputReadStatus::TurnBound {
+                turn_id,
+                receipt_input_id,
+            },
+        }
+    }
 }
 
 /// `Held` reports only durable lease facts. It does not assert that the holder
@@ -504,6 +521,21 @@ pub enum PendingTurnInputReadStatus {
     Held {
         /// Exact expiry stored on that matching session-execution lease.
         lease_expires_at_ms: u64,
+    },
+    /// The row belongs to a direct turn that aborted with `Err` while it held
+    /// the row's claim (FIG-3589, ADR 0069 §7).
+    ///
+    /// No drain and no other turn claims it, whatever lease generation holds
+    /// the session. Only a redrive of `turn_id`, which replays that turn's
+    /// journal and settles the row with its claim, or a cancel of the input
+    /// consumes it. The aborted turn's `Err` carries the acceptance receipt
+    /// that names both.
+    TurnBound {
+        /// The aborted turn the row is bound to.
+        turn_id: crate::TurnId,
+        /// The input the aborted turn's acceptance receipt names: the one row
+        /// of its drive a cancel may target.
+        receipt_input_id: crate::InputId,
     },
 }
 
@@ -614,6 +646,16 @@ pub enum PendingTurnInputCancelOutcome {
     },
     AlreadyCompleted(PendingTurnInput),
     AlreadyCancelled(PendingTurnInput),
+    /// Refused: the row belongs to the drive of the aborted direct turn
+    /// `turn_id`, and it is not the input that turn's acceptance receipt names
+    /// (FIG-3589). Cancelling it alone would change the drive set that turn's
+    /// journal replays. Cancel `receipt_input_id` instead, which settles the
+    /// receipt's input and returns this row to the queue.
+    TurnBound {
+        input: PendingTurnInput,
+        turn_id: crate::TurnId,
+        receipt_input_id: crate::InputId,
+    },
     NotFound,
 }
 impl PendingTurnInputCancelOutcome {
@@ -630,7 +672,8 @@ impl PendingTurnInputCancelOutcome {
             Self::Cancelled(input)
             | Self::AlreadyClaimed { input, .. }
             | Self::AlreadyCompleted(input)
-            | Self::AlreadyCancelled(input) => Some(input),
+            | Self::AlreadyCancelled(input)
+            | Self::TurnBound { input, .. } => Some(input),
             Self::NotFound => None,
         }
     }

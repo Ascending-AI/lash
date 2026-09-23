@@ -79,8 +79,10 @@ const POST_FLOOR_INDEXES: [&str; 1] = ["uq_lash_runtime_effect_replay_commit_seq
 /// arbitration state component 110 installs (FIG-3409): the commit-order
 /// counter and lifecycle on the group, the renamed arity expectation, and the
 /// commit protocol columns on the replay row.
-const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
+const POST_FLOOR_COLUMNS: [(&str, &str); 13] = [
     ("lash_pending_turn_inputs", "submitted_ingress_json"),
+    ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+    ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
     ("lash_pending_turn_inputs", "submission_digest"),
     ("lash_trigger_mutation_receipts", "owner_kind"),
     ("lash_trigger_mutation_receipts", "owner_id"),
@@ -128,11 +130,10 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 117 -> 118 generation added the FIG-3544 submission columns
-/// and introduced no relation or constraint. Component 119 (FIG-3532) is
-/// destructive: no 118 → 119 arm exists, so the component-118 stamp over the
-/// current catalog is refused for having no applicable migration and names no
-/// artifacts.
+/// The retained 118 -> 119 generation moved no relation (FIG-3532 changed
+/// persisted vocabularies only). Component 120 (FIG-3589) is destructive: no
+/// 119 → 120 arm exists, so the component-119 stamp over the current catalog is
+/// refused for having no applicable migration and names no artifacts.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over
 /// the current catalog is refused at the ordinary reject-and-recreate

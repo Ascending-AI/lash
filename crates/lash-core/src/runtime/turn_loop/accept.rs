@@ -354,6 +354,7 @@ impl LashRuntime {
             .as_ref()
             .map(SessionExecutionLeaseGuard::fence)
             .expect("a store-backed turn acquires its execution lease before acceptance");
+        let drive_generation = drive_fence.fencing_token;
         let drive = scoped_effect_controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
@@ -445,6 +446,18 @@ impl LashRuntime {
                 )));
             }
             Err(error) => {
+                // The drive's body may have claimed rows before its outcome was
+                // lost (a journal finalize fault, say): bind whatever the
+                // accepted row's claim under this generation holds, while the
+                // lease still stands (FIG-3589).
+                self.bind_drive_claim_after_abort(
+                    DriveClaimToBind::HeldUnder {
+                        generation: drive_generation,
+                    },
+                    &accepted.input_id,
+                    &trace_turn_id,
+                )
+                .await;
                 if let Some(lease) = session_execution_lease.as_ref() {
                     let _ = lease.release_if_live().await;
                 }
@@ -461,11 +474,12 @@ impl LashRuntime {
             .protocol_turn_options
             .clone()
             .or(driven.protocol_turn_options);
+        let bound_turn_id = trace_turn_id.clone();
         driven.trace_turn_id = Some(trace_turn_id);
         driven.protocol_extension = input.protocol_extension.clone();
         driven.turn_context = input.turn_context.clone();
 
-        let claim_for_abandon = drive.clone();
+        let drive_claim = drive.clone();
         // A replay carries the first execution's claim token; if another
         // driver reclaimed these rows meanwhile, the commit cedes instead of
         // dropping the settlement and answering them twice.
@@ -482,12 +496,15 @@ impl LashRuntime {
             stopwatch,
         ))
         .await;
-        self.journaled_drive_claims
-            .remove(&claim_for_abandon.claim_id);
-        if let Err(err) = &result {
-            self.abandon_turn_input_claims_after_local_abort(
-                err,
-                std::slice::from_ref(&claim_for_abandon),
+        self.journaled_drive_claims.remove(&drive_claim.claim_id);
+        if result.is_err() {
+            // The aborted turn keeps its claim and its `Err` names the input:
+            // bind the claim to the turn before the lease is released, so no
+            // later generation folds the input into another turn (FIG-3589).
+            self.bind_drive_claim_after_abort(
+                DriveClaimToBind::Claim(&drive_claim),
+                &acceptance.input_id,
+                &bound_turn_id,
             )
             .await;
         }

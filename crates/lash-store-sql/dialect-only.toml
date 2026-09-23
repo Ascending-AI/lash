@@ -3229,6 +3229,29 @@ interrupted turn's commit re-defers.
 """
 
 [[dialect_only]]
+statement = "pending_turn_input.lock_cancel_targets_in_queue_order"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+PostgreSQL row locks can deadlock where SQLite's single writer cannot. A cancel
+of a bound receipt row rewrites the rest of its claim (FIG-3589), so it takes
+every row it may write in queue order first, the order the redrive's commit and
+re-take lock them in. SQLite already holds the database write lock.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.lock_cancel_suffix_in_queue_order"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = "The suffix form of pending_turn_input.lock_cancel_targets_in_queue_order."
+
+[[dialect_only]]
+statement = "pending_turn_input.select_turn_bound"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as pending_turn_input.settlement_facts, over the rows an aborted turn's redrive re-takes (FIG-3589)."
+
+[[dialect_only]]
 statement = "pending_turn_input.claim_candidates_next_turn"
 backends = ["sqlite", "postgres"]
 kind = "SKIP LOCKED"

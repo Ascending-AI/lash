@@ -32,7 +32,7 @@ pub(super) fn text_response(text: &str) -> crate::LlmResponse {
     }
 }
 
-fn fixed_text_provider(text: &str) -> crate::ProviderHandle {
+pub(super) fn fixed_text_provider(text: &str) -> crate::ProviderHandle {
     let text = text.to_string();
     crate::testing::TestProvider::builder()
         .kind("stub")
@@ -291,11 +291,11 @@ pub async fn direct_turn_accepts_before_driving(
 /// An accepted direct-turn input whose first driver never committed is
 /// rediscoverable, claimable, and drivable by an unrelated worker.
 ///
-/// The first driver aborts after its claim, leaving that claim pinned to a
-/// session-lease generation that no longer holds the lane — the state a killed
-/// worker leaves behind. The successor claims it under ADR 0029's generation
-/// fence with no repair step, no TTL, and no knowledge that the input was ever
-/// direct.
+/// The first driver's worker dies after its claim, leaving that claim pinned to
+/// a session-lease generation that no longer holds the lane. The successor
+/// claims it under ADR 0029's generation fence with no repair step, no TTL, and
+/// no knowledge that the input was ever direct. A driver that aborts with `Err`
+/// instead binds the claim to its turn, which no successor takes (FIG-3589).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -305,37 +305,28 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-orphaned-direct-turn"));
-    let abort_plugin: Arc<dyn crate::facade_support::PluginFactory> =
-        Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-direct-turn-abort",
-            crate::facade_support::PluginSpec::new().with_before_turn(Arc::new(|_ctx| {
-                Box::pin(async move {
-                    Err(crate::PluginError::Invoke(
-                        "conformance abort before the first driver commits".to_string(),
-                    ))
-                })
-            })),
-        ));
+    let died = Arc::new(tokio::sync::Notify::new());
     let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
     let mut first_driver = acceptance_runtime(
         &store,
         &effect_host,
         fixed_text_provider("never reached"),
-        vec![abort_plugin],
+        vec![crash_before_commit_plugin(Arc::clone(&died))],
         crate::testing::runtime_lease_owner(),
     )
     .await;
     let scope = effect_host
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the abandoned direct turn");
-    let failure = first_driver
-        .stream_turn(
+    crash_turn(
+        &store,
+        &died,
+        first_driver.stream_turn(
             direct_input(&turn_id, "input the first driver never commits"),
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-        )
-        .await
-        .expect_err("the first driver must abort before committing");
-    assert_eq!(failure.code, crate::RuntimeErrorCode::PluginPrepareTurn);
+        ),
+    )
+    .await;
     let orphaned = store
         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
         .await
@@ -790,7 +781,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
 /// kind fails before it runs and is never journaled, so the redrive executes
 /// it for real.
 #[derive(Default)]
-struct JournalLayer {
+pub(super) struct JournalLayer {
     outcomes: std::sync::Mutex<std::collections::HashMap<String, crate::RuntimeEffectOutcome>>,
     crash_at: std::sync::Mutex<Option<crate::RuntimeEffectKind>>,
     lose_outcome_at: std::sync::Mutex<Option<crate::RuntimeEffectKind>>,
@@ -805,12 +796,12 @@ impl JournalLayer {
     /// The next effect of `kind` runs to completion, and then the worker dies
     /// before its outcome is recorded, so the redrive runs its body again.
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
-    fn lose_outcome_at_next(&self, kind: crate::RuntimeEffectKind) {
+    pub(super) fn lose_outcome_at_next(&self, kind: crate::RuntimeEffectKind) {
         *self.lose_outcome_at.lock().expect("lose-outcome lock") = Some(kind);
     }
 
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
-    fn journaled_drive(&self) -> Option<crate::AcceptedTurnInputDrive> {
+    pub(super) fn journaled_drive(&self) -> Option<crate::AcceptedTurnInputDrive> {
         self.outcomes
             .lock()
             .expect("journal lock")
@@ -933,14 +924,14 @@ impl crate::store::RuntimePersistenceDecorator for RedriveStore {
 /// One journal and one effect host shared by a first execution and its
 /// redrive, the way a durable engine's handler keeps its journal across
 /// worker incarnations.
-struct Journal {
-    controller: Arc<JournalLayer>,
-    effect_host: Arc<dyn crate::EffectHost>,
+pub(super) struct Journal {
+    pub(super) controller: Arc<JournalLayer>,
+    pub(super) effect_host: Arc<dyn crate::EffectHost>,
     batching: crate::QueuedWorkBatchingConfig,
 }
 
 impl Journal {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let controller = Arc::new(JournalLayer::default());
         let effect_host: Arc<dyn crate::EffectHost> =
             Arc::new(crate::testing::LayeredEffectHost::new(
@@ -961,7 +952,7 @@ impl Journal {
     }
 
     /// Run the direct turn `turn_id` against `store` on a fresh runtime.
-    async fn run(
+    pub(super) async fn run(
         &self,
         store: &Arc<dyn crate::RuntimePersistence>,
         provider: crate::ProviderHandle,
@@ -972,12 +963,51 @@ impl Journal {
             .await
     }
 
+    /// Run the direct turn `turn_id` until its worker dies after the drive and
+    /// before the commit ([`crash_before_commit_plugin`]).
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
+    pub(super) async fn crash_before_commit(
+        &self,
+        store: &Arc<dyn crate::RuntimePersistence>,
+        provider: crate::ProviderHandle,
+        turn_id: &TurnId,
+        text: &str,
+    ) {
+        let died = Arc::new(tokio::sync::Notify::new());
+        let mut runtime = acceptance_runtime_with_batching(
+            SESSION_ID,
+            store,
+            &self.effect_host,
+            provider,
+            vec![crash_before_commit_plugin(Arc::clone(&died))],
+            crate::testing::runtime_lease_owner(),
+            self.batching.clone(),
+        )
+        .await;
+        let scope = self
+            .effect_host
+            .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
+            .expect("scope the crashing direct turn");
+        crash_turn(
+            store,
+            &died,
+            runtime.stream_turn(
+                direct_input(turn_id, text),
+                crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+            ),
+        )
+        .await;
+    }
+
     /// [`Self::run`] with extra plugins on the runtime.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn run_with_plugins(
+    pub(super) async fn run_with_plugins(
         &self,
         store: &Arc<dyn crate::RuntimePersistence>,
         provider: crate::ProviderHandle,
@@ -1008,23 +1038,76 @@ impl Journal {
     }
 }
 
-/// A worker that dies after its drive and before its commit: the turn aborts in
-/// its prepare phase, which leaves the claim pinned and writes nothing.
-fn die_before_commit_plugin() -> Arc<dyn crate::facade_support::PluginFactory> {
+/// A turn that aborts with `Err` after its drive and before its commit: the
+/// turn fails in its prepare phase and writes nothing, and its abort path binds
+/// the drive claim to the turn (FIG-3589).
+pub(super) fn abort_before_commit_plugin() -> Arc<dyn crate::facade_support::PluginFactory> {
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-die-before-commit",
+        "conformance-abort-before-commit",
         crate::facade_support::PluginSpec::new().with_before_turn(Arc::new(|_ctx| {
             Box::pin(async move {
                 Err(crate::PluginError::Invoke(
-                    "conformance worker died before its commit".to_string(),
+                    "conformance turn aborted before its commit".to_string(),
                 ))
             })
         })),
     ))
 }
 
+/// A worker that dies after its drive and before its commit: its turn stops
+/// in the prepare phase and never returns, and [`crash_turn`] drops it there.
+/// No abort path runs, so the claim stays pinned to a lease generation that no
+/// longer holds the lane — the state a killed worker leaves behind — and is
+/// never bound to the turn (FIG-3589).
+pub(super) fn crash_before_commit_plugin(
+    died: Arc<tokio::sync::Notify>,
+) -> Arc<dyn crate::facade_support::PluginFactory> {
+    Arc::new(crate::plugin::StaticPluginFactory::new(
+        "conformance-crash-before-commit",
+        crate::facade_support::PluginSpec::new().with_before_turn(Arc::new(move |_ctx| {
+            let died = Arc::clone(&died);
+            Box::pin(async move {
+                died.notify_one();
+                std::future::pending().await
+            })
+        })),
+    ))
+}
+
+/// Drive `turn` until its worker dies in [`crash_before_commit_plugin`], drop
+/// it there, and wait for the dropped lease guard's best-effort release, so a
+/// successor worker can take the lane.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn crash_turn<T>(
+    store: &Arc<dyn crate::RuntimePersistence>,
+    died: &tokio::sync::Notify,
+    turn: impl std::future::Future<Output = T>,
+) {
+    tokio::select! {
+        _ = turn => panic!("a crashed worker's turn never returns"),
+        () = died.notified() => {}
+    }
+    let session_id = SessionId::from(SESSION_ID);
+    for _ in 0..1_000 {
+        let observed = store
+            .get_session_execution_lease(&session_id)
+            .await
+            .expect("observe the crashed worker's lease");
+        if observed.lease.is_none() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    panic!("the crashed worker's lease was never released");
+}
+
 /// A provider that records the text of every request it answers.
-fn recording_provider(answer: &str) -> (crate::ProviderHandle, Arc<std::sync::Mutex<Vec<String>>>) {
+pub(super) fn recording_provider(
+    answer: &str,
+) -> (crate::ProviderHandle, Arc<std::sync::Mutex<Vec<String>>>) {
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let answer = answer.to_string();
     let provider = {
@@ -1072,7 +1155,9 @@ async fn vacuum(store: &Arc<dyn crate::RuntimePersistence>) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn pending_input_ids(store: &Arc<dyn crate::RuntimePersistence>) -> Vec<crate::InputId> {
+pub(super) async fn pending_input_ids(
+    store: &Arc<dyn crate::RuntimePersistence>,
+) -> Vec<crate::InputId> {
     store
         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
         .await
@@ -1086,7 +1171,7 @@ async fn pending_input_ids(store: &Arc<dyn crate::RuntimePersistence>) -> Vec<cr
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn applications(
+pub(super) async fn applications(
     store: &Arc<dyn crate::RuntimePersistence>,
 ) -> Vec<crate::TurnInputApplication> {
     store
@@ -1099,7 +1184,7 @@ async fn applications(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn enqueue_next_turn(
+pub(super) async fn enqueue_next_turn(
     store: &Arc<dyn crate::RuntimePersistence>,
     text: &str,
 ) -> crate::PendingTurnInput {
@@ -1360,15 +1445,8 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
     let journal = Journal::new();
     let (provider, requests) = recording_provider("answered the journaled set");
     journal
-        .run_with_plugins(
-            &store,
-            provider.clone(),
-            vec![die_before_commit_plugin()],
-            &turn_id,
-            "the accepted words",
-        )
-        .await
-        .expect_err("the worker dies before the turn commits");
+        .crash_before_commit(&store, provider.clone(), &turn_id, "the accepted words")
+        .await;
     let journaled = match journal.controller.journaled_drive() {
         Some(crate::AcceptedTurnInputDrive::Claimed { claim }) => claim,
         other => panic!("the first execution claimed its accepted row: {other:?}"),
@@ -1680,15 +1758,8 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
     let journal = Journal::new();
     let (provider, _) = recording_provider("answered by the first driver to commit");
     journal
-        .run_with_plugins(
-            &store,
-            provider.clone(),
-            vec![die_before_commit_plugin()],
-            &turn_id,
-            "answer me once",
-        )
-        .await
-        .expect_err("the worker dies after its drive is journaled");
+        .crash_before_commit(&store, provider.clone(), &turn_id, "answer me once")
+        .await;
     let journaled = match journal.controller.journaled_drive() {
         Some(crate::AcceptedTurnInputDrive::Claimed { claim }) => claim,
         other => panic!("the first execution claimed its accepted row: {other:?}"),

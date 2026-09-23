@@ -418,9 +418,12 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     claim_token       TEXT,
     claim_fencing_token INTEGER NOT NULL DEFAULT 0,
     claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
+    claim_bound_turn_id TEXT,
+    claim_bound_receipt_input_id TEXT,
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
+    CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL) OR (claim_bound_turn_id IS NOT NULL AND claim_bound_receipt_input_id IS NOT NULL AND claim_token IS NOT NULL AND state = 'deferred_next_turn')),
     UNIQUE (session_id, source_key)
         ON CONFLICT IGNORE
 );
@@ -815,7 +818,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// vocabularies queued-run terminals persist change (`turn_input_redrive_set_unavailable`
 /// removed, `accepted_turn_input_ceded` and `TurnOutcome::Queued` added). A
 /// pre-79 database is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 79;
+/// Bumped to 80 for FIG-3589: `pending_turn_inputs` gains
+/// `claim_bound_turn_id` and `claim_bound_receipt_input_id`, the aborted direct
+/// turn a row's claim is bound to and the input its receipt names, with
+/// `ck_pending_turn_inputs_bound_claim_is_next_turn` holding the pair
+/// all-or-none and a binding to an open next-turn claim. A pre-80 database is rejected at open and
+/// recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 80;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

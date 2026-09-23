@@ -980,6 +980,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .filter(|entry| {
                 entry.input.session_id == session_id
                     && entry.input.state.is_next_turn_pending()
+                    && entry.claim.bound_turn().is_none()
                     && (!entry.claim.live_under(live_generation))
             })
             .map(|entry| crate::store::PendingWorkOrderingKey {

@@ -69,13 +69,14 @@ pub use commit_identity::{
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{
-    EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority, EffectReplayLeaseFacts,
-    EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
-    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, ProcessLeaseAuthority,
-    ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
-    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
-    effect_replay_lease_verdict, fenced_write_applied, head_publication_verdict,
-    process_lease_verdict, queued_work_batch_claimability, require_fenced_write_applied,
+    BoundTurnInputCancel, EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority,
+    EffectReplayLeaseFacts, EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT,
+    FENCING_TRACE_TARGET, FenceTimeAuthority, FencedWrite, HeadPublicationVerdict,
+    ProcessLeaseAuthority, ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts,
+    TurnInputSettlementFacts, WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts,
+    WorkRowClaimability, bound_turn_input_cancel, effect_replay_lease_verdict,
+    fenced_write_applied, head_publication_verdict, process_lease_verdict,
+    queued_work_batch_claimability, require_fenced_write_applied,
     require_releasable_session_execution_lease, require_renewable_session_execution_lease,
     require_settleable_queued_work, require_settleable_turn_input,
     require_single_writer_head_publication, turn_input_claimability,
@@ -1353,7 +1354,10 @@ pub trait TurnInputStore: Send + Sync {
     /// [`PendingTurnInputReadStatus::Held`](crate::PendingTurnInputReadStatus::Held)
     /// with that lease's exact expiry. Expired, released, and mismatched
     /// generations are returned as pending under ADR 0029; this read never
-    /// infers whether a holder process is alive. Resubmitting the same input
+    /// infers whether a holder process is alive. A row whose claim is bound to
+    /// an aborted direct turn is returned as
+    /// [`PendingTurnInputReadStatus::TurnBound`](crate::PendingTurnInputReadStatus::TurnBound)
+    /// whatever generation holds the lease (FIG-3589). Resubmitting the same input
     /// while its row is held creates a duplicate admission once the held row's
     /// original claim returns; hosts must wait out the reported expiry or
     /// reuse the same source key.
@@ -1377,6 +1381,13 @@ pub trait TurnInputStore: Send + Sync {
     }
 
     /// Cancel an unclaimed pending user input by id.
+    ///
+    /// A row bound to an aborted direct turn is cancellable by the input its
+    /// receipt names, which returns the bound claim's other rows to the queue.
+    /// A cancel of another bound row that does not also cover the receipt's
+    /// input is refused as
+    /// [`PendingTurnInputCancelOutcome::TurnBound`](crate::PendingTurnInputCancelOutcome::TurnBound)
+    /// (FIG-3589).
     ///
     /// Provided convenience: the singular form is exactly
     /// [`cancel_pending_turn_inputs`](Self::cancel_pending_turn_inputs) with a
@@ -1451,6 +1462,78 @@ pub trait TurnInputStore: Send + Sync {
             self.abandon_turn_input_claim(claim).await?;
         }
         Ok(())
+    }
+
+    /// Bind the rows `claim` still holds to `turn_id`, the direct turn that
+    /// drove them and aborted with `Err` (FIG-3589, ADR 0069 §7).
+    ///
+    /// A bound row keeps its claim, so a redrive of `turn_id` that replays the
+    /// journaled drive settles it with the claim token the journal recorded.
+    /// It stops lapsing with the claim's lease generation: no next-turn or
+    /// checkpoint claim takes it, and it is not claimable work, under any
+    /// generation. Only that settlement, [`Self::reclaim_turn_bound_inputs`]
+    /// for the same turn, or a cancel of one of its rows releases it; the
+    /// cancel returns the claim's other rows to the queue.
+    ///
+    /// Conditional on the claim: a row another driver settled or reclaimed
+    /// meanwhile no longer carries it and is left alone, so binding a claim
+    /// that no longer holds anything is a no-op. Only next-turn rows are
+    /// bound. A crashed turn never reaches this call, so its claim still lapses
+    /// with its generation and a successor recovers it (ADR 0029).
+    ///
+    /// `receipt_input_id` is the input the aborted turn's acceptance receipt
+    /// names; a cancel of any other bound row is refused
+    /// ([`PendingTurnInputCancelOutcome::TurnBound`](crate::PendingTurnInputCancelOutcome::TurnBound)).
+    /// Rows a pending queued run owns are never bound: they lapse to the run.
+    async fn bind_turn_input_claim(
+        &self,
+        _claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>,
+        _turn_id: &crate::TurnId,
+        _receipt_input_id: &crate::InputId,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "bind_turn_input_claim",
+        })
+    }
+
+    /// [`Self::bind_turn_input_claim`] for a turn that does not know its
+    /// drive claim: the drive effect failed after its body claimed rows but
+    /// before its outcome reached the turn (FIG-3589).
+    ///
+    /// Binds the rows that share the claim identity the receipt's row
+    /// `receipt_input_id` carries, provided that claim was taken under lease
+    /// generation `generation`, the generation the failed drive ran under. The
+    /// identity is read and the rows are bound in one transaction, fenced by
+    /// that claim id and token. A receipt row that is unclaimed, or claimed
+    /// under another generation, binds nothing.
+    async fn bind_turn_input_claim_of_receipt(
+        &self,
+        _session_id: &SessionId,
+        _receipt_input_id: &crate::InputId,
+        _generation: u64,
+        _turn_id: &crate::TurnId,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "bind_turn_input_claim_of_receipt",
+        })
+    }
+
+    /// Claim, under the caller's live fence, every row bound to the aborted
+    /// turn `turn_id`, releasing the binding (FIG-3589).
+    ///
+    /// The redrive of an aborted turn whose drive the effect host did not
+    /// journal re-takes exactly the rows its first execution drove. A redrive
+    /// that replays a journaled drive never calls this: it settles with the
+    /// recorded claim. `None` when nothing is bound to `turn_id`; a store that
+    /// never binds has nothing bound.
+    async fn reclaim_turn_bound_inputs(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _owner: &LeaseOwnerIdentity,
+        _turn_id: &crate::TurnId,
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError> {
+        Ok(None)
     }
 
     /// Discover distinct turn ids with active-turn-scoped inputs eligible for

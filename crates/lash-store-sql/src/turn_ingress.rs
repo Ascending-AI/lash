@@ -39,7 +39,8 @@ crate::statements! {
     pub struct TurnIngressStatements @ "turn_ingress" {
         /// Whether session `?1` has work a runner could pick up at `?2`:
         /// an unfinished queued run, an available queued batch, or an input
-        /// already deferred to the next turn.
+        /// already deferred to the next turn that no aborted turn is bound to
+        /// (FIG-3589).
         ///
         /// One question, so one statement: asking it as two would let a
         /// session go from empty to non-empty between them and report a
@@ -57,6 +58,7 @@ crate::statements! {
                 FROM pending_turn_inputs pti
                 WHERE pti.session_id = ?1
                   AND {{deferred_next_turn_turn_input_state(pti.state)}}
+                  AND pti.claim_bound_turn_id IS NULL
              )";
 
         /// The earliest unclaimed session command and the earliest deferred
@@ -68,7 +70,8 @@ crate::statements! {
         /// side of an enqueue and report an ordering that never held.
         /// "Unclaimed" is a join against the lease row, because a claim
         /// pinned to a superseded lease generation is not a live claim
-        /// (ADR 0029).
+        /// (ADR 0029). An input bound to an aborted turn is never unclaimed
+        /// (FIG-3589).
         pending_session_work_ordering = "WITH earliest_command AS (
                 SELECT enqueued_at_ms, enqueue_seq
                 FROM queued_work_batches AS queued
@@ -89,6 +92,7 @@ crate::statements! {
                 FROM pending_turn_inputs AS input
                 WHERE session_id = ?1
                   AND {{deferred_next_turn_turn_input_state(input.state)}}
+                  AND claim_bound_turn_id IS NULL
                   AND (claim_token IS NULL OR NOT EXISTS (
                        SELECT 1 FROM session_execution_leases AS lease
                        WHERE lease.session_id = ?1

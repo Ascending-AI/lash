@@ -1253,7 +1253,8 @@ pub struct RuntimeError {
     ///
     /// Present when a direct turn aborts after its input was durably
     /// accepted: the host names the input by this receipt to withdraw it, or
-    /// redrives the same turn. FIG-3589 binds the input to the aborted turn.
+    /// redrives the same turn. Until then the input is bound to the aborted
+    /// turn, and no other turn or drain claims it (FIG-3589).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_input_acceptance:
         Option<Box<crate::turn_input_vocabulary::TurnInputAcceptanceReceipt>>,

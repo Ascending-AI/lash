@@ -17,6 +17,12 @@ items are next-turn items by rule. Section 6 stands; section 5's unclaimed
 regime is deleted (see the note there). References below to ADR 0010 read as
 ADR 0101.
 
+Amended 2026-09-23 (FIG-3589): section 7 adds the one ingress row state the
+acceptance timeline lacked. A direct turn that aborts with `Err` binds its drive
+claim to its turn, so the input no longer lapses to whichever lease generation
+comes next; only that turn's redrive or a cancel by its receipt consumes it. A
+crashed turn is untouched: section 3's recovery still reclaims it.
+
 ## Context
 
 Lash has two ways to start a turn, and they disagree about what durably exists.
@@ -334,6 +340,82 @@ advisory lane claims its row through the same generation-fenced
 that is the claimed regime, unchanged. What section 6 rules out is a *separate*
 generation fence attached to acceptance replay itself, on top of the two
 regimes section 5 defines.
+
+### 7. An aborted direct turn's input is bound to that turn
+
+Section 3 makes a crashed direct turn recoverable by anyone: its claim is pinned
+to a lease generation that stops holding the lane, and the next generation
+reclaims the rows under ADR 0029's fence. That is right for a crash, because
+nobody is left to decide. It is wrong for a turn that *aborts*: a live fault
+returns `Err` to a caller that is still there, carrying the acceptance receipt
+(FIG-3575), and the caller now owns the decision. Left to the generation fence,
+the next turn under a new lease generation reclaims the aborted turn's rows and
+folds them into its own message block. The model sees the words in a turn they
+were never sent to, a host that retries with the same words shows them twice,
+and the aborted turn's journal is orphaned: its redrive finds the rows answered
+and cedes.
+
+**So an aborted direct turn binds its drive claim to its turn id.** The binding
+is a nullable pair on the row beside the claim it binds: `claim_bound_turn_id`
+and `claim_bound_receipt_input_id`, the input the turn's acceptance receipt
+names. It is not a new lifecycle state: the row stays an open next-turn row
+holding its claim, and a CHECK holds the pair all-or-none and to exactly that
+shape. Its rules:
+
+- **Written at the abort, before the lease is released.** The direct-turn drive
+  writes it on the `Err` path, conditional on the claim still being the one the
+  turn drove, so a row another driver settled or reclaimed meanwhile is left
+  alone. When the drive effect itself fails after its body claimed rows (its
+  journal cannot finalize, say), the turn never learns its claim; it binds the
+  claim the accepted row carries under the lease generation the drive ran
+  under instead. Writing either before the release closes the window in which a
+  successor could reclaim the rows first. It is best-effort like every
+  abort-path repair: a store that cannot take the write leaves the rows exactly
+  as a crash does. It is also no stronger than its fence: if the live fault was
+  a lost lease and a successor generation had already re-claimed the rows, the
+  binding is a no-op, and that successor may fold the input into its turn.
+- **Never binds a pending queued run's inputs.** A direct turn's drive can
+  absorb a run's lapsed frozen members; those rows are skipped, so they lapse to
+  the run and its retry re-claims them as before.
+- **Tells an abort from a crash by construction.** Only a turn that reaches its
+  abort path writes the binding. A worker that dies, or a future that is
+  dropped, never does, so its claim lapses with its generation and section 3's
+  recovery is unchanged. Neither the lease nor the journal has to be consulted:
+  the effect journal lives in another database on SQLite, and the lease cannot
+  say why its holder stopped.
+- **Excluded from every claim and from claimable work.** The next-turn and
+  checkpoint candidate scans, the claim statement's backstop, the
+  has-claimable-work probe and the pending-work ordering all skip a bound row,
+  under every lease generation.
+- **Consumed by exactly two things.** The aborted turn's redrive settles the
+  rows with the claim token its journaled drive recorded (section 6), which
+  clears the binding with the claim. A redrive whose effect host journaled no
+  drive re-takes the rows bound to its own turn id under its own generation
+  (`reclaim_turn_bound_inputs`) and drives exactly that set. Or the host cancels
+  the input by the receipt, which also returns the claim's other rows, the
+  earlier admissions the aborted turn had absorbed, to the queue unbound,
+  because the aborted turn can no longer settle them. A cancel of one of those
+  other rows on its own is refused (`PendingTurnInputCancelOutcome::TurnBound`,
+  naming the turn and the receipt's input): it would change the drive set the
+  turn's journal replays. A cancel that covers the receipt's input as well, in
+  one target list or one suffix, may take them.
+- **Visible.** The pending-input read reports a bound row as
+  `PendingTurnInputReadStatus::TurnBound { turn_id, receipt_input_id }`, naming
+  the turn to redrive and the input to cancel.
+
+The redrive has one precondition the binding does not remove: the aborted turn's
+journal was recorded against the session head it ran on. Once a later turn
+commits, the redrive can no longer replay that journal: its acceptance fails
+with `SqliteEffectReplayHashConflict` or `PostgresEffectReplayHashConflict`, and
+the row stays bound. The host must then cancel the input by the receipt. A typed
+refusal for this case, and a bound on how long a bound row may wait, are left to
+a follow-up.
+
+Two sweeps meet bound rows. Deleting a session deletes them with every other
+row. `vacuum()` reclaims terminal rows only, and a bound row is open, so it
+leaves them; so does the FIG-1573 orphan backstop, which ranges over active-turn
+rows. There is no sweep that releases a binding: a bound row waits for its
+redrive or its cancel, and an operator finds it by its read status.
 
 ### The residual duplicate-execution window
 

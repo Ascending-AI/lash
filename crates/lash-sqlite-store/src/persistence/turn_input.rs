@@ -639,9 +639,7 @@ impl TurnInputStore for Store {
                             rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                         };
                         rows.into_iter()
-                            .map(|(row, lease_expires_at_ms)| {
-                                pending_turn_input_read_from_row(row, lease_expires_at_ms)
-                            })
+                            .map(pending_turn_input_read_from_row)
                             .collect()
                     })();
                 Ok(outcome)
@@ -713,6 +711,16 @@ impl TurnInputStore for Store {
                     Vec<lash_core_execution::PendingTurnInputCancelReceipt>,
                     StoreError,
                 > = (|| {
+                    // Every input this cancel names, so a bound row whose
+                    // receipt is cancelled alongside it may go (FIG-3589).
+                    let mut covered = std::collections::BTreeSet::new();
+                    for target in &targets {
+                        if let Some(row) =
+                            load_pending_turn_input_row_by_target_conn(tx, &session_id, target)?
+                        {
+                            covered.insert(lash_core_execution::InputId::from(row.input_id));
+                        }
+                    }
                     let mut results = Vec::with_capacity(targets.len());
                     for target in targets {
                         let outcome = match load_pending_turn_input_row_by_target_conn(
@@ -720,7 +728,9 @@ impl TurnInputStore for Store {
                             &session_id,
                             &target,
                         )? {
-                            Some(row) => cancel_pending_turn_input_row_conn(tx, row, now)?,
+                            Some(row) => {
+                                cancel_pending_turn_input_row_conn(tx, row, now, &covered)?
+                            }
                             None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
                         };
                         results.push(lash_core_execution::PendingTurnInputCancelReceipt {
@@ -777,9 +787,15 @@ impl TurnInputStore for Store {
                                 .map_err(sqlite_error)?;
                             rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                         };
+                        let covered = rows
+                            .iter()
+                            .map(|row| lash_core_execution::InputId::from(row.input_id.clone()))
+                            .collect::<std::collections::BTreeSet<_>>();
                         let mut outcomes = Vec::with_capacity(rows.len());
                         for row in rows {
-                            outcomes.push(cancel_pending_turn_input_row_conn(tx, row, now)?);
+                            outcomes.push(cancel_pending_turn_input_row_conn(
+                                tx, row, now, &covered,
+                            )?);
                         }
                         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes {
                             anchor,
@@ -864,6 +880,106 @@ impl TurnInputStore for Store {
             .await
             .map_err(sqlite_error)?;
         Ok(())
+    }
+
+    async fn bind_turn_input_claim(
+        &self,
+        claim: &lash_core_execution::TurnInputClaim,
+        turn_id: &lash_core_execution::TurnId,
+        receipt_input_id: &lash_core_execution::InputId,
+    ) -> Result<(), StoreError> {
+        let session_id = claim.session_id.clone();
+        let claim_id = claim.claim_id.clone();
+        let lease_token = claim.lease_token.clone();
+        let turn_id = turn_id.clone();
+        let receipt_input_id = receipt_input_id.clone();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .pending_inputs
+                        .bind_claim
+                        .sql(),
+                    params![
+                        session_id.as_str(),
+                        claim_id.as_str(),
+                        lease_token,
+                        turn_id.as_str(),
+                        receipt_input_id.as_str(),
+                    ],
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    async fn bind_turn_input_claim_of_receipt(
+        &self,
+        session_id: &SessionId,
+        receipt_input_id: &lash_core_execution::InputId,
+        generation: u64,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<(), StoreError> {
+        let session_id = session_id.clone();
+        let receipt_input_id = receipt_input_id.clone();
+        let turn_id = turn_id.clone();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome: Result<(), StoreError> = (|| {
+                    let sql = crate::turn_ingress::turn_ingress_sql();
+                    let facts: Option<(Option<String>, Option<String>, i64)> = tx
+                        .query_row(
+                            sql.pending_inputs_sqlite.settlement_facts.sql(),
+                            params![session_id.as_str(), receipt_input_id.as_str()],
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    let Some((Some(claim_id), Some(claim_token), claim_generation)) = facts else {
+                        return Ok(());
+                    };
+                    if claim_generation != sql_session_lease_generation(generation)? {
+                        return Ok(());
+                    }
+                    tx.execute(
+                        sql.pending_inputs.bind_claim.sql(),
+                        params![
+                            session_id.as_str(),
+                            claim_id,
+                            claim_token,
+                            turn_id.as_str(),
+                            receipt_input_id.as_str(),
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
+                })();
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn reclaim_turn_bound_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
+        reclaim_turn_bound_inputs_sqlite(
+            &self.conn,
+            self.clock.timestamp_ms(),
+            session_id,
+            session_execution_lease,
+            owner,
+            turn_id,
+        )
+        .await
     }
 
     async fn orphaned_active_turn_ids(

@@ -179,14 +179,32 @@ impl EmbedError {
     /// The acceptance of the direct turn this error aborted (FIG-3575).
     ///
     /// A direct turn that aborts after its input was durably accepted names
-    /// the input here. The aborted turn released its lease, so its claim on
-    /// the input no longer holds anything. The host decides the input's fate:
-    /// redrive the same turn id, which replays the aborted turn's journal and
-    /// commits once, or withdraw the input by this receipt with
-    /// [`DurableSession::cancel_pending_turn_input`](crate::DurableSession::cancel_pending_turn_input).
-    /// Until it does, a later drain or direct turn may claim the input.
-    /// FIG-3589 binds the input to the aborted turn, so that only a redrive or
-    /// a cancel by this receipt consumes it.
+    /// the input here. The aborted turn keeps its claim on the input and binds
+    /// it to its turn id before releasing its lease (FIG-3589), so no drain and
+    /// no later direct turn folds the input into its own turn: the pending
+    /// read reports it as
+    /// [`TurnBound`](lash_core::PendingTurnInputReadStatus::TurnBound). The
+    /// host decides its fate. Redrive the same turn id, which replays the
+    /// aborted turn's journal and commits once, or withdraw the input by this
+    /// receipt with
+    /// [`DurableSession::cancel_pending_turn_input`](crate::DurableSession::cancel_pending_turn_input),
+    /// which also returns any earlier inputs the aborted turn had absorbed to
+    /// the queue. Those absorbed inputs cannot be cancelled on their own while
+    /// bound: that cancel is refused as
+    /// [`TurnBound`](lash_core::PendingTurnInputCancelOutcome::TurnBound).
+    ///
+    /// The journal was recorded against the session as that turn found it.
+    /// Once a later turn commits, a redrive can no longer replay it and fails
+    /// with a replay hash conflict
+    /// ([`SqliteEffectReplayHashConflict`](lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict)
+    /// or
+    /// [`PostgresEffectReplayHashConflict`](lash_core::RuntimeErrorCode::PostgresEffectReplayHashConflict)),
+    /// and the input stays bound: cancel it by this receipt.
+    ///
+    /// The binding is fenced by the aborted turn's claim. If the live fault was
+    /// a lost lease and a successor generation had already re-claimed the input
+    /// before the binding landed, the binding does nothing and that successor
+    /// may fold the input into its own turn.
     ///
     /// The receipt also comes back when the admitted turn already committed
     /// and a later turn of the same run aborted (an agent-frame follow-on

@@ -168,7 +168,10 @@ pub(crate) async fn reject_if_active_turn_settled(
         | lash::PendingTurnInputCancelOutcome::AlreadyCancelled(_) => Err(AppError::conflict(
             "the running turn settled before the input could be injected",
         )),
+        // A turn-bound row is held by an aborted turn's drive (FIG-3589): as
+        // claimed as a live claim, for this reconciliation.
         lash::PendingTurnInputCancelOutcome::AlreadyClaimed { .. }
+        | lash::PendingTurnInputCancelOutcome::TurnBound { .. }
         | lash::PendingTurnInputCancelOutcome::AlreadyCompleted(_) => Ok(()),
         // Audited: this is a locally synthesized reconciliation-invariant failure, not a propagated store error.
         lash::PendingTurnInputCancelOutcome::NotFound => Err(AppError::internal(format!(
