@@ -850,6 +850,13 @@ pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: Dra
     );
 
     armed.store(false, Ordering::SeqCst);
+    // The killed drain's session lane is released by its dropped lease guard
+    // on a spawned best-effort task, not by the unwind itself — and a real
+    // kill releases nothing, leaving the lane to its expiry. Either way the
+    // retry is the worker that finds the lane claimable, so the law waits for
+    // that durable fact: building the retry against a lane the dead drain
+    // still holds is refused as `Contended` (FIG-3566).
+    until_lane_claimable(&world.store).await;
     let mut retry_runtime = drain_runtime(
         &world,
         Arc::clone(&world.registry),
@@ -872,6 +879,40 @@ pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: Dra
         drain_ledger_row(&world.registry, &drain_id).await.is_some(),
         "the retry writes the ledger row"
     );
+}
+
+/// Poll interval for [`until_lane_claimable`]'s durable read.
+const POLL: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// Hang detector for a law's wait on a durable fact, not a latency
+/// expectation.
+const AWAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Wait until no live session execution lease holds the conformance
+/// session's lane: released, or past its expiry at the store's own
+/// observation time. Bounded by [`AWAIT_BUDGET`] as a hang detector.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each read is established by the setup"
+)]
+async fn until_lane_claimable(store: &Arc<dyn RuntimePersistence>) {
+    tokio::time::timeout(AWAIT_BUDGET, async {
+        loop {
+            let observation = store
+                .get_session_execution_lease(&SessionId::from(SESSION_ID))
+                .await
+                .expect("read the session's execution lease");
+            if observation
+                .lease
+                .is_none_or(|lease| lease.expires_at_epoch_ms <= observation.observed_at_epoch_ms)
+            {
+                return;
+            }
+            tokio::time::sleep(POLL).await;
+        }
+    })
+    .await
+    .expect("the killed drain's session lane becomes claimable");
 }
 
 /// The probe that stands in for a worker kill at the epilogue's entry: the
