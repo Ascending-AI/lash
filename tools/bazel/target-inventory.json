@@ -18091,7 +18091,6 @@
         "label": "//crates/lash-core:test_batch",
         "members": [
           "//crates/lash-core:integration_boundary__test",
-          "//crates/lash-core:lash-core__unit_test",
           "//crates/lash-core:panic_containment__test",
           "//crates/lash-core:runtime_effect__test",
           "//crates/lash-core:runtime_lifecycle__test",
@@ -19948,7 +19947,6 @@
         "members": [
           "//crates/lash:attachments_evidence__test",
           "//crates/lash:integration__test",
-          "//crates/lash:lash__unit_test",
           "//crates/lash:observation_admin_evidence__test",
           "//crates/lash:otel_trace_evidence__test",
           "//crates/lash:processes_evidence__test",

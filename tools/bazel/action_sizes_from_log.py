@@ -1,42 +1,60 @@
 #!/usr/bin/env python3
-"""Turn measured rustc invocations into `tools/bazel/action-sizes.json`.
+"""Turn the pool's per-action usage logs into `tools/bazel/action-sizes.json`.
 
-Every remote action carries a `memory_kb` and a `cpu_count` request. Those two
-numbers are part of the action key, so the repository defaults in `.bazelrc`
-are deliberately small and fixed; a target that needs more says so per target,
-from a measured table rather than by moving the defaults.
+Every remote action carries a `cpu_count` and a `memory_kb` request. Both are
+part of the action key, so the repository defaults in `.bazelrc` are the small
+action (1 CPU, 2 GiB) and never move; a compile that needs more says so per
+target, from this measured table.
 
-This script builds that table from a usage log. Each line is one rustc
-invocation:
+The input is the usage log every pool worker appends to, one tab-separated
+record per action (`ACTION_USAGE_LOG`, written by the executor's action
+supervisor):
 
-    crate=<--crate-name> kind=<lib|bin|test|build-script> <rss_kb> <user> <sys> <wall>
+    <ts>  crate=<CARGO_CRATE_NAME>  pkg=<CARGO_PKG_NAME>  kind=<...>
+          tool=<argv[0]>  peak_bytes=<memory.peak>  cpu_usec=<cpu time>
+          wall_ms=<wall time>  exit=<status>  requested_kb=<...>  requested_cpu=<...>
 
-where `rss_kb` is maximum resident set size in KiB and the three times are
-seconds. The seeding log is produced locally by
-`tools/bazel/measure_rustc_usage.sh`, a `RUSTC_WRAPPER` that runs the real rustc
-under `/usr/bin/time`:
+Copy the logs off the workers and run:
 
-    LASH_RUSTC_USAGE_LOG=/tmp/usage.log \
-      RUSTC_WRAPPER=$PWD/tools/bazel/measure_rustc_usage.sh \
-      cargo build --workspace --all-targets --locked
-    python3 tools/bazel/action_sizes_from_log.py /tmp/usage.log \
+    python3 tools/bazel/action_sizes_from_log.py usage-*.log \\
       -o tools/bazel/action-sizes.json
 
-The pool's own per-box usage log (kiln
-`executor/tools/action-sizes`) emits the same JSON, so replacing the seed with
-pool measurements is a file replace and not a format change.
+What counts as a sample:
 
-The rule, per `<crate>/<kind>`:
+* Lash's own compiles only. The pool is shared with other repositories, so a
+  record is kept only when its `(pkg, crate)` pair names a first-party target
+  in this workspace's `cargo metadata`. That filter is also what keeps another
+  repository's crate that happens to share a name out of this table.
+* `tool=process_wrapper`: rules_rust runs every Rustc, RustcMetadata and Clippy
+  action of a target through it, and nothing else in the log is a compile.
+* Successful (`exit=0`) actions of at least one second of wall time. A shorter
+  action cannot show how many cores it would keep busy.
 
-* `memory_kb` = peak RSS x 1.5, rounded up to a multiple of 512 MiB, never
-  below 1 GiB, and never below the repository default (a table entry may only
-  raise a request; lowering one would OOM-kill the action it describes).
-* `cpu_count` = ceil(cpu-seconds / wall-seconds), at least 1, capped at 8.
-* Both are taken over the loudest sample of that key, not the mean: the
-  request has to hold the worst invocation the key ever produced.
+Rows are keyed `<package>/<crate>`, not by kind. The `kind` field cannot key
+them: rules_rust passes `--crate-type` in a params file the supervisor does not
+read, so most records say `kind=-`. Every action a target owns (its compile, its
+pipelined metadata compile, its Clippy pass, and for a library its unit-test
+compile) shares the crate name and the `exec_properties`, so one row per
+crate is also exactly what the generator can apply.
 
-Entries that ask for no more than the defaults are dropped: absence from the
-file *is* the default request.
+The rule, per `<package>/<crate>`:
+
+* `cpu_count` = ceil(p95 cores - 0.2), at least 1, capped at 8, where cores is
+  cpu time / wall time. A p95 within 0.2 of a whole core rounds down because CPU
+  is compressible: an action that briefly wants 2.1 cores on 2 runs slightly
+  slower and does not fail. Samples taken under a 1-CPU request run
+  under a one-core quota and measure the cap, not the need, so they are left out
+  whenever the crate also has samples at a larger request.
+* `memory_kb` = the largest peak x 1.5, rounded up to 512 MiB, never below the
+  2 GiB default. Memory is not compressible, so it follows the worst sample, not
+  a percentile.
+* At least 20 samples, or no row. Fewer samples are not enough for a p95.
+* A row that asks for no more than the defaults is dropped: absence from the
+  file *is* the default request.
+
+Test *runs* are not sized here. A test run is a whole libtest binary with a
+tokio runtime, not a compile, and its request lives in the generator as
+`test.cpu_count` / `test.memory_kb` (see `TEST_CPU_FLOOR` there).
 """
 
 from __future__ import annotations
@@ -46,117 +64,167 @@ import collections
 import json
 import math
 import pathlib
+import subprocess
 import sys
 
 
-# Must match `build:shared --remote_default_exec_properties=...` in `.bazelrc`.
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+# Must match `build --remote_default_exec_properties=...` in `.bazelrc`.
 DEFAULT_MEMORY_KB = 2097152
 DEFAULT_CPU_COUNT = 1
 
-# Peak is what the action reached on one machine on one day; the margin is what
-# keeps a slightly larger input from being OOM-killed by the action cgroup.
-MEMORY_MARGIN = 1.5
-# A request is a scheduling reservation, so a finer granularity would only
-# fragment the pool's budget.
-MEMORY_GRANULARITY_KB = 512 * 1024
-MEMORY_FLOOR_KB = 1024 * 1024
-# The pool caps a single action's request at 8 cores (kiln
-# `executor/tools/action-sizes`, CPU_CAP = 8, under a per-box ceiling of half a
-# box). The cap is repeated here so this seeded table and the one the pool
-# regenerates from its own per-box logs agree row for row instead of the seed
-# quietly asking for less.
+COMPILE_TOOL = "process_wrapper"
+MIN_WALL_MS = 1000
+MIN_SAMPLES = 20
+CPU_PERCENTILE = 95
+# How far above a whole core the p95 may sit and still round down.
+CPU_TOLERANCE = 0.2
+# The pool caps a single action's request at 8 cores.
 MAX_CPU_COUNT = 8
-
-KINDS = ("lib", "bin", "test", "build-script")
-
-# Every package's `build.rs` compiles under this one rustc crate name, so a row
-# built from it would be one merged number standing for forty-five unrelated
-# compiles. It is also unusable: `cargo_build_script` forwards its keyword
-# arguments to the rule that RUNS a build script, not to the `rust_binary` that
-# compiles it, so a measured compile has no target to attach to. A
-# `<package>/build-script` row measured on the run action is the one this
-# repository's generator consumes; this local wrapper cannot produce one.
-UNKEYABLE_CRATES = ("build_script_build",)
+# Peak is what the action reached on one machine on one day; the margin keeps a
+# slightly larger input from being OOM-killed by the action cgroup.
+MEMORY_MARGIN = 1.5
+# A request is a scheduling reservation; a finer granularity only fragments the
+# pool's budget.
+MEMORY_GRANULARITY_KB = 512 * 1024
 
 
-class Sample:
-    """The loudest measurement seen for one `<crate>/<kind>` key."""
+class Samples:
+    """Every kept measurement for one `<package>/<crate>` key."""
 
     def __init__(self) -> None:
-        self.peak_rss_kb = 0
-        self.cpu_count = DEFAULT_CPU_COUNT
-        self.samples = 0
+        # (cores, peak_bytes, requested_cpu)
+        self.records: list[tuple[float, int, int]] = []
 
-    def observe(self, rss_kb: int, user: float, sys_: float, wall: float) -> None:
-        self.samples += 1
-        self.peak_rss_kb = max(self.peak_rss_kb, rss_kb)
-        self.cpu_count = max(self.cpu_count, cpu_count_for(user, sys_, wall))
+    def observe(self, cores: float, peak_bytes: int, requested_cpu: int) -> None:
+        self.records.append((cores, peak_bytes, requested_cpu))
 
+    def cpu_basis(self) -> list[float]:
+        unconstrained = [r[0] for r in self.records if r[2] > DEFAULT_CPU_COUNT]
+        return unconstrained or [r[0] for r in self.records]
 
-def cpu_count_for(user: float, sys_: float, wall: float) -> int:
-    """Cores the invocation actually kept busy, rounded up."""
-    if wall <= 0:
-        # Below the clock's resolution: nothing that short parallelises.
-        return DEFAULT_CPU_COUNT
-    return min(
-        MAX_CPU_COUNT, max(DEFAULT_CPU_COUNT, math.ceil((user + sys_) / wall))
-    )
+    def peak_bytes(self) -> int:
+        return max(r[1] for r in self.records)
 
 
-def memory_kb_for(peak_rss_kb: int) -> int:
-    requested = math.ceil(peak_rss_kb * MEMORY_MARGIN / MEMORY_GRANULARITY_KB)
-    requested *= MEMORY_GRANULARITY_KB
-    return max(requested, MEMORY_FLOOR_KB, DEFAULT_MEMORY_KB)
+def percentile(values: list[float], pct: int) -> float:
+    """Nearest-rank percentile."""
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(pct / 100 * len(ordered)) - 1)]
 
 
-def parse_log(lines: list[str]) -> dict[str, Sample]:
-    measured: dict[str, Sample] = collections.defaultdict(Sample)
-    for number, line in enumerate(lines, start=1):
-        line = line.strip()
-        if not line:
+def cpu_count_for(p95_cores: float) -> int:
+    wanted = math.ceil(p95_cores - CPU_TOLERANCE)
+    return min(MAX_CPU_COUNT, max(DEFAULT_CPU_COUNT, wanted))
+
+
+def memory_kb_for(peak_bytes: int) -> int:
+    requested = math.ceil(peak_bytes / 1024 * MEMORY_MARGIN / MEMORY_GRANULARITY_KB)
+    return max(requested * MEMORY_GRANULARITY_KB, DEFAULT_MEMORY_KB)
+
+
+def first_party_crates(metadata: dict) -> set[tuple[str, str]]:
+    """Every `(package, crate)` pair the generator emits a target for."""
+    crates = set()
+    for package in metadata["packages"]:
+        for target in package["targets"]:
+            if "custom-build" in target["kind"]:
+                continue
+            crates.add((package["name"], target["name"].replace("-", "_")))
+    return crates
+
+
+def parse_record(line: str) -> dict[str, str] | None:
+    fields = line.rstrip("\n").split("\t")
+    if len(fields) < 2:
+        return None
+    record = {}
+    for field in fields[1:]:
+        key, separator, value = field.partition("=")
+        if not separator:
+            return None
+        record[key] = value
+    return record
+
+
+def as_int(value: str | None) -> int | None:
+    if value is None or not value.isdigit():
+        return None
+    return int(value)
+
+
+def collect(lines, crates: set[tuple[str, str]]) -> dict[str, Samples]:
+    """Keeps the Lash compile samples; every other record is skipped.
+
+    The log is append-only from many actions at once, so a torn or unknown line
+    is skipped rather than fatal: the table is a measurement, not a ledger.
+    """
+    measured: dict[str, Samples] = collections.defaultdict(Samples)
+    for line in lines:
+        record = parse_record(line)
+        if record is None or record.get("tool") != COMPILE_TOOL:
             continue
-        fields = line.split()
-        if len(fields) != 6:
-            raise ValueError(f"line {number}: expected 6 fields, got {len(fields)}")
-        crate_field, kind_field, rss_field, user, sys_, wall = fields
-        if not crate_field.startswith("crate=") or not kind_field.startswith("kind="):
-            raise ValueError(f"line {number}: expected `crate=... kind=...`")
-        crate = crate_field[len("crate=") :]
-        kind = kind_field[len("kind=") :]
-        if not crate:
-            raise ValueError(f"line {number}: empty crate name")
-        if kind not in KINDS:
-            raise ValueError(f"line {number}: unknown kind {kind!r}")
-        measured[f"{crate}/{kind}"].observe(
-            int(rss_field), float(user), float(sys_), float(wall)
+        if record.get("exit") != "0":
+            continue
+        pair = (record.get("pkg", ""), record.get("crate", ""))
+        if pair not in crates:
+            continue
+        wall_ms = as_int(record.get("wall_ms"))
+        cpu_usec = as_int(record.get("cpu_usec"))
+        peak_bytes = as_int(record.get("peak_bytes"))
+        if wall_ms is None or cpu_usec is None or peak_bytes is None:
+            continue
+        if wall_ms < MIN_WALL_MS:
+            continue
+        requested_cpu = as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT
+        measured[f"{pair[0]}/{pair[1]}"].observe(
+            cpu_usec / 1000 / wall_ms, peak_bytes, requested_cpu
         )
     return measured
 
 
-def table(measured: dict[str, Sample]) -> dict[str, dict[str, int]]:
+def table(measured: dict[str, Samples]) -> dict[str, dict[str, float | int]]:
     sizes = {}
-    for key, sample in measured.items():
-        if key.split("/", 1)[0] in UNKEYABLE_CRATES:
+    for key, samples in measured.items():
+        if len(samples.records) < MIN_SAMPLES:
             continue
-        memory_kb = memory_kb_for(sample.peak_rss_kb)
-        if memory_kb <= DEFAULT_MEMORY_KB and sample.cpu_count <= DEFAULT_CPU_COUNT:
+        p95 = percentile(samples.cpu_basis(), CPU_PERCENTILE)
+        cpu_count = cpu_count_for(p95)
+        memory_kb = memory_kb_for(samples.peak_bytes())
+        if cpu_count <= DEFAULT_CPU_COUNT and memory_kb <= DEFAULT_MEMORY_KB:
             continue
         sizes[key] = {
-            "cpu_count": sample.cpu_count,
+            "cpu_count": cpu_count,
             "memory_kb": memory_kb,
-            "peak_bytes": sample.peak_rss_kb * 1024,
-            "samples": sample.samples,
+            "p95_cores": round(p95, 2),
+            "peak_bytes": samples.peak_bytes(),
+            "samples": len(samples.records),
         }
     return dict(sorted(sizes.items()))
 
 
-def render(sizes: dict[str, dict[str, int]]) -> str:
+def render(sizes: dict) -> str:
     return json.dumps(sizes, indent=2, sort_keys=True) + "\n"
 
 
+def cargo_metadata() -> dict:
+    return json.loads(
+        subprocess.run(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("log", type=pathlib.Path, help="measured rustc usage log")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("logs", nargs="+", type=pathlib.Path, help="pool usage logs")
     parser.add_argument(
         "-o",
         "--output",
@@ -165,7 +233,11 @@ def main() -> int:
         help="write the table here instead of stdout",
     )
     args = parser.parse_args()
-    rendered = render(table(parse_log(args.log.read_text(encoding="utf-8").splitlines())))
+    crates = first_party_crates(cargo_metadata())
+    lines = []
+    for path in args.logs:
+        lines.extend(path.read_text(encoding="utf-8", errors="replace").splitlines())
+    rendered = render(table(collect(lines, crates)))
     if args.output is None:
         sys.stdout.write(rendered)
     else:

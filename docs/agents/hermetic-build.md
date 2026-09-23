@@ -169,8 +169,15 @@ declared repository-relative source, patch, data, runfiles, build environment,
 and rule inputs, so two Kiln forks can reuse the same results. Successful test
 results are cacheable (`--cache_test_results=yes`) and an input change produces
 a different test action key. Failed tests are never reused as successes. Inherited actions request one CPU and 2 GiB in both local and CI builds.
-Generated targets retain the measured resource requests in
-`tools/bazel/action-sizes.json`, including the four-CPU test floor. Local
+Compile and test-run requests are separate. A target's plain `exec_properties`
+size its compile actions (Rustc, RustcMetadata, Clippy) from the table in
+`tools/bazel/action-sizes.json`, which `tools/bazel/action_sizes_from_log.py`
+rebuilds from the pool's usage logs for Lash packages only; an unmeasured
+compile inherits the default. A test target's `test.cpu_count` /
+`test.memory_kb` size its TestRunner spawn alone: every run gets at least
+4 CPU / 4 GiB, and the few suites listed in `TEST_RUN_SIZES` in the generator
+get 8 CPU. A `:test_batch` reserves two floor-sized member slots (8 CPU / 8 GiB)
+and runs at most two members at once. Local
 clients submit at most 16 jobs; CI submits 32. These are in-flight action
 limits, not compiler thread counts. The scheduler admits work against each
 worker's advertised capacity. Keep a fork's Bazel server alive to preserve
@@ -641,7 +648,7 @@ directory in `.bazelrc`, under `.github/`, or in `scripts/ci_plan.py`.
 The local `--jobs=16` and CI `--jobs=32` limits count in-flight remote actions,
 not local cores. Resource defaults live in the unconditional `build` section
 of `.bazelrc`, so forks and CI use identical action keys for inherited requests.
-Sized targets keep their existing higher floors. Aligning CI's previous
+Measured compiles and test runs state their own requests. Aligning CI's previous
 4 CPU/4 GiB fallback with the local 1 CPU/2 GiB fallback changes the keys of
 unannotated CI actions once; those actions can then reuse local results.
 

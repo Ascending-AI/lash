@@ -22,6 +22,7 @@ lash_rust_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-tool-support",
     package_name = "lash-internal-tool-support",
@@ -45,7 +46,7 @@ lash_rust_unit_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-tool-support",
     package_name = "lash-internal-tool-support",
@@ -81,6 +82,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-tool-support",
     package_name = "lash-internal-tool-support",
@@ -102,6 +104,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-tool-support",
     package_name = "lash-internal-tool-support",
@@ -123,6 +126,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-tool-support",
     package_name = "lash-internal-tool-support",
@@ -142,6 +146,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-tool-support",
     package_name = "lash-internal-tool-support",

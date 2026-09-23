@@ -19,7 +19,19 @@ Tests that carry any per-case contract (skip args, `RUST_TEST_THREADS=1`,
 never batched -- the generator emits only qualifying labels, and the coverage
 contract reconciles `WORKSPACE_TEST_BATCHES` against
 `WORKSPACE_BAZEL_TEST_TARGETS` so a silently dropped member fails CI.
+
+A batch declares what it runs. It reserves `BATCH_JOBS` member slots, each the
+size of one member's own test-run request (the generator only batches members
+sized at the test floor, 4 CPU / 4 GiB), as `test.cpu_count` / `test.memory_kb`
+on the TestRunner spawn, and the runner starts at most `BATCH_JOBS` members at
+once. Test runs use 0.5 cores at p50 and 2.4 at p95 against that 4-CPU floor,
+so two concurrent members fit an 8-CPU reservation, the same size as the
+largest standalone test runs, while each still has its own floor.
 """
+
+# Members running at once. The runner reads it from `LASH_BATCH_JOBS`, never
+# from `nproc`, which sees the worker's cores and not this reservation.
+BATCH_JOBS = 2
 
 def _rloc(file):
     """Path of a file inside a test's runfiles tree."""
@@ -48,18 +60,23 @@ def _lash_batch_test_impl(ctx):
     ctx.actions.write(script, """#!/usr/bin/env bash
 set -euo pipefail
 export LASH_BATCH_MANIFEST="$TEST_SRCDIR/{manifest}"
+export LASH_BATCH_JOBS={jobs}
 exec bash "$TEST_SRCDIR/_main/tools/bazel/test_batch_runner.sh" "$@"
-""".format(manifest = _rloc(manifest)))
+""".format(manifest = _rloc(manifest), jobs = ctx.attr.jobs))
 
     runfiles = ctx.runfiles(files = [manifest, script]).merge(runfiles)
     return [DefaultInfo(executable = script, runfiles = runfiles)]
 
-lash_batch_test = rule(
+_lash_batch_test = rule(
     implementation = _lash_batch_test_impl,
     doc = "Runs a package's plain libtest binaries in one test action, " +
           "sharing a single runfiles tree instead of one forest per binary " +
           "(FIG-3365).",
     attrs = {
+        "jobs": attr.int(
+            doc = "Members the runner starts at once.",
+            mandatory = True,
+        ),
         "tests": attr.label_list(
             doc = "rust_test targets whose executables this batch runs. " +
                   "Only plain members -- no args, env, sharding, or custom " +
@@ -74,3 +91,24 @@ lash_batch_test = rule(
     },
     test = True,
 )
+
+def lash_batch_test(name, tests, member_cpu_count, member_memory_kb, **kwargs):
+    """A package's plain test binaries, run `BATCH_JOBS` at a time.
+
+    Args:
+      name: the batch label.
+      tests: the member `rust_test` targets.
+      member_cpu_count: the test-run CPU request of every member.
+      member_memory_kb: the test-run memory request of every member.
+      **kwargs: forwarded to the rule.
+    """
+    _lash_batch_test(
+        name = name,
+        exec_properties = {
+            "test.cpu_count": str(BATCH_JOBS * member_cpu_count),
+            "test.memory_kb": str(BATCH_JOBS * member_memory_kb),
+        },
+        jobs = BATCH_JOBS,
+        tests = tests,
+        **kwargs
+    )

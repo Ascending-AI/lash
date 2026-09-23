@@ -8,11 +8,12 @@ load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 
 # Every remote action carries a `memory_kb` and a `cpu_count` request. The
 # repository default in `.bazelrc` is the small action; a target that needs more
-# says so here, through `exec_properties` that
-# `tools/bazel/generate_build_files.py` writes into the generated BUILD file
-# from the measured table in `tools/bazel/action-sizes.json`. Per-target
-# properties merge with the remote defaults, and both keys are always emitted
-# together so a request is legible without reading the defaults.
+# says so through `exec_properties` that `tools/bazel/generate_build_files.py`
+# writes into the generated BUILD file. Plain keys size the target's compile
+# actions (from the measured table in `tools/bazel/action-sizes.json`), and on a
+# test target `test.cpu_count` / `test.memory_kb` size its run: Bazel applies
+# `test.`-prefixed properties to the TestRunner spawn only. Per-target
+# properties merge with the remote defaults.
 
 _IGNORED_FILES = [
     "BUILD",
@@ -102,12 +103,7 @@ def lash_rust_build_script(
         manifest_dir,
         package_name,
         version,
-        data = [],
-        exec_properties = {}):
-    # `cargo_build_script` forwards its kwargs to the rule that RUNS the script,
-    # not to the `rust_binary` that compiles it, so a `build_script` row sizes
-    # the script's execution action. Compiling a `build.rs` has never been the
-    # expensive half, and the measured table carries no build-script row today.
+        data = []):
     cargo_build_script(
         name = name,
         aliases = _aliases_for(all_crate_deps(build = True)),
@@ -117,7 +113,6 @@ def lash_rust_build_script(
         data = data,
         deps = all_crate_deps(build = True),
         edition = "2024",
-        exec_properties = exec_properties,
         pkg_name = package_name,
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),

@@ -16,6 +16,7 @@ lash_rust_binary(
     crate_name = "toolbench",
     crate_root = "src/main.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -35,7 +36,7 @@ lash_rust_unit_test(
     crate_name = "toolbench",
     crate_root = "src/main.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
