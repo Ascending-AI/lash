@@ -43,7 +43,7 @@ history-node ids derive from the session id, operation id, and append ordinal;
 structural `FrameOpen` nodes use their deterministic session-and-frame-key
 identity because process provenance must be able to name a frame before its
 surrounding commit is realized. The commit intent is hashed through the typed,
-allowlisted `lash-intent/v1` projection. Topology and semantic payload enter the
+allowlisted `lash-intent/v2` projection. Topology and semantic payload enter the
 projection. Transport authority, fencing tokens, store-assigned facts, snapshot
 bytes, and clock observations do not.
 
@@ -60,9 +60,9 @@ Clock-derived values remain outside intent. Stores realize those observations,
 return them on the receipt, and the runtime rehydrates them so resident and
 durable state converge.
 
-The graph mutation algebra is append-only. `GraphCommitDelta::Append` is the
-only graph-changing variant; `Unchanged` represents a commit whose history head
-does not move. Appends are create-only and validate their leaf before writing.
+The graph mutation algebra is append-only. `GraphAppend::Extend` is the
+only graph-changing variant; `GraphAppend::PreserveHead` represents a commit
+whose history head does not move. Appends are create-only and validate their leaf before writing.
 Full replacement, session reset, fresh-open replacement, orphan healing, and
 in-place rewind are removed rather than emulated. A host rewinds by retaining a
 target, creating a session there, switching to it, and deleting the old session

@@ -1,6 +1,6 @@
 # Commit-identity families mint frozen unframed preimages
 
-Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) changes the
+Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) changes the
 `lash.intent` typed payload at its reject-and-recreate cutover. The two
 completed-claim lists become one, `enqueued_queue_batches` is removed, and the
 pending follow-on (a session-head field) takes its place; the config carries
@@ -63,6 +63,10 @@ parts. Provider replay routes and the separately retained response metadata
 leaves are encoded explicitly. The obsolete payload-dependent encoders and
 their corpora are removed; `append_request_identity_v5.hex` owns the new
 node, whole-request, route and effect-cause vectors.
+
+Amended 2026-09-24: the append encoding has since advanced to 7 (FIG-1961,
+FIG-3515), and `append_request_identity_v7.hex` owns the current vectors. The
+current value lives in `lash::formats`.
 
 The append family retains its unframed envelope and `lash-append-request/v2`
 hash label. Encoding 5 is the receipt's grammar discriminator, not a new hash

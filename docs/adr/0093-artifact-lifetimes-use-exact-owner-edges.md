@@ -20,8 +20,8 @@ execution needs the artifact it produced.
 
 ## Decision
 
-Compilation parses, links, introspects, and returns a `ModuleArtifact`; it does
-no I/O. Publication is a separate store operation and always names an
+Compilation links and introspects a lowered module and returns a
+`ModuleArtifact` (parsing belongs to the TypeScript front end); it does no I/O. Publication is a separate store operation and always names an
 `ArtifactOwner`: an explicit host identity, an authoritative process record, or
 a replayable execution scope.
 

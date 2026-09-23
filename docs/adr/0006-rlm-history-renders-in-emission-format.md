@@ -1,12 +1,17 @@
-# RLM History Renders in the Lashlang Emission Format
+# RLM History Renders in the Emission Format
 
 ## Status
 
 accepted
 
+Amended 2026-09-24 (FIG-3016, FIG-3021): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+makes TypeScript the sole RLM dialect, so the emitted cell is
+`<typescript>…</typescript>` and the renderer is the tag-parameterized
+`render_cell_text`. The decision is unchanged.
+
 ## Decision
 
-The RLM history renderer presents each prior step in the exact grammar the model must emit. A prior executed step renders as an **assistant** message containing `{prose}\n<lashlang>\n{code}\n</lashlang>` — the canonical cell produced by `render_lashlang_cell_text` — followed by a **user** message carrying that step's printed output, error, and final value. Plain user turns and prose-only finishes render their content verbatim by role. The `--- history[N] · … ---` header, the `Code:` framing, the indented source, and the inline `history[N].output[M]` gluing are removed entirely: **history format equals emission format**. The model's reasoning lane, the `history[N].output[M]` runtime binding, and the event store are unchanged.
+The RLM history renderer presents each prior step in the exact grammar the model must emit. A prior executed step renders as an **assistant** message containing `{prose}\n<typescript>\n{code}\n</typescript>` — the canonical cell produced by `render_cell_text` — followed by a **user** message carrying that step's printed output, error, and final value. Plain user turns and prose-only finishes render their content verbatim by role. The `--- history[N] · … ---` header, the `Code:` framing, the indented source, and the inline `history[N].output[M]` gluing are removed entirely: **history format equals emission format**. The model's reasoning lane, the `history[N].output[M]` runtime binding, and the event store are unchanged.
 
 ## Why
 

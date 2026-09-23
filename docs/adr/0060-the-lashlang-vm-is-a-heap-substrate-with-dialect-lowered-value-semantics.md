@@ -7,10 +7,17 @@ Accepted.
 Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
 surface and makes TypeScript the sole authoring language. This ADR's separation
 of machine from language stands and is what made the retirement cheap: "Lashlang"
-below names the IR and VM. The value semantics described here — the isolation
-copies, the durable-boundary validator, the heap size schedule — are the IR's
-semantics, produced by lowering, and are unchanged. What is gone is the second
-front end, not a second machine.
+below names the IR and VM. What is gone is the second front end, not a second
+machine.
+
+Amended 2026-09-24 (FIG-3019): the isolation copies went with the surface. The
+compiler emits only ECMA reference semantics; `DeepCopy` and
+`DeepCopyLoopBinding` are deleted. A durable heap is written as a forest, or as
+a validated graph when it has sharing (`validate_persisted_graph`), and the
+wire's `reference_semantics` flag records only which of the two it is, not a
+dialect. The passages below on isolation lowering, a dialect-scoped durable
+validator and consulting a segment's dialect are historical. The collection,
+metering and heap size schedule contracts stand.
 
 ## Context
 
@@ -147,7 +154,7 @@ ADR 0055's clean-cutover rule applies unchanged: deployments drain or recreate
 parked Lashlang processes, older bytes are neither migrated nor decoded, and no
 compatibility decoder exists at any of these version boundaries.
 
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
 
 ## Consequences
 

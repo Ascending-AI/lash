@@ -45,7 +45,7 @@ forever. Retained audit rows are now their own counter and are not a blocker:
 they do not make a sweep incomplete, and a host reads the counter to decide
 whether the cutoff above is worth invoking.
 
-Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) replaces the
+Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) replaces the
 pending-input and queued-work row classes with one Session Ingress row class.
 Its owner is the session; its reclaim triggers are owner-delete cascade and
 terminal-state vacuum of tombstones of every kind, where a wake tombstone is

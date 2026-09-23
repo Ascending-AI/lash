@@ -5,7 +5,7 @@
 Accepted. Ratified on FIG-874; this ADR defines the store-owned quadrant of
 that compatibility doctrine.
 
-Amended 2026-09-23 (FIG-3540): under [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) the projection's
+Amended 2026-09-23 (FIG-3540), **not yet implemented**: under [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) the projection's
 Pending Turn Input and Queued Work rows become the session's Session Ingress
 rows, and the head gains the pending follow-on and `config_revision`. That
 cutover advances `session_state_version` from 2 to 3 with no converter step and

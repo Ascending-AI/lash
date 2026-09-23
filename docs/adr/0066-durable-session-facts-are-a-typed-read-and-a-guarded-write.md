@@ -4,6 +4,15 @@
 
 Accepted.
 
+Amended 2026-09-24 (FIG-3019): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+deleted the dialect fact. `RlmSessionConfig` and `RlmCreateExtras` carry only
+`final_answer_format` and `termination`. `RlmDialect`, `.rlm_dialect(X)`,
+`rlm_plugin_session_dialect`, `rlm_session_dialect` and the post-open dialect
+comparison are gone, and a recorded session config that still names a `dialect`
+is refused with the typed `RlmSessionConfigDecodeError::RetiredDialectField`.
+The guarded set-if-unset write (`set_rlm_config_if_unset`) stands for the
+remaining facts. The dialect text below is historical.
+
 ## Context
 
 A session carries two different kinds of configuration and they had one shape.

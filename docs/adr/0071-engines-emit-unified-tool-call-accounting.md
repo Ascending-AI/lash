@@ -5,7 +5,7 @@ native tool calls and dispatches them between model completions. The RLM engine
 runs Lashlang, whose executor can dispatch tools internally before it returns an
 `ExecResponse`. These are different control loops, but they are not different
 kinds of tool use. Every completed call is part of the turn's accounting and
-must therefore use the standard `SessionEvent::ToolCall` event shape.
+must therefore use the standard `SessionStreamEvent::ToolCall` event shape.
 
 The RLM driver emits one accounting event for each tool record returned by a
 successful exec effect. It does so in `handle_exec_result`, after inspecting the
@@ -24,7 +24,7 @@ The engine vocabulary carries three invariants:
    never determine or truncate the terminal control decision.
 3. Engine internals reach model context only through that engine's projector.
 
-`SessionEvent::ToolCall` is an accounting and host-observation event. It is not a
+`SessionStreamEvent::ToolCall` is an accounting and host-observation event. It is not a
 conversation or protocol graph node, and RLM trajectory entries remain free of
 tool-call records. RLM emission consequently fills `AssembledTurn.tool_calls`,
 host and remote turn summaries, and `TurnExecutionMetrics.had_tool_calls` without
@@ -34,13 +34,13 @@ no model tokens and add nothing to the ADR 0032 LLM-attempt ledger.
 Accounting remains bounded without sacrificing attachment reachability. Large
 inline `ToolValue` scalars are replaced in place by an `omitted_bytes` marker,
 recursing through success values and failure or cancellation raw values while
-preserving the surrounding arrays and objects. A fixed per-exec record cap
-collapses the tail into one marker carrying `omitted_records` and
-`omitted_failures`; the marker is non-successful exactly when its omitted tail
-contains a non-successful record. Attachment references are small, load-bearing
-references rather than inline output bytes, so neither bound may remove them.
-Tail attachments are carried by the overflow marker and remain visible to the
-ordinary tool-output attachment scan.
+preserving the surrounding arrays and objects. A fixed per-exec record cap (128)
+keeps the first records and reports the tail as one typed
+`SessionStreamEvent::ToolCallsOmitted` event whose `OmittedToolCalls` summary
+carries the omitted `count`, `failures` and `attachments`. Attachment references
+are small, load-bearing references rather than inline output bytes, so neither
+bound may remove them. Tail attachments are carried by that summary and remain
+visible to the ordinary tool-output attachment scan.
 
 ## Why attachment commit combines owner promotion with explicit adoption
 

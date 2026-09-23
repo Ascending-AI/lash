@@ -77,9 +77,8 @@ the answer decided FIG-526, and it will decide the next one.
 - lash-core never asks which tier it runs on. A behaviour difference is either
   an operation on the effect seam or the single `EffectJournaling { Local,
   Journaled }` fact on `RuntimeEffectController` (FIG-2226, PR #1946). The
-  only documented exceptions are `supports_concurrent_effects` and
-  `owns_commit_backpressure`: they are properties of the engine, not a tier
-  flag. `scripts/check-substrate-boundary.sh` guards the retired names.
+  only documented exception is `owns_commit_backpressure`: it is a property of
+  the engine, not a tier flag (FIG-3397 deleted `supports_concurrent_effects`). `scripts/check-substrate-boundary.sh` guards the retired names.
 - How a failed turn settles is not a tier question either (FIG-3575). The
   failure's code has a cause class, `RuntimeErrorCode::turn_failure_cause`:
   a code is terminal exactly when it is an outcome. An outcome, and any

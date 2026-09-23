@@ -17,7 +17,7 @@ subagents run on their own model tiers; a per-turn selection can differ from the
 model; a transport fallback (router-side routing, or a retry landing on a different served
 model) means even one logical call can produce a model other than the one requested; and a
 tool loop is many calls with no guarantee of one model. On top of that, the *visible*
-output may map to **zero** model calls — an RLM `finish <value>` Final Value, or a tool
+output may map to **zero** model calls — an RLM `finish(value)` Final Value, or a tool
 result promoted to output, ends a turn with no assistant-text call producing it. "The model
 of a turn" is therefore a category error: the honest answer is often several models, or none.
 A single-value rollup would be both lossy (it discards the multi-model reality) and

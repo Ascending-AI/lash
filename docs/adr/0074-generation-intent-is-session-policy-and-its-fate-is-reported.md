@@ -5,6 +5,15 @@
 > below only as historical context for this decision; they are no longer part of
 > the runtime or plugin surface.
 
+> **Amended 2026-09-24 (FIG-1875):** the durable head now carries generation
+> intent. `PersistedSessionConfig` records `provider_id`, `model`,
+> `turn_budget`, `prompt`, `generation`, `tool_access`, `subagent` and
+> `protocol_turn_options`. On reopen the host spec's generation overlay merges
+> per option over the persisted `generation`, and a persisted model is kept when
+> the host supplies none (`crates/lash/src/session.rs`). The sentences below
+> saying the store is not a carrier of generation intent, and that only
+> `provider_id` comes from the record, describe the state before FIG-1875.
+
 `GenerationOptions` is caller intent, but only the one-shot direct path had a caller-owned
 slot for it. Agent sessions synthesized their options from provider configuration —
 copying `ProviderOptions.max_output_tokens` onto the request, where the adapter's own

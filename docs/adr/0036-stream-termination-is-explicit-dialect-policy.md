@@ -9,7 +9,7 @@ fell out of the retry attempt ledger.
 
 We decided that **stream completion requires dialect-specific terminal evidence unless the host
 explicitly selects EOF tolerance**. The host-supplied policy is
-`StreamTermination::RequireTerminalEvidence | EofTolerated`. It follows the same ADR 0026/0034
+`StreamTermination::RequireTerminalEvidence | EofTolerated`. It follows the same ADR 0026/0070
 configuration path as cache capability data: `ModelCapability.stream_termination` is a
 route/model override; OpenAI-compatible endpoint defaults live in
 `OpenAiCompat.stream_termination`; direct Anthropic and Google providers expose the same policy

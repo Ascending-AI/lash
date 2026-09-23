@@ -1,6 +1,6 @@
 # Turn cancellation is a first-party work-driver primitive on the keyed-promise seam
 
-Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) §10 applies the
+Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) §10 applies the
 `undelivered` disposition by author. Its scope is the host-authored items
 addressed to the cancelled turn that it did not deliver. `Defer` no longer
 rewrites them: turn addressing is immutable, and an ended turn's items are
@@ -13,7 +13,7 @@ unchanged.
 Foreground turns need a durable, externally addressable stop request without becoming Runtime
 Processes and without adding coordination state to the session store. We therefore define exact
 turn cancellation as `TurnAddress { session_id, turn_id }` on `TurnWorkDriver`, alongside (but
-separate from) `ProcessWorkDriver`. Session and turn ids are routing identities, not authorization
+separate from) the process work seam, `ProcessWorkSubstrate`. Session and turn ids are routing identities, not authorization
 credentials; every host boundary remains responsible for authentication and authorization.
 
 The primitive is cooperative. A request races the turn's normal completion through a reserved,

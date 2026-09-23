@@ -27,7 +27,10 @@ This ADR explicitly supersedes ADR 0074's sentence that host configuration
 wins on reopen "for the model and the prompt" for the session-prompt field.
 The rule is refined by presence: an explicit host session prompt wins, while a
 present persisted session prompt wins when the host leaves that field absent.
-ADR 0074's model and generation authority is unchanged.
+ADR 0074's model and generation authority is unchanged by this ADR. *(Since
+FIG-1875 a persisted model is kept when the host supplies none, and the host's
+generation overlay merges over the persisted options; see the ADR 0074
+amendment.)*
 
 ## Decision
 

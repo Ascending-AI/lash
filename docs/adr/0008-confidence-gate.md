@@ -75,10 +75,9 @@ CI and local development the same language for confidence.
 
 ## Consequences
 
-- PR CI runs the `fast:<shard>` commands in parallel with workspace tests and
-  then validates a small aggregate `fast:summary` artifact. Local
-  `scripts/confidence-gate.sh fast` runs the same shards sequentially for a
-  single-machine check. Local evidence defaults to
+- PR CI does not run the confidence gate (#1370 dropped the `fast:<shard>`
+  lane). Local `scripts/confidence-gate.sh fast` runs the fast shards
+  sequentially for a single-machine check. Local evidence defaults to
   `target/confidence/<worktree-slug>/`, where the slug includes an absolute-path
   checksum, so concurrent and same-basename worktrees cannot overwrite one
   another. CI explicitly sets `LASH_CONFIDENCE_OUT_DIR` to
@@ -94,17 +93,14 @@ CI and local development the same language for confidence.
   `confidence_override_reason`: a non-blank reason explicitly bypasses only
   this precondition and is logged as a warning. Full-profile CI for the release
   SHA remains independently required (FIG-1160).
-- The optional `Mutation` workflow runs the core replay/commit target set on
-  `mutation-requested` PR labels and manual dispatch, reusing the weekly gate's
-  mutation runner. It is outside the required CI lane. Red weeklies do not
-  automatically create tickets.
+- Red weeklies do not automatically create tickets.
 - `just confidence`, `just confidence-fast`, `just confidence-broad`, and
   `just confidence-full` are the local entry points.
 - Missing tools are actionable failures with deterministic bootstrap commands.
   Use `LASH_CONFIDENCE_BOOTSTRAP=1` when a machine should install the required
   cargo subcommands.
 - The durable fault matrix lives in
-  `crates/lash-core/src/runtime/tests/runtime_scenarios/fault_matrix.rs`; every
+  `crates/lash-core/tests/runtime/tests/runtime_scenarios/fault_matrix.rs`; every
   row must point at an executable test or carry a concrete blocked rationale.
 - `sim/backend-contention/backend-contention.json` records deterministic
   `RuntimePersistence` lease contention, stale completion fencing, reopen, and

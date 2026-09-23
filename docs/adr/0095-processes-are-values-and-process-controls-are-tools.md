@@ -8,6 +8,15 @@ Status: Accepted (FIG-2990, 2026-09-13). Supersedes
 [ADR 0067](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) and
 [ADR 0090](0090-named-process-signatures-are-authoritative.md).
 
+Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+made TypeScript the sole RLM dialect. The Lashlang `process (…) { }` literal
+and the other "both dialects" wording below are historical; the process
+literal is the TypeScript async arrow. The shipped process-control tools are
+`processes.start`, `await`, `emit`, `signal`, `cancel`, `list` and `register`;
+there is no `create` tool, and trigger operations are host operations
+(`lashlang::TriggerHostOperation`) declared with the same `x-lash` contract
+vocabulary rather than catalogue tools.
+
 ## Context
 
 A process was three things at once and none of them completely. `defineProcess`
@@ -205,7 +214,7 @@ one recorded settlement order and no phases.
 
 ## Amendment: "never a batch child" becomes the Durable Wait child contract (FIG-3392)
 
-**Decided, not yet implemented.** FIG-3397 lands it; the full contract is
+**Implemented** by FIG-3397; the full contract is
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 "One handle kind, and await is a Durable Wait" above says `processes.await` "is

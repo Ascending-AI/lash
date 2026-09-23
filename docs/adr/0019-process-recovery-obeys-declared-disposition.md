@@ -53,8 +53,8 @@ authorization converts uncertainty into a terminal fact.
 
 The registry's role does not change: it records facts and holds monitors, never
 links. Lash never kills, revives, or supervises anything. OS resources remain
-the concern of the component that spawned them — the shell runtime kills its
-own process groups on teardown, and a worker that observes its own lease lost
+the concern of the component that spawned them — a host's shell runtime kills
+its own process groups on teardown, and a worker that observes its own lease lost
 terminates its local children itself. On the engine tier the division is the
 same: the engine owns re-invocation mechanics, and the run handler lash
 provides consults the disposition before executing, completing an already
@@ -118,7 +118,7 @@ work the only sound policy is to never start the replacement.
 ## Consequences
 
 - `ProcessRegistration` gains a required disposition field; every producer in
-  the tree declares one (`start_command` → OwnerBound, lashlang engine and
+  the tree declares one (host-registered owner-bound tools → OwnerBound, lashlang engine and
   subagent session-turn rows → Rerunnable, external placeholders →
   ExternallyOwned). There is no migration default: construction without a
   disposition does not compile.

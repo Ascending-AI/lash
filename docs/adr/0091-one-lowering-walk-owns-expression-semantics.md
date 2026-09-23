@@ -2,6 +2,15 @@
 
 Status: Accepted
 
+Amended 2026-09-24 (FIG-2997): static trigger facts no longer live in the
+linker's `Scope`, and compilation derives no default trigger key. A supplied
+`subscription_key` must be a non-empty string literal outside the
+`lash.internal/` prefix (`LinkError::InvalidTriggerSubscriptionKey`). An absent
+key is derived when the registration is materialized at run time, from the
+process name and trigger source (`derived_trigger_subscription_key`). The
+trigger-scope paragraph and the generated-trigger-key consequence below are
+historical.
+
 ## Context
 
 Lashlang previously interpreted an expression through several independent

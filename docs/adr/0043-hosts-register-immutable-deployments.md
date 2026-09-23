@@ -13,7 +13,7 @@ not hold.
 envelope, and replay rejects a mismatch (`validate_recorded_effect_envelope`,
 `crates/lash-restate/src/controller/mod.rs`, delegating to
 `validate_replayed_effect_envelope`,
-`crates/lash-core/src/runtime/effect/validation.rs`). This detects lash's own
+`crates/lash-core-execution/src/runtime/effect/validation.rs`). This detects lash's own
 nondeterminism bugs, which is why the hash covers content rather than an
 identity tuple. It cannot distinguish "the runtime computed a different
 envelope" from "the code that computed it changed underneath the invocation".
@@ -109,8 +109,8 @@ started invocation completes against consistent code.
 Lash cannot detect the violation and does not pretend to: a runtime cannot
 distinguish its own nondeterminism from code changing beneath it. Attribution
 short of detection is possible and is accepted design (ruled 2026-08-09,
-diagnosis only): journaled effect envelopes carry a producer build
-fingerprint, so a divergence message names which build wrote the journal and
+diagnosis only): journaled effect envelopes are to carry a producer build
+fingerprint (accepted, not yet implemented: no envelope carries one today), so a divergence message names which build wrote the journal and
 which is replaying it — same build means a lash bug, different build means
 this obligation was violated — as the lashlang program hash already does one
 layer down. The stamp never gates replay; tolerance of mismatched journals

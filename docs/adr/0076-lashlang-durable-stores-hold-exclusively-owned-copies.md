@@ -20,6 +20,16 @@ owner, states the view's single omission rule once, and records that no
 existence decision may read the view. No wire, heap or validator behaviour
 changes.
 
+Amended 2026-09-24 (FIG-3019): the store-side isolation copy is gone with the
+Lashlang surface (ADR 0096). Name, slot and global stores share heap
+references by ECMA rules; only specific operations still isolate (for
+example a concatenation result and each callback item). The encoder writes the forest form when the heap
+has one and otherwise the validated shared-graph form
+(`validate_persisted_graph`), recording which in the wire's
+`reference_semantics` flag. The claims below that every durable store holds an
+exclusively owned copy and that sharing between roots is unreachable by
+construction are historical.
+
 ## Context
 
 Lashlang values used to be trees: every binding held its own structure, and a

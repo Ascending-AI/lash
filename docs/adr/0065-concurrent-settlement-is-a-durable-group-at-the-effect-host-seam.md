@@ -12,10 +12,19 @@ group is named explicitly, close releases consumer interest instead of deleting
 group state, and FIG-1416 ruling 3 is superseded for unfinished tool execution
 at normal opener end. The full contract is
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md),
-which is decided and not yet implemented; the clauses this ADR itself changes
+which is implemented (see its Status); the clauses this ADR itself changes
 are marked inline and summarised in
 ["Tool children have an opener lifetime"](#tool-children-have-an-opener-lifetime-fig-3392)
 below.
+
+Amended 2026-09-24 (FIG-2266, FIG-3394, FIG-3397): the contract drifted from
+the text below as it was built. FIG-2266 deleted the `supports_effect_groups()`
+flag, and the three group methods lost their default bodies: a controller
+implements groups or refuses all three with `EffectGroupUnsupported`. FIG-3397
+deleted `supports_concurrent_effects` with the tool-batch path, and made
+Restate group children `call` children. FIG-3394 folded the occurrence ordinal
+into `batch_id`, so the group key has no separate occurrence segment. The
+affected clauses carry inline notes.
 
 ## Context
 
@@ -142,8 +151,8 @@ lash does not own, and a Restate deployment may not mount a SQL store at all.
 ## Decision
 
 **Concurrent settlement is a structured, durable group at the effect-host seam.**
-The contract gains one capability and three methods on `RuntimeEffectController`,
-beside `supports_concurrent_effects` and `execute_effect` — not on
+The contract gains three methods on `RuntimeEffectController`, beside
+`execute_effect` — not on
 `AwaitEventResolver`, and not on `EffectHost`, whose levers are deployment-level
 while group state is scope-level.
 
@@ -153,8 +162,12 @@ children as independently durable units, (b) report which settled first as a
 durable fact, and (c) let the losers finish under its own ownership after the
 caller has moved on.
 
-- `supports_effect_groups()` — checked once at **deployment validation**, not
-  per call. The group path is the only tool-batch path, so a controller
+- *(Amended by FIG-2266: the `supports_effect_groups()` flag this bullet
+  describes is deleted. The three methods have no default bodies; a controller
+  implements groups or refuses all three with `EffectGroupUnsupported` through
+  `effect_groups_unsupported`, and journals nothing when it does. The bullet
+  originally read:)* `supports_effect_groups()` — checked once at **deployment
+  validation**, not per call. The group path is the only tool-batch path, so a controller
   answering `false` has no batch path at all, and a host wiring one should learn
   that at startup rather than mid-turn on its first `Promise.all`. It gates
   admission, not dispatch. A host may answer `true` **only if it has a registered
@@ -257,11 +270,10 @@ caller has moved on.
   same group again by construction. `disposition` may only **narrow** the one the
   group declared at open (see "Loser disposition is declared at open").
 
-The three group methods keep defaults that error loudly with
-`RuntimeErrorCode::EffectGroupUnsupported`, following
-`cancel_await_events_for_session`: an out-of-tree controller that has not
-implemented groups fails closed with a named error rather than mis-executing a
-batch.
+The three group methods have no default bodies (FIG-2266): an out-of-tree
+controller that has not implemented groups returns
+`RuntimeErrorCode::EffectGroupUnsupported` explicitly and fails closed with a
+named error rather than mis-executing a batch.
 
 ### The settlement obligation
 
@@ -420,7 +432,11 @@ rather than discover it.
 
 ### Group identity carries an occurrence discriminator
 
-A group's key is `{scope_id}:group:{batch_id}:{occurrence}`.
+A group's key is `{scope_id}:group:{batch_id}`, or
+`{scope_id}:group:{parent_effect_id}:{batch_id}` for a nested batch. *(Amended by
+FIG-3394: the key originally carried a separate `:{occurrence}` segment; the
+occurrence ordinal is now folded into the `batch_id` hash, so it is carried
+exactly once. The reasoning below still holds for that ordinal.)*
 
 The obvious derivation is unsafe. A batch id is a *content hash* of its calls,
 so two textually identical `Promise.race([a(), b()])` calls in one protocol
@@ -494,10 +510,10 @@ been an active corruption source rather than a passive one.
 
 Every in-tree tier **implements** the group surface as target state — no tier
 does so in the contract layer that introduces these types, and each one lands its
-own implementation. What `supports_effect_groups()` answers is not a property of
-the tier, though: it is the per-deployment fact above, so an in-tree tier whose
-host has not been handed a `GroupExecutors` resolver answers `false` and refuses
-coherently, and answers `true` once wiring registers one. Groups add **no second
+own implementation. Whether groups are available is not a property of the
+tier, though: an in-tree tier whose host has not been handed a `GroupExecutors`
+resolver refuses the whole surface coherently with `EffectGroupUnsupported`
+(FIG-2266 deleted the `supports_effect_groups()` flag that used to answer this). Groups add **no second
 durability flag**. The durability claim stays the existing
 `replay_ownership` / journal-addressing fact, which the contract already warns
 is only a routing fact and not an end-to-end durability claim.
@@ -523,8 +539,8 @@ introducing a new axis.
 The dialect surface is deliberately **not** gated on the host. Lowering is
 compile-time and controller-blind, so `race`/`any` become accepted on every tier
 including inline, where nothing is journaled. This is accepted explicitly rather
-than worked around: the accepted surface is a property of the dialect, pinned
-per session (ADR 0061) and enforced by one census and one register (ADR 0064),
+than worked around: the accepted surface is a property of the dialect (ADR 0096)
+and enforced by one census and one register (ADR 0064),
 so making it vary by tier would fork the census into per-controller variants and
 the surface would stop being checkable. It is also how `sleep` and `waitSignal`
 already behave — accepted everywhere, durable only where the tier is — and
@@ -629,7 +645,7 @@ existing commands with `Cancel` disposition — no new command, no new method.
 
 ## Tool children have an opener lifetime (FIG-3392)
 
-**Decided, not yet implemented.** FIG-2266, FIG-3396 and FIG-3397 build it, and
+**Implemented** by FIG-2266, FIG-3396 and FIG-3397, and
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) is
 the contract. This section records what changes in *this* ADR.
 
@@ -720,12 +736,14 @@ effect.
 
 Two corrections to this ADR's earlier reading of the engine tier:
 
-- **Implicit child-call cancellation covers zero group children today.** The
+- **Implicit child-call cancellation covered zero group children.** The
   pinned VM cancels tracked request-response children and deliberately exempts
-  one-way sends, and every group child is currently dispatched one-way
-  (`crates/lash-restate/src/effect_group/dispatch.rs`, `.send()`). The per-child
-  CANCEL durable wait is the only cancel path those children have, and it may be
-  removed only in the same cutover that makes children `call` children.
+  one-way sends, and every group child was dispatched one-way (`.send()`). The
+  per-child CANCEL durable wait was the only cancel path those children had, and
+  could be removed only in the same cutover that made children `call` children.
+  *(Amended by FIG-3397: group children are now `call` children
+  (`crates/lash-restate/src/effect_group/dispatch.rs`), so implicit cancellation
+  tracks them.)*
 - **The "a Restate group child is an invocation" ruling survives, but not for the
   reason given.** "The Rust SDK requires `ctx.run` closures to be awaited
   immediately" is a Rust-SDK binding gap with an upstream issue, not a protocol

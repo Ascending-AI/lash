@@ -60,7 +60,7 @@ plugin state of its own — it is a capability, not a container.
 pub struct PluginStateStore { /* opaque; host-owned */ }
 
 impl PluginStateStore {
-    pub fn session_id(&self) -> &str;
+    pub fn session_id(&self) -> &SessionId;
     pub fn plugin_id(&self) -> &str;
     pub fn generation(&self) -> u64;
 
@@ -409,7 +409,8 @@ Invariant 6 is a wholesale deletion for that reason.
 ## Consequences
 
 - `SessionPlugin` loses `snapshot`, `snapshot_revision`, and `restore`. The
-  trait becomes `id`, `version`, `register`, and `session_ready`.
+  trait becomes `id`, `version`, `register`, `extension_contributions`, and
+  `session_ready`.
 - Deleted outright: `SnapshotWriter`, `SnapshotReader`, `PluginSnapshotMeta`,
   `PluginSessionSnapshot`, snapshot artifacts, the revision fingerprint, the
   `plugin_snapshot` checkpoint component, and

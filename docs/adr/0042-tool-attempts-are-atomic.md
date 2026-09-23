@@ -14,8 +14,17 @@ unchanged; and the coordination around an atomic attempt is placed at handler
 level on a child's own admitted controller. See
 ["The protected phase, and where coordination runs"](#the-protected-phase-and-where-coordination-runs-fig-3392)
 at the end of this ADR; the full contract is
-[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
-Decided, not yet implemented outside the in-process batch path.
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md),
+which is implemented (FIG-2266, FIG-3396, FIG-3397); the in-process batch path
+was deleted by FIG-3397.
+
+Amended 2026-09-24 (#1283, FIG-3000): lash no longer ships shell tools.
+`shell.start`, `shell.write` and the internal shell runner were retired with
+the built-in tool suite; shell tools live in hosts. The in-crate declarers of
+`StartProcess`, `SignalProcess` and `CancelProcess` are the process-control
+leaf tools (`processes.start`, `processes.signal`, `processes.cancel`), and
+`processes.start` declares `OnParentEnd::Abandon`. Passages below that name
+the shell tools are historical.
 
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side
@@ -87,9 +96,10 @@ snapshots restore even though they carry no lane field. The law
 `snapshot_resolution_rejects_lazy_live_sources_from_both_lanes` pins the other
 typed-collision case: a snapshot-only id lazily resolved by both lanes fails
 with `CrossLaneToolIdCollision`. The law
-`lazy_leaf_resolution_cannot_smuggle_an_orchestrating_registration` pins the
-mixed advertised/lazy case: the advertised lane's source-derived kind binds
-silently and the lazy claim cannot replace it, so dispatch remains fail-closed.
+`unadvertised_leaf_cannot_smuggle_an_orchestrating_registration` pins the
+mixed case: dispatch lookup never admits an unadvertised leaf, so only the
+advertised typed registration establishes the orchestrating lane and dispatch
+remains fail-closed.
 
 The orchestration-body determinism contract is binding: no wall clock, random
 number generation, or unordered iteration may drive commands; no unjournaled
@@ -107,9 +117,7 @@ An internal owner-bound `ProcessInput::ToolCall` body is a different boundary:
 it is the process activity itself and may perform host I/O. Core executes an
 `Internal` process tool directly, with panic containment but without a
 `ToolAttempt`; that route is not exposed to model-facing providers as an escape
-from the orchestration determinism contract. The internal shell runner uses
-this boundary for PTY ownership and registry point-read/backoff signal-event
-waits; those waits do not consume journal ordinals.
+from the orchestration determinism contract.
 
 The structural rule remains:
 
@@ -268,7 +276,7 @@ facade reconstructs and settles the retained plan after a host scope is rebound;
 `ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind` proves
 that the default `Cancel` policy survives that boundary and is redrive-safe.
 
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
 
 `shell.start` and its detached form map explicitly to `Abandon`: their
 owner-bound commands intentionally continue across turns, so the generic
@@ -311,9 +319,9 @@ and cannot be recorded as a `CommandFailed` tool-intent refusal.
 
 ## The protected phase, and where coordination runs (FIG-3392)
 
-**Partly implemented.** The protected phase exists today in the in-process batch
-path; the durable arbitration below and the handler-level driver are FIG-3396's
-and FIG-2266's work. The full contract is
+**Implemented** by FIG-2266, FIG-3396 and FIG-3397: the durable arbitration
+and the handler-level driver replace the in-process batch path, which FIG-3397
+deleted. The full contract is
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 ### "Records the final attempt first, then drains its declarations" is a phase
@@ -347,9 +355,10 @@ winners:
   classified by their retained command and child obligations, never by an invented
   outer attempt.
 
-The code takes the protection seriously on the in-process path, and that path is
-local rather than durable — which is precisely the gap.
-`crates/lash-core-execution/src/session/tool_execution/batch.rs` short-circuits
+The code took the protection seriously on the in-process path, and that path was
+local rather than durable — which was precisely the gap. *(The code quoted in
+this paragraph was deleted with the batch path by FIG-3397.)*
+`crates/lash-core-execution/src/session/tool_execution/batch.rs` short-circuited
 its own cancel grace with `if final_result_committed.is_committed() { return
 tool_call.await; }`, and
 `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` publishes
@@ -372,9 +381,9 @@ is unchanged.**
 
 A second, different order has been enforced beside it and was never recorded in
 any ADR: the order in which the *children of one batch* take their turn to drain.
-`BatchIntentDrainGate` sequences those turns by **source index**, and
-`settle_terminal_attempt` takes its turn for every terminal attempt whether or not
-it declared an intent, so every terminal leaf of a batch settles in source order.
+`BatchIntentDrainGate` (deleted by FIG-3397) sequenced those turns by **source index**, and
+`settle_terminal_attempt` took its turn for every terminal attempt whether or not
+it declared an intent, so every terminal leaf of a batch settled in source order.
 That was a determinism device — before effect groups, completion order was not a
 durable fact, so source order was the only replay-stable cross-sibling order
 available for the journal commands intent realization emits.

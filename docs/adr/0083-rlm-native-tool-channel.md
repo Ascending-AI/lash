@@ -16,8 +16,8 @@ histories require different ownership and projection rules.
 ## Decision
 
 `RlmProtocolPluginConfig.channel` selects `RlmChannel::Cell` or
-`RlmChannel::NativeTool`. Materialization records `channel` in the durable session
-options, alongside the dialect. Rematerialization requires that recorded pin
+`RlmChannel::NativeTool`. Materialization records `channel` in the durable protocol
+turn options. Rematerialization requires that recorded pin
 and refuses substitution with `RecordedSessionConfigConflict`; missing pins are
 refused with `MissingRecordedSessionConfig`. There is no fallback or migration.
 Hosts select the channel before opening sessions. Workbench uses
