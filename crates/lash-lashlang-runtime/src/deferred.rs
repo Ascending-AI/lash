@@ -456,148 +456,77 @@ mod tests {
         AfterDurableRecord,
     }
 
-    #[derive(Clone)]
-    struct FaultJournalController {
+    /// Fails the first deferred-resolution effect at `fault`, over a SQLite
+    /// memory deployment whose journal records and replays every effect.
+    struct FaultJournalLayer {
         fault: JournalFault,
-        faults_remaining: std::sync::Arc<AtomicUsize>,
-        outcomes: std::sync::Arc<Mutex<BTreeMap<String, lash_core::RuntimeEffectOutcome>>>,
-        inner: std::sync::Arc<lash_core::facade_support::NativeRuntimeEffectController>,
-        host: std::sync::Arc<std::sync::OnceLock<std::sync::Arc<dyn lash_core::EffectHost>>>,
+        faults_remaining: AtomicUsize,
     }
-
-    impl FaultJournalController {
-        fn new(fault: JournalFault) -> Self {
-            Self {
-                fault,
-                faults_remaining: std::sync::Arc::new(AtomicUsize::new(usize::from(!matches!(
-                    fault,
-                    JournalFault::None
-                )))),
-                outcomes: std::sync::Arc::new(Mutex::new(BTreeMap::new())),
-                inner: std::sync::Arc::new(
-                    lash_core::facade_support::NativeRuntimeEffectController::default(),
-                ),
-                host: std::sync::Arc::new(std::sync::OnceLock::new()),
-            }
-        }
-    }
-
-    impl lash_core::AwaitEventResolver for FaultJournalController {}
 
     #[async_trait]
-    impl lash_core::RuntimeEffectController for FaultJournalController {
-        fn shared_effect_host(&self) -> Option<std::sync::Arc<dyn lash_core::EffectHost>> {
-            Some(std::sync::Arc::clone(self.host.get_or_init(|| {
-                std::sync::Arc::new(
-                    lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
-                        std::sync::Arc::new(self.clone()),
-                        &self.inner,
-                    ),
-                ) as std::sync::Arc<dyn lash_core::EffectHost>
-            })))
-        }
-
+    impl lash_core::testing::EffectLayer for FaultJournalLayer {
         async fn execute_effect(
             &self,
+            inner: &dyn lash_core::RuntimeEffectController,
             envelope: lash_core::RuntimeEffectEnvelope,
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
         {
-            let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
-                &envelope.command
-            else {
-                return local_executor.execute(envelope).await;
-            };
-            if !operation.starts_with("deferred_tool_resolution:v2:") {
-                return local_executor.execute(envelope).await;
+            let is_deferred = matches!(
+                &envelope.command,
+                lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
+                    if operation.starts_with("deferred_tool_resolution:v2:")
+            );
+            let inject = is_deferred
+                && self
+                    .faults_remaining
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                        remaining.checked_sub(1)
+                    })
+                    .is_ok();
+            if !inject {
+                return inner.execute_effect(envelope, local_executor).await;
             }
-            let key = envelope.invocation.replay_key().to_string();
-            if let Some(outcome) = self.outcomes.lock_recover().get(&key).cloned() {
-                return Ok(outcome);
+            match self.fault {
+                JournalFault::None => inner.execute_effect(envelope, local_executor).await,
+                // The resolver ran, and the process died before the journal
+                // recorded its answer.
+                JournalFault::AfterResolverReturn => {
+                    local_executor.execute(envelope).await?;
+                    Err(lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::RuntimeStore,
+                        "injected failure after resolver return",
+                    ))
+                }
+                // The journal recorded the answer, and the process died before
+                // it reached the caller.
+                JournalFault::AfterDurableRecord => {
+                    inner.execute_effect(envelope, local_executor).await?;
+                    Err(lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::RuntimeStore,
+                        "injected failure after durable record",
+                    ))
+                }
             }
-            let outcome = local_executor.execute(envelope).await?;
-            let inject = self
-                .faults_remaining
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
-                    remaining.checked_sub(1)
-                })
-                .is_ok();
-            if inject && matches!(self.fault, JournalFault::AfterResolverReturn) {
-                return Err(lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::RuntimeStore,
-                    "injected failure after resolver return",
-                ));
-            }
-            self.outcomes.lock_recover().insert(key, outcome.clone());
-            if inject && matches!(self.fault, JournalFault::AfterDurableRecord) {
-                return Err(lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::RuntimeStore,
-                    "injected failure after durable record",
-                ));
-            }
-            Ok(outcome)
         }
+    }
 
-        async fn open_effect_group(
-            &self,
-            group: lash_core::RuntimeEffectGroup,
-        ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-            self.inner.open_effect_group(group).await
-        }
-
-        async fn read_group_settlement(
-            &self,
-            group_key: &str,
-            rank: u64,
-        ) -> Result<
-            Option<lash_core::runtime::effect::RankedGroupSettlement>,
-            lash_core::RuntimeEffectControllerError,
-        > {
-            self.inner.read_group_settlement(group_key, rank).await
-        }
-
-        fn register_group_executors(
-            &self,
-            executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            self.inner.register_group_executors(executors)
-        }
-
-        async fn await_next_settlement(
-            &self,
-            handle: &mut lash_core::EffectGroupHandle,
-            cancel: lash_core::CancellationToken,
-        ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-            self.inner.await_next_settlement(handle, cancel).await
-        }
-
-        async fn close_effect_group(
-            &self,
-            handle: lash_core::EffectGroupHandle,
-            disposition: lash_core::LoserPolicy,
-        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            self.inner.close_effect_group(handle, disposition).await
-        }
-
-        async fn commit_group_child_final(
-            &self,
-            commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-        ) -> Result<
-            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-            lash_core::RuntimeEffectControllerError,
-        > {
-            self.inner.commit_group_child_final(commit).await
-        }
-
-        async fn group_child_drain_blocked(
-            &self,
-            group_key: &str,
-            commit_seq: u64,
-        ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
-            self.inner
-                .group_child_drain_blocked(group_key, commit_seq)
-                .await
-        }
+    /// A fresh SQLite memory deployment's effect host behind a
+    /// [`FaultJournalLayer`]: one journal every context built over it shares.
+    async fn fault_journal_host(fault: JournalFault) -> Arc<dyn lash_core::EffectHost> {
+        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+            .await
+            .expect("open a memory deployment");
+        Arc::new(lash_core::testing::LayeredEffectHost::new(
+            deployment.effect_host(),
+            Arc::new(FaultJournalLayer {
+                fault,
+                faults_remaining: AtomicUsize::new(usize::from(!matches!(
+                    fault,
+                    JournalFault::None
+                ))),
+            }),
+        ))
     }
 
     #[test]
@@ -824,20 +753,20 @@ mod tests {
         ])
     }
 
-    fn link_context(
+    async fn link_context(
         record: &mut DeferredResolutionRecord,
     ) -> lash_core::RuntimeExecutionContext<'static> {
-        link_context_with_controller(
+        link_context_with_host(
             record,
             "exec-code:0",
-            Arc::new(FaultJournalController::new(JournalFault::None)),
+            fault_journal_host(JournalFault::None).await,
         )
     }
 
-    fn link_context_with_controller(
+    fn link_context_with_host(
         record: &mut DeferredResolutionRecord,
         replay_key: &str,
-        controller: Arc<dyn lash_core::RuntimeEffectController>,
+        effect_host: Arc<dyn lash_core::EffectHost>,
     ) -> lash_core::RuntimeExecutionContext<'static> {
         let invocation = lash_core::testing::exec_code_invocation(
             "session",
@@ -854,8 +783,9 @@ mod tests {
         } else {
             record.select_link(link_key);
         }
-        lash_core::testing::code_execution_context_with_effect_controller_and_invocation(
-            controller, invocation,
+        lash_core::testing::code_execution_context_with_effect_host_and_invocation(
+            effect_host,
+            invocation,
         )
     }
 
@@ -899,7 +829,7 @@ mod tests {
         let harness = resolver_harness();
         let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
 
         link_with_deferred_resolution(
             program,
@@ -929,7 +859,7 @@ mod tests {
         let program = web_fetch_url_program();
 
         let mut record = DeferredResolutionRecord::default();
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
         link_with_deferred_resolution(
             program.clone(),
             empty_host_environment(),
@@ -972,7 +902,7 @@ mod tests {
         let harness = resolver_harness();
         let program = mystery_run_program();
         let mut record = DeferredResolutionRecord::default();
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
 
         let err = link_with_deferred_resolution(
             program.clone(),
@@ -1009,7 +939,7 @@ mod tests {
         let harness = resolver_harness();
         let program = web_mystery_web_program();
         let mut record = DeferredResolutionRecord::default();
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
 
         let host = resolve_and_fold_deferred(
             &program,
@@ -1059,7 +989,7 @@ mod tests {
             "web.fetch",
             Resolution::Resolved(Box::new(grant("fetch_url", "web", "fetch"))),
         );
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
 
         let host = resolve_and_fold_deferred(
             &program,
@@ -1092,7 +1022,7 @@ mod tests {
             .expect("ambient grant folds");
         let mut record = DeferredResolutionRecord::default();
         record.record("web.fetch", Resolution::NotAvailable);
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
 
         link_with_deferred_resolution(program, ambient, None, &mut record, &ctx)
             .await
@@ -1119,7 +1049,7 @@ mod tests {
         let captured_id = captured.definition.manifest.id.to_string();
         let mut record = DeferredResolutionRecord::default();
         record.record("web.fetch", Resolution::Resolved(Box::new(captured)));
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
 
         let effective = resolve_and_fold_deferred(
             &program,
@@ -1177,7 +1107,7 @@ mod tests {
         );
         let mut record = DeferredResolutionRecord::default();
         record.record("web.fetch", Resolution::Resolved(Box::new(captured)));
-        let ctx = link_context(&mut record);
+        let ctx = link_context(&mut record).await;
 
         let error = resolve_and_fold_deferred(
             &program,
@@ -1195,13 +1125,11 @@ mod tests {
     #[tokio::test]
     async fn fault_after_resolver_return_allows_side_effect_free_rediscovery() {
         let harness = resolver_harness();
-        let controller = Arc::new(FaultJournalController::new(
-            JournalFault::AfterResolverReturn,
-        ));
+        let effect_host = fault_journal_host(JournalFault::AfterResolverReturn).await;
         let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx =
-            link_context_with_controller(&mut record, "exec-code:fault-before", controller.clone());
+            link_context_with_host(&mut record, "exec-code:fault-before", effect_host.clone());
 
         let first = resolve_and_fold_deferred(
             &program,
@@ -1216,11 +1144,8 @@ mod tests {
         assert!(harness.installed.lock_recover().is_empty());
 
         let mut restarted_record = DeferredResolutionRecord::default();
-        let restarted_ctx = link_context_with_controller(
-            &mut restarted_record,
-            "exec-code:fault-before",
-            controller,
-        );
+        let restarted_ctx =
+            link_context_with_host(&mut restarted_record, "exec-code:fault-before", effect_host);
         resolve_and_fold_deferred(
             &program,
             empty_host_environment(),
@@ -1237,13 +1162,10 @@ mod tests {
     #[tokio::test]
     async fn fault_after_durable_record_replays_without_resolving() {
         let harness = resolver_harness();
-        let controller = Arc::new(FaultJournalController::new(
-            JournalFault::AfterDurableRecord,
-        ));
+        let effect_host = fault_journal_host(JournalFault::AfterDurableRecord).await;
         let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
-        let ctx =
-            link_context_with_controller(&mut record, "exec-code:fault-after", controller.clone());
+        let ctx = link_context_with_host(&mut record, "exec-code:fault-after", effect_host.clone());
 
         let first = resolve_and_fold_deferred(
             &program,
@@ -1257,11 +1179,8 @@ mod tests {
         assert!(record.resolutions.is_empty());
 
         let mut restarted_record = DeferredResolutionRecord::default();
-        let restarted_ctx = link_context_with_controller(
-            &mut restarted_record,
-            "exec-code:fault-after",
-            controller,
-        );
+        let restarted_ctx =
+            link_context_with_host(&mut restarted_record, "exec-code:fault-after", effect_host);
         resolve_and_fold_deferred(
             &program,
             empty_host_environment(),
@@ -1278,13 +1197,13 @@ mod tests {
     #[tokio::test]
     async fn journal_replay_masks_changed_ambient_before_live_lookup() {
         let harness = resolver_harness();
-        let controller = Arc::new(FaultJournalController::new(JournalFault::None));
+        let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
         let mut first_record = DeferredResolutionRecord::default();
-        let first_ctx = link_context_with_controller(
+        let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:journal-replay",
-            controller.clone(),
+            effect_host.clone(),
         );
         resolve_and_fold_deferred(
             &program,
@@ -1303,10 +1222,10 @@ mod tests {
         )
         .expect("replacement folds into ambient environment");
         let mut replayed_record = DeferredResolutionRecord::default();
-        let replay_ctx = link_context_with_controller(
+        let replay_ctx = link_context_with_host(
             &mut replayed_record,
             "exec-code:journal-replay",
-            controller,
+            effect_host,
         );
         let effective = resolve_and_fold_deferred(
             &program,
@@ -1333,13 +1252,13 @@ mod tests {
     #[tokio::test]
     async fn journal_replay_masks_changed_surface_before_catalog_merge() {
         let harness = resolver_harness();
-        let controller = Arc::new(FaultJournalController::new(JournalFault::None));
+        let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
         let mut first_record = DeferredResolutionRecord::default();
-        let first_ctx = link_context_with_controller(
+        let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:surface-journal-replay",
-            controller.clone(),
+            effect_host.clone(),
         );
         resolve_and_build_deferred_environment(
             &program,
@@ -1355,10 +1274,10 @@ mod tests {
         let surface = surface_with_shared_fetch_modules(&["web"]);
         let catalog = incompatible_shared_fetch_catalog();
         let mut replayed_record = DeferredResolutionRecord::default();
-        let replay_ctx = link_context_with_controller(
+        let replay_ctx = link_context_with_host(
             &mut replayed_record,
             "exec-code:surface-journal-replay",
-            controller,
+            effect_host,
         );
         let effective = resolve_and_build_deferred_environment(
             &program,
@@ -1397,13 +1316,13 @@ mod tests {
     #[tokio::test]
     async fn journal_replay_preserves_unrelated_surface_catalog_collision() {
         let harness = resolver_harness();
-        let controller = Arc::new(FaultJournalController::new(JournalFault::None));
+        let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
         let mut first_record = DeferredResolutionRecord::default();
-        let first_ctx = link_context_with_controller(
+        let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:surface-unrelated-collision",
-            controller.clone(),
+            effect_host.clone(),
         );
         resolve_and_build_deferred_environment(
             &program,
@@ -1419,10 +1338,10 @@ mod tests {
         let surface = surface_with_shared_fetch_modules(&["web", "unrelated"]);
         let catalog = incompatible_shared_fetch_catalog();
         let mut replayed_record = DeferredResolutionRecord::default();
-        let replay_ctx = link_context_with_controller(
+        let replay_ctx = link_context_with_host(
             &mut replayed_record,
             "exec-code:surface-unrelated-collision",
-            controller,
+            effect_host,
         );
         let error = resolve_and_build_deferred_environment(
             &program,
@@ -1458,10 +1377,10 @@ mod tests {
             captured: grant("captured_fetch", "web", "fetch"),
         });
         let shared: SharedDeferredToolResolver = resolver.clone();
-        let controller = Arc::new(FaultJournalController::new(JournalFault::None));
+        let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
-        let ctx = link_context_with_controller(&mut record, "exec-code:route", controller.clone());
+        let ctx = link_context_with_host(&mut record, "exec-code:route", effect_host.clone());
 
         let first = resolve_and_fold_deferred(
             &program,
@@ -1483,7 +1402,7 @@ mod tests {
 
         let mut restarted_record = DeferredResolutionRecord::default();
         let restarted_ctx =
-            link_context_with_controller(&mut restarted_record, "exec-code:route", controller);
+            link_context_with_host(&mut restarted_record, "exec-code:route", effect_host);
         let effective = resolve_and_fold_deferred(
             &program,
             empty_host_environment(),
@@ -1510,10 +1429,10 @@ mod tests {
             installed_ids: Mutex::new(Vec::new()),
         });
         let shared: SharedDeferredToolResolver = resolver.clone();
-        let controller = Arc::new(FaultJournalController::new(JournalFault::None));
+        let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
-        let ctx = link_context_with_controller(&mut record, "exec-code:revoked", controller);
+        let ctx = link_context_with_host(&mut record, "exec-code:revoked", effect_host);
 
         for replacement in ["replacement_fetch", "another_fetch"] {
             let error = resolve_and_fold_deferred(
@@ -1547,10 +1466,10 @@ mod tests {
         let harness = resolver_harness();
         let program = mystery_run_program();
         let mut first_record = DeferredResolutionRecord::default();
-        let first_ctx = link_context_with_controller(
+        let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:first",
-            Arc::new(FaultJournalController::new(JournalFault::None)),
+            fault_journal_host(JournalFault::None).await,
         );
         link_with_deferred_resolution(
             program.clone(),
@@ -1566,10 +1485,10 @@ mod tests {
         fold_grant(&mut ambient, &grant("ambient_run", "mystery", "run"))
             .expect("new ambient definition folds");
         let mut second_record = DeferredResolutionRecord::default();
-        let second_ctx = link_context_with_controller(
+        let second_ctx = link_context_with_host(
             &mut second_record,
             "exec-code:second",
-            Arc::new(FaultJournalController::new(JournalFault::None)),
+            fault_journal_host(JournalFault::None).await,
         );
         link_with_deferred_resolution(program, ambient, None, &mut second_record, &second_ctx)
             .await
@@ -1581,10 +1500,10 @@ mod tests {
     async fn deferred_record_refuses_a_different_admitted_link_address() {
         let program = web_fetch_program();
         let mut record = DeferredResolutionRecord::default();
-        let _record_context = link_context_with_controller(
+        let _record_context = link_context_with_host(
             &mut record,
             "exec-code:record",
-            Arc::new(FaultJournalController::new(JournalFault::None)),
+            fault_journal_host(JournalFault::None).await,
         );
         let mismatched_invocation = lash_core::testing::exec_code_invocation(
             "session",

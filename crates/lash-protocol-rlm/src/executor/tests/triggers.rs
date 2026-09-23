@@ -385,136 +385,39 @@ pub(super) fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
     resources
 }
 
-#[derive(Clone)]
-pub(super) struct CapturingTriggerEffectController {
+/// Captures every effect envelope a runtime sends through a SQLite memory
+/// deployment's effect host, which journals and runs each one.
+#[derive(Clone, Default)]
+pub(super) struct TriggerEffectCapture {
     envelopes: Arc<std::sync::Mutex<Vec<lash_core::RuntimeEffectEnvelope>>>,
-    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
-    host: Arc<std::sync::OnceLock<Arc<dyn lash_core::EffectHost>>>,
 }
-
-impl Default for CapturingTriggerEffectController {
-    fn default() -> Self {
-        Self {
-            envelopes: Arc::default(),
-            inner: Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            host: Arc::new(std::sync::OnceLock::new()),
-        }
-    }
-}
-
-impl lash_core::AwaitEventResolver for CapturingTriggerEffectController {}
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for CapturingTriggerEffectController {
-    fn shared_effect_host(&self) -> Option<Arc<dyn lash_core::EffectHost>> {
-        Some(Arc::clone(self.host.get_or_init(|| {
-            Arc::new(
-                lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
-                    Arc::new(Self {
-                        envelopes: Arc::clone(&self.envelopes),
-                        inner: Arc::clone(&self.inner),
-                        host: Arc::new(std::sync::OnceLock::new()),
-                    }),
-                    &self.inner,
-                ),
-            ) as Arc<dyn lash_core::EffectHost>
-        })))
-    }
-
+impl lash_core::testing::EffectLayer for TriggerEffectCapture {
     async fn execute_effect(
         &self,
+        inner: &dyn lash_core::RuntimeEffectController,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
         self.envelopes.lock_recover().push(envelope.clone());
-        match envelope.command {
-            lash_core::RuntimeEffectCommand::Trigger { command } => {
-                let operation_id = envelope.invocation.effect_id().to_string();
-                let result = lash_core::RuntimeEffectLocalExecutor::into_trigger(local_executor)?
-                    .execute(&operation_id, *command)
-                    .await?;
-                let result = Box::new(result);
-                Ok(lash_core::RuntimeEffectOutcome::Trigger { result })
-            }
-            _ => local_executor.execute(envelope).await,
-        }
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
-    }
-
-    fn group_child_scoped_controller(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        binding: lash_core::GroupChildBinding,
-    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
-        self.inner.group_child_scoped_controller(admitted, binding)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn group_child_drain_blocked(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .group_child_drain_blocked(group_key, commit_seq)
-            .await
+        inner.execute_effect(envelope, local_executor).await
     }
 }
 
-impl CapturingTriggerEffectController {
+impl TriggerEffectCapture {
+    /// A fresh memory deployment's effect host with this capture layered over
+    /// it.
+    async fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
+        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+            .await
+            .expect("open a memory deployment");
+        Arc::new(lash_core::testing::LayeredEffectHost::new(
+            deployment.effect_host(),
+            Arc::new(self.clone()),
+        ))
+    }
+
     /// The registration drafts the runtime sent, in order.
     fn register_drafts(&self) -> Vec<lash_core::TriggerSubscriptionDraft> {
         self.envelopes
@@ -558,12 +461,12 @@ impl CapturingTriggerEffectController {
 
 pub(super) async fn execute_with_capturing_trigger_effects(
     code: &str,
-    controller: CapturingTriggerEffectController,
+    capture: TriggerEffectCapture,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::new();
-    let ctx = lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
+    let ctx = lash_core::testing::code_execution_context_with_trigger_store_and_effect_host(
         Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
-        Arc::new(controller),
+        capture.effect_host().await,
     );
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
@@ -738,12 +641,11 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
 pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store() {
     block_on(async {
         let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-        let controller = CapturingTriggerEffectController::default();
-        let ctx =
-            lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
-                store.clone(),
-                Arc::new(controller.clone()),
-            );
+        let capture = TriggerEffectCapture::default();
+        let ctx = lash_core::testing::code_execution_context_with_trigger_store_and_effect_host(
+            store.clone(),
+            capture.effect_host().await,
+        );
         let surface = LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
@@ -787,7 +689,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // journal its link identity, so the journaled resolution production
         // always wrote is now the first envelope; the register is the second.
         let (effect_owner_scope, effect_subscription_key) = {
-            let envelopes = controller.envelopes.lock_recover();
+            let envelopes = capture.envelopes.lock_recover();
             let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
                 &envelopes[0].command
             else {
@@ -833,14 +735,14 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
 pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_module_regeneration() {
     block_on(async {
         async fn capture(code: &str) -> Vec<(String, String, String)> {
-            let controller = CapturingTriggerEffectController::default();
+            let capture = TriggerEffectCapture::default();
             let response = Box::pin(execute_with_capturing_trigger_effects(
                 code,
-                controller.clone(),
+                capture.clone(),
             ))
             .await;
             assert!(response.error.is_none(), "{:?}", response.error);
-            controller
+            capture
                 .envelopes
                 .lock_recover()
                 .iter()
@@ -1097,8 +999,8 @@ async fn execute_trigger_process_with_originator(
         Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let controller = CapturingTriggerEffectController::default();
-    let controller_dyn: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(controller.clone());
+    let capture = TriggerEffectCapture::default();
+    let effect_host = capture.effect_host().await;
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -1113,10 +1015,7 @@ async fn execute_trigger_process_with_originator(
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::new(controller_dyn.clone())
-                .allow_process_lifetime_completion_keys(),
-        ),
+        Arc::clone(&effect_host),
         Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
         process_env_store.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -1148,7 +1047,7 @@ async fn execute_trigger_process_with_originator(
     .expect("valid trigger process worker");
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
-        controller: controller_dyn.clone(),
+        effect_host: Arc::clone(&effect_host),
         originator_override: originator_override.clone(),
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
@@ -1158,7 +1057,7 @@ async fn execute_trigger_process_with_originator(
         process_control_tool_catalog(),
         None,
         processes,
-        controller_dyn,
+        effect_host,
         process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -1243,7 +1142,7 @@ async fn execute_trigger_process_with_originator(
     };
     TriggerProcessResult {
         terminal,
-        trigger_effects: controller.trigger_effects(),
+        trigger_effects: capture.trigger_effects(),
         subscriptions,
     }
 }
@@ -1367,7 +1266,7 @@ pub(super) fn typescript_process_local_helper_reaches_trigger_command_handler() 
 #[test]
 pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
     block_on(async {
-        let scalar = CapturingTriggerEffectController::default();
+        let scalar = TriggerEffectCapture::default();
         let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
                 const remember = async (tick: timer.Tick) => true;
@@ -1436,7 +1335,7 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
                 .all(|(effect_id, _)| !effect_id.contains(":child:"))
         );
 
-        let batched = CapturingTriggerEffectController::default();
+        let batched = TriggerEffectCapture::default();
         let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
                 const remember = async (tick: timer.Tick) => true;
@@ -1752,17 +1651,17 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
     .expect("the captured fixture is valid JSON");
 
     block_on(async {
-        let controller = CapturingTriggerEffectController::default();
+        let capture = TriggerEffectCapture::default();
         let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
         let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
             TRIGGER_INPUTS_ARROW_SOURCE,
-            controller.clone(),
+            capture.clone(),
             store.clone(),
         ))
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
 
-        let drafts = controller.register_drafts();
+        let drafts = capture.register_drafts();
         let [draft] = drafts.as_slice() else {
             panic!("exactly one registration, got {}", drafts.len());
         };
@@ -1840,17 +1739,17 @@ fn repin_trigger_inputs_retired_record_form() {
             .expect("the captured fixture is valid JSON");
 
     block_on(async {
-        let controller = CapturingTriggerEffectController::default();
+        let capture = TriggerEffectCapture::default();
         let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
         let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
             TRIGGER_INPUTS_ARROW_SOURCE,
-            controller.clone(),
+            capture.clone(),
             store.clone(),
         ))
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
 
-        let drafts = controller.register_drafts();
+        let drafts = capture.register_drafts();
         let [draft] = drafts.as_slice() else {
             panic!("exactly one registration, got {}", drafts.len());
         };
@@ -1893,15 +1792,15 @@ fn repin_trigger_inputs_retired_record_form() {
 
 async fn execute_typescript_with_capturing_trigger_effects(
     code: &str,
-    controller: CapturingTriggerEffectController,
+    capture: TriggerEffectCapture,
     store: Arc<lashlang::InMemoryLashlangArtifactStore>,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::for_engine("typescript");
     execute_code_with_channel_and_bounds(
         &mut state,
-        lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
+        lash_core::testing::code_execution_context_with_trigger_store_and_effect_host(
             Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
-            Arc::new(controller),
+            capture.effect_host().await,
         ),
         ExecRequest {
             language: "typescript".to_string(),

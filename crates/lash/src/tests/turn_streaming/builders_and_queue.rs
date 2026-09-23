@@ -1,18 +1,24 @@
 use super::*;
 
+/// The standard core over `effect_host`: a scope an advanced turn brings must
+/// be lent by the host the core controls turns through.
+fn standard_core_over(effect_host: Arc<dyn lash_core::EffectHost>) -> Result<LashCore> {
+    explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .effect_host(effect_host)
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+}
+
 #[tokio::test]
-pub(super) async fn turn_run_uses_configured_native_effect_host_without_explicit_effects()
--> Result<()> {
-    let recorder = Arc::new(RecordingNativeEffectController::default());
-    let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
+pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effects() -> Result<()> {
+    let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
-            effect_controller,
-        )))
+        .effect_host(recorder.effect_host().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("native-default-effect-host").open().await?;
+    let session = core.session("configured-effect-host").open().await?;
 
     let output = session.turn(TurnInput::text("inline")).run().await?;
 
@@ -120,14 +126,14 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
 
 #[tokio::test]
 pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()> {
-    let recorder = Arc::new(RecordingNativeEffectController::default());
-    let effect_host = lash_core::facade_support::NativeEffectHost::new(recorder.clone());
+    let recorder = EffectRecorder::default();
+    let effect_host = recorder.effect_host().await;
     let custom_scope = lash_core::ExecutionScope::runtime_operation("custom-foreground-scope");
     let scoped_effect_controller = effect_host.scoped(
         lash_core::AdmittedScope::unpinned(custom_scope.clone())
             .expect("a runtime-operation scope admits unpinned"),
     )?;
-    let core = standard_core();
+    let core = standard_core_over(effect_host.clone())?;
     let session = core.session("custom-effect-scope").open().await?;
 
     let output = session
@@ -148,13 +154,13 @@ pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()
 
 #[tokio::test]
 pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identity() -> Result<()> {
-    let recorder = Arc::new(RecordingNativeEffectController::default());
-    let effect_host = lash_core::facade_support::NativeEffectHost::new(recorder.clone());
+    let recorder = EffectRecorder::default();
+    let effect_host = recorder.effect_host().await;
     let scoped_effect_controller = effect_host.scoped(lash_core::AdmittedScope::turn(
         "mismatched-turn-scope",
         "admitted-turn",
     ))?;
-    let core = standard_core();
+    let core = standard_core_over(effect_host.clone())?;
     let session = core.session("mismatched-turn-scope").open().await?;
 
     let error = session
@@ -187,12 +193,9 @@ pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identi
 
 #[tokio::test]
 pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
-    let recorder = Arc::new(RecordingNativeEffectController::default());
-    let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
+    let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
-            effect_controller,
-        )))
+        .effect_host(recorder.effect_host().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -222,32 +225,32 @@ pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<
 #[tokio::test]
 pub(super) async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallback() -> Result<()>
 {
-    let recorder = Arc::new(RecordingNativeEffectController::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
-            recorder.clone(),
-        )))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("turn-id-precedence").open().await?;
+    let recorder = EffectRecorder::default();
+    let effect_host = recorder.effect_host().await;
+    let core = standard_core_over(effect_host.clone())?;
 
-    let builder_wins_scope = ScopedEffectController::borrowed(
-        recorder.as_ref(),
-        lash_core::AdmittedScope::runtime_operation("scope-operation"),
-    )?;
-    session
+    // A session pins the physical scope its turns are cancelled under at its
+    // first admitted turn, so a runtime-operation scope and a turn scope run
+    // in sessions of their own.
+    let builder_wins_scope = effect_host.scoped(lash_core::AdmittedScope::runtime_operation(
+        "scope-operation",
+    ))?;
+    core.session("turn-id-precedence-builder")
+        .open()
+        .await?
         .turn(TurnInput::text("builder wins"))
         .turn_id("builder-turn")
         .advanced()
         .run_with_scope(builder_wins_scope)
         .await?;
 
-    let scope_fallback = ScopedEffectController::borrowed(
-        recorder.as_ref(),
-        lash_core::AdmittedScope::turn("turn-id-precedence", "fallback-turn"),
-    )?;
-    session
+    let scope_fallback = effect_host.scoped(lash_core::AdmittedScope::turn(
+        "turn-id-precedence-fallback",
+        "fallback-turn",
+    ))?;
+    core.session("turn-id-precedence-fallback")
+        .open()
+        .await?
         .turn(TurnInput::text("scope fallback"))
         .advanced()
         .run_with_scope(scope_fallback)
@@ -345,12 +348,9 @@ pub(super) async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle
 
 #[tokio::test]
 pub(super) async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<()> {
-    let recorder = Arc::new(RecordingNativeEffectController::default());
-    let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
+    let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
-            effect_controller,
-        )))
+        .effect_host(recorder.effect_host().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(

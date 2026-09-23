@@ -10,6 +10,8 @@ mod group;
 pub mod group_closing;
 pub mod group_drain;
 mod group_journal;
+#[cfg(any(test, feature = "testing"))]
+mod layered_host;
 use lash_core_store::effect_identity as identity_types;
 mod live_openers;
 pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
@@ -77,6 +79,8 @@ pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
 };
 pub use lash_sansio::{CausalRef, EffectAddress};
+#[cfg(any(test, feature = "testing"))]
+pub use layered_host::{EffectLayer, LayeredEffectHost};
 pub use native_host::NativeEffectHost;
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,

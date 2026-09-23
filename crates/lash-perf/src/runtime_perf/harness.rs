@@ -916,18 +916,19 @@ pub(crate) async fn build_runtime_with_store(
             let (provider, control) = benchmark_provider_with_control(scenario);
             (provider.into_handle(), control)
         };
-    let effect_host: Arc<dyn lash_core::EffectHost> = if wiring.turn_start_gate {
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::new(Arc::new(
-                RetryingStartGateController::default(),
-            ))
+    // Every scenario measures the same host; the start-gate scenario layers
+    // its retry fixture over it rather than swapping the host out.
+    let native_host: Arc<dyn lash_core::EffectHost> = Arc::new(
+        lash_core::facade_support::NativeEffectHost::default()
             .allow_process_lifetime_completion_keys(),
-        )
+    );
+    let effect_host: Arc<dyn lash_core::EffectHost> = if wiring.turn_start_gate {
+        Arc::new(lash_core::testing::LayeredEffectHost::new(
+            native_host,
+            Arc::new(StartGateRetryLayer::default()),
+        ))
     } else {
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::default()
-                .allow_process_lifetime_completion_keys(),
-        )
+        native_host
     };
     let store = store.unwrap_or_else(|| Arc::new(RuntimePerfStore::default()));
     let settlement_control = scenario
@@ -1023,40 +1024,18 @@ pub(crate) async fn build_runtime_with_store(
     })
 }
 
-struct RetryingStartGateController {
+/// Fails the first two peeks of each turn-cancel gate so the start gate's
+/// bounded retry wrapper is on the measured path.
+#[derive(Default)]
+struct StartGateRetryLayer {
     attempts_by_key: Mutex<HashMap<String, usize>>,
-    delegate: lash_core::facade_support::NativeRuntimeEffectController,
-}
-
-impl Default for RetryingStartGateController {
-    fn default() -> Self {
-        Self {
-            attempts_by_key: Mutex::new(HashMap::new()),
-            delegate: lash_core::facade_support::NativeRuntimeEffectController::default(),
-        }
-    }
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for RetryingStartGateController {
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.delegate.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.delegate.resolve_await_event(key, resolution).await
-    }
-
+impl lash_core::testing::EffectLayer for StartGateRetryLayer {
     async fn peek_await_event(
         &self,
+        inner: &dyn lash_core::AwaitEventResolver,
         key: &lash_core::AwaitEventKey,
     ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
         if matches!(key.wait, lash_core::AwaitEventWaitIdentity::TurnCancelGate) {
@@ -1070,97 +1049,7 @@ impl lash_core::AwaitEventResolver for RetryingStartGateController {
                 ));
             }
         }
-        self.delegate.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.delegate.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.delegate
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.delegate
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for RetryingStartGateController {
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        self.delegate.execute_effect(envelope, local_executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.delegate.open_effect_group(group).await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.delegate.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.delegate.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.delegate.close_effect_group(handle, disposition).await
-    }
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.delegate.commit_group_child_final(commit).await
-    }
-
-    async fn group_child_drain_blocked(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
-        self.delegate
-            .group_child_drain_blocked(group_key, commit_seq)
-            .await
+        inner.peek_await_event(key).await
     }
 }
 

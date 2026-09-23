@@ -64,6 +64,9 @@ insta = "1"
 # normal builds never see it.
 loom = { workspace = true }
 proptest = "1"
+# FIG-3580: fixtures layer over a SQLite memory deployment's effect host; the
+# store depends on lash-core-execution, not on this crate (ADR 0102).
+lash-sqlite-store = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }

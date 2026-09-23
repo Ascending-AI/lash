@@ -417,16 +417,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         None
     }
 
-    /// Testing hook: a controller double that forwards effect-group operations
-    /// to an inner substrate exposes an `EffectHost` over that same substrate
-    /// here, so test builders can wire tool-child routing and bound-child
-    /// admission against the group state the double's opens actually land in.
-    /// Production controllers leave this `None`.
-    #[cfg(any(test, feature = "testing"))]
-    fn shared_effect_host(&self) -> Option<std::sync::Arc<dyn crate::EffectHost>> {
-        None
-    }
-
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

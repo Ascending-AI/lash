@@ -2109,6 +2109,7 @@ dependencies = [
  "lash-internal-core-memory",
  "lash-internal-core-store",
  "lash-internal-sansio",
+ "lash-internal-sqlite-store",
  "lash-internal-trace",
  "loom",
  "proptest",

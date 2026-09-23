@@ -1,10 +1,8 @@
 //! Effect-boundary invariant tests for scalar vs batched Lashlang tool dispatch.
 
 use super::*;
-use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
-use std::time::Instant;
 
 #[test]
 fn process_effect_outcome_contract_normalizes_only_opaque_replay_identity() {
@@ -78,138 +76,24 @@ impl ToolAttemptInvariantRecorder {
     }
 }
 
-struct RecordingNativeEffectController {
+/// Records every tool attempt that crosses the effect boundary of the
+/// contract world's host.
+struct ToolAttemptRecordingLayer {
     recorder: Arc<ToolAttemptInvariantRecorder>,
-    delegate: lash_core::facade_support::NativeRuntimeEffectController,
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.delegate.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.delegate.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.delegate.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: lash::CancellationToken,
-        deadline: Option<Instant>,
-    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.delegate.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.delegate
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.delegate
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
+impl lash_core::testing::EffectLayer for ToolAttemptRecordingLayer {
     async fn execute_effect(
         &self,
+        inner: &dyn lash_core::RuntimeEffectController,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
         if let lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } = &envelope.command {
             self.recorder.record_tool_attempt(&call.tool_name);
         }
-        self.delegate.execute_effect(envelope, local_executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.delegate.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.delegate.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.delegate.native_effect_groups_substrate()
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.delegate.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.delegate.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.delegate.close_effect_group(handle, disposition).await
-    }
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.delegate.commit_group_child_final(commit).await
-    }
-
-    async fn group_child_drain_blocked(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
-        self.delegate
-            .group_child_drain_blocked(group_key, commit_seq)
-            .await
+        inner.execute_effect(envelope, local_executor).await
     }
 }
 
@@ -238,18 +122,17 @@ impl lash_core::ToolProvider for RecordingToolProvider {
     }
 }
 
+/// The contract world's own host — the one every other agent contract runs
+/// on — with the recording layer over it.
 fn recording_effect_host(
     recorder: Arc<ToolAttemptInvariantRecorder>,
 ) -> Arc<dyn lash_core::EffectHost> {
-    Arc::new(
-        lash_core::facade_support::NativeEffectHost::new(Arc::new(
-            RecordingNativeEffectController {
-                recorder,
-                delegate: lash_core::facade_support::NativeRuntimeEffectController::default(),
-            },
-        ))
-        .allow_process_lifetime_completion_keys(),
-    )
+    Arc::new(lash_core::testing::LayeredEffectHost::new(
+        Arc::new(
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
+        ),
+        Arc::new(ToolAttemptRecordingLayer { recorder }),
+    ))
 }
 
 struct BatchEnvelopeProbeTools;

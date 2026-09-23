@@ -10,98 +10,17 @@ use super::*;
 
 use std::sync::atomic::AtomicBool;
 
-/// A native controller whose settlement reads fail while `fail_settlements`
-/// is raised; every other operation is the native controller's own.
-struct SettlementFaultController {
-    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+/// Fails every settlement read while `fail_settlements` is raised; every
+/// other operation is the SQLite memory deployment's own.
+struct SettlementFaultLayer {
     fail_settlements: AtomicBool,
 }
 
 #[async_trait]
-impl lash_core::AwaitEventResolver for SettlementFaultController {
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait]
-impl lash_core::RuntimeEffectController for SettlementFaultController {
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
-    {
-        self.native.execute_effect(envelope, local_executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
-    {
-        self.native.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.native.native_effect_groups_substrate()
-    }
-
+impl lash_core::testing::EffectLayer for SettlementFaultLayer {
     async fn await_next_settlement(
         &self,
+        inner: &dyn lash_core::RuntimeEffectController,
         handle: &mut lash_core::EffectGroupHandle,
         cancel: lash_core::CancellationToken,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
@@ -112,46 +31,7 @@ impl lash_core::RuntimeEffectController for SettlementFaultController {
                 "settlement read failed: disk I/O error",
             ));
         }
-        self.native.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> std::result::Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.read_group_settlement(group_key, rank).await
-    }
-
-    async fn group_child_drain_blocked(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> std::result::Result<bool, lash_core::RuntimeEffectControllerError> {
-        self.native
-            .group_child_drain_blocked(group_key, commit_seq)
-            .await
+        inner.await_next_settlement(handle, cancel).await
     }
 }
 
@@ -173,17 +53,15 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
         let registry = Arc::new(TestLocalProcessRegistry::default());
         register_intent_target(registry.as_ref(), &session_id).await;
         let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
-        let native = Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default());
-        let controller = Arc::new(SettlementFaultController {
-            native: Arc::clone(&native),
-            fail_settlements: AtomicBool::new(true),
-        });
-        let host =
-            lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
-                controller as Arc<dyn lash_core::RuntimeEffectController>,
-                &native,
-            )
-            .allow_process_lifetime_completion_keys();
+        let host = lash_core::testing::LayeredEffectHost::new(
+            lash_sqlite_store::SqliteDeployment::memory()
+                .await
+                .expect("open a memory deployment")
+                .effect_host(),
+            Arc::new(SettlementFaultLayer {
+                fail_settlements: AtomicBool::new(true),
+            }),
+        );
         let core = oracle_builder(
             tier,
             &session_id,

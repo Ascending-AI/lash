@@ -6,6 +6,8 @@
 
 #[path = "graph_sequence_cutover.rs"]
 mod graph_sequence_cutover;
+#[path = "layered_effect_host.rs"]
+mod layered_effect_host;
 #[path = "parent_end_payload.rs"]
 mod parent_end_payload;
 #[path = "parent_end_registration_race.rs"]

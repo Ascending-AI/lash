@@ -128,10 +128,10 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                     observed_bindings: Default::default(),
                     enumerations: Default::default(),
                 });
-            context = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+            context = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_host_and_invocation(
                 provider,
                 lash_core::ToolCatalog::default(),
-                Arc::new(FailingDeferredJournalController::default()),
+                failing_deferred_journal_host().await,
                 lash_core::testing::exec_code_invocation(
                     "host-setup-failure",
                     "turn-1",

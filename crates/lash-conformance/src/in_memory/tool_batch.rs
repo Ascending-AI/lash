@@ -3,20 +3,14 @@
 
 use std::sync::Arc;
 
-use crate::*;
-
 crate::tool_batch_parallelism_tests!({
     // The deferred route parks on a completion key, and the native host refuses
     // to issue one until the embedding accepts that such a key dies with the
     // process. A single-process conformance run is exactly that embedding, and
     // saying so here is what lets the native tier answer the same law as the
     // durable tiers instead of a narrower one.
-    let host: Arc<dyn crate::EffectHost> = Arc::new(
-        crate::NativeEffectHost::new(
-            Arc::new(NativeRuntimeEffectController::default()) as Arc<dyn RuntimeEffectController>
-        )
-        .allow_process_lifetime_completion_keys(),
-    );
+    let host: Arc<dyn crate::EffectHost> =
+        Arc::new(crate::NativeEffectHost::default().allow_process_lifetime_completion_keys());
     (
         (),
         "native",

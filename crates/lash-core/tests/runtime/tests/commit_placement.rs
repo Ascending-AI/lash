@@ -120,7 +120,7 @@ impl<const ENGINE: bool> lash_core::RuntimeEffectController for JournaledCommitC
 
 async fn assert_commit_placement(
     session_id: &SessionId,
-    controller: Arc<dyn lash_core::RuntimeEffectController>,
+    effect_host: Arc<dyn lash_core::EffectHost>,
     expected_entries: usize,
 ) {
     let store = Arc::new(RecordingStore::default());
@@ -134,16 +134,9 @@ async fn assert_commit_placement(
             ..LlmResponse::default()
         }),
     }]);
-    let host = match controller.effect_journaling() {
-        lash_core::EffectJournaling::Local => {
-            let mut config = test_runtime_host_config();
-            config = config.with_effect_host(Arc::new(
-                lash_core::facade_support::NativeEffectHost::new(controller.clone()),
-            ));
-            EmbeddedRuntimeHost::new(config)
-        }
-        lash_core::EffectJournaling::Journaled => journal_replay_host(controller.clone()),
-    };
+    let host = EmbeddedRuntimeHost::new(
+        test_runtime_host_config().with_effect_host(Arc::clone(&effect_host)),
+    );
     let mut runtime = TestRuntime::new(transport)
         .host(host)
         .store(store.clone())
@@ -157,11 +150,9 @@ async fn assert_commit_placement(
         .run_turn_assembled(
             TurnInput::text("commit"),
             CancellationToken::new(),
-            lash_core::ScopedEffectController::shared(
-                controller,
-                lash_core::AdmittedScope::turn(session_id, "placement-turn"),
-            )
-            .unwrap(),
+            effect_host
+                .scoped(lash_core::AdmittedScope::turn(session_id, "placement-turn"))
+                .unwrap(),
         )
         .await
         .expect("commit real turn");
@@ -215,21 +206,35 @@ async fn assert_commit_placement(
     );
 }
 
+/// The host an engine-owned controller is lent through.
+fn engine_commit_host() -> Arc<dyn lash_core::EffectHost> {
+    effect::controller_effect_host(Arc::new(JournaledCommitController::<true>::default()))
+}
+
+/// A SQLite memory deployment's effect host: a store-journaled host that owns
+/// no commit backpressure.
+async fn store_commit_host() -> Arc<dyn lash_core::EffectHost> {
+    lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("open a memory deployment")
+        .effect_host()
+}
+
 #[tokio::test]
 async fn durable_journaled_engine_commits_bypass_local_admission() {
     Box::pin(assert_commit_placement(
         &SessionId::from("engine-commit-placement"),
-        Arc::new(JournaledCommitController::<true>::default()),
+        engine_commit_host(),
         0,
     ))
     .await;
 }
 
 #[tokio::test]
-async fn native_commits_enter_local_admission() {
+async fn store_host_commits_enter_local_admission() {
     Box::pin(assert_commit_placement(
-        &SessionId::from("native-commit-placement"),
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+        &SessionId::from("store-host-commit-placement"),
+        store_commit_host().await,
         1,
     ))
     .await;
@@ -239,30 +244,33 @@ async fn native_commits_enter_local_admission() {
 async fn store_journaled_commits_keep_native_admission() {
     Box::pin(assert_commit_placement(
         &SessionId::from("store-journaled-commit-placement"),
-        Arc::new(JournaledCommitController::<false>::default()),
+        effect::controller_effect_host(Arc::new(JournaledCommitController::<false>::default())),
         1,
     ))
     .await;
 }
 
-#[test]
-fn commit_admission_ownership_survives_controller_wrappers() {
-    let controllers: [Arc<dyn lash_core::RuntimeEffectController>; 2] = [
-        Arc::new(JournaledCommitController::<true>::default()),
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+/// Passes every operation through untouched.
+struct PassThrough;
+
+impl lash_core::testing::EffectLayer for PassThrough {}
+
+#[tokio::test]
+async fn commit_admission_ownership_survives_controller_wrappers() {
+    let hosts: [(Arc<dyn lash_core::EffectHost>, bool); 2] = [
+        (engine_commit_host(), true),
+        (store_commit_host().await, false),
     ];
-    for controller in controllers {
-        let expected = controller.owns_commit_backpressure();
-        let host = lash_core::facade_support::NativeEffectHost::new(controller);
-        assert_eq!(
-            lash_core::RuntimeEffectController::owns_commit_backpressure(&host),
-            expected
-        );
-        let (proxy, _requests) = lash_core::runtime::effect::EffectTaskController::scoped(
-            &host,
-            lash_core::AdmittedScope::turn("ownership", "turn"),
-        )
-        .unwrap();
+    for (inner, expected) in hosts {
+        let host = lash_core::testing::LayeredEffectHost::new(inner, Arc::new(PassThrough));
+        let admitted = lash_core::AdmittedScope::turn("ownership", "turn");
+        let scoped = lash_core::EffectHost::scoped_static(&host, admitted.clone())
+            .unwrap()
+            .expect("both inner hosts lend owned controllers");
+        assert_eq!(scoped.controller().owns_commit_backpressure(), expected);
+        let (proxy, _requests) =
+            lash_core::runtime::effect::EffectTaskController::scoped(scoped.controller(), admitted)
+                .unwrap();
         assert_eq!(proxy.controller().owns_commit_backpressure(), expected);
     }
 }

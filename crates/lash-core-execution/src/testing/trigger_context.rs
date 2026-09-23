@@ -21,13 +21,13 @@ pub fn code_execution_context_with_trigger_store_and_invocation(
         .into_runtime()
 }
 
-pub fn code_execution_context_with_trigger_store_and_effect_controller(
+pub fn code_execution_context_with_trigger_store_and_effect_host(
     trigger_store: Arc<dyn crate::TriggerStore>,
-    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    effect_host: Arc<dyn crate::EffectHost>,
 ) -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new()
         .trigger_router(Some(test_trigger_router(trigger_store)))
-        .shared_effect_controller(effect_controller)
+        .effect_host(effect_host)
         .build()
         .into_runtime()
 }

@@ -518,14 +518,15 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
     }
 }
 
-#[derive(Default)]
-struct RecordingNativeEffectController {
-    invocations: StdMutex<Vec<DurableEffectInvocation>>,
-    persisted_outcomes: StdMutex<Vec<String>>,
-    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+/// Records every effect envelope that crosses the effect boundary, and the
+/// outcome of each one that ran.
+#[derive(Clone, Default)]
+struct EffectRecorder {
+    invocations: Arc<StdMutex<Vec<DurableEffectInvocation>>>,
+    persisted_outcomes: Arc<StdMutex<Vec<String>>>,
 }
 
-impl RecordingNativeEffectController {
+impl EffectRecorder {
     fn invocations(&self) -> Vec<DurableEffectInvocation> {
         self.invocations.lock_recover().clone()
     }
@@ -537,6 +538,68 @@ impl RecordingNativeEffectController {
             .iter()
             .map(|outcome| serde_json::from_str(outcome).expect("deserialize effect outcome"))
             .collect()
+    }
+
+    fn record_invocation(&self, envelope: &lash_core::RuntimeEffectEnvelope) {
+        self.invocations
+            .lock_recover()
+            .push(DurableEffectInvocation {
+                kind: envelope.command.kind(),
+                execution_scope: envelope.invocation.execution_scope().clone(),
+                turn_id: envelope.invocation.attribution.turn_id.clone(),
+                replay_key: Some(envelope.invocation.replay_key().to_owned()),
+            });
+    }
+
+    fn record_outcome(&self, outcome: &lash_core::RuntimeEffectOutcome) {
+        self.persisted_outcomes
+            .lock_recover()
+            .push(serde_json::to_string(outcome).expect("serialize effect outcome"));
+    }
+
+    /// A fresh SQLite memory deployment's effect host, with this recorder
+    /// layered over every controller it lends.
+    async fn effect_host(&self) -> Arc<lash_core::testing::LayeredEffectHost> {
+        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+            .await
+            .expect("open a memory deployment");
+        Arc::new(lash_core::testing::LayeredEffectHost::new(
+            deployment.effect_host(),
+            Arc::new(self.clone()),
+        ))
+    }
+}
+
+#[async_trait]
+impl lash_core::testing::EffectLayer for EffectRecorder {
+    async fn execute_effect(
+        &self,
+        inner: &dyn lash_core::RuntimeEffectController,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
+    {
+        self.record_invocation(&envelope);
+        let outcome = inner.execute_effect(envelope, local_executor).await;
+        if let Ok(outcome) = &outcome {
+            self.record_outcome(outcome);
+        }
+        outcome
+    }
+}
+
+/// A bare controller for the explicit-effects entry points, which take a
+/// controller rather than a host: it records into an [`EffectRecorder`] and
+/// runs each effect locally.
+#[derive(Default)]
+struct RecordingNativeEffectController {
+    recorder: EffectRecorder,
+    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+}
+
+impl RecordingNativeEffectController {
+    fn invocations(&self) -> Vec<DurableEffectInvocation> {
+        self.recorder.invocations()
     }
 }
 
@@ -601,14 +664,7 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
-        self.invocations
-            .lock_recover()
-            .push(DurableEffectInvocation {
-                kind: envelope.command.kind(),
-                execution_scope: envelope.invocation.execution_scope().clone(),
-                turn_id: envelope.invocation.attribution.turn_id.clone(),
-                replay_key: Some(envelope.invocation.replay_key().to_owned()),
-            });
+        self.recorder.record_invocation(&envelope);
         if matches!(
             &envelope.command,
             lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }
@@ -617,9 +673,7 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         }
         let outcome = local_executor.execute(envelope).await;
         if let Ok(outcome) = &outcome {
-            self.persisted_outcomes
-                .lock_recover()
-                .push(serde_json::to_string(outcome).expect("serialize effect outcome"));
+            self.recorder.record_outcome(outcome);
         }
         outcome
     }

@@ -26,7 +26,7 @@ async fn recorded_unavailable_masks_incompatible_surface_before_environment_vali
     };
     let mut record = DeferredResolutionRecord::default();
     record.record("web.now", Resolution::NotAvailable);
-    let ctx = link_context(&mut record);
+    let ctx = link_context(&mut record).await;
 
     let effective = resolve_and_build_deferred_environment(
         &program,
