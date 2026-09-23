@@ -126,6 +126,12 @@ impl super::Lowerer {
         } else {
             self.generated_binding(name)
         };
+        // A binding declared in a block of the cell's top level ends with its
+        // block (ECMA-262 lexical scoping), so it never becomes a session
+        // global. A function frame's locals are never globals to begin with.
+        if owner_function == 0 && self.scopes.len() > self.root_scope_depth {
+            self.private_bindings.insert(internal.clone());
+        }
         #[expect(
             clippy::expect_used,
             reason = "the lowerer pushes the program root scope before any declaration and never pops past it"

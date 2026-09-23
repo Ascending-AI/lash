@@ -106,10 +106,13 @@ struct Lowerer {
     scopes: Vec<Scope>,
     functions: Vec<FunctionContext>,
     next_binding: usize,
-    /// Every binding name this lowering invented. They are the front end's
-    /// own slots, so the lowered program marks them private
-    /// ([`lashlang::BindingVisibility::Private`]).
-    generated_bindings: BTreeSet<String>,
+    /// The bindings the lowered program marks private
+    /// ([`lashlang::BindingVisibility::Private`]): every name this lowering
+    /// invented, and every authored `let`/`const` (loop binders included)
+    /// declared in a block of the cell's top level, which ECMA-262 ends with
+    /// its block. Only the cell's own top-level bindings (and hoisted `var`s)
+    /// are session-visible.
+    private_bindings: BTreeSet<String>,
     next_function: usize,
     position: PositionContext,
     switch_breaks: Vec<(String, usize)>,

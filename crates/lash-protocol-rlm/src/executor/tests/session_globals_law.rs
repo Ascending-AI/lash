@@ -129,13 +129,12 @@ fn cold_reload(state: &RlmExecutionState) -> RlmExecutionState {
     restored
 }
 
-/// `item` is authored: a loop binding with no outer binding of its name
-/// keeps its name, and the lowering assigns it no private role (only the
-/// slots the front end generates are private).
-/// `item` is authored: a loop binding with no outer binding of its name
-/// keeps its name, and the lowering assigns it no private role (only the
-/// slots the front end generates are private).
-const CELL_1_GLOBALS: &[&str] = &["answer", "box", "counter", "fetched", "item", "total"];
+/// ECMA-262 block scoping (ADR 0062/0064): a `let`/`const` declared inside a
+/// block, a loop binder included, does not exist after its block, so the
+/// front end marks it private like its own slots. `item` (the loop binder)
+/// and `armed` (a `const` in an `if` arm) are therefore not session globals;
+/// the top-level `let answer` and `let counter` are.
+const CELL_1_GLOBALS: &[&str] = &["answer", "box", "counter", "fetched", "total"];
 /// `reader` is absent by design: a closure never crosses a program boundary
 /// (`lashlang::State::install_runtime` drops closure-rooted globals), so the
 /// closure over a shadowed block binding is exercised inside its own cell.
@@ -144,7 +143,6 @@ const CELL_2_GLOBALS: &[&str] = &[
     "box",
     "counter",
     "fetched",
-    "item",
     "from_host",
     "total",
     "worker",
@@ -164,6 +162,10 @@ let counter = 0;
 const fetched = await web.fetch({ url: "global" });
 for (const item of [1, 2]) {
   counter = counter + item;
+}
+if (counter > 0) {
+  const armed = counter;
+  box.n = armed;
 }
 {
   const answer = 100;

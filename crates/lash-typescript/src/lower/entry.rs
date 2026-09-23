@@ -138,7 +138,7 @@ fn lower_with_ambient_kind(
         language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations: lowerer.declarations,
         main,
-        private_bindings: std::mem::take(&mut lowerer.generated_bindings)
+        private_bindings: std::mem::take(&mut lowerer.private_bindings)
             .into_iter()
             .map(Into::into)
             .collect(),

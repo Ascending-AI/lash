@@ -221,7 +221,7 @@ impl Lowerer {
         let id = self.next_binding;
         self.next_binding += 1;
         let name = format!("{GENERATED_BINDING_PREFIX}{id}_{label}");
-        self.generated_bindings.insert(name.clone());
+        self.private_bindings.insert(name.clone());
         name
     }
 
