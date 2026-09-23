@@ -607,17 +607,29 @@ async fn redrive_same_opener(
          its record and no child runs twice"
     );
 
-    // The caller releases before the completeness check: a group open to a
-    // caller in this process is not drainable here, by the same guard the
-    // drain suite's own laws rely on.
     close(&scoped, handle, RUN)
         .await
         .expect("the returning caller closes once every rank is served");
-    drain_until_no_live_lease(&world, key).await;
-    let report = pass(&world, key).await.expect("a final pass runs");
+
+    // Completeness is the journal's fact, so another host over the same
+    // journal checks it, as the sibling redrives do. This host is the wrong
+    // one to ask: a child's terminal commits, and wakes the caller, before
+    // the child's task returns, so for that instant a drain here is refused
+    // with the retryable `RuntimeEffectGroupDrainDeferred`. That refusal is
+    // pinned by the drain suite's own law. Every rank has been served, so no
+    // child is left unsettled and one pass is the whole answer. A child run
+    // again would show up in `verifier`.
+    let verifier = RecordingExecutors::settling();
+    let checker = make(spec(CRASH_LEASE_MS, &verifier)).await;
+    let report = pass(&checker, key).await.expect("a final pass runs");
     assert!(
         report.is_complete(),
         "the resumed group drains to completion: {report:?}"
+    );
+    assert!(
+        verifier.executions().is_empty(),
+        "a resumed group leaves the drain nothing to run: {:?}",
+        verifier.executions()
     );
 }
 
