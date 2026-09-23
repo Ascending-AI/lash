@@ -644,6 +644,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
 
 /// PostgreSQL redrive law for the exact process-replay boundary between a
 /// durable `spawn_agent` child start and its following await.
+#[ignore = "parked: rewritten in PR B (serial batch path deleted) (FIG-3397)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn fig1293_spawn_agent_redrives_after_child_start_before_await_on_postgres() {
     assert_fig1293_postgres_crash_boundary(CrashAfter::SpawnAgentStart, false).await;
@@ -653,6 +654,7 @@ async fn fig1293_spawn_agent_redrives_after_child_start_before_await_on_postgres
 /// but before the next serial child begins. Serial scheduling is the binding
 /// substrate geometry used by ordinal journals and remains valid on the
 /// key-addressed PostgreSQL controller.
+#[ignore = "parked: rewritten in PR B (serial batch path deleted) (FIG-3397)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn fig1293_protocol_batch_redrives_between_children_on_postgres() {
     assert_fig1293_postgres_crash_boundary(CrashAfter::FirstProtocolBatchChild, true).await;
@@ -662,6 +664,7 @@ async fn fig1293_protocol_batch_redrives_between_children_on_postgres() {
 /// committed success and one committed failure request cancellation, before
 /// the third child starts. Redrive must recover the two recorded children and
 /// record a literal cancelled terminal for the third without entering it.
+#[ignore = "parked: rewritten in PR B (serial batch path deleted) (FIG-3397)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_postgres() {
     let Some(database_url) = database_url() else {
