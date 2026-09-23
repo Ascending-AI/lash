@@ -504,6 +504,14 @@ impl PostgresEffectHost {
     pub fn group_closing(&self) -> Arc<dyn StoreEffectGroupClosing> {
         Arc::clone(&self.inner).into_group_closing()
     }
+
+    /// Testing seam (FIG-3524): arm this journal's next `claim`, `finalize`
+    /// or `renew` on a named replay key to return the `Store` error instead
+    /// of reaching the row store.
+    #[cfg(feature = "testing")]
+    pub fn effect_journal_faults(&self) -> effect_replay_driver::EffectJournalFaults {
+        self.inner.journal_faults()
+    }
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -548,6 +556,14 @@ impl PostgresRuntimeEffectController {
 
     pub fn start_replay(&self) {
         self.inner.start_replay();
+    }
+
+    /// Testing seam (FIG-3524): arm this journal's next `claim`, `finalize`
+    /// or `renew` on a named replay key to return the `Store` error instead
+    /// of reaching the row store.
+    #[cfg(feature = "testing")]
+    pub fn effect_journal_faults(&self) -> effect_replay_driver::EffectJournalFaults {
+        self.inner.journal_faults()
     }
 }
 

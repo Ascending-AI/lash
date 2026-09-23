@@ -351,6 +351,9 @@ lash_conformance::turn_crash_matrix_tests!({
             })
         },
         crash_redrive_conformance_invocation,
+        // The Restate recording controller has no SQLite/Postgres effect
+        // journal: only the tool-attempt error-return placement runs here.
+        |scenario: &str, _scope: ExecutionScope| crash_redrive_conformance_invocation(scenario),
     )
 });
 

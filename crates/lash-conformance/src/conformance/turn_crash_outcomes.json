@@ -158,5 +158,37 @@
     "scenario": "peer_reclaim",
     "outcome": "A recovered commit reaches terminal state while leaving the queued-work row owned by the successor lease generation untouched for at-least-once redelivery.",
     "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 1}
+  },
+  {
+    "error_return": {
+      "placement": "tool-attempt",
+      "outcome": "FIG-3528: an unretried store error from execute_effect(ToolAttempt) is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
+      "ticket": "FIG-3528",
+      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+    }
+  },
+  {
+    "error_return": {
+      "placement": "effect-journal-claim",
+      "outcome": "FIG-3528: an unretried store error from the effect journal's claim is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
+      "ticket": "FIG-3528",
+      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+    }
+  },
+  {
+    "error_return": {
+      "placement": "effect-journal-finalize",
+      "outcome": "FIG-3528: an unretried store error from the effect journal's finalize is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
+      "ticket": "FIG-3528",
+      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+    }
+  },
+  {
+    "error_return": {
+      "placement": "effect-journal-renew",
+      "outcome": "FIG-3512: an unretried store error from the effect-lease renew aborts the running tool and the attempt becomes a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
+      "ticket": "FIG-3512",
+      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+    }
   }
 ]

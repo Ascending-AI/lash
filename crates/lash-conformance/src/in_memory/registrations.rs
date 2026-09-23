@@ -410,6 +410,9 @@ mod tests {
                 crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
             },
             |_: &str| ConformanceInvocation::native(),
+            // In-memory has no effect journal: only the tool-attempt
+            // error-return placement runs here.
+            |_: &str, _: crate::ExecutionScope| ConformanceInvocation::native(),
         )
     });
 

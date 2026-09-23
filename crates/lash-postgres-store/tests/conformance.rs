@@ -446,6 +446,7 @@ lash_conformance::turn_crash_matrix_tests!({
     };
     reset(storage.pool()).await;
     let database_url = database_url().expect("configured Postgres database URL");
+    let error_return_database_url = database_url.clone();
     (
         _database_lock,
         move |scenario: &str| {
@@ -459,6 +460,34 @@ lash_conformance::turn_crash_matrix_tests!({
                 as Arc<dyn RuntimePersistence>
         },
         |_: &str| lash_conformance::ConformanceInvocation::native(),
+        move |_: &str, scope: ExecutionScope| {
+            {
+                let database_url = error_return_database_url.clone();
+                // FIG-3524: the error-return sweep needs the journaled
+                // controller so the claim/finalize/renew placements arm real
+                // journal faults. The short renew interval lets a `renew`
+                // fault fire while the parked tool attempt is still open.
+                let storage = sync_await(async move {
+                    PostgresStorage::connect(&database_url)
+                        .await
+                        .expect("construct Postgres error-return journal pool")
+                });
+                let controller = PostgresRuntimeEffectController::with_options(
+                    &storage,
+                    scope.clone(),
+                    PostgresEffectReplayOptions {
+                        lease_timings: lash_core::facade_support::LeaseTimings::new(
+                            std::time::Duration::from_secs(60),
+                            std::time::Duration::from_millis(50),
+                        )
+                        .expect("error-return effect lease timings"),
+                        ..PostgresEffectReplayOptions::default()
+                    },
+                );
+                postgres_conformance_invocation(controller.clone(), scope)
+                    .with_effect_journal_faults(controller.effect_journal_faults())
+            }
+        },
     )
 });
 
