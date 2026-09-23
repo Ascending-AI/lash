@@ -225,7 +225,8 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
                 TurnInput::text("cancel after partial stream"),
                 TurnOptions::new(
                     turn_cancel,
-                    named_turn_scope(
+                    host_turn_scope(
+                        &runtime.host.core,
                         &SessionId::from("root"),
                         &TurnId::from("cancel-partial-provider-stream"),
                     ),
@@ -356,7 +357,8 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("truncated-stream-retry"),
                 ),
@@ -439,7 +441,8 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
             TurnInput::text("retry a pre-response transport failure"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("counted-regeneration-reset"),
                 ),
@@ -534,7 +537,8 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
             TurnInput::text("defer to a provider retry-after"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("courtesy-regeneration-reset"),
                 ),
@@ -656,7 +660,11 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
             TurnInput::text("retry after paid output"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from("paid-output-retry")),
+                host_turn_scope(
+                    &runtime.host.core,
+                    &SessionId::from("root"),
+                    &TurnId::from("paid-output-retry"),
+                ),
             )
             .with_turn_events(&turn_events),
         )
@@ -771,7 +779,8 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
             TurnInput::text("follow up after the failed generation"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("paid-output-follow-up"),
                 ),
@@ -852,7 +861,8 @@ pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
         .run_turn_assembled(
             TurnInput::text("foreground must wait"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("foreground-busy-lane-turn"),
             ),
@@ -919,7 +929,11 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("queued-busy-turn")),
+            host_turn_scope(
+                &runtime.host.core,
+                &SessionId::from("root"),
+                &TurnId::from("queued-busy-turn"),
+            ),
         ))
         .await
         .expect("busy queued drain should not error")
@@ -950,7 +964,8 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("queued-after-busy-turn"),
             ),
@@ -1425,7 +1440,8 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("command-before-lease-ttl"),
             ),
@@ -1453,7 +1469,8 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
     let after_ttl = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("command-after-lease-ttl"),
             ),
@@ -1533,7 +1550,8 @@ pub(super) async fn idle_queued_work_claim_lease_expiry_surfaces_session_executi
     let err = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("idle-claim-lease-expiry-turn"),
             ),
@@ -1605,7 +1623,8 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
             .run_turn_assembled(
                 TurnInput::text("first concurrent commit"),
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &first_runtime.host.core,
                     &SessionId::from(session_id),
                     &TurnId::from("product-admission-first"),
                 ),
@@ -1629,7 +1648,8 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
             .run_turn_assembled(
                 TurnInput::text("second concurrent commit"),
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &second_runtime.host.core,
                     &SessionId::from(session_id),
                     &TurnId::from("product-admission-second"),
                 ),
@@ -1767,7 +1787,8 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
             .run_turn_assembled(
                 TurnInput::text("emit evidence before losing CAS"),
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("cas-survivor-stale-turn"),
                 ),
@@ -1826,7 +1847,8 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
         .run_turn_assembled(
             TurnInput::text("take over and win the head"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &successor.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("cas-survivor-successor-turn"),
             ),
@@ -1923,7 +1945,8 @@ pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publica
             .run_turn_assembled(
                 TurnInput::text("activate before the predecessor publishes"),
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &successor_runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("activated-overlap-successor"),
                 ),
@@ -2069,7 +2092,11 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
             .run_turn_assembled(
                 TurnInput::text("lease can be lost"),
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from("lease-loss-turn")),
+                host_turn_scope(
+                    &runtime.host.core,
+                    &SessionId::from("root"),
+                    &TurnId::from("lease-loss-turn"),
+                ),
             )
             .await
     });
@@ -2155,7 +2182,8 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
         .run_turn_assembled(
             TurnInput::text("continue after predecessor tail"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &successor_runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("successor-after-landed-tail"),
             ),
