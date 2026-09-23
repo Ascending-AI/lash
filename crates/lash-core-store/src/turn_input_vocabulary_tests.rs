@@ -212,3 +212,21 @@ fn submission_digest_covers_every_submitted_field() {
         assert_ne!(digest(&changed), base, "the {field} is submission identity");
     }
 }
+
+/// The provisioned acceptance id is a durable identity: a change to its
+/// derivation (the domain, `EffectAddress::graph_key`, or the acceptance replay
+/// key shape) renames the rows in-flight acceptances will look for on redrive,
+/// and a redrive would then admit the same words a second time (FIG-3513).
+/// A deliberate change must mint a new domain version and update this vector.
+#[test]
+fn provisioned_turn_input_id_is_pinned() {
+    let address = crate::EffectAddress::new(
+        crate::ExecutionScope::turn("session", "turn"),
+        "session:turn:accept_turn_input",
+    )
+    .expect("valid acceptance address");
+    assert_eq!(
+        super::provisioned_turn_input_id(&address),
+        "ti:6e69f3397990690f846f9b04b46cb7b3c7bdaf659b1a028ab0bc3fdd41730832"
+    );
+}

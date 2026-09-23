@@ -12,6 +12,39 @@ use pretty_assertions::assert_eq;
 
 const DIRECT_INPUT: &str = "direct accepted input";
 
+/// Counts acceptance bodies: the acceptance executor's store write is the one
+/// `enqueue_pending_turn_input` a direct turn makes.
+struct CountingAcceptanceStore {
+    inner: Arc<dyn RuntimePersistence>,
+    enqueues: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl crate::store::RuntimePersistenceDecorator for CountingAcceptanceStore {
+    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn enqueue_pending_turn_input(
+        &self,
+        draft: crate::PendingTurnInputDraft,
+    ) -> Result<crate::PendingTurnInput, StoreError> {
+        self.enqueues
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.enqueue_pending_turn_input(draft).await
+    }
+}
+
+fn counted(
+    inner: Arc<dyn RuntimePersistence>,
+    enqueues: &Arc<std::sync::atomic::AtomicUsize>,
+) -> Arc<dyn RuntimePersistence> {
+    Arc::new(CountingAcceptanceStore {
+        inner,
+        enqueues: Arc::clone(enqueues),
+    })
+}
+
 fn direct_input(identity: &ReferenceIdentity) -> crate::TurnInput {
     let mut input = crate::TurnInput::text(DIRECT_INPUT);
     input.trace_turn_id = Some(identity.turn_id.clone());
@@ -42,6 +75,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
 
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let acceptance_bodies = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let invocation = make_invocation(scenario);
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
@@ -50,7 +84,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
         journal_faults: invocation.effect_journal_faults(),
     });
     let mut runtime = Box::pin(build_runtime(
-        SeamStore::wrap(make(scenario), control.clone()),
+        SeamStore::wrap(counted(make(scenario), &acceptance_bodies), control.clone()),
         control.clone(),
         Arc::clone(&effect_controller),
         &identity,
@@ -99,7 +133,10 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
             journal_faults: successor_invocation.effect_journal_faults(),
         });
     let mut successor = Box::pin(build_runtime_with_lease_timings(
-        SeamStore::wrap(make(scenario), successor_control.clone()),
+        SeamStore::wrap(
+            counted(make(scenario), &acceptance_bodies),
+            successor_control.clone(),
+        ),
         successor_control.clone(),
         Arc::clone(&successor_effect_controller),
         &identity,
@@ -119,6 +156,13 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
         .await
         .unwrap_or_else(|error| panic!("the redriven acceptance commits the turn: {error}"));
     successor_invocation.end();
+
+    assert_eq!(
+        acceptance_bodies.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the redrive re-ran the acceptance body: the adoption path was exercised, \
+         not a journaled outcome"
+    );
 
     assert_eq!(
         turn.turn_input_acceptance
