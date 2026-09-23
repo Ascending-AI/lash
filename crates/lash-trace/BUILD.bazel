@@ -56,6 +56,48 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "trace_schema_generator__bin",
+    crate_features = [
+        "default",
+    ],
+    crate_name = "trace_schema_generator",
+    crate_root = "src/bin/trace_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-trace",
+    library_crate_name = "lash_trace",
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_unit_test(
+    name = "trace_schema_generator__bin__unit_test",
+    crate_features = [
+        "default",
+    ],
+    crate_name = "trace_schema_generator",
+    crate_root = "src/bin/trace_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    library = ":lash-trace",
+    library_crate_name = "lash_trace",
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "schema__test",
     crate_features = [
@@ -68,7 +110,9 @@ lash_rust_integration_test(
         "otel",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//:host_schemas",
+    ],
     library = ":lash-trace",
     library_crate_name = "lash_trace",
     manifest_dir = "crates/lash-trace",
@@ -87,6 +131,7 @@ lash_batch_test(
     tests = [
         ":lash-trace__unit_test",
         ":schema__test",
+        ":trace_schema_generator__bin__unit_test",
     ],
 )
 

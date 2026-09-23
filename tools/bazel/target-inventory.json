@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 150,
+  "cargo_target_count": 152,
   "feature_lane_units": [
     {
       "features": [],
@@ -1861,6 +1861,12 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-core-execution:lash-core-execution__fv_ecbe9667",
+      "package": "lash-internal-core-execution"
+    },
+    {
+      "features": [],
+      "kind": "bin",
+      "label": "//crates/lash-core-execution:process_event_schema_generator__bin__fv_ecbe9667",
       "package": "lash-internal-core-execution"
     },
     {
@@ -17555,7 +17561,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 207,
+  "generated_label_count": 211,
   "packages": [
     {
       "declared_features": [
@@ -17712,6 +17718,18 @@
           "tags": []
         },
         {
+          "cargo": "process_event_schema_generator",
+          "kind": "bin",
+          "label": "//crates/lash-core-execution:process_event_schema_generator__bin",
+          "tags": []
+        },
+        {
+          "cargo": "process_event_schema_generator",
+          "kind": "bin-unit-test",
+          "label": "//crates/lash-core-execution:process_event_schema_generator__bin__unit_test",
+          "tags": []
+        },
+        {
           "cargo": "effect_model",
           "kind": "test",
           "label": "//crates/lash-core-execution:effect_model__test",
@@ -17729,6 +17747,7 @@
         "members": [
           "//crates/lash-core-execution:effect_model__test",
           "//crates/lash-core-execution:lash-core-execution__unit_test",
+          "//crates/lash-core-execution:process_event_schema_generator__bin__unit_test",
           "//crates/lash-core-execution:process_model__test"
         ]
       }
@@ -19119,6 +19138,7 @@
       ],
       "dependencies": [
         "base64",
+        "jsonschema",
         "lash-internal-core",
         "lash-internal-sansio",
         "lash-internal-trace",
@@ -19695,9 +19715,11 @@
       ],
       "dependencies": [
         "chrono",
+        "jsonschema",
         "lash-internal-sansio",
         "opentelemetry",
         "opentelemetry_sdk",
+        "schemars",
         "serde",
         "serde_json",
         "sha2",
@@ -19723,6 +19745,18 @@
           "tags": []
         },
         {
+          "cargo": "trace_schema_generator",
+          "kind": "bin",
+          "label": "//crates/lash-trace:trace_schema_generator__bin",
+          "tags": []
+        },
+        {
+          "cargo": "trace_schema_generator",
+          "kind": "bin-unit-test",
+          "label": "//crates/lash-trace:trace_schema_generator__bin__unit_test",
+          "tags": []
+        },
+        {
           "cargo": "schema",
           "kind": "test",
           "label": "//crates/lash-trace:schema__test",
@@ -19733,7 +19767,8 @@
         "label": "//crates/lash-trace:test_batch",
         "members": [
           "//crates/lash-trace:lash-trace__unit_test",
-          "//crates/lash-trace:schema__test"
+          "//crates/lash-trace:schema__test",
+          "//crates/lash-trace:trace_schema_generator__bin__unit_test"
         ]
       }
     },

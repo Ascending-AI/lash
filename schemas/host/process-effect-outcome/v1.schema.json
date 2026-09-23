@@ -1,0 +1,52 @@
+{
+  "$id": "https://lash.dev/schemas/process-effect-outcome/v1",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "node_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "occurrence": {
+      "maximum": 8,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "operation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "outcome_class": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "replay_key": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "vocabulary_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "vocabulary_version",
+    "node_id",
+    "occurrence",
+    "operation",
+    "outcome_class",
+    "replay_key"
+  ],
+  "title": "ProcessEffectSummaryOccurrence",
+  "type": "object",
+  "x-lash-event-type": "process.effect_outcome",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "PROCESS_EVENT_VOCABULARY_VERSION"
+}

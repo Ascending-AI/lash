@@ -2609,6 +2609,7 @@ name = "lash-internal-remote-protocol"
 version = "0.0.0-dev"
 dependencies = [
  "base64",
+ "jsonschema",
  "lash-internal-core",
  "lash-internal-sansio",
  "lash-internal-trace",
@@ -2759,9 +2760,11 @@ name = "lash-internal-trace"
 version = "0.0.0-dev"
 dependencies = [
  "chrono",
+ "jsonschema",
  "lash-internal-sansio",
  "opentelemetry",
  "opentelemetry_sdk",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4327,6 +4330,7 @@ version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
+ "chrono",
  "dyn-clone",
  "schemars_derive 0.8.22",
  "serde",

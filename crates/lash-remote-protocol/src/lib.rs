@@ -248,7 +248,13 @@ pub use usage_activity::*;
 // string into a tagged ten-kind journaled lifecycle carrying the durable
 // `sequence`. A window-89 peer writes `"started"`/`"cancelled"` strings this
 // decoder refuses and cannot decode the tagged kinds, so peers must adopt 90.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 90;
+// Window 91: FIG-3469 types the process-observation snapshot graph and node
+// event record in the published schema (`TraceLashlangGraph`, `TraceRecord`)
+// where window 90 published them as untyped JSON. The wire bytes are
+// unchanged, but the published v90 contract document no longer describes this
+// decoder's accepted items, so the new document takes a new window and peers
+// must adopt 91.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 91;
 
 /// One versioned remote-protocol message.
 ///

@@ -14,7 +14,7 @@ use crate::{
 pub const DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT: usize = 256;
 
 /// Whether the static execution map was available to the fold.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLashlangGraphCompleteness {
     Complete,
@@ -27,7 +27,9 @@ pub enum TraceLashlangGraphCompleteness {
 /// the transition kind. The transition kind lets a start and its terminal
 /// fact merge monotonically while still making a second, different start or
 /// terminal a typed conflict.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct TraceLashlangEventIdentity {
     #[serde(flatten)]
     pub generation: Option<TraceLanguageExecutionGeneration>,
@@ -42,7 +44,9 @@ pub struct TraceLashlangEventIdentity {
     pub transition: TraceLashlangEventTransition,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLashlangEventTransition {
     ExecutionStarted,
@@ -56,7 +60,7 @@ pub enum TraceLashlangEventTransition {
 }
 
 /// One canonical event retained so a persisted snapshot can be folded again.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphHistoryEvent {
     pub identity: TraceLashlangEventIdentity,
     pub timestamp: DateTime<Utc>,
@@ -64,14 +68,14 @@ pub struct TraceLashlangGraphHistoryEvent {
 }
 
 /// Why two records under one logical identity did not deduplicate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLashlangGraphConflictKind {
     ConflictingDuplicate,
 }
 
 /// A bounded, typed record of divergent values under one logical identity.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphConflict {
     pub identity: TraceLashlangEventIdentity,
     pub kind: TraceLashlangGraphConflictKind,
@@ -79,7 +83,7 @@ pub struct TraceLashlangGraphConflict {
 }
 
 /// Trace-derived Lashlang execution graph snapshot for hosts and debugging tools.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraph {
     pub schema_version: u32,
     pub graph_key: String,
@@ -166,7 +170,7 @@ impl<'de> Deserialize<'de> for TraceLashlangGraph {
 }
 
 /// Aggregate facts for occurrences evicted from one node's bounded history.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangNodeRetention {
     pub node_id: String,
     pub truncation_watermark: u64,
@@ -179,7 +183,7 @@ pub struct TraceLashlangNodeRetention {
 }
 
 /// One occurrence's observed Lashlang graph node state.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum TraceLashlangNodeObservation {
     #[default]
@@ -238,7 +242,7 @@ impl TraceLashlangNodeObservation {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangNodeSummary {
     pub retained_occurrences: u64,
     pub started_count: u64,
@@ -249,14 +253,14 @@ pub struct TraceLashlangNodeSummary {
     pub last_terminal: Option<TraceLashlangNodeTerminalSummary>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangNodeTerminalSummary {
     pub occurrence: u64,
     pub status: TraceLashlangNodeTerminalStatus,
     pub end: DateTime<Utc>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLashlangNodeTerminalStatus {
     Completed,
@@ -273,7 +277,9 @@ pub enum TraceLashlangNodeTerminalStatus {
 /// is indistinguishable from an ordinary edge leaving the same node. Which arm
 /// ran is read from the typed selection on the branch node itself
 /// ([`TraceLashlangGraphNode::branch_selection`]).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLashlangEdgeSelection {
     #[default]
@@ -282,7 +288,7 @@ pub enum TraceLashlangEdgeSelection {
 }
 
 /// Trace-derived Lashlang graph node.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphNode {
     pub id: String,
     pub kind: ExecutionNodeKind,
@@ -319,7 +325,7 @@ impl TraceLashlangGraphNode {
 }
 
 /// Trace-derived Lashlang graph edge.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphEdge {
     pub id: String,
     pub from: String,
@@ -329,7 +335,7 @@ pub struct TraceLashlangGraphEdge {
 }
 
 /// Link from an observed parent Lashlang node to a child execution graph.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphChildLink {
     pub parent_graph_key: String,
     pub parent_node_id: String,

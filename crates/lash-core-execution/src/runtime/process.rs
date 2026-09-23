@@ -61,8 +61,8 @@ pub use events::{
     ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSemantics, ProcessTerminalSpec,
     ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
     process_signal_await_key, process_signal_event_type, process_signal_name_from_event_type,
-    process_signal_wait_key, terminal_append_request, terminal_event_type_name,
-    validate_process_signal_name,
+    process_signal_wait_key, runtime_lifecycle_event_type, terminal_append_request,
+    terminal_event_type_name, validate_process_signal_name,
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{

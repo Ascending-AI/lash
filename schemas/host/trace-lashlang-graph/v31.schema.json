@@ -1,0 +1,1883 @@
+{
+  "$id": "https://lash.dev/schemas/trace-lashlang-graph/v31",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EffectAddress": {
+      "description": "Canonical address of one admitted runtime effect.",
+      "properties": {
+        "execution_scope": {
+          "$ref": "#/definitions/ExecutionScope"
+        },
+        "replay_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_scope",
+        "replay_key"
+      ],
+      "type": "object"
+    },
+    "ExecutionNodeKind": {
+      "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may expose more than one site kind. Declaration order is the canonical order: a node's execution sites sort by it, so reordering the variants changes the serialized workflow graph and needs a graph schema bump.",
+      "enum": [
+        "resource_operation",
+        "sleep",
+        "wait",
+        "terminal",
+        "process_event",
+        "branch",
+        "loop",
+        "call",
+        "step"
+      ],
+      "type": "string"
+    },
+    "ExecutionScope": {
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic work begins. Its journal encoding is an existing durable contract; effect addresses compose it with a replay key without changing those bytes.",
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "drain_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "queue_drain"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "drain_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "session_delete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "runtime_operation"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GroupWakePolicy": {
+      "description": "Wake rule recorded in a durable effect group's identity.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the caller's early exit on rejection is not a host wake rule. The wire shape has no default, so a missing rule cannot be replayed under a guess.",
+      "oneOf": [
+        {
+          "description": "Wake on the first settlement of any kind.",
+          "enum": [
+            "first"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Wake on the first success, or after every child fails.",
+          "enum": [
+            "first_success"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Deliver every settlement in durable rank order.",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ToolFailureClass": {
+      "enum": [
+        "invalid_request",
+        "io",
+        "unavailable",
+        "permission_denied",
+        "timeout",
+        "execution",
+        "external",
+        "resource_limit",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "ToolFailureSource": {
+      "oneOf": [
+        {
+          "enum": [
+            "runtime",
+            "tool",
+            "plugin",
+            "policy",
+            "cancellation"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Provenance was not persisted by a legacy wire or durable payload.",
+          "enum": [
+            "unknown_legacy"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ToolRetryStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "never"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "after_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "safe"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attempts": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "exhausted"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempts",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Retry status was not persisted by a legacy wire or durable payload.",
+          "properties": {
+            "type": {
+              "enum": [
+                "unknown_legacy"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceBranchMembership": {
+      "properties": {
+        "arm": {
+          "$ref": "#/definitions/TraceBranchSelection"
+        },
+        "branch_node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "arm",
+        "branch_node_id"
+      ],
+      "type": "object"
+    },
+    "TraceBranchSelection": {
+      "enum": [
+        "then",
+        "else"
+      ],
+      "type": "string"
+    },
+    "TraceLabelMetadata": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "TraceLanguageChildExecution": {
+      "properties": {
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "entry_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entry_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "incarnation": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "module_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "process_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/TraceRuntimeScope"
+        }
+      },
+      "required": [
+        "incarnation",
+        "process_id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "TraceLanguageExecution": {
+      "oneOf": [
+        {
+          "properties": {
+            "execution_map": {
+              "$ref": "#/definitions/TraceLanguageExecutionMap"
+            },
+            "kind": {
+              "enum": [
+                "execution_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "execution_map",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "execution_finished"
+              ],
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/definitions/TraceLanguageExecutionStatus"
+            }
+          },
+          "required": [
+            "kind",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "node_started"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "node_kind": {
+              "$ref": "#/definitions/ExecutionNodeKind"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "node_id",
+            "node_kind",
+            "occurrence"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The named occurrence has parked on an observed wait. Its `since` is the enclosing trace record timestamp, not a separately sampled clock.",
+          "properties": {
+            "awaited": {
+              "$ref": "#/definitions/TraceNodeAwaited"
+            },
+            "kind": {
+              "enum": [
+                "node_waiting"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "node_kind": {
+              "$ref": "#/definitions/ExecutionNodeKind"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "awaited",
+            "kind",
+            "label",
+            "node_id",
+            "node_kind",
+            "occurrence"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A parked occurrence resolved, including cancellation. Its node terminal remains a separate fact.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "node_resumed"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "node_kind": {
+              "$ref": "#/definitions/ExecutionNodeKind"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "resolution": {
+              "$ref": "#/definitions/TraceNodeWaitResolution"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "node_id",
+            "node_kind",
+            "occurrence",
+            "resolution"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Only an occurrence observed in flight may be cancelled.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "node_cancelled"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "node_kind": {
+              "$ref": "#/definitions/ExecutionNodeKind"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "node_id",
+            "node_kind",
+            "occurrence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "node_completed"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "node_kind": {
+              "$ref": "#/definitions/ExecutionNodeKind"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "node_id",
+            "node_kind",
+            "occurrence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "failure": {
+              "$ref": "#/definitions/TraceLanguageExecutionFailure"
+            },
+            "kind": {
+              "enum": [
+                "node_failed"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "node_kind": {
+              "$ref": "#/definitions/ExecutionNodeKind"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "failure",
+            "kind",
+            "label",
+            "node_id",
+            "node_kind",
+            "occurrence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "edge_id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "branch_selected"
+              ],
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "selected": {
+              "$ref": "#/definitions/TraceBranchSelection"
+            }
+          },
+          "required": [
+            "edge_id",
+            "kind",
+            "node_id",
+            "occurrence",
+            "selected"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "child": {
+              "$ref": "#/definitions/TraceLanguageChildExecution"
+            },
+            "kind": {
+              "enum": [
+                "child_started"
+              ],
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "parent_node_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "child",
+            "kind",
+            "occurrence",
+            "parent_node_id"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "event_key": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/definitions/TraceLanguageExecutionIdentity"
+        }
+      },
+      "required": [
+        "event_key",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "TraceLanguageExecutionFailure": {
+      "description": "The observed cause of a failed language node.",
+      "oneOf": [
+        {
+          "description": "A dispatched tool effect failed with its recorded classification and recorded source and retry status. `replay_key` is the causing effect's identity.",
+          "properties": {
+            "class": {
+              "$ref": "#/definitions/ToolFailureClass"
+            },
+            "code": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "effect"
+              ],
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "replay_key": {
+              "type": "string"
+            },
+            "retry": {
+              "$ref": "#/definitions/ToolRetryStatus"
+            },
+            "source": {
+              "$ref": "#/definitions/ToolFailureSource"
+            }
+          },
+          "required": [
+            "class",
+            "code",
+            "kind",
+            "message",
+            "replay_key",
+            "retry",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A VM or host-boundary failure with a stable runtime error code.",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "runtime"
+              ],
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "kind",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceLanguageExecutionIdentity": {
+      "properties": {
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "entry_kind": {
+          "type": "string"
+        },
+        "entry_name": {
+          "type": "string"
+        },
+        "entry_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "incarnation": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "module_ref": {
+          "type": "string"
+        },
+        "restate_invocation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/definitions/TraceRuntimeScope"
+        },
+        "source_identity": {
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/definitions/TraceRuntimeSubject"
+        }
+      },
+      "required": [
+        "entry_kind",
+        "entry_name",
+        "module_ref",
+        "scope",
+        "source_identity",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "TraceLanguageExecutionMap": {
+      "description": "The static graph of an execution, carried once on [`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity (`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the enclosing [`TraceLanguageExecutionIdentity`]; the map never restates it.",
+      "properties": {
+        "edges": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TraceLanguageExecutionMapEdge"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TraceLanguageExecutionMapNode"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TraceLanguageExecutionMapEdge": {
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "id",
+        "label",
+        "to"
+      ],
+      "type": "object"
+    },
+    "TraceLanguageExecutionMapNode": {
+      "properties": {
+        "branch_memberships": {
+          "description": "Observed branch selections that admit this node's arm.",
+          "items": {
+            "$ref": "#/definitions/TraceBranchMembership"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ExecutionNodeKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "label_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceLabelMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "site": {
+          "$ref": "#/definitions/WorkflowExecutionSite"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "site"
+      ],
+      "type": "object"
+    },
+    "TraceLanguageExecutionStatus": {
+      "enum": [
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "TraceLashlangEdgeSelection": {
+      "description": "Observed branch-edge selection state.\n\nOnly the edge a `BranchSelected` event names is marked. There is no `Rejected`: the execution map carries data-dependency and sequencing edges (ADR 0037) and nothing marks an edge as a branch arm, so an unselected arm is indistinguishable from an ordinary edge leaving the same node. Which arm ran is read from the typed selection on the branch node itself ([`TraceLashlangGraphNode::branch_selection`]).",
+      "enum": [
+        "unknown",
+        "selected"
+      ],
+      "type": "string"
+    },
+    "TraceLashlangEventIdentity": {
+      "description": "Canonical identity of one fold input.\n\nNode transitions use `(node_id, node_kind, occurrence, attempt, incarnation)` plus the transition kind. The transition kind lets a start and its terminal fact merge monotonically while still making a second, different start or terminal a typed conflict.",
+      "properties": {
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "branch_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "incarnation": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExecutionNodeKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurrence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "transition": {
+          "$ref": "#/definitions/TraceLashlangEventTransition"
+        }
+      },
+      "required": [
+        "transition"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangEventTransition": {
+      "enum": [
+        "execution_started",
+        "execution_finished",
+        "node_started",
+        "node_waiting",
+        "node_resumed",
+        "node_terminal",
+        "branch_selected",
+        "child_started"
+      ],
+      "type": "string"
+    },
+    "TraceLashlangGraphChildLink": {
+      "description": "Link from an observed parent Lashlang node to a child execution graph.",
+      "properties": {
+        "child_attempt": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "child_entry_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_entry_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_graph_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_incarnation": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "child_module_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_process_id": {
+          "type": "string"
+        },
+        "parent_graph_key": {
+          "type": "string"
+        },
+        "parent_node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "child_incarnation",
+        "child_process_id",
+        "parent_graph_key",
+        "parent_node_id"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangGraphCompleteness": {
+      "description": "Whether the static execution map was available to the fold.",
+      "enum": [
+        "complete",
+        "incomplete_map"
+      ],
+      "type": "string"
+    },
+    "TraceLashlangGraphConflict": {
+      "description": "A bounded, typed record of divergent values under one logical identity.",
+      "properties": {
+        "identity": {
+          "$ref": "#/definitions/TraceLashlangEventIdentity"
+        },
+        "kind": {
+          "$ref": "#/definitions/TraceLashlangGraphConflictKind"
+        },
+        "variants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "identity",
+        "kind",
+        "variants"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangGraphConflictKind": {
+      "description": "Why two records under one logical identity did not deduplicate.",
+      "enum": [
+        "conflicting_duplicate"
+      ],
+      "type": "string"
+    },
+    "TraceLashlangGraphEdge": {
+      "description": "Trace-derived Lashlang graph edge.",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "selection": {
+          "$ref": "#/definitions/TraceLashlangEdgeSelection"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "id",
+        "label",
+        "selection",
+        "to"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangGraphHistoryEvent": {
+      "description": "One canonical event retained so a persisted snapshot can be folded again.",
+      "properties": {
+        "event": {
+          "$ref": "#/definitions/TraceLanguageExecution"
+        },
+        "identity": {
+          "$ref": "#/definitions/TraceLashlangEventIdentity"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "identity",
+        "timestamp"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangGraphNode": {
+      "description": "Trace-derived Lashlang graph node.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "unobserved"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "running"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "occurrence",
+            "start",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "awaited": {
+              "$ref": "#/definitions/TraceNodeAwaited"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "since": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "waiting"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "awaited",
+            "occurrence",
+            "since",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "end",
+            "occurrence",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "failure": {
+              "$ref": "#/definitions/TraceLanguageExecutionFailure"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "end",
+            "failure",
+            "occurrence",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "end",
+            "occurrence",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "branch_node_id": {
+              "type": "string"
+            },
+            "branch_occurrence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "skipped"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "branch_node_id",
+            "branch_occurrence",
+            "end",
+            "status"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "branch_selection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceBranchSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which arm a branch node took, copied from the typed `selected` field of the `BranchSelected` event. Absent on every other node, and on a branch whose selection has not been observed yet."
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ExecutionNodeKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "label_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceLabelMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "$ref": "#/definitions/TraceLashlangNodeSummary"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangNodeRetention": {
+      "description": "Aggregate facts for occurrences evicted from one node's bounded history.",
+      "properties": {
+        "archived_node": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceLashlangGraphNode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "children": {
+          "items": {
+            "$ref": "#/definitions/TraceLashlangGraphChildLink"
+          },
+          "type": "array"
+        },
+        "node": {
+          "$ref": "#/definitions/TraceLashlangGraphNode"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "selected_edge_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "truncation_watermark": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "watermark_history": {
+          "items": {
+            "$ref": "#/definitions/TraceLashlangGraphHistoryEvent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "children",
+        "node",
+        "node_id",
+        "selected_edge_ids",
+        "truncation_watermark",
+        "watermark_history"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangNodeSummary": {
+      "properties": {
+        "first_terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceLashlangNodeTerminalSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraceLashlangNodeTerminalSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retained_occurrences": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "started_count": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "terminal_count": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retained_occurrences",
+        "started_count",
+        "terminal_count"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangNodeTerminalStatus": {
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "skipped"
+      ],
+      "type": "string"
+    },
+    "TraceLashlangNodeTerminalSummary": {
+      "properties": {
+        "end": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "occurrence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TraceLashlangNodeTerminalStatus"
+        }
+      },
+      "required": [
+        "end",
+        "occurrence",
+        "status"
+      ],
+      "type": "object"
+    },
+    "TraceNodeAwaited": {
+      "oneOf": [
+        {
+          "properties": {
+            "deadline_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "sleep"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "signal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "child_processes"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_ids",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "batch_id": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "tool_batch"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "batch_id",
+            "position",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "group_key": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "effect_group"
+              ],
+              "type": "string"
+            },
+            "wake": {
+              "$ref": "#/definitions/GroupWakePolicy"
+            }
+          },
+          "required": [
+            "group_key",
+            "position",
+            "type",
+            "wake"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceNodeWaitResolution": {
+      "enum": [
+        "resumed",
+        "timed_out",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "TraceRuntimeScope": {
+      "properties": {
+        "protocol_iteration": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_index": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TraceRuntimeSubject": {
+      "oneOf": [
+        {
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/EffectAddress"
+            },
+            "effect_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "effect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "address",
+            "effect_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowExecutionSite": {
+      "description": "Stable source-level location of one runtime site under a workflow node.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/ExecutionNodeKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "path": {
+          "default": [],
+          "items": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "owner"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Trace-derived Lashlang execution graph snapshot for hosts and debugging tools.",
+  "properties": {
+    "children": {
+      "items": {
+        "$ref": "#/definitions/TraceLashlangGraphChildLink"
+      },
+      "type": "array"
+    },
+    "completeness": {
+      "$ref": "#/definitions/TraceLashlangGraphCompleteness"
+    },
+    "conflicts": {
+      "items": {
+        "$ref": "#/definitions/TraceLashlangGraphConflict"
+      },
+      "type": "array"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/definitions/TraceLashlangGraphEdge"
+      },
+      "type": "array"
+    },
+    "entry_kind": {
+      "type": "string"
+    },
+    "entry_name": {
+      "type": "string"
+    },
+    "entry_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "execution_map": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TraceLanguageExecutionMap"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "graph_key": {
+      "type": "string"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/definitions/TraceLashlangGraphHistoryEvent"
+      },
+      "type": "array"
+    },
+    "history_limit": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "module_ref": {
+      "type": "string"
+    },
+    "node_retention": {
+      "items": {
+        "$ref": "#/definitions/TraceLashlangNodeRetention"
+      },
+      "type": "array"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/definitions/TraceLashlangGraphNode"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "enum": [
+        31
+      ],
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/definitions/TraceRuntimeScope"
+    },
+    "source_identity": {
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/definitions/TraceLanguageExecutionStatus"
+    },
+    "subject": {
+      "$ref": "#/definitions/TraceRuntimeSubject"
+    }
+  },
+  "required": [
+    "children",
+    "completeness",
+    "conflicts",
+    "edges",
+    "entry_kind",
+    "entry_name",
+    "graph_key",
+    "history",
+    "history_limit",
+    "module_ref",
+    "node_retention",
+    "nodes",
+    "schema_version",
+    "scope",
+    "source_identity",
+    "status",
+    "subject"
+  ],
+  "title": "TraceLashlangGraph",
+  "type": "object",
+  "x-lash-schema-version": 31,
+  "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
+}

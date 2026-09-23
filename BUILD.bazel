@@ -34,6 +34,13 @@ filegroup(
 )
 
 filegroup(
+    name = "host_schemas",
+    srcs = glob(["schemas/host/*/*.schema.json"]),
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
     name = "cargo_metadata",
     srcs = [
         "Cargo.lock",
@@ -220,8 +227,12 @@ filegroup(
 # workspace_compile; checking documents does not trigger another Cargo graph.
 schema_documents(
     name = "host_schema_documents",
-    generator = "//crates/lashlang:workflow_schema_generator__bin",
-    extra_generator = "//crates/lash-remote-protocol:remote_schema_generator__bin",
+    generators = [
+        "//crates/lashlang:workflow_schema_generator__bin",
+        "//crates/lash-trace:trace_schema_generator__bin",
+        "//crates/lash-remote-protocol:remote_schema_generator__bin",
+        "//crates/lash-core-execution:process_event_schema_generator__bin",
+    ],
     script = "scripts/generate-workflow-schemas.py",
 )
 
@@ -234,7 +245,7 @@ schema_check(
 
 schema_documents(
     name = "example_schema_documents",
-    generator = "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
+    generators = ["//examples/workflow-graph-roundtrip:workflow_contract_schema__bin"],
     script = "//examples/workflow-graph-roundtrip:scripts/generate-contract-schema.py",
 )
 

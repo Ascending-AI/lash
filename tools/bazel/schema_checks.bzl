@@ -4,11 +4,11 @@ def _schema_documents_impl(ctx):
     documents = ctx.actions.declare_directory(ctx.label.name + ".documents")
     args = ctx.actions.args()
     args.add(ctx.file.script.path)
-    args.add("--generator", ctx.executable.generator.path)
-    tools = [ctx.attr.generator[DefaultInfo].files_to_run]
-    if ctx.attr.extra_generator:
-        args.add("--generator", ctx.executable.extra_generator.path)
-        tools.append(ctx.attr.extra_generator[DefaultInfo].files_to_run)
+    tools = []
+    for generator in ctx.attr.generators:
+        run = generator[DefaultInfo].files_to_run
+        args.add("--generator", run.executable.path)
+        tools.append(run)
     args.add("--output", documents.path)
     ctx.actions.run_shell(
         command = 'exec /usr/bin/python3 "$@"',
@@ -26,8 +26,7 @@ schema_documents = rule(
     attrs = {
         # Keep the workspace's target configuration: an exec transition would
         # compile a second generator instead of using the ordinary binary.
-        "generator": attr.label(executable = True, cfg = "target", mandatory = True),
-        "extra_generator": attr.label(executable = True, cfg = "target"),
+        "generators": attr.label_list(cfg = "target", mandatory = True, allow_empty = False),
         "script": attr.label(allow_single_file = [".py"], mandatory = True),
     },
 )

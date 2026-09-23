@@ -281,8 +281,6 @@ pub enum RemoteProcessObservationCompleteness {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessObservationProjection {
-    // Trace types derive no JsonSchema; a typed schema is tracked by FIG-3469.
-    #[schemars(with = "Option<serde_json::Value>")]
     pub graph: Option<lash_trace::TraceLashlangGraph>,
     pub completeness: RemoteProcessObservationCompleteness,
 }
@@ -300,7 +298,6 @@ pub enum RemoteProcessObservationItem {
         process_id: ProcessId,
         incarnation: u64,
         cursor: String,
-        #[schemars(with = "serde_json::Value")]
         record: Box<lash_trace::TraceRecord>,
     },
     Gap {
