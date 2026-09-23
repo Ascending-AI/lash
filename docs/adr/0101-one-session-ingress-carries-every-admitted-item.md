@@ -601,9 +601,10 @@ One wholehog cutover, one PR series ending in one cutover commit.
   replay. The cutover bumps the journaled acceptance and claim formats, and the
   new binary refuses an old-shape journal entry fail-closed with a typed error
   before any effect. There is no drain step and no compatibility replay. This
-  follows the standing clean-cutover rule (Sam, 2026-09-24): a change that would
-  otherwise need a migration, a drain or compatibility with older in-flight state
-  bumps the gating version and refuses old durable state before any effect.
+  follows the current clean-cutover policy (2026-09-24): while lash has no
+  migration or drain path, a change that would otherwise need one bumps the
+  gating version and refuses old durable state before any effect. The policy is
+  temporary; the version gate is what a later migration or drain would key off.
 * A cancelled turn must not settle withheld wakes as completed (FIG-3543, D10).
   Whatever the interim lanes ship, the cutover replaces it with §10.
 
