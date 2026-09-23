@@ -485,23 +485,55 @@ pub struct QueuedWorkSettlementRowClaim {
     pub claim_session_lease_generation: u64,
 }
 
-/// The consumed process wake a settled batch contributes to its session's
-/// redelivery fence.
+/// The process wake a batch carried when it left the queue, which its
+/// session's redelivery fence must record (FIG-1065, FIG-3545).
+///
+/// Every terminal transition of a wake row — claim settlement and host
+/// cancel alike — raises the fence to `max(floor, sequence)` in the same
+/// transaction that removes the row. Otherwise a redelivery of the same
+/// `(process, sequence)` after a producer crash, a failed terminal mark or a
+/// lost claim finds neither a row nor a floor and re-admits the wake.
 ///
 /// A process-wake batch is validated at enqueue to carry exactly one wake
 /// payload, so "the wake the batch carried" is one fact no matter how a
-/// backend reads it: PostgreSQL decodes the head payload, SQLite decodes the
-/// same head payload, and the in-memory store reads the batch's first wake
-/// item.
+/// backend reads it: the SQL settlements decode the head payload, the
+/// in-memory store and every cancel read the hydrated batch.
 #[derive(Clone, Debug)]
-pub struct ConsumedProcessWake {
+pub struct TerminalProcessWake {
     /// The batch's source key. PostgreSQL advisory-locks this identity before
-    /// writing the fence; backends without advisory locks leave it `None`.
+    /// writing the fence; backends without advisory locks may leave it `None`.
     pub source_key: Option<String>,
     /// Structural producer identity the fence indexes on.
     pub process_id: crate::ProcessId,
-    /// The consumed sequence the allocation floor rises to.
+    /// The terminal sequence the allocation floor rises to.
     pub sequence: u64,
+}
+
+impl TerminalProcessWake {
+    /// The wake `payload` carries, if it is a process wake, under the batch's
+    /// `source_key`.
+    pub fn of_payload(
+        source_key: Option<String>,
+        payload: &crate::QueuedWorkPayload,
+    ) -> Option<Self> {
+        match payload {
+            crate::QueuedWorkPayload::ProcessWake { wake } => Some(Self {
+                source_key,
+                process_id: wake.process_id.clone(),
+                sequence: wake.sequence,
+            }),
+            crate::QueuedWorkPayload::AgentFrameTask { .. }
+            | crate::QueuedWorkPayload::SessionCommand { .. } => None,
+        }
+    }
+
+    /// The wake a hydrated batch carries, if any.
+    pub fn of_batch(batch: &crate::QueuedWorkBatch) -> Option<Self> {
+        batch
+            .items
+            .iter()
+            .find_map(|item| Self::of_payload(batch.source_key.clone(), &item.payload))
+    }
 }
 
 /// One covered queued-work row's observation under the backend's commit
@@ -511,16 +543,15 @@ pub struct QueuedWorkSettlementRow {
     pub batch_id: crate::BatchId,
     /// The row's live claim columns; `None` when no row holds the identity.
     pub claim: Option<QueuedWorkSettlementRowClaim>,
-    /// The consumed wake the settlement must record in the session's
-    /// redelivery fence before the row leaves the queue, when the batch
-    /// carried one.
-    pub consumed_wake: Option<ConsumedProcessWake>,
+    /// The wake the settlement must record in the session's redelivery
+    /// fence before the row leaves the queue, when the batch carried one.
+    pub terminal_wake: Option<TerminalProcessWake>,
 }
 
 /// One ordered write a queued-work settlement plan prescribes (FIG-1065).
 #[derive(Clone, Debug)]
 pub enum QueuedWorkSettlementWrite {
-    /// Raise the session's redelivery fence for the consumed wake.
+    /// Raise the session's redelivery fence for the settled wake.
     ///
     /// This write lands before the queue row leaves: a crash between the two
     /// would replay a wake the session already consumed. PostgreSQL takes the
@@ -528,10 +559,10 @@ pub enum QueuedWorkSettlementWrite {
     /// executes it inside the commit's serialized write transaction; the
     /// in-memory store stages the floor update.
     FenceWakeRedelivery {
-        /// The covered row whose consumed wake the fence records.
+        /// The covered row whose wake the fence records.
         batch_id: crate::BatchId,
         /// The wake identity the floor rises to.
-        wake: ConsumedProcessWake,
+        wake: TerminalProcessWake,
     },
     /// Remove the settled batch row under the completion's claim authority.
     SettleClaimedBatch { batch_id: crate::BatchId },
@@ -710,7 +741,7 @@ pub fn plan_queued_work_settlement(
         {
             return SettlementDecision::Superseded(error);
         }
-        if let Some(wake) = row.consumed_wake.as_ref() {
+        if let Some(wake) = row.terminal_wake.as_ref() {
             writes.push(QueuedWorkSettlementWrite::FenceWakeRedelivery {
                 batch_id: row.batch_id.clone(),
                 wake: wake.clone(),

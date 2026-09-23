@@ -257,6 +257,26 @@ impl InMemorySessionStore {
         )
     }
 
+    /// Raise session `session_id`'s redelivery fence to `max(floor,
+    /// sequence)` for a wake whose row is leaving the queue under the same
+    /// write transaction.
+    ///
+    /// The one home of the invariant that every terminal transition of a
+    /// wake — claim settlement and host cancel — raises the floor with the
+    /// row's removal (FIG-1065, FIG-3545).
+    pub(super) fn raise_wake_redelivery_fence(
+        wake_redelivery_fences: &mut std::collections::HashMap<(String, String), u64>,
+        session_id: &SessionId,
+        wake: &crate::store::claim_plan::TerminalProcessWake,
+    ) {
+        wake_redelivery_fences
+            .entry((session_id.to_string(), wake.process_id.to_string()))
+            .and_modify(|allocation_floor| {
+                *allocation_floor = (*allocation_floor).max(wake.sequence);
+            })
+            .or_insert(wake.sequence);
+    }
+
     pub(super) fn enqueue_queued_work_for_state(
         queued: &mut Vec<super::InMemoryQueuedBatch>,
         wake_redelivery_fences: &std::collections::HashMap<(String, String), u64>,
@@ -874,6 +894,17 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         }
         if entry.claim.token().is_some() && entry.claim.live_under(live_generation) {
             return Ok(None);
+        }
+        // A host cancel is a wake's terminal transition too: the fence rises
+        // under the same write transaction that removes the row, or a
+        // redelivery of the withdrawn wake would be admitted again
+        // (FIG-3545).
+        if let Some(wake) = crate::store::claim_plan::TerminalProcessWake::of_batch(&entry.batch) {
+            Self::raise_wake_redelivery_fence(
+                &mut self.wake_redelivery_fences.lock_recover(),
+                session_id,
+                &wake,
+            );
         }
         Ok(Some(queued.remove(index).batch))
     }

@@ -485,6 +485,18 @@ impl QueuedWorkStore for Store {
                         return Ok(None);
                     }
                     let batch = queued_work_batch_from_conn(tx, row)?;
+                    // A host cancel is a wake's terminal transition too: the
+                    // fence lands with the removal, or a redelivery of the
+                    // withdrawn wake would be admitted again (FIG-3545).
+                    if let Some(wake) =
+                        lash_core::store::claim_plan::TerminalProcessWake::of_batch(&batch)
+                    {
+                        crate::queued_work::raise_wake_redelivery_fence_conn(
+                            tx,
+                            &session_id,
+                            &wake,
+                        )?;
+                    }
                     tx.execute(
                         sql.queued_batches_sqlite.delete_cancelled.sql(),
                         params![session_id.as_str(), batch_id.as_str(), now],

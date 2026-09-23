@@ -1,6 +1,6 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,11 +25,13 @@ use crate::scheduler::{BoundaryEvent, BoundaryKind};
 use crate::trace::value_digest;
 
 mod process_lifecycle;
+mod process_wake;
 
 use process_lifecycle::{
     LifecycleSuccessEngine, RecordingWorkerFaultSink, lifecycle_process_fact, lifecycle_worker,
     record_lifecycle_started, register_lifecycle_row, register_rerunnable_lifecycle_row,
 };
+use process_wake::worker_failover_work;
 
 pub(crate) async fn collect_process_events(
     registry: &dyn ProcessRegistry,
@@ -154,7 +156,6 @@ pub struct RuntimeBoundaryHarness {
     effect_replay_store: RuntimeEffectReplayStore,
     effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     durable_entries: BTreeMap<String, DurableEntry>,
-    delivered_process_wake_source_keys: BTreeSet<String>,
     worker_process_registry: Option<Arc<dyn ProcessRegistry>>,
     worker_process_continuations: Option<Arc<dyn lash_core::ProcessContinuationStore>>,
     clock: Arc<SimClock>,
@@ -171,7 +172,6 @@ impl RuntimeBoundaryHarness {
             effect_replay_store,
             effect_controller: None,
             durable_entries: BTreeMap::new(),
-            delivered_process_wake_source_keys: BTreeSet::new(),
             worker_process_registry: None,
             worker_process_continuations: None,
             clock,
@@ -681,35 +681,52 @@ impl RuntimeBoundaryHarness {
             }
         };
         // A wake redelivered with the same structural process/event source key
-        // must be claimed exactly once. This driver models the durable
-        // receiver-evidence dedupe contract, and it
-        // settles the claimed wake below so it never lingers as reclaimable
-        // queued work that a subsequent runtime turn would double-claim.
-        let duplicate = self
-            .delivered_process_wake_source_keys
-            .contains(&source_key);
-        let batch = store
+        // must be claimed exactly once. The store's receiver floor is that
+        // evidence: settling the delivered wake below raises it, so a
+        // redelivery is refused durably rather than by a harness-side set
+        // (FIG-3545).
+        let batch = match store
             .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake.clone()))
             .await
-            .map_err(|err| RuntimeBoundaryError::new(format!("enqueue wake failed: {err}")))?;
-        let claim = if duplicate {
-            None
-        } else {
-            store
-                .claim_ready_queued_work_by_batch_ids(
-                    &SessionId::from(session.clone()),
-                    &lease.fence(),
-                    &owner,
-                    QueuedWorkClaimBoundary::Idle,
-                    std::slice::from_ref(&batch.batch_id),
-                    lash_core::testing::queued_work_claim_policy(1),
-                )
-                .await
-                .map_err(|err| {
-                    RuntimeBoundaryError::new(format!("claim queued wake failed: {err}"))
-                })?
-                .claim
+        {
+            Ok(batch) => batch,
+            Err(lash_core::StoreError::ProcessWakeSequenceRewound {
+                allocation_floor, ..
+            }) => {
+                store
+                    .release_session_execution_lease(&lease.completion())
+                    .await
+                    .map_err(|err| {
+                        RuntimeBoundaryError::new(format!(
+                            "release process wake session lease failed: {err}"
+                        ))
+                    })?;
+                return Ok(process_wake::refused_redelivery_observation(
+                    &session,
+                    &process_id,
+                    &source_key,
+                    wake,
+                    allocation_floor,
+                ));
+            }
+            Err(err) => {
+                return Err(RuntimeBoundaryError::new(format!(
+                    "enqueue wake failed: {err}"
+                )));
+            }
         };
+        let claim = store
+            .claim_ready_queued_work_by_batch_ids(
+                &SessionId::from(session.clone()),
+                &lease.fence(),
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                std::slice::from_ref(&batch.batch_id),
+                lash_core::testing::queued_work_claim_policy(1),
+            )
+            .await
+            .map_err(|err| RuntimeBoundaryError::new(format!("claim queued wake failed: {err}")))?
+            .claim;
         store
             .release_session_execution_lease(&lease.completion())
             .await
@@ -731,9 +748,10 @@ impl RuntimeBoundaryHarness {
                     RuntimeBoundaryError::new(format!("abandon delivered wake claim failed: {err}"))
                 })?;
         }
-        // Remove the batch this delivery enqueued (whether it was claimed here or
-        // was a redelivery of an already-consumed wake) so no lingering queued
-        // work leaks to a later claimant.
+        // Remove the batch this delivery enqueued so no lingering queued work
+        // leaks to a later claimant. The removal is the wake's terminal
+        // transition, so it raises the receiver floor that refuses a later
+        // redelivery of this wake.
         let settled = store
             .cancel_queued_work_batch(&SessionId::from(session.clone()), &batch.batch_id)
             .await
@@ -751,9 +769,6 @@ impl RuntimeBoundaryHarness {
                 "settle delivered wake removed `{}` instead of `{}`",
                 settled.batch_id, batch.batch_id
             )));
-        }
-        if claimed_once {
-            self.delivered_process_wake_source_keys.insert(source_key);
         }
         Ok(json!({
             "session": session,
@@ -826,6 +841,7 @@ impl RuntimeBoundaryHarness {
             .start_worker_owned_work(
                 store.as_ref(),
                 &session,
+                &event.boundary_id,
                 &stale_owner,
                 &stale_lease,
                 event.at,
@@ -1140,11 +1156,12 @@ impl RuntimeBoundaryHarness {
         &self,
         store: &dyn RuntimePersistence,
         session: &str,
+        boundary_id: &str,
         owner: &LeaseOwnerIdentity,
         lease: &lash_core::SessionExecutionLease,
         occurred_at_ms: u64,
     ) -> Result<WorkerOwnedWork, RuntimeBoundaryError> {
-        let wake = worker_failover_work(session, occurred_at_ms)?;
+        let wake = worker_failover_work(session, boundary_id, occurred_at_ms)?;
         let source_key =
             lash_core::facade_support::process_wake_source_key(&wake.process_id, wake.sequence);
         let batch = store
@@ -1575,42 +1592,6 @@ fn terminal_writer_from_events(events: &[lash_core::ProcessEvent]) -> Option<Str
             .and_then(Value::as_str)
             .map(str::to_string)
     })
-}
-
-fn worker_failover_work(
-    session: &str,
-    occurred_at_ms: u64,
-) -> Result<lash_core::ProcessWakeDelivery, RuntimeBoundaryError> {
-    let process_id = ProcessId::from(format!("sim-worker-{session}"));
-    lash_core::facade_support::process_wake_delivery(
-        lash_core::facade_support::ProcessWakeDeliveryRequest {
-            target_session_id: SessionId::from(session.to_string()),
-            process_id: process_id.clone(),
-            process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
-            sequence: 1,
-            event_type: "process.wake".to_string(),
-            event_invocation: RuntimeInvocation {
-                attribution: RuntimeAttribution::for_session(session.to_string()),
-                subject: RuntimeSubject::ProcessEvent {
-                    process_id,
-                    sequence: 1,
-                    event_type: "process.wake".to_string(),
-                },
-                caused_by: None,
-                replay: Some(RuntimeReplay {
-                    attribution: None,
-                    key: format!("worker-failover:{session}:work"),
-                }),
-            },
-            process_caused_by: None,
-            authority: lash_core::QueuedWorkAuthority::default(),
-            wake: lash_core::facade_support::ProcessWake {
-                input: format!("worker-owned work for {session}"),
-            },
-            occurred_at_ms,
-        },
-    )
-    .map_err(|err| RuntimeBoundaryError::new(format!("build worker-owned work failed: {err}")))
 }
 
 fn boundary_session_alias(event: &BoundaryEvent) -> String {

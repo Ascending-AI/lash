@@ -482,44 +482,34 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .completed_queue_claims
                 .iter()
                 .map(|completed| {
-                    let rows =
-                        completed
-                            .batch_ids
-                            .iter()
-                            .map(|batch_id| {
-                                let entry = queued.iter().find(|entry| {
-                                    entry.batch.session_id == completed.session_id
-                                        && entry.batch.batch_id == *batch_id
-                                });
-                                crate::store::claim_plan::QueuedWorkSettlementRow {
-                                    batch_id: batch_id.clone(),
-                                    claim: entry.map(|entry| {
-                                        crate::store::claim_plan::QueuedWorkSettlementRowClaim {
-                                            claim_id: entry.claim.id(),
-                                            claim_token: entry.claim.token(),
-                                            claim_session_lease_generation: entry
-                                                .claim
-                                                .diagnostic_generation()
-                                                .unwrap_or(0),
-                                        }
-                                    }),
-                                    consumed_wake: entry.and_then(|entry| {
-                                        entry.batch.items.iter().find_map(|item| {
-                                            match &item.payload {
-                                            crate::QueuedWorkPayload::ProcessWake { wake } => Some(
-                                                crate::store::claim_plan::ConsumedProcessWake {
-                                                    source_key: None,
-                                                    process_id: wake.process_id.clone(),
-                                                    sequence: wake.sequence,
-                                                },
-                                            ),
-                                            _ => None,
-                                        }
-                                        })
-                                    }),
-                                }
-                            })
-                            .collect();
+                    let rows = completed
+                        .batch_ids
+                        .iter()
+                        .map(|batch_id| {
+                            let entry = queued.iter().find(|entry| {
+                                entry.batch.session_id == completed.session_id
+                                    && entry.batch.batch_id == *batch_id
+                            });
+                            crate::store::claim_plan::QueuedWorkSettlementRow {
+                                batch_id: batch_id.clone(),
+                                claim: entry.map(|entry| {
+                                    crate::store::claim_plan::QueuedWorkSettlementRowClaim {
+                                        claim_id: entry.claim.id(),
+                                        claim_token: entry.claim.token(),
+                                        claim_session_lease_generation: entry
+                                            .claim
+                                            .diagnostic_generation()
+                                            .unwrap_or(0),
+                                    }
+                                }),
+                                terminal_wake: entry.and_then(|entry| {
+                                    crate::store::claim_plan::TerminalProcessWake::of_batch(
+                                        &entry.batch,
+                                    )
+                                }),
+                            }
+                        })
+                        .collect();
                     crate::store::claim_plan::plan_queued_work_settlement(completed, rows)
                         .into_result()
                 })
@@ -598,15 +588,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                                     )
                             });
                             if row_still_held {
-                                fences
-                                    .entry((
-                                        settlement_plan.session_id().to_string(),
-                                        wake.process_id.to_string(),
-                                    ))
-                                    .and_modify(|allocation_floor| {
-                                        *allocation_floor = (*allocation_floor).max(wake.sequence);
-                                    })
-                                    .or_insert(wake.sequence);
+                                InMemorySessionStore::raise_wake_redelivery_fence(
+                                    &mut fences,
+                                    settlement_plan.session_id(),
+                                    wake,
+                                );
                             }
                         }
                         crate::store::claim_plan::QueuedWorkSettlementWrite::SettleClaimedBatch { batch_id } => {

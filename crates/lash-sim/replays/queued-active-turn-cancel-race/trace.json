@@ -4132,7 +4132,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-001:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -4714,7 +4714,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-002:event:1:wake",
+            "source_key": "process:sim-worker-session-002-worker-001:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -4921,7 +4921,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-002:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -7164,7 +7164,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-003:event:1:wake",
+            "source_key": "process:sim-worker-session-003-worker-001:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -9146,12 +9146,14 @@
           "wake_id": "wake:v1:blake3:76ff55c170d175637695ebeec8f1125ad7bb105d43b07c6a347fb01312bd82c3"
         },
         "runtime_queued_work": {
-          "batch_id_present": true,
+          "batch_id_present": false,
           "claim_fencing_token": null,
           "claim_id_present": false,
           "claimed": false,
           "claimed_batch_count": 0,
-          "enqueued": true,
+          "enqueued": false,
+          "receiver_allocation_floor": 1,
+          "receiver_floor_refused": true,
           "runtime_turn_id": null,
           "source_key": "process:sim-process-session-004-001:event:1:wake",
           "work_class": "TurnWork"

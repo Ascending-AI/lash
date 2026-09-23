@@ -5717,7 +5717,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-001:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -7939,12 +7939,14 @@
           "wake_id": "wake:v1:blake3:aeb58c42d1eb8ecd9d338614b0a614f9cb791820273f8e76dbe47dfcbf73b28a"
         },
         "runtime_queued_work": {
-          "batch_id_present": true,
+          "batch_id_present": false,
           "claim_fencing_token": null,
           "claim_id_present": false,
           "claimed": false,
           "claimed_batch_count": 0,
-          "enqueued": true,
+          "enqueued": false,
+          "receiver_allocation_floor": 1,
+          "receiver_floor_refused": true,
           "runtime_turn_id": null,
           "source_key": "process:sim-process-session-002-001:event:1:wake",
           "work_class": "TurnWork"
@@ -12603,7 +12605,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-002:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -15324,7 +15326,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-003:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -15490,7 +15492,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-004:event:1:wake",
+            "source_key": "process:sim-worker-session-004-worker-001:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -15641,7 +15643,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-002:event:1:wake",
+            "source_key": "process:sim-worker-session-002-worker-001:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -16079,7 +16081,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-002:event:1:wake",
+            "source_key": "process:sim-worker-session-002-worker-002:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -19618,7 +19620,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-003:event:1:wake",
+            "source_key": "process:sim-worker-session-003-worker-001:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -21950,7 +21952,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-003:event:1:wake",
+            "source_key": "process:sim-worker-session-003-worker-002:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -24989,7 +24991,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-004:event:1:wake",
+            "source_key": "process:sim-worker-session-004-worker-002:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -26567,7 +26569,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-004:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -33304,7 +33306,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-003:event:1:wake",
+            "source_key": "process:sim-worker-session-003-worker-003:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -33557,7 +33559,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-005:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -34125,7 +34127,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-004:event:1:wake",
+            "source_key": "process:sim-worker-session-004-worker-003:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -38268,7 +38270,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-002:event:1:wake",
+            "source_key": "process:sim-worker-session-002-worker-003:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -38531,7 +38533,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-004:event:1:wake",
+            "source_key": "process:sim-worker-session-004-worker-004:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -39277,7 +39279,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-002:event:1:wake",
+            "source_key": "process:sim-worker-session-002-worker-004:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -40438,7 +40440,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-003:event:1:wake",
+            "source_key": "process:sim-worker-session-003-worker-004:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },
@@ -40764,7 +40766,7 @@
             "second_owner_claim_fencing_token": 2,
             "second_owner_outranks_first": true,
             "second_owner_resumed_work": true,
-            "source_key": "process:sim-worker-session-001:event:1:wake",
+            "source_key": "process:sim-worker-session-001-worker-006:stale-completion:event:1:wake",
             "stale_work_completion_rejected": true
           }
         },

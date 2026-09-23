@@ -388,7 +388,7 @@ pub(crate) fn plan_queued_work_settlement_conn(
         // fence: the claim-keyed head payload, decoded the same way
         // PostgreSQL decodes it. The wake batch carries exactly one wake
         // item, so the head payload is the batch's whole wake contribution.
-        let consumed_wake = match claim.as_ref() {
+        let terminal_wake = match claim.as_ref() {
             Some(_) => conn
                 .query_row(
                     turn_ingress
@@ -407,25 +407,53 @@ pub(crate) fn plan_queued_work_settlement_conn(
                 .map_err(sqlite_error)?
                 .map(decode_queued_payload)
                 .transpose()?
-                .and_then(|payload| match payload {
-                    QueuedWorkPayload::ProcessWake { wake } => {
-                        Some(lash_core::store::claim_plan::ConsumedProcessWake {
-                            source_key: None,
-                            process_id: wake.process_id,
-                            sequence: wake.sequence,
-                        })
-                    }
-                    _ => None,
+                .and_then(|payload| {
+                    lash_core::store::claim_plan::TerminalProcessWake::of_payload(None, &payload)
                 }),
             None => None,
         };
         rows.push(lash_core::store::claim_plan::QueuedWorkSettlementRow {
             batch_id: batch_id.clone(),
             claim,
-            consumed_wake,
+            terminal_wake,
         });
     }
     // The shared planner takes the verdict: a settlement is authorized only
     // while every covered row still carries this claim's id and lease token.
     lash_core::store::claim_plan::plan_queued_work_settlement(completed, rows).into_result()
+}
+
+/// Raise session `session_id`'s redelivery fence to `max(floor, sequence)`
+/// for a wake whose row is leaving the queue in this transaction.
+///
+/// The one home of the invariant that every terminal transition of a wake —
+/// claim settlement and host cancel — raises the floor with the row's
+/// removal (FIG-1065, FIG-3545). Callers write the fence before the delete.
+pub(crate) fn raise_wake_redelivery_fence_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    wake: &lash_core::store::claim_plan::TerminalProcessWake,
+) -> Result<(), StoreError> {
+    let allocation_floor = i64::try_from(wake.sequence).map_err(|_| {
+        stored_data_corrupt(
+            "WakeRedeliveryFence",
+            format!(
+                "allocation_floor does not fit SQLite INTEGER: {}",
+                wake.sequence
+            ),
+        )
+    })?;
+    conn.execute(
+        crate::process_registry::sql::process_sql()
+            .fence_sqlite
+            .upsert_max
+            .sql(),
+        params![
+            session_id.as_str(),
+            wake.process_id.as_str(),
+            allocation_floor
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
 }

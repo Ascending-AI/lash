@@ -576,29 +576,7 @@ pub(super) async fn session_execution_lease_first_claim_excludes_concurrent_reop
 pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let wake = ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: "wake-1".to_string(),
-        target_session_id: SessionId::from("root"),
-        process_id: ProcessId::from("process-1"),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
-        sequence: 7,
-        event_type: "process.wake".to_string(),
-        event_invocation: RuntimeInvocation {
-            attribution: RuntimeAttribution::for_session("root"),
-            subject: RuntimeSubject::ProcessEvent {
-                process_id: ProcessId::from("process-1"),
-                sequence: 7,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
-        process_caused_by: None,
-        authority: crate::QueuedWorkAuthority::default(),
-        input: "wake payload".to_string(),
-        created_at_ms: 1,
-    };
+    let wake = root_process_wake(7);
     let malformed = QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
@@ -691,6 +669,98 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
             .expect("list after consumed wake redelivery")
             .is_empty(),
         "receiver evidence must prevent a late redelivery from recreating queued work"
+    );
+}
+
+/// A process wake from `process-1` to `root` at `sequence`.
+fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
+    ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: format!("wake-{sequence}"),
+        target_session_id: SessionId::from("root"),
+        process_id: ProcessId::from("process-1"),
+        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+        sequence,
+        event_type: "process.wake".to_string(),
+        event_invocation: RuntimeInvocation {
+            attribution: RuntimeAttribution::for_session("root"),
+            subject: RuntimeSubject::ProcessEvent {
+                process_id: ProcessId::from("process-1"),
+                sequence,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
+        input: "wake payload".to_string(),
+        created_at_ms: 1,
+    }
+}
+
+/// A host cancel is a terminal transition of a wake, so it raises the
+/// session's redelivery floor in the same transaction that removes the row
+/// (FIG-3545). A redelivery of the withdrawn `(process, seq)` — after a
+/// producer crash, a failed terminal mark or a lost claim — is refused with
+/// the typed rewind outcome instead of resurrecting the wake; a later
+/// sequence from the same process is still admitted.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimePersistence>) {
+    let session_id = SessionId::from("root");
+    let queued = store
+        .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(7)))
+        .await
+        .expect("enqueue wake");
+    store
+        .cancel_queued_work_batch(&session_id, &queued.batch_id)
+        .await
+        .expect("host cancel of the queued wake")
+        .expect("an unclaimed wake is cancelled");
+
+    let redelivery = store
+        .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(7)))
+        .await
+        .expect_err("redelivery of a host-cancelled wake must trip the receiver floor");
+    match redelivery {
+        StoreError::ProcessWakeSequenceRewound {
+            session_id: refused_session,
+            process_id,
+            sequence,
+            allocation_floor,
+        } => {
+            assert_eq!(refused_session, session_id);
+            assert_eq!(process_id, ProcessId::from("process-1"));
+            assert_eq!(sequence, 7);
+            assert_eq!(allocation_floor, 7);
+        }
+        other => panic!("expected ProcessWakeSequenceRewound, got {other:?}"),
+    }
+    assert!(
+        store
+            .list_queued_work(&session_id)
+            .await
+            .expect("list after refused redelivery")
+            .is_empty(),
+        "a host-cancelled wake must not come back"
+    );
+
+    let later = store
+        .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(8)))
+        .await
+        .expect("a later sequence stays above the floor");
+    assert_eq!(
+        store
+            .list_queued_work(&session_id)
+            .await
+            .expect("list after later wake")
+            .into_iter()
+            .map(|batch| batch.batch_id)
+            .collect::<Vec<_>>(),
+        vec![later.batch_id],
     );
 }
 

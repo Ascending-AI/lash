@@ -54,13 +54,13 @@ pub use attachment_manifest::{
     decode_attachment_owner,
 };
 pub use claim_plan::{
-    ClaimPlanDecision, ConsumedProcessWake, QueuedWorkClaimPlan, QueuedWorkClaimRow,
-    QueuedWorkClaimWrite, QueuedWorkSettlementPlan, QueuedWorkSettlementRow,
-    QueuedWorkSettlementRowClaim, QueuedWorkSettlementWrite, SettlementDecision,
-    TurnInputClaimPlan, TurnInputClaimRow, TurnInputClaimWrite, TurnInputSettlementPlan,
-    TurnInputSettlementRegime, TurnInputSettlementRow, TurnInputSettlementRowFacts,
-    TurnInputSettlementStep, classify_empty_claim_scan, plan_queued_work_claim,
-    plan_queued_work_settlement, plan_turn_input_claim, plan_turn_input_settlement,
+    ClaimPlanDecision, QueuedWorkClaimPlan, QueuedWorkClaimRow, QueuedWorkClaimWrite,
+    QueuedWorkSettlementPlan, QueuedWorkSettlementRow, QueuedWorkSettlementRowClaim,
+    QueuedWorkSettlementWrite, SettlementDecision, TerminalProcessWake, TurnInputClaimPlan,
+    TurnInputClaimRow, TurnInputClaimWrite, TurnInputSettlementPlan, TurnInputSettlementRegime,
+    TurnInputSettlementRow, TurnInputSettlementRowFacts, TurnInputSettlementStep,
+    classify_empty_claim_scan, plan_queued_work_claim, plan_queued_work_settlement,
+    plan_turn_input_claim, plan_turn_input_settlement,
 };
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
@@ -1821,6 +1821,12 @@ pub trait QueuedWorkStore: Send + Sync {
     /// when the batch is missing or currently held by a live claim; callers must
     /// treat that as "already claimed or completed" and must not restore any
     /// stale local draft state.
+    ///
+    /// Cancelling a process-wake batch is a terminal transition of that wake:
+    /// the session's redelivery fence rises to `max(floor, sequence)` in the
+    /// same transaction as the removal, so a later redelivery of the same
+    /// `(process, sequence)` is refused with
+    /// [`StoreError::ProcessWakeSequenceRewound`] rather than re-admitted.
     async fn cancel_queued_work_batch(
         &self,
         session_id: &SessionId,
