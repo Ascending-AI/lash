@@ -257,9 +257,17 @@ impl Lowerer {
             })
             .collect::<Vec<_>>();
 
+        // A function declaration holds its value only once it is emitted,
+        // which waits until every binding it captures holds one. Until then
+        // a read of it is a read before initialization, refused by name like
+        // any other, rather than of a name that has no assignment yet.
+        for binding in &pending {
+            self.set_local_initialized(&binding.internal, false);
+        }
         let flush_ready = |pending: &mut Vec<PendingBinding>,
                            available: &mut BTreeSet<String>,
                            output: &mut Vec<LashExpr>| {
+            let mut flushed = Vec::new();
             while let Some(index) = pending.iter().position(|binding| {
                 binding
                     .captures
@@ -267,13 +275,17 @@ impl Lowerer {
                     .all(|capture| available.contains(capture))
             }) {
                 let binding = pending.remove(index);
-                available.insert(binding.internal);
+                available.insert(binding.internal.clone());
+                flushed.push(binding.internal);
                 output.push(binding.assignment);
             }
+            flushed
         };
         let mut output = hoisted_vars;
         for statement in statements {
-            flush_ready(&mut pending, &mut available, &mut output);
+            for internal in flush_ready(&mut pending, &mut available, &mut output) {
+                self.set_local_initialized(&internal, true);
+            }
             match statement.unlabeled() {
                 Stmt::Function { .. } => {}
                 Stmt::Var { declarations, .. } => {
@@ -289,7 +301,9 @@ impl Lowerer {
                 _ => output.extend(self.lower_stmt(statement)?),
             }
         }
-        flush_ready(&mut pending, &mut available, &mut output);
+        for internal in flush_ready(&mut pending, &mut available, &mut output) {
+            self.set_local_initialized(&internal, true);
+        }
         if let Some(function) = pending.first() {
             return Err(Diagnostic::new(
                 DiagnosticCode::TemporalDeadZone,
