@@ -222,12 +222,31 @@ impl RuntimeEffectController for SeamEffectController {
         self.inner.native_effect_groups_substrate()
     }
 
+    /// The group child's bound controller is the substrate's, but its seam
+    /// traffic is still the turn's: a child's tool attempts cross this seam
+    /// on every tier, not only where the host happens to build the child's
+    /// controller over it.
     fn group_child_scoped_controller(
         &self,
         admitted: crate::AdmittedScope,
         binding: crate::GroupChildBinding,
     ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
-        self.inner.group_child_scoped_controller(admitted, binding)
+        let Some(bound) = self
+            .inner
+            .group_child_scoped_controller(admitted, binding)?
+        else {
+            return Ok(None);
+        };
+        let Some(controller) = bound.owned_controller() else {
+            return Ok(Some(bound));
+        };
+        let seam: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
+            inner: controller,
+            control: self.control.clone(),
+            executions: Arc::clone(&self.executions),
+            journal_faults: self.journal_faults.clone(),
+        });
+        crate::ScopedEffectController::shared(seam, bound.admitted_scope().clone()).map(Some)
     }
 
     async fn await_next_settlement(
