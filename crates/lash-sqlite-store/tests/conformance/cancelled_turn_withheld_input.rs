@@ -17,7 +17,7 @@ async fn sqlite_withheld_input_store(dir: &TempDir) -> Arc<dyn RuntimePersistenc
     factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("root"),
+            session_id: SessionId::from(lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })

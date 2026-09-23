@@ -21,6 +21,7 @@ lash_conformance::cancelled_turn_withheld_input_tests!({
     (
         database_lock,
         "postgres",
-        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
+        Arc::new(storage.session_store(lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID))
+            as Arc<dyn RuntimePersistence>,
     )
 });

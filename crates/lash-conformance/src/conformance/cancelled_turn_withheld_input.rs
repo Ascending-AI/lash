@@ -12,7 +12,7 @@
 //! The law drives a real runtime turn over the supplied durable store and
 //! reads the outcome back only through surfaces every backend already owes.
 
-use super::direct_turn_acceptance::{acceptance_runtime, direct_input, text_response};
+use super::direct_turn_acceptance::{acceptance_runtime_for_session, direct_input, text_response};
 use crate::admit;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -21,7 +21,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-const SESSION_ID: &str = "root";
+/// The session every store in this suite is exercised under. Not `root`:
+/// commit admission is process-wide and keyed by session, and a cancelled
+/// turn's commit does not wait behind other laws' commits in the same binary.
+pub const CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID: &str = "cancelled-turn-withheld-input";
+const SESSION_ID: &str = CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID;
 
 /// How the Stop reaches the running turn.
 enum Stop {
@@ -156,7 +160,7 @@ impl Harness {
                 crate::TurnOptions::new(cancel, scope),
             )
             .await
-            .expect("the turn commits")
+            .unwrap_or_else(|error| panic!("turn `{turn_id}` commits: {error:?}"))
     }
 }
 
@@ -392,7 +396,8 @@ pub async fn immediate_cancel_defers_withheld_inject_now_input(
             .build()
             .into_handle()
     };
-    let runtime = acceptance_runtime(
+    let runtime = acceptance_runtime_for_session(
+        SESSION_ID,
         &runtime_store,
         &effect_host,
         provider,

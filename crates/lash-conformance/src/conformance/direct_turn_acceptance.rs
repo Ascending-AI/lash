@@ -44,11 +44,31 @@ fn fixed_text_provider(text: &str) -> crate::ProviderHandle {
         .into_handle()
 }
 
+pub(super) async fn acceptance_runtime(
+    store: &Arc<dyn crate::RuntimePersistence>,
+    effect_host: &Arc<dyn crate::EffectHost>,
+    provider: crate::ProviderHandle,
+    plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    lease_owner: crate::LeaseOwnerIdentity,
+) -> crate::LashRuntime {
+    acceptance_runtime_for_session(
+        SESSION_ID,
+        store,
+        effect_host,
+        provider,
+        plugin_factories,
+        lease_owner,
+    )
+    .await
+}
+
+/// [`acceptance_runtime`] over an explicit session id.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn acceptance_runtime(
+pub(super) async fn acceptance_runtime_for_session(
+    session_id: &str,
     store: &Arc<dyn crate::RuntimePersistence>,
     effect_host: &Arc<dyn crate::EffectHost>,
     provider: crate::ProviderHandle,
@@ -62,9 +82,9 @@ pub(super) async fn acceptance_runtime(
     host = host.with_effect_host(Arc::clone(effect_host));
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));
+    policy.session_id = Some(SessionId::from(session_id.to_string()));
     let state = crate::RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: SessionId::from(session_id.to_string()),
         policy: policy.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -74,7 +94,7 @@ pub(super) async fn acceptance_runtime(
             crate::QueuedWorkBatchingConfig::new(1),
             lease_owner,
         )
-        .with_session_id(SESSION_ID)
+        .with_session_id(session_id)
         .with_policy(policy)
         .with_initial_state(state)
         .with_runtime_host(host)
