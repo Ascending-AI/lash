@@ -2,9 +2,9 @@
 """Unit tests for the remote sizing contract.
 
 `tools/bazel/action_sizes_from_log.py` turns the pool's usage logs into the
-measured compile table; `tools/bazel/generate_build_files.py` turns that table
-and the test-run sizes into `exec_properties`, and `tools/bazel/test_batch.bzl`
-sizes a batch from its member request.
+measured compile and test-run tables; `tools/bazel/generate_build_files.py`
+turns them into `exec_properties` and sizes each `:test_batch` from its members,
+and `tools/bazel/test_batch.bzl` reserves what it is given.
 """
 
 from __future__ import annotations
@@ -241,41 +241,152 @@ class CompileRequestTest(unittest.TestCase):
         self.assertGreater(seen, 0)
 
 
+def test_record(
+    label: str = "//crates/lash-core:runtime_turns__test",
+    role: str = "run",
+    cores: float = 1.0,
+    peak_bytes: int = 100 * 1024 * 1024,
+    wall_ms: int = 4_000,
+    exit_status: str = "0",
+    requested_cpu: str = "4",
+) -> str:
+    """A test action's usage record, as the supervisor writes it since kiln#28."""
+    return "\t".join(
+        [
+            "1790160000",
+            "crate=-",
+            "pkg=-",
+            "kind=-",
+            "tool=test-setup.sh",
+            f"peak_bytes={peak_bytes}",
+            f"cpu_usec={int(cores * wall_ms * 1000)}",
+            f"wall_ms={wall_ms}",
+            f"exit={exit_status}",
+            "requested_kb=4194304",
+            f"requested_cpu={requested_cpu}",
+            f"test={role}:-:{label}",
+        ]
+    )
+
+
+TEST_LABELS = {"//crates/lash-core:runtime_turns__test", "//crates/lash-core:test_batch"}
+
+
+def test_run_table(lines: list[str]) -> dict:
+    return sizes.test_run_table(sizes.collect_test_runs(lines, TEST_LABELS))
+
+
+class TestRunTableTest(unittest.TestCase):
+    """Test runs are sized per Bazel label from the `test` field of the log."""
+
+    def test_only_successful_runs_of_generated_labels_count(self) -> None:
+        lines = [test_record()] * 3
+        lines += [test_record(role="xml")] * 5
+        lines += [test_record(exit_status="1")] * 5
+        lines += [test_record(label="//crates/hirsel-proto:hirsel-proto__unit_test")] * 5
+        # A compile record, and one written before the field existed.
+        lines += [record()] * 5
+        lines += [test_record().rsplit("\t", 1)[0]] * 5
+        table_ = test_run_table(lines)
+        self.assertEqual(list(table_), ["//crates/lash-core:runtime_turns__test"])
+        self.assertEqual(table_["//crates/lash-core:runtime_turns__test"]["samples"], 3)
+
+    def test_a_label_containing_colons_is_read_whole(self) -> None:
+        label = "//crates/lash-core:test_batch"
+        self.assertIn(label, test_run_table([test_record(label=label)] * 3))
+
+    def test_three_samples_make_a_row_and_two_do_not(self) -> None:
+        self.assertEqual(sizes.TEST_MIN_SAMPLES, 3)
+        self.assertEqual(test_run_table([test_record()] * 2), {})
+        self.assertEqual(len(test_run_table([test_record()] * 3)), 1)
+
+    def test_memory_is_the_peak_with_margin_and_a_one_gib_floor(self) -> None:
+        entry = test_run_table([test_record(peak_bytes=100 * 1024 * 1024)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 1048576)
+        # 7.45 GiB x 1.5 = 11.2 GiB, rounded up to 11.5 GiB.
+        entry = test_run_table([test_record(peak_bytes=7_999_586_304)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 12058624)
+
+    def test_cpu_is_the_compile_p95_rule(self) -> None:
+        entry = test_run_table([test_record(cores=2.15)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 2)
+        entry = test_run_table([test_record(cores=2.25)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 3)
+        entry = test_run_table([test_record(cores=20.0)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 8)
+
+    def test_sub_second_runs_count_as_samples_but_not_as_cpu_evidence(self) -> None:
+        entry = test_run_table([test_record(cores=3.0, wall_ms=400)] * 3)[
+            "//crates/lash-core:runtime_turns__test"
+        ]
+        self.assertEqual((entry["samples"], entry["cpu_count"], entry["p95_cores"]), (3, 1, 0.0))
+        lines = [test_record(cores=3.0, wall_ms=400)] * 3 + [test_record(cores=2.5)]
+        entry = test_run_table(lines)["//crates/lash-core:runtime_turns__test"]
+        self.assertEqual((entry["samples"], entry["cpu_count"]), (4, 3))
+
+    def test_the_checked_in_table_names_generated_tests_only(self) -> None:
+        checked_in = json.loads(
+            (ROOT / "tools/bazel/test-run-sizes.json").read_text(encoding="utf-8")
+        )
+        inventory = json.loads(
+            (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
+        )
+        labels = sizes.test_labels(inventory)
+        self.assertTrue(checked_in)
+        for label, entry in checked_in.items():
+            with self.subTest(label=label):
+                self.assertIn(label, labels)
+                self.assertEqual(
+                    sorted(entry),
+                    ["cpu_count", "memory_kb", "p95_cores", "peak_bytes", "samples"],
+                )
+                self.assertGreaterEqual(entry["samples"], sizes.TEST_MIN_SAMPLES)
+                self.assertGreaterEqual(entry["memory_kb"], sizes.TEST_MEMORY_FLOOR_KB)
+                self.assertTrue(1 <= entry["cpu_count"] <= sizes.MAX_CPU_COUNT)
+
+
 class TestRunRequestTest(unittest.TestCase):
-    """A test run is sized through the `test` exec group, apart from its compile.
+    """A test run is sized through the `test` exec group, apart from its compile."""
 
-    A run is a whole libtest binary running a tokio runtime and a store. At one
-    core the suite's own threads contend for it and time-sensitive cases fail
-    outright: CI run 34950810111 lost `//crates/lash-perf:lash-perf__unit_test`
-    on a phase assertion and timed out `//crates/lash-sim:stack_policy__test`.
-    """
-
-    def test_an_unmeasured_test_asks_for_the_run_floor_only(self) -> None:
-        self.assertEqual(generator.TEST_CPU_FLOOR, 4)
+    def test_an_unmeasured_test_keeps_the_request_it_had(self) -> None:
+        self.assertEqual(generator.UNMEASURED_TEST_RUN, {"cpu_count": 4, "memory_kb": 4194304})
         self.assertEqual(
-            generator.exec_properties("no-such-package", "no_such_crate", "test"),
-            {
-                "test.cpu_count": str(generator.TEST_CPU_FLOOR),
-                "test.memory_kb": str(generator.TEST_MEMORY_FLOOR_KB),
-            },
+            generator.exec_properties(
+                "no-such-package", "no_such_crate", "test", "//no/such:test"
+            ),
+            {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+        )
+        # An unmeasured run of a large suite keeps its larger request.
+        self.assertEqual(
+            generator.test_run_request(
+                "lash-internal-core", "lash_core", "//crates/lash-core:never_measured"
+            ),
+            {"cpu_count": 8, "memory_kb": 6815744},
         )
 
-    def test_a_listed_run_keeps_its_larger_request(self) -> None:
-        properties = generator.exec_properties("lash-internal-core", "lash_core", "test")
-        self.assertEqual(properties["test.cpu_count"], "8")
-        self.assertEqual(properties["test.memory_kb"], "6815744")
-        # The compile half is the measured row, not the run's size.
+    def test_a_measured_run_asks_for_its_row(self) -> None:
+        label = "//crates/lash-core:lash-core__unit_test"
+        row = generator.TEST_RUN_SIZES[label]
+        properties = generator.exec_properties("lash-internal-core", "lash_core", "test", label)
+        self.assertEqual(properties["test.cpu_count"], str(row["cpu_count"]))
+        self.assertEqual(properties["test.memory_kb"], str(row["memory_kb"]))
+        # The compile half is the measured compile row, not the run's size.
         self.assertEqual(
             properties["cpu_count"],
             str(generator.ACTION_SIZES["lash-internal-core/lash_core"]["cpu_count"]),
         )
 
-    def test_listed_runs_never_ask_for_less_than_the_floor(self) -> None:
-        for key, run in generator.TEST_RUN_SIZES.items():
-            with self.subTest(key=key):
-                self.assertGreaterEqual(run["cpu_count"], generator.TEST_CPU_FLOOR)
-                self.assertGreaterEqual(run["memory_kb"], generator.TEST_MEMORY_FLOOR_KB)
-                self.assertLessEqual(run["cpu_count"], sizes.MAX_CPU_COUNT)
+    def test_timing_sensitive_suites_keep_four_cores(self) -> None:
+        self.assertEqual(generator.CONTENTION_FLOOR_PACKAGES, {"lash-perf", "lash-sim"})
+        label = "//crates/lash-perf:lash-perf__unit_test"
+        self.assertLess(generator.TEST_RUN_SIZES[label]["cpu_count"], 4)
+        self.assertEqual(
+            generator.test_run_request("lash-perf", "lash_perf", label)["cpu_count"], 4
+        )
+
+    def test_a_test_target_must_name_its_label(self) -> None:
+        with self.assertRaises(ValueError):
+            generator.exec_properties("lash-sim", "lash_sim", "test")
 
     def test_every_generated_test_target_states_its_run(self) -> None:
         test_rules = (
@@ -289,13 +400,19 @@ class TestRunRequestTest(unittest.TestCase):
                 continue
             properties = properties_of(block)
             seen += 1
-            with self.subTest(path=str(path), block=block.splitlines()[1]):
-                self.assertGreaterEqual(
-                    int(properties["test.cpu_count"]), generator.TEST_CPU_FLOOR
-                )
-                self.assertGreaterEqual(
-                    int(properties["test.memory_kb"]), generator.TEST_MEMORY_FLOOR_KB
-                )
+            package = path.parent.relative_to(ROOT).as_posix()
+            name = re.search(r'name = "([^"]+)"', block).group(1)
+            label = f"//{package}:{name}"
+            with self.subTest(label=label):
+                cpu = int(properties["test.cpu_count"])
+                memory_kb = int(properties["test.memory_kb"])
+                if label in generator.TEST_RUN_SIZES:
+                    self.assertEqual(memory_kb, generator.TEST_RUN_SIZES[label]["memory_kb"])
+                    self.assertGreaterEqual(cpu, generator.TEST_RUN_SIZES[label]["cpu_count"])
+                else:
+                    self.assertGreaterEqual(cpu, generator.UNMEASURED_TEST_RUN["cpu_count"])
+                if package in ("crates/lash-perf", "crates/lash-sim"):
+                    self.assertGreaterEqual(cpu, generator.CONTENTION_CPU_FLOOR)
         self.assertGreater(seen, 0)
 
     def test_no_other_target_states_a_run(self) -> None:
@@ -310,31 +427,53 @@ class TestRunRequestTest(unittest.TestCase):
 class BatchBudgetTest(unittest.TestCase):
     """A batch reserves what it runs, and runs no more than it reserves."""
 
-    def test_batches_only_hold_floor_sized_members(self) -> None:
-        for key in generator.TEST_RUN_SIZES:
+    def test_the_large_suites_never_join_a_batch(self) -> None:
+        for key in generator.UNMEASURED_LARGE_TEST_RUNS:
             with self.subTest(key=key):
                 self.assertFalse(generator.batchable_run(*key.split("/")))
         self.assertTrue(generator.batchable_run("no-such-package", "no_such_crate"))
 
-    def test_every_generated_batch_declares_the_member_floor(self) -> None:
+    def test_the_budget_is_the_two_largest_members_side_by_side(self) -> None:
+        self.assertEqual(generator.BATCH_JOBS, 2)
+        requests = [
+            {"cpu_count": 1, "memory_kb": 1048576},
+            {"cpu_count": 3, "memory_kb": 1048576},
+            {"cpu_count": 2, "memory_kb": 2097152},
+        ]
+        self.assertEqual(
+            generator.batch_budget("//no/such:test_batch", requests),
+            {"cpu_count": 5, "memory_kb": 3145728},
+        )
+
+    def test_a_measured_batch_never_reserves_less_than_it_used(self) -> None:
+        label = "//crates/lash-core:test_batch"
+        measured = generator.TEST_RUN_SIZES[label]
+        small = [{"cpu_count": 1, "memory_kb": 1048576}] * 3
+        budget = generator.batch_budget(label, small)
+        self.assertEqual(budget["cpu_count"], max(2, measured["cpu_count"]))
+        self.assertEqual(budget["memory_kb"], max(2097152, measured["memory_kb"]))
+
+    def test_every_generated_batch_reserves_its_jobs(self) -> None:
         seen = 0
         for path, block in generated_blocks():
-            if not block.startswith("lash_batch_test("):
+            if not block.startswith(("lash_batch_test(", 'load("//tools/bazel:test_batch.bzl"')):
+                continue
+            if "lash_batch_test(\n" not in block:
                 continue
             seen += 1
             with self.subTest(path=str(path)):
-                self.assertIn(f"member_cpu_count = {generator.TEST_CPU_FLOOR},", block)
-                self.assertIn(
-                    f"member_memory_kb = {generator.TEST_MEMORY_FLOOR_KB},", block
-                )
+                self.assertIn(f"    jobs = {generator.BATCH_JOBS},\n", block)
+                cpu = int(re.search(r"    cpu_count = (\d+),", block).group(1))
+                memory_kb = int(re.search(r"    memory_kb = (\d+),", block).group(1))
+                self.assertGreaterEqual(cpu, generator.BATCH_JOBS)
+                self.assertGreaterEqual(memory_kb, generator.BATCH_JOBS * 1048576)
         self.assertGreater(seen, 0)
 
-    def test_the_rule_reserves_every_slot_it_runs(self) -> None:
+    def test_the_rule_reserves_what_it_is_given_and_runs_jobs_at_once(self) -> None:
         bzl = (ROOT / "tools/bazel/test_batch.bzl").read_text(encoding="utf-8")
-        self.assertRegex(bzl, r"\nBATCH_JOBS = [1-9]\d*\n")
-        self.assertIn('"test.cpu_count": str(BATCH_JOBS * member_cpu_count)', bzl)
-        self.assertIn('"test.memory_kb": str(BATCH_JOBS * member_memory_kb)', bzl)
-        self.assertIn("jobs = BATCH_JOBS", bzl)
+        self.assertIn('"test.cpu_count": str(cpu_count)', bzl)
+        self.assertIn('"test.memory_kb": str(memory_kb)', bzl)
+        self.assertIn("jobs = jobs", bzl)
         self.assertIn("export LASH_BATCH_JOBS={jobs}", bzl)
         runner = (ROOT / "tools/bazel/test_batch_runner.sh").read_text(encoding="utf-8")
         self.assertIn("jobs_cap=${LASH_BATCH_JOBS:?", runner)
@@ -350,10 +489,10 @@ class TableValidationTest(unittest.TestCase):
             ],
         }
         saved = dict(generator.ACTION_SIZES)
-        saved_runs = dict(generator.TEST_RUN_SIZES)
+        saved_large = dict(generator.UNMEASURED_LARGE_TEST_RUNS)
         try:
             generator.ACTION_SIZES.clear()
-            generator.TEST_RUN_SIZES.clear()
+            generator.UNMEASURED_LARGE_TEST_RUNS.clear()
             generator.ACTION_SIZES["lash-sim/lash_sim"] = {"cpu_count": 2}
             generator.validate_action_sizes(metadata)
             generator.ACTION_SIZES["gone/gone"] = {"cpu_count": 2}
@@ -362,8 +501,21 @@ class TableValidationTest(unittest.TestCase):
         finally:
             generator.ACTION_SIZES.clear()
             generator.ACTION_SIZES.update(saved)
-            generator.TEST_RUN_SIZES.clear()
-            generator.TEST_RUN_SIZES.update(saved_runs)
+            generator.UNMEASURED_LARGE_TEST_RUNS.clear()
+            generator.UNMEASURED_LARGE_TEST_RUNS.update(saved_large)
+
+    def test_a_measured_run_no_test_is_generated_for_fails_generation(self) -> None:
+        saved = set(generator.EMITTED_TEST_LABELS)
+        try:
+            generator.EMITTED_TEST_LABELS.clear()
+            generator.EMITTED_TEST_LABELS.update(generator.TEST_RUN_SIZES)
+            generator.validate_test_run_sizes()
+            generator.EMITTED_TEST_LABELS.discard(next(iter(generator.TEST_RUN_SIZES)))
+            with self.assertRaises(SystemExit):
+                generator.validate_test_run_sizes()
+        finally:
+            generator.EMITTED_TEST_LABELS.clear()
+            generator.EMITTED_TEST_LABELS.update(saved)
 
 
 class DefaultsAgreeTest(unittest.TestCase):

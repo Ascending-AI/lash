@@ -30,29 +30,39 @@ DEFAULT_CPU_COUNT = 1
 # A test RUN is sized separately from its compile, through the `test` exec
 # group: Bazel applies `test.`-prefixed `exec_properties` to the TestRunner
 # spawn and plain ones to the compile. A run is a whole libtest binary with a
-# tokio runtime and a store, and by default one test thread per core, so the
-# crate's compile measurement says nothing about it. At the repository default
-# of one core the runtime's own threads and the harness's contend for that
-# single core, and time-sensitive cases fail or time out rather than run slowly:
-# CI run 34950810111 lost `//crates/lash-perf:lash-perf__unit_test` on a phase
-# assertion and timed out `//crates/lash-sim:stack_policy__test` that way.
-# Every test run therefore asks for at least four cores and 4 GiB.
-TEST_CPU_FLOOR = 4
-TEST_MEMORY_FLOOR_KB = 4194304
-# Test runs that ask for more than the floor, keyed `<package>/<crate>` like
-# the compile table. These are the run requests these suites have always had;
-# no run measurement has yet justified lowering them.
-TEST_RUN_SIZES = {
-    "agent-workbench/agent_workbench": {"cpu_count": 8, "memory_kb": TEST_MEMORY_FLOOR_KB},
+# tokio runtime and a store, so the crate's compile measurement says nothing
+# about it. Runs are measured per Bazel label instead: the pool's usage log
+# records which test each run belongs to, and `action_sizes_from_log.py
+# --test-runs` rebuilds this table from it (the rule is documented there).
+TEST_RUN_SIZES_PATH = ROOT / "tools/bazel/test-run-sizes.json"
+# What a run asks for until it has been measured: the request every run had
+# before measurement existed. A new test starts here and comes down once the
+# pool has seen it.
+UNMEASURED_TEST_RUN = {"cpu_count": 4, "memory_kb": 4194304}
+# Unmeasured runs of these crates keep the larger request they have always had.
+# The same crates are also the suites that never join a `:test_batch`.
+UNMEASURED_LARGE_TEST_RUNS = {
+    "agent-workbench/agent_workbench": {"cpu_count": 8, "memory_kb": 4194304},
     "lash-internal-core/lash_core": {"cpu_count": 8, "memory_kb": 6815744},
-    "lash-internal-restate/lash_restate": {"cpu_count": 8, "memory_kb": TEST_MEMORY_FLOOR_KB},
+    "lash-internal-restate/lash_restate": {"cpu_count": 8, "memory_kb": 4194304},
     # The no-abort stress binary forks a dozen children that each parse
     # deliberately deep sources up to the stack bound. Measured 2026-09-23 as
     # one cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
-    # Sized by the compile table's rule, peak x 1.5 rounded up to 512 MiB.
-    "lash-internal-typescript/integration": {"cpu_count": TEST_CPU_FLOOR, "memory_kb": 12058624},
-    "lash-runtime/lash": {"cpu_count": 8, "memory_kb": TEST_MEMORY_FLOOR_KB},
+    "lash-internal-typescript/integration": {"cpu_count": 4, "memory_kb": 12058624},
+    "lash-runtime/lash": {"cpu_count": 8, "memory_kb": 4194304},
 }
+# Timing-sensitive suites keep four cores whatever they measure. Below that the
+# harness's and the runtime's own threads contend and time-sensitive cases
+# fail instead of running slowly: CI run 34950810111 lost
+# `//crates/lash-perf:lash-perf__unit_test` on a phase assertion and timed out
+# `//crates/lash-sim:stack_policy__test` at one core. A measured p95 of 1.3
+# cores for lash-perf is exactly what such a suite shows while it is healthy.
+CONTENTION_CPU_FLOOR = 4
+CONTENTION_FLOOR_PACKAGES = {"lash-perf", "lash-sim"}
+# Members a `:test_batch` runs at once. The batch reserves the sum of its
+# largest BATCH_JOBS members' requests and the runner reads the same number
+# from `LASH_BATCH_JOBS`, never from `nproc`.
+BATCH_JOBS = 2
 # `//crates/lash-sim:lash-sim__unit_test` packs the whole simulation suite into
 # one libtest binary, and a libtest binary is a single Bazel test action. On CI
 # run 34791314196 it ran 313 s and was the last action of a 926 s job: from
@@ -80,6 +90,7 @@ def action_sizes() -> dict[str, dict[str, int]]:
 
 
 ACTION_SIZES = action_sizes()
+TEST_RUN_SIZES = json.loads(TEST_RUN_SIZES_PATH.read_text(encoding="utf-8"))
 
 
 def compile_request(package_name: str, crate_name: str) -> dict[str, int]:
@@ -91,15 +102,27 @@ def compile_request(package_name: str, crate_name: str) -> dict[str, int]:
     }
 
 
-def test_run_request(package_name: str, crate_name: str) -> dict[str, int]:
-    """What one run of this test binary reserves."""
-    return TEST_RUN_SIZES.get(
-        f"{package_name}/{crate_name}",
-        {"cpu_count": TEST_CPU_FLOOR, "memory_kb": TEST_MEMORY_FLOOR_KB},
-    )
+def test_run_request(package_name: str, crate_name: str, label: str) -> dict[str, int]:
+    """What one run of this test binary reserves.
+
+    The measured row for the label, else the request it had before it was
+    measured; a timing-sensitive suite never drops below its core floor.
+    """
+    measured = TEST_RUN_SIZES.get(label)
+    if measured is not None:
+        request = {"cpu_count": measured["cpu_count"], "memory_kb": measured["memory_kb"]}
+    else:
+        request = dict(
+            UNMEASURED_LARGE_TEST_RUNS.get(f"{package_name}/{crate_name}", UNMEASURED_TEST_RUN)
+        )
+    if package_name in CONTENTION_FLOOR_PACKAGES:
+        request["cpu_count"] = max(request["cpu_count"], CONTENTION_CPU_FLOOR)
+    return request
 
 
-def exec_properties(package_name: str, crate_name: str, kind: str) -> dict[str, str]:
+def exec_properties(
+    package_name: str, crate_name: str, kind: str, label: str | None = None
+) -> dict[str, str]:
     """The remote requests for one target, minus whatever is the default.
 
     Plain keys size the target's compile actions and are stated only when the
@@ -112,30 +135,55 @@ def exec_properties(package_name: str, crate_name: str, kind: str) -> dict[str, 
         properties["cpu_count"] = str(request["cpu_count"])
         properties["memory_kb"] = str(request["memory_kb"])
     if kind == "test":
-        run = test_run_request(package_name, crate_name)
+        if label is None:
+            raise ValueError(f"a test target of {package_name}/{crate_name} needs its label")
+        EMITTED_TEST_LABELS.add(label)
+        run = test_run_request(package_name, crate_name, label)
         properties["test.cpu_count"] = str(run["cpu_count"])
         properties["test.memory_kb"] = str(run["memory_kb"])
     return properties
 
 
-def batchable_run(package_name: str, crate_name: str) -> bool:
-    """A batch runs members sized at the test floor, and only those.
+# Every test label a run request was written for, so a measured row that names
+# none of them is caught as stale.
+EMITTED_TEST_LABELS: set[str] = set()
 
-    `lash_batch_test` reserves a fixed number of floor-sized member slots, so a
-    member that asks for more than the floor would run on less than it asked
-    for. Such a test runs on its own, at its own request.
+
+def batchable_run(package_name: str, crate_name: str) -> bool:
+    """The large suites run on their own, at their own request.
+
+    Batch membership is a property of the suite, not of this week's
+    measurement: a plain test joins its package's batch unless its crate is
+    one of the large suites.
     """
-    return test_run_request(package_name, crate_name) == {
-        "cpu_count": TEST_CPU_FLOOR,
-        "memory_kb": TEST_MEMORY_FLOOR_KB,
+    return f"{package_name}/{crate_name}" not in UNMEASURED_LARGE_TEST_RUNS
+
+
+def batch_budget(label: str, requests: list[dict[str, int]]) -> dict[str, int]:
+    """What a batch reserves: its largest BATCH_JOBS members side by side.
+
+    A batch that has itself been measured never reserves less than that
+    measurement. Its members' short runs carry no CPU evidence and ask for one
+    core each, while two of them side by side, plus the runner, can keep more
+    busy: `//crates/lash-core:test_batch` holds 3.3 cores at p95 over members
+    that each ask for one.
+    """
+    EMITTED_TEST_LABELS.add(label)
+    measured = TEST_RUN_SIZES.get(label, {})
+    return {
+        field: max(
+            sum(sorted((request[field] for request in requests), reverse=True)[:BATCH_JOBS]),
+            measured.get(field, 0),
+        )
+        for field in ("cpu_count", "memory_kb")
     }
 
 
 def exec_properties_argument(
-    package_name: str, crate_name: str, kind: str, indent: int = 4
+    package_name: str, crate_name: str, kind: str, label: str | None = None, indent: int = 4
 ) -> str:
     """Renders the `exec_properties = {...}` line, or nothing."""
-    properties = exec_properties(package_name, crate_name, kind)
+    properties = exec_properties(package_name, crate_name, kind, label)
     if not properties:
         return ""
     spaces = " " * indent
@@ -157,10 +205,24 @@ def validate_action_sizes(metadata: dict) -> None:
         for target in package["targets"]
         if "custom-build" not in target["kind"]
     }
-    stale = sorted((set(ACTION_SIZES) | set(TEST_RUN_SIZES)) - crates)
+    stale = sorted((set(ACTION_SIZES) | set(UNMEASURED_LARGE_TEST_RUNS)) - crates)
     if stale:
         raise SystemExit(
             "generate_build_files: sizes name no first-party crate: "
+            + ", ".join(stale)
+        )
+
+
+def validate_test_run_sizes() -> None:
+    """Every measured run names a test this generation emitted.
+
+    Checked after generation, because only the generator knows the labels it
+    writes: a renamed or deleted test leaves a row that still looks like policy.
+    """
+    stale = sorted(set(TEST_RUN_SIZES) - EMITTED_TEST_LABELS)
+    if stale:
+        raise SystemExit(
+            "generate_build_files: test-run sizes name no generated test: "
             + ", ".join(stale)
         )
 
@@ -379,7 +441,7 @@ def cargo_test_policy(
         # `fuzzed_sources_survive_without_the_preflight` died of SIGKILL, so the
         # label used to be pinned to the runner with `no-remote-exec`, where it
         # ran on every CI leg (about 70 s of the tail's local time). The run is
-        # sized in TEST_RUN_SIZES now and executes on the pool like any other.
+        # sized from its measured runs now and executes on the pool like any other.
         tags.append("dev-deferred")
         reasons.append(
             "the no-abort stress binary runs 43 s; too slow for the developer"
@@ -767,7 +829,12 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    crate_name = {quote(library['name'])},\n"
                 f"    crate_root = {quote(relative(library['src_path']).replace(package_dir + '/', ''))},\n"
                 f"    declared_features = {string_list(declared_features)},\n"
-                + exec_properties_argument(package["name"], library["name"], "test")
+                + exec_properties_argument(
+                    package["name"],
+                    library["name"],
+                    "test",
+                    f"//{package_dir}:{primary_target}__unit_test",
+                )
                 + unit_test_sources_argument(package_dir)
                 + f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 + (
@@ -800,7 +867,16 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 # timeout, policy tags, or run request above the floor --
                 # rides the package's shared `lash_batch_test` instead of
                 # paying its own runfiles forest and test-runner action.
-                batch_members.append(f":{primary_target}__unit_test")
+                batch_members.append(
+                    (
+                        f":{primary_target}__unit_test",
+                        test_run_request(
+                            package["name"],
+                            library["name"],
+                            f"//{package_dir}:{primary_target}__unit_test",
+                        ),
+                    )
+                )
             unit_inventory = {
                 "cargo": library["name"],
                 "kind": "unit-test",
@@ -866,7 +942,12 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         ]
         if kind == "test" and target["name"] in SOURCE_OWNERSHIP.get(package_dir, {}).get("tests", {}):
             args.append(f"    srcs_patterns = {string_list(test_source_patterns(package_dir, target['name']))},")
-        sized = exec_properties_argument(package["name"], crate_name, size_kind)
+        sized = exec_properties_argument(
+            package["name"],
+            crate_name,
+            size_kind,
+            f"//{package_dir}:{name}" if size_kind == "test" else None,
+        )
         if sized:
             args.append(sized.rstrip("\n"))
         args.append(
@@ -942,7 +1023,12 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             and not target_tags
             and batchable_run(package["name"], crate_name)
         ):
-            batch_members.append(f":{name}")
+            batch_members.append(
+                (
+                    f":{name}",
+                    test_run_request(package["name"], crate_name, f"//{package_dir}:{name}"),
+                )
+            )
         target_inventory = {
             "cargo": target["name"],
             "kind": kind,
@@ -970,7 +1056,9 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    crate_root = {quote(crate_root)},\n",
                 f"    declared_features = {string_list(declared_features)},\n",
             ]
-            bin_unit_sized = exec_properties_argument(package["name"], crate_name, "test")
+            bin_unit_sized = exec_properties_argument(
+                package["name"], crate_name, "test", f"//{package_dir}:{name}__unit_test"
+            )
             if bin_unit_sized:
                 unit_args.append(bin_unit_sized)
             if extra_compile_data or binary_data:
@@ -1004,7 +1092,14 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 and not bin_unit_tags
                 and batchable_run(package["name"], crate_name)
             ):
-                batch_members.append(f":{name}__unit_test")
+                batch_members.append(
+                    (
+                        f":{name}__unit_test",
+                        test_run_request(
+                            package["name"], crate_name, f"//{package_dir}:{name}__unit_test"
+                        ),
+                    )
+                )
 
     if package["name"] == "lash-internal-core":
         chunks.append(
@@ -1041,13 +1136,15 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
     batch_label = None
     if len(batch_members) >= 2:
         batch_label = f"//{package_dir}:test_batch"
+        budget = batch_budget(batch_label, [request for _member, request in batch_members])
         chunks.append(
             'load("//tools/bazel:test_batch.bzl", "lash_batch_test")\n\n'
             "lash_batch_test(\n"
             '    name = "test_batch",\n'
-            f"    member_cpu_count = {TEST_CPU_FLOOR},\n"
-            f"    member_memory_kb = {TEST_MEMORY_FLOOR_KB},\n"
-            f"    tests = {string_list(sorted(batch_members))},\n"
+            f"    cpu_count = {budget['cpu_count']},\n"
+            f"    jobs = {BATCH_JOBS},\n"
+            f"    memory_kb = {budget['memory_kb']},\n"
+            f"    tests = {string_list(sorted(member for member, _request in batch_members))},\n"
             ")\n\n"
         )
 
@@ -1078,7 +1175,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         "test_batch": {
             "label": batch_label,
             "members": (
-                sorted(f"//{package_dir}{member}" for member in batch_members)
+                sorted(f"//{package_dir}{member}" for member, _request in batch_members)
                 if batch_label
                 else []
             ),
@@ -1089,6 +1186,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     validate_source_ownership(metadata)
     validate_action_sizes(metadata)
+    EMITTED_TEST_LABELS.clear()
     features = package_features(metadata)
     outputs = {}
     inventory = []
@@ -1302,6 +1400,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         outputs[ROOT / f"tools/bazel/{service}_test_labels.txt"] = (
             "".join(f"{label}\n" for label in labels)
         )
+    validate_test_run_sizes()
     return outputs, inventory
 
 
@@ -1902,7 +2001,9 @@ class FeatureLaneGraph:
                 f"    crate_name = {quote(library['name'])},\n"
                 f"    crate_root = {quote(root)},\n"
                 f"    declared_features = {string_list(sorted(package['features']))},\n"
-                + exec_properties_argument(package_name, library["name"], "test")
+                + exec_properties_argument(
+                    package_name, library["name"], "test", f"//{directory}:{name}"
+                )
                 + unit_test_sources_argument(directory)
                 + f"    extra_compile_data = {string_list(compile_data)},\n"
                 + (
@@ -1939,7 +2040,9 @@ class FeatureLaneGraph:
                 f"    crate_name = {quote(crate_name)},\n"
                 f"    crate_root = {quote(crate_root)},\n"
                 f"    declared_features = {string_list(sorted(package['features']))},\n"
-                + exec_properties_argument(package_name, crate_name, "test")
+                + exec_properties_argument(
+                    package_name, crate_name, "test", f"//{directory}:{name}"
+                )
                 + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
                 + (f"    extra_data = {string_list([WORKBENCH_NODE])},\n" if workbench_node else "")
                 + f"    library = {quote(library_label) if library_label else 'None'},\n"
@@ -1981,7 +2084,9 @@ class FeatureLaneGraph:
             f"    crate_name = {quote(crate_name)},\n"
             f"    crate_root = {quote(crate_root)},\n"
             f"    declared_features = {string_list(sorted(package['features']))},\n"
-            + exec_properties_argument(package_name, crate_name, "test")
+            + exec_properties_argument(
+                package_name, crate_name, "test", f"//{directory}:{name}"
+            )
             + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
             + (f"    extra_data = {string_list(extra_data)},\n" if extra_data else "")
             + f"    library = {quote(library_label) if library_label else 'None'},\n"

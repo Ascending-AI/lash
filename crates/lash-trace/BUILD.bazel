@@ -48,7 +48,7 @@ lash_rust_unit_test(
         "default",
         "otel",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-trace",
     package_name = "lash-internal-trace",
@@ -89,7 +89,7 @@ lash_rust_unit_test(
         "default",
         "otel",
     ],
-    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
     library = ":lash-trace",
     library_crate_name = "lash_trace",
     manifest_dir = "crates/lash-trace",
@@ -109,7 +109,7 @@ lash_rust_integration_test(
         "default",
         "otel",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//:host_schemas",
     ],
@@ -126,8 +126,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    member_cpu_count = 4,
-    member_memory_kb = 4194304,
+    cpu_count = 2,
+    jobs = 2,
+    memory_kb = 2097152,
     tests = [
         ":lash-trace__unit_test",
         ":schema__test",

@@ -52,9 +52,30 @@ The rule, per `<package>/<crate>`:
 * A row that asks for no more than the defaults is dropped: absence from the
   file *is* the default request.
 
-Test *runs* are not sized here. A test run is a whole libtest binary with a
-tokio runtime, not a compile, and its request lives in the generator as
-`test.cpu_count` / `test.memory_kb` (see `TEST_CPU_FLOOR` there).
+Test runs (`--test-runs`)
+-------------------------
+
+A test run is a whole libtest binary with a tokio runtime, not a compile, and
+is sized apart from it: `--test-runs` writes `tools/bazel/test-run-sizes.json`,
+which the generator emits as `test.cpu_count` / `test.memory_kb`. A test
+action's record carries its Bazel label in the `test` field
+(`test=<run|xml>:<shard|->:<label>`, written by the supervisor since kiln#28);
+the compile fields are empty for it. The rule, per label:
+
+* Only `run` records, successful ones, of a test label this workspace
+  generates (`tools/bazel/target-inventory.json`), feature lanes and
+  `:test_batch` aggregates included. The XML spawn is not the test, and another
+  repository's labels never match. A batch's own row is a lower bound on the
+  budget the generator derives from its members (see `batch_budget` there).
+* At least 3 samples, or no row. An unmeasured test keeps the request the
+  generator gives it without one.
+* `memory_kb` = the largest peak x 1.5, rounded up to 512 MiB, at least 1 GiB.
+* `cpu_count` = the compile rule above: ceil(p95 cores - 0.2), at least 1,
+  capped at 8, over the samples of at least one second (1-CPU samples left out
+  when larger ones exist). A test whose every run is shorter asks for one core:
+  it cannot show more, and it holds what it has for under a second.
+* Every sampled label gets a row, including one at the smallest request: the
+  generator's fallback for an unmeasured run is larger than that.
 """
 
 from __future__ import annotations
@@ -119,9 +140,9 @@ def cpu_count_for(p95_cores: float) -> int:
     return min(MAX_CPU_COUNT, max(DEFAULT_CPU_COUNT, wanted))
 
 
-def memory_kb_for(peak_bytes: int) -> int:
+def memory_kb_for(peak_bytes: int, floor_kb: int = DEFAULT_MEMORY_KB) -> int:
     requested = math.ceil(peak_bytes / 1024 * MEMORY_MARGIN / MEMORY_GRANULARITY_KB)
-    return max(requested * MEMORY_GRANULARITY_KB, DEFAULT_MEMORY_KB)
+    return max(requested * MEMORY_GRANULARITY_KB, floor_kb)
 
 
 def first_party_crates(metadata: dict) -> set[tuple[str, str]]:
@@ -184,6 +205,88 @@ def collect(lines, crates: set[tuple[str, str]]) -> dict[str, Samples]:
     return measured
 
 
+TEST_MIN_SAMPLES = 3
+TEST_MEMORY_FLOOR_KB = 1024 * 1024
+TEST_RUN_KINDS = ("unit-test", "bin-unit-test", "test")
+
+
+def test_labels(inventory: dict) -> set[str]:
+    """Every test label the generator emits: tests, feature lanes and batches."""
+    units = [
+        target for package in inventory["packages"] for target in package["targets"]
+    ] + inventory["feature_lane_units"]
+    return {
+        unit["label"]
+        for unit in units
+        if unit.get("label") and unit["kind"] in TEST_RUN_KINDS
+    } | {
+        package["test_batch"]["label"]
+        for package in inventory["packages"]
+        if package["test_batch"]["label"]
+    }
+
+
+class TestRuns:
+    """Every kept run of one test label.
+
+    A run of under a second still counts as a sample and still has a peak, but
+    its cores are process startup, not a need, so only longer runs are CPU
+    evidence.
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.peak_bytes = 0
+        self.timed = Samples()
+
+    def observe(self, cpu_usec: int, wall_ms: int, peak_bytes: int, requested_cpu: int) -> None:
+        self.count += 1
+        self.peak_bytes = max(self.peak_bytes, peak_bytes)
+        if wall_ms >= MIN_WALL_MS:
+            self.timed.observe(cpu_usec / 1000 / wall_ms, peak_bytes, requested_cpu)
+
+
+def collect_test_runs(lines, labels: set[str]) -> dict[str, TestRuns]:
+    """Keeps the successful runs of this workspace's tests, keyed by label."""
+    measured: dict[str, TestRuns] = collections.defaultdict(TestRuns)
+    for line in lines:
+        record = parse_record(line)
+        if record is None or record.get("exit") != "0":
+            continue
+        role, _, rest = record.get("test", "-").partition(":")
+        _shard, _, label = rest.partition(":")
+        if role != "run" or label not in labels:
+            continue
+        wall_ms = as_int(record.get("wall_ms"))
+        cpu_usec = as_int(record.get("cpu_usec"))
+        peak_bytes = as_int(record.get("peak_bytes"))
+        if wall_ms is None or cpu_usec is None or peak_bytes is None:
+            continue
+        requested_cpu = as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT
+        measured[label].observe(cpu_usec, wall_ms, peak_bytes, requested_cpu)
+    return measured
+
+
+def test_run_table(measured: dict[str, TestRuns]) -> dict[str, dict[str, float | int]]:
+    sizes = {}
+    for label, runs in measured.items():
+        if runs.count < TEST_MIN_SAMPLES:
+            continue
+        p95 = (
+            percentile(runs.timed.cpu_basis(), CPU_PERCENTILE)
+            if runs.timed.records
+            else 0.0
+        )
+        sizes[label] = {
+            "cpu_count": cpu_count_for(p95),
+            "memory_kb": memory_kb_for(runs.peak_bytes, floor_kb=TEST_MEMORY_FLOOR_KB),
+            "p95_cores": round(p95, 2),
+            "peak_bytes": runs.peak_bytes,
+            "samples": runs.count,
+        }
+    return dict(sorted(sizes.items()))
+
+
 def table(measured: dict[str, Samples]) -> dict[str, dict[str, float | int]]:
     sizes = {}
     for key, samples in measured.items():
@@ -232,12 +335,22 @@ def main() -> int:
         default=None,
         help="write the table here instead of stdout",
     )
+    parser.add_argument(
+        "--test-runs",
+        action="store_true",
+        help="size test runs per label (tools/bazel/test-run-sizes.json) instead of compiles",
+    )
     args = parser.parse_args()
-    crates = first_party_crates(cargo_metadata())
     lines = []
     for path in args.logs:
         lines.extend(path.read_text(encoding="utf-8", errors="replace").splitlines())
-    rendered = render(table(collect(lines, crates)))
+    if args.test_runs:
+        inventory = json.loads(
+            (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
+        )
+        rendered = render(test_run_table(collect_test_runs(lines, test_labels(inventory))))
+    else:
+        rendered = render(table(collect(lines, first_party_crates(cargo_metadata()))))
     if args.output is None:
         sys.stdout.write(rendered)
     else:

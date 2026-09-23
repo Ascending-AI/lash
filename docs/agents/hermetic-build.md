@@ -182,10 +182,13 @@ size its compile actions (Rustc, RustcMetadata, Clippy) from the table in
 `tools/bazel/action-sizes.json`, which `tools/bazel/action_sizes_from_log.py`
 rebuilds from the pool's usage logs for Lash packages only; an unmeasured
 compile inherits the default. A test target's `test.cpu_count` /
-`test.memory_kb` size its TestRunner spawn alone: every run gets at least
-4 CPU / 4 GiB, and the few suites listed in `TEST_RUN_SIZES` in the generator
-get 8 CPU. A `:test_batch` reserves two floor-sized member slots (8 CPU / 8 GiB)
-and runs at most two members at once. Local
+`test.memory_kb` size its TestRunner spawn alone, from the per-label table in
+`tools/bazel/test-run-sizes.json` (`action_sizes_from_log.py --test-runs`, at
+least 3 pool runs per label). An unmeasured run asks for 4 CPU / 4 GiB, or 8 CPU
+for the large suites in `UNMEASURED_LARGE_TEST_RUNS`; lash-perf and lash-sim
+never drop below 4 CPU. A `:test_batch` reserves its two largest members'
+requests side by side, never less than the batch itself measured, and runs at
+most two members at once. Local
 clients submit at most 16 jobs; CI submits 32. These are in-flight action
 limits, not compiler thread counts. The scheduler admits work against each
 worker's advertised capacity. Keep a fork's Bazel server alive to preserve

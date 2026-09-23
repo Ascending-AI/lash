@@ -50,7 +50,7 @@ lash_rust_unit_test(
         "core-conversions",
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//:host_schemas",
     ],
@@ -95,7 +95,7 @@ lash_rust_unit_test(
         "core-conversions",
         "default",
     ],
-    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
     library = ":lash-remote-protocol",
     library_crate_name = "lash_remote_protocol",
     manifest_dir = "crates/lash-remote-protocol",
@@ -108,8 +108,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    member_cpu_count = 4,
-    member_memory_kb = 4194304,
+    cpu_count = 2,
+    jobs = 2,
+    memory_kb = 2097152,
     tests = [
         ":lash-remote-protocol__unit_test",
         ":remote_schema_generator__bin__unit_test",
@@ -311,7 +312,7 @@ lash_rust_feature_test(
         "core-conversions",
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//:host_schemas",
     ],
@@ -364,7 +365,7 @@ lash_rust_feature_test(
         "core-conversions",
         "default",
     ],
-    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = "//crates/lash-remote-protocol:lash-remote-protocol__fv_e76f1385",
     library_crate_name = "lash_remote_protocol",

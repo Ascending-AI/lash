@@ -20,18 +20,13 @@ never batched -- the generator emits only qualifying labels, and the coverage
 contract reconciles `WORKSPACE_TEST_BATCHES` against
 `WORKSPACE_BAZEL_TEST_TARGETS` so a silently dropped member fails CI.
 
-A batch declares what it runs. It reserves `BATCH_JOBS` member slots, each the
-size of one member's own test-run request (the generator only batches members
-sized at the test floor, 4 CPU / 4 GiB), as `test.cpu_count` / `test.memory_kb`
-on the TestRunner spawn, and the runner starts at most `BATCH_JOBS` members at
-once. Test runs use 0.5 cores at p50 and 2.4 at p95 against that 4-CPU floor,
-so two concurrent members fit an 8-CPU reservation, the same size as the
-largest standalone test runs, while each still has its own floor.
+A batch declares what it runs. The generator sizes it from its members' own
+test-run requests (measured per label, see `tools/bazel/test-run-sizes.json`):
+it reserves the sum of its `jobs` largest members' requests, as
+`test.cpu_count` / `test.memory_kb` on the TestRunner spawn, and the runner
+starts at most `jobs` members at once, so whichever members run side by side
+fit the reservation.
 """
-
-# Members running at once. The runner reads it from `LASH_BATCH_JOBS`, never
-# from `nproc`, which sees the worker's cores and not this reservation.
-BATCH_JOBS = 2
 
 def _rloc(file):
     """Path of a file inside a test's runfiles tree."""
@@ -96,23 +91,25 @@ _lash_batch_test = rule(
     test = True,
 )
 
-def lash_batch_test(name, tests, member_cpu_count, member_memory_kb, **kwargs):
-    """A package's plain test binaries, run `BATCH_JOBS` at a time.
+def lash_batch_test(name, tests, jobs, cpu_count, memory_kb, **kwargs):
+    """A package's plain test binaries, run `jobs` at a time.
 
     Args:
       name: the batch label.
       tests: the member `rust_test` targets.
-      member_cpu_count: the test-run CPU request of every member.
-      member_memory_kb: the test-run memory request of every member.
+      jobs: members the runner starts at once.
+      cpu_count: the test-run CPU reservation, the sum of the `jobs` largest
+        member requests.
+      memory_kb: the test-run memory reservation, likewise.
       **kwargs: forwarded to the rule.
     """
     _lash_batch_test(
         name = name,
         exec_properties = {
-            "test.cpu_count": str(BATCH_JOBS * member_cpu_count),
-            "test.memory_kb": str(BATCH_JOBS * member_memory_kb),
+            "test.cpu_count": str(cpu_count),
+            "test.memory_kb": str(memory_kb),
         },
-        jobs = BATCH_JOBS,
+        jobs = jobs,
         tests = tests,
         **kwargs
     )
