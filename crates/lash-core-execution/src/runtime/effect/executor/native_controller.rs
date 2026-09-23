@@ -945,8 +945,10 @@ impl NativeEffectGroups {
             // The wait a cancellable `AwaitEvent` child is parked on: dropping
             // the execution future never polls the waiter's own release arm,
             // so the cancel arm below resolves the promise itself — the same
-            // release the store tier's `execute_effect_cancellable` writes
-            // (ADR 0099 §12, FIG-3411).
+            // release the store tier's group dispatch writes (ADR 0099 §12,
+            // FIG-3411). The arm is taken whether or not the wait had parked:
+            // the task always polls, and a cancel seated first wins the
+            // biased select.
             let cancel_wait_key = match &child.command {
                 RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
                 _ => None,
@@ -1109,12 +1111,21 @@ impl NativeEffectGroups {
     /// Serves the settlement recorded at `rank` without touching any caller
     /// cursor (ADR 0099 §8): the read a §6 incorporation prefix makes, which
     /// needs the child's durable identity rather than its declared position.
+    ///
+    /// A rank read is a read of the record, not of caller interest, so it is
+    /// answered for a closed group and for one the spawned finalizer already
+    /// reaped — the retained record is the same state (FIG-3567). The SQL
+    /// tiers answer it from the journal whatever the lifecycle; answering it
+    /// here only until the reaper ran would make a post-close read race the
+    /// finalizer.
     fn read_settlement(
         groups: &Arc<Self>,
         group_key: &str,
         rank: u64,
     ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        let state = groups.lookup(group_key)?;
+        let state = groups
+            .retained(group_key)
+            .ok_or_else(|| closed_group_error(group_key))?;
         let inner = state.state.lock_recover();
         let index = usize::try_from(rank)
             .ok()
@@ -1485,6 +1496,14 @@ impl NativeEffectGroups {
         self.open.read_recover().get(group_key).cloned()
     }
 
+    /// The group's state while it is open or after the reaper retired it —
+    /// the one record a reopen resurrects and a rank read serves — until its
+    /// scope retires.
+    fn retained(&self, group_key: &str) -> Option<Arc<NativeEffectGroup>> {
+        self.get(group_key)
+            .or_else(|| self.retired.lock_recover().get(group_key).cloned())
+    }
+
     fn lookup(
         &self,
         group_key: &str,
@@ -1683,16 +1702,9 @@ impl NativeEffectGroups {
     /// than on the contract.
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn recorded(&self, group_key: &str) -> Vec<RecordedSettlement> {
-        let Some(state) = self.get(group_key) else {
-            return self
-                .retired
-                .lock_recover()
-                .get(group_key)
-                .map(|state| Self::snapshot(&state.state.lock_recover()))
-                .unwrap_or_default();
-        };
-        let inner = state.state.lock_recover();
-        Self::snapshot(&inner)
+        self.retained(group_key)
+            .map(|state| Self::snapshot(&state.state.lock_recover()))
+            .unwrap_or_default()
     }
 
     #[cfg(any(test, feature = "testing"))]
