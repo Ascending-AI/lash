@@ -226,14 +226,28 @@ pub enum RemoteTurnStatus {
     Completed,
     Failed,
     Cancelled,
+    /// No turn ran; the accepted input waits in the next-turn queue.
+    Queued,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnOutcome {
-    Finished { finish: RemoteTurnFinish },
-    AgentFrameSwitch { frame_key: String, task: String },
-    Stopped { stop: RemoteTurnStop },
+    Finished {
+        finish: RemoteTurnFinish,
+    },
+    AgentFrameSwitch {
+        frame_key: String,
+        task: String,
+    },
+    Stopped {
+        stop: RemoteTurnStop,
+    },
+    /// No turn ran: the accepted input waits behind `ahead` earlier inputs and
+    /// the queued-work drain answers it in order.
+    Queued {
+        ahead: u64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -284,6 +298,7 @@ impl From<&RemoteTurnOutcome> for RemoteTurnStatus {
                 stop: RemoteTurnStop::Cancelled { .. },
             } => Self::Cancelled,
             RemoteTurnOutcome::Stopped { .. } => Self::Failed,
+            RemoteTurnOutcome::Queued { .. } => Self::Queued,
         }
     }
 }

@@ -773,6 +773,22 @@ impl TurnBoundary {
                     let observed = store.turn_cancel_request_intent(&address).await?;
                     commit.interrupted_turn_cancel_intent = Some(observed);
                 }
+                // A replayed journaled initial drive whose rows were reclaimed
+                // was answered by another driver: cede, never drop and commit
+                // the same words again (ADR 0069 §6). The refusal travels as
+                // the typed runtime error the turn's caller classifies.
+                Err(err) if claim_settlement.cedes(&err) => {
+                    return Err(StoreError::TurnOutcomeMaterializationRefused {
+                        error: Box::new(crate::RuntimeError::new(
+                            crate::RuntimeErrorCode::AcceptedTurnInputCeded,
+                            format!(
+                                "the journaled initial drive set of this turn was reclaimed \
+                                 by another driver before it could commit, so another turn \
+                                 answered it; nothing was committed: {err}"
+                            ),
+                        )),
+                    });
+                }
                 Err(err) if can_retry_recovered_settlement && retry_budget.consume() => {
                     let dropped =
                         claim_settlement.drop_superseded(&err, current_session_lease_generation);

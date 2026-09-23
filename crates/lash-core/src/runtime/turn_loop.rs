@@ -70,9 +70,11 @@ pub(in crate::runtime) struct TurnLeaseScope<'lease> {
 /// Cancellation is its own trace variant carrying the evidence
 /// [`TurnStop::Cancelled`] already holds, so a cancelled turn is never traced
 /// as a failure.
-fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
+fn trace_outcome(outcome: &TurnOutcome) -> Option<lash_trace::TraceTurnOutcome> {
     use lash_trace::{TraceTurnCompletionReason as Reason, TraceTurnOutcome as Outcome};
-    match outcome {
+    Some(match outcome {
+        // A queued call ran no turn, so there is no completed turn to trace.
+        TurnOutcome::Queued { .. } => return None,
         TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => Outcome::Completed {
             done_reason: Reason::AssistantMessage,
         },
@@ -129,7 +131,7 @@ fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
                 },
             }
         }
-    }
+    })
 }
 
 pub(super) fn post_commit_delivery_issue(

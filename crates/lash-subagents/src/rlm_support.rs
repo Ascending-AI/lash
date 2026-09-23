@@ -298,6 +298,9 @@ pub(crate) fn task_result_value(turn: &AssembledTurn) -> Result<Value, String> {
         TurnOutcome::Stopped(_) => {
             return Err("subagent process reported success for a stopped child turn".to_string());
         }
+        TurnOutcome::Queued { .. } => {
+            return Err("subagent child turn was queued instead of producing a result".to_string());
+        }
     };
     Ok(value)
 }

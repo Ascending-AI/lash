@@ -838,8 +838,12 @@ pub enum AcceptedTurnInputDrive {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AcceptedTurnInputRefusal {
-    /// A live claim held by another driver covers the accepted row.
-    ClaimedByAnotherDriver,
+    /// The accepted row is held by a claim of the live lease generation that
+    /// is not this drive's. The drive's turn holds that lease, so the holder is
+    /// another claim of the same lane: an earlier run of this drive body, or a
+    /// claim whose hand-back failed. The row stays claim-pinned until that
+    /// claim settles or the generation turns over, and is then drained.
+    HeldByLiveClaim,
     /// The accepted row is no longer open: another driver settled it, the host
     /// cancelled it, or `vacuum()` pruned it after either.
     SettledOrRemoved,

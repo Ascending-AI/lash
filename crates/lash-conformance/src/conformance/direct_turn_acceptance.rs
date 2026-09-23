@@ -1438,12 +1438,17 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
     };
     let late = enqueue_next_turn(&store, "admitted after the crash").await;
 
-    let (redrive_store, _) = RedriveStore::wrap(&store);
+    let (redrive_store, reads) = RedriveStore::wrap(&store);
     let redrive_store: Arc<dyn crate::RuntimePersistence> = redrive_store;
     journal
         .run(&redrive_store, provider, &turn_id, "the accepted words")
         .await
         .expect("the redrive commits the journaled drive set");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        0,
+        "the redrive drives the journaled set and never claims or reads a pending row"
+    );
 
     let requests = requests.lock().expect("request lock").clone();
     assert_eq!(requests.len(), 1, "only the redrive reached the provider");
@@ -1573,10 +1578,10 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
 }
 
 /// A direct turn whose accepted input sits behind more earlier admissions than
-/// one claim absorbs drives nothing and drops nothing: the call reports the
-/// input queued behind them, a replay reports the same queue position without
-/// reading a row, and the queued-work drain then answers every input in
-/// arrival order, each exactly once.
+/// one claim absorbs drives nothing and drops nothing: the call succeeds with a
+/// `Queued` outcome naming the inputs ahead, a replay reports the same queue
+/// position without reading a row, and the queued-work drain then answers
+/// every input in arrival order, each exactly once.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1594,19 +1599,22 @@ pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
     let queued = journal
         .run(&store, provider.clone(), &turn_id, "the direct input")
         .await
-        .expect_err("a direct turn past the claim bound reports its input queued");
-    assert_eq!(
-        queued.code,
-        crate::RuntimeErrorCode::TurnInputQueued,
-        "{queued:?}"
+        .expect("a direct turn past the claim bound succeeds with its input queued");
+    assert!(
+        matches!(queued.outcome, crate::TurnOutcome::Queued { ahead: 2 }),
+        "the call reports the queue position as its outcome: {:?}",
+        queued.outcome
     );
-    let Some(crate::RuntimeErrorCause::TurnInputQueued { acceptance, ahead }) =
-        queued.cause.clone()
-    else {
-        panic!("the queued outcome carries its acceptance and position: {queued:?}");
-    };
-    let input_id = acceptance.input_id.clone();
-    assert_eq!(ahead, 2);
+    let input_id = queued
+        .turn_input_acceptance
+        .as_ref()
+        .expect("a queued call reports its acceptance")
+        .input_id
+        .clone();
+    assert!(
+        queued.llm_calls.is_empty() && queued.tool_calls.is_empty(),
+        "a queued call ran no turn"
+    );
     assert!(
         matches!(
             journal.controller.journaled_drive(),
@@ -1638,8 +1646,19 @@ pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
             "the direct input",
         )
         .await
-        .expect_err("a replay reports the same queue position");
-    assert_eq!(replayed.cause, queued.cause);
+        .expect("a replay succeeds with the same queue position");
+    assert!(
+        matches!(replayed.outcome, crate::TurnOutcome::Queued { ahead: 2 }),
+        "{:?}",
+        replayed.outcome
+    );
+    assert_eq!(
+        replayed
+            .turn_input_acceptance
+            .as_ref()
+            .map(|acceptance| acceptance.input_id.clone()),
+        Some(input_id.clone())
+    );
     assert_eq!(reads.load(Ordering::SeqCst), 0);
 
     let mut drains = 0;
@@ -1703,4 +1722,95 @@ pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
             .is_some_and(|last| last.contains("the direct input")),
         "the queued direct input is answered last: {requests:?}"
     );
+}
+
+/// The worker dies after its drive is journaled and before its commit; while
+/// it is down, a recovery drain under a newer lease generation reclaims the
+/// same rows and answers them. The redrive replays the journaled claim, finds
+/// its settlement superseded, and cedes: it never commits the same words a
+/// second time without a settlement (ADR 0069 §6).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
+    prefix: &str,
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let turn_id = TurnId::from(format!("{prefix}-redrive-after-drain"));
+    let journal = Journal::new();
+    let (provider, _) = recording_provider("answered by the first driver to commit");
+    journal
+        .run_with_plugins(
+            &store,
+            provider.clone(),
+            vec![die_before_commit_plugin()],
+            &turn_id,
+            "answer me once",
+        )
+        .await
+        .expect_err("the worker dies after its drive is journaled");
+    let journaled = match journal.controller.journaled_drive() {
+        Some(crate::AcceptedTurnInputDrive::Claimed { claim }) => claim,
+        other => panic!("the first execution claimed its accepted row: {other:?}"),
+    };
+    let accepted = journaled.inputs[0].input_id.clone();
+
+    let mut drainer = acceptance_runtime(
+        &store,
+        &journal.effect_host,
+        provider.clone(),
+        Vec::new(),
+        crate::LeaseOwnerIdentity::opaque(
+            format!("{prefix}-recovery-owner"),
+            format!("{prefix}-recovery-incarnation"),
+        ),
+    )
+    .await;
+    let drain_id = format!("{prefix}-recovery-drain");
+    let drain_scope = journal
+        .effect_host
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
+        .expect("scope the recovery drain");
+    let drain = drainer
+        .stream_next_queued_work(crate::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            drain_scope,
+        ))
+        .await
+        .expect("the recovery drain runs");
+    assert!(
+        matches!(drain, crate::QueuedTurnDrain::Ran(_)),
+        "the recovery drain reclaims and answers the orphaned rows"
+    );
+    drop(drainer);
+
+    // The redrive resumes the session as the store now holds it, the drain's
+    // answer included: nothing about the head refuses it, so only the
+    // settlement can.
+    let ceded = journal
+        .run(&store, provider, &turn_id, "answer me once")
+        .await
+        .expect_err("a redrive whose rows another driver answered must not commit them again");
+    assert_eq!(
+        ceded.code,
+        crate::RuntimeErrorCode::AcceptedTurnInputCeded,
+        "{ceded:?}"
+    );
+    let applied = applications(&store).await;
+    assert_eq!(
+        applied
+            .iter()
+            .filter(|application| application.input_id == accepted)
+            .count(),
+        1,
+        "the input is answered exactly once: {applied:?}"
+    );
+    assert!(
+        applied
+            .iter()
+            .all(|application| application.turn_id.as_str() == drain_id),
+        "the recovery drain's turn is the one that answered it: {applied:?}"
+    );
+    assert!(pending_input_ids(&store).await.is_empty());
 }

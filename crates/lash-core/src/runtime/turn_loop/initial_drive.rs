@@ -78,10 +78,16 @@ impl RuntimeEffectLocalRunner for AcceptedTurnInputDriveRunner {
                 ),
             ));
         }
-        let drive = self
-            .drive()
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
+        // A store failure here is journaled with the effect under a durable
+        // engine, so it must not carry a retryable code: every retry of the
+        // invocation would replay the same failure. Like the acceptance
+        // write, it surfaces as a store-commit failure.
+        let drive = self.drive().await.map_err(|err| {
+            crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                format!("accepted turn input drive failed: {err}"),
+            )
+        })?;
         Ok(crate::RuntimeEffectOutcome::ClaimAcceptedTurnInput { drive })
     }
 }
@@ -170,9 +176,10 @@ impl AcceptedTurnInputDriveRunner {
                     }
                 }
                 // Held under the live lease generation, or any status this
-                // read cannot prove drivable: another driver owns the row.
+                // read cannot prove drivable: another claim of this lane owns
+                // the row.
                 _ => crate::AcceptedTurnInputDrive::Refused {
-                    refusal: crate::AcceptedTurnInputRefusal::ClaimedByAnotherDriver,
+                    refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim,
                 },
             },
             None => crate::AcceptedTurnInputDrive::Refused {

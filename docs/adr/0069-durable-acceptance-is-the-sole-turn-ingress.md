@@ -303,24 +303,33 @@ pruning terminal rows cannot affect a replay: a redrive after vacuum drives the
 journaled rows and replays the receipt, an input the host cancelled is never
 re-admitted, and a row admitted after the drive was journaled never joins the
 redriven turn. Only a first execution reads rows, and when it finds its own row
-held by another driver, or already settled, cancelled, or pruned, it cedes with
-the terminal typed error `accepted_turn_input_ceded`. It never re-admits a row.
-Replaying that refusal refuses again, which is why it is terminal.
+held by another claim of the live lease generation, or already settled,
+cancelled, or pruned, it cedes with the terminal typed error
+`accepted_turn_input_ceded`. It never re-admits a row. Replaying that refusal
+refuses again, which is why it is terminal.
+
+A replayed drive settles with the first execution's claim token. If the worker
+died after the drive was journaled and a recovery drain reclaimed and answered
+those rows meanwhile, the settlement is superseded, and the replay cedes at
+commit with the same `accepted_turn_input_ceded`: nothing is written. The
+journaled drive never joins ADR 0029's recovered-settlement drop, because
+dropping the superseded rows and committing anyway would answer the same words
+a second time.
 
 A queued drive drops nothing and withdraws nothing. The accepted row stays in
-the next-turn queue in arrival order, the call reports `turn_input_queued` with
-the acceptance receipt and the number of inputs ahead of it, and the queued-work
-drain answers it in order, exactly once. The claim bound is host policy
+the next-turn queue in arrival order, the call succeeds with one turn whose
+outcome is `TurnOutcome::Queued { ahead }` and which carries the acceptance
+receipt, and the queued-work drain answers the input in order, exactly once. The claim bound is host policy
 (`QueuedWorkBatchingConfig::with_max_turn_input_claim`, default 64), shared by
 the direct-turn drive and the drain because they claim from the same queue.
-Retrying the call would admit the words a second time, so the outcome is not
-retryable; replaying the turn reports the same queue position.
+Retrying the call would admit the words a second time; replaying the turn
+reports the same queue position.
 
 This is the second regime's replay story and it introduces no third one.
 Acceptance replay adds **no third authority** beside the claim predicate and the
-head CAS: the journaled drive replays the claim predicate's own token, and an
-unclaimed drive still settles under the head CAS alone. To be precise about what
-that does and does not say: a direct turn that takes the advisory lane claims its row through the same generation-fenced
+head CAS: the journaled drive replays the claim predicate's own token. To be
+precise about what that does and does not say: a direct turn that takes the
+advisory lane claims its row through the same generation-fenced
 `claim_next_turn_inputs` a drain uses, so it *is* lease-generation fenced —
 that is the claimed regime, unchanged. What section 6 rules out is a *separate*
 generation fence attached to acceptance replay itself, on top of the two

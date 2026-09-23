@@ -61,14 +61,14 @@ finish(result);
     }
 }
 
-/// The live pass's worker dies at its final commit: every effect ran and was
+/// The live pass's store refuses every commit, so its worker dies at its final commit: every effect ran and was
 /// journaled, and nothing was committed.
-struct DiesAtCommitStore {
+struct RefusesEveryCommitStore {
     inner: Arc<dyn lash_core::RuntimePersistence>,
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for DiesAtCommitStore {
+impl lash_core::store::RuntimePersistenceDecorator for RefusesEveryCommitStore {
     fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
         self.inner.as_ref()
     }
@@ -232,7 +232,7 @@ impl ProductionToolCell {
             self.policy.clone(),
             self.initial_state.clone(),
             self.host.clone(),
-            Arc::new(DiesAtCommitStore {
+            Arc::new(RefusesEveryCommitStore {
                 inner: Arc::clone(&self.runtime_store),
             }),
             self.plugin_factories.clone(),

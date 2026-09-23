@@ -1345,11 +1345,26 @@ impl TurnReport {
         }
     }
 
+    /// A queued call is a success: the input is durably admitted and will be
+    /// answered in order ([`Self::queued_ahead`]).
     pub fn is_success(&self) -> bool {
         matches!(
             self.outcome,
-            TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
+            TurnOutcome::Finished(_)
+                | TurnOutcome::AgentFrameSwitch { .. }
+                | TurnOutcome::Queued { .. }
         )
+    }
+
+    /// How many earlier inputs the accepted input waits behind, when this call
+    /// ran no turn because the input sits past one claim's bound. The
+    /// queued-work drain answers it in arrival order; resubmitting would admit
+    /// the words a second time. `None` for a turn that ran.
+    pub fn queued_ahead(&self) -> Option<u64> {
+        match self.outcome {
+            TurnOutcome::Queued { ahead } => Some(ahead),
+            _ => None,
+        }
     }
 
     /// Returns whether the turn stopped because the assembled context
@@ -1472,5 +1487,23 @@ pub fn message_role(message: &Message) -> &'static str {
         MessageRole::Assistant => "assistant",
         MessageRole::System => "system",
         MessageRole::Event => "event",
+    }
+}
+
+#[cfg(test)]
+mod queued_report_tests {
+    use super::{TurnOutcome, TurnReport};
+
+    #[test]
+    fn a_queued_report_is_a_success_that_names_its_queue_position() {
+        let mut turn = lash_core::testing::mock_assembled_turn(
+            &lash_core::SessionId::from("queued-session"),
+            "",
+        );
+        turn.outcome = TurnOutcome::Queued { ahead: 3 };
+        let report = TurnReport::from_assembled(turn);
+        assert!(report.is_success(), "a queued call is not a failure");
+        assert_eq!(report.queued_ahead(), Some(3));
+        assert_eq!(report.assistant_message(), None);
     }
 }

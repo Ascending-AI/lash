@@ -154,10 +154,10 @@ impl LashRuntime {
     /// * **An input behind a full claim is queued, not driven.** When more
     ///   earlier inputs wait than one claim absorbs
     ///   ([`QueuedWorkBatchingConfig::max_turn_input_claim`](crate::QueuedWorkBatchingConfig::max_turn_input_claim)),
-    ///   the call drives nothing and returns
-    ///   [`RuntimeErrorCode::TurnInputQueued`] carrying the acceptance and the
-    ///   number of inputs ahead; the queued-work drain answers it in order.
-    ///   Retrying would admit it twice.
+    ///   the call drives nothing and succeeds with one turn whose outcome is
+    ///   [`TurnOutcome::Queued`](crate::TurnOutcome::Queued), carrying the
+    ///   acceptance and the number of inputs ahead; the queued-work drain
+    ///   answers it in order. Retrying would admit it twice.
     /// * **Live per-turn context stays with this caller.** `protocol_extension`
     ///   and live `TurnContext` plugin inputs are process-local and cannot be
     ///   persisted, so a worker that recovers this accepted row drives its
@@ -371,21 +371,35 @@ impl LashRuntime {
         let drive = match drive {
             Ok(crate::AcceptedTurnInputDrive::Claimed { claim }) => *claim,
             Ok(crate::AcceptedTurnInputDrive::Queued { ahead }) => {
+                // No turn runs: the accepted row waits in arrival order and
+                // the queued-work drain answers it. The call reports that as
+                // an outcome, not a failure.
                 if let Some(lease) = session_execution_lease.as_ref() {
                     let _ = lease.release_if_live().await;
                 }
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::TurnInputQueued,
-                    format!(
-                        "accepted turn input `{}` is queued behind {ahead} earlier inputs; it \
-                         will be answered in order",
-                        accepted.input_id
-                    ),
-                )
-                .with_cause(crate::RuntimeErrorCause::TurnInputQueued {
-                    acceptance: Box::new(acceptance),
-                    ahead,
-                }));
+                let mut queued = crate::AssembledTurn {
+                    state: self.export_state(),
+                    outcome: crate::TurnOutcome::Queued { ahead },
+                    assistant_output: crate::AssistantOutput {
+                        safe_text: String::new(),
+                        raw_text: String::new(),
+                        state: crate::OutputState::EmptyOutput,
+                    },
+                    execution: crate::TurnExecutionMetrics::default(),
+                    token_usage: crate::TokenUsage::default(),
+                    llm_calls: Vec::new(),
+                    tool_calls: Vec::new(),
+                    omitted: None,
+                    failure_evidence: Vec::new(),
+                    errors: Vec::new(),
+                    turn_input_acceptance: Some(acceptance.clone()),
+                    turn_cancel_input_outcome: Default::default(),
+                };
+                stopwatch.stamp(&mut queued, self.host.core.clock.as_ref());
+                return Ok(AgentFrameRun {
+                    turns: vec![queued],
+                    acceptance: Some(acceptance),
+                });
             }
             Ok(crate::AcceptedTurnInputDrive::Refused { refusal }) => {
                 if let Some(lease) = session_execution_lease.as_ref() {
@@ -394,9 +408,10 @@ impl LashRuntime {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::AcceptedTurnInputCeded,
                     match refusal {
-                        crate::AcceptedTurnInputRefusal::ClaimedByAnotherDriver => format!(
-                            "accepted turn input `{}` was claimed by another driver before this \
-                             turn could drive it; its turn completes without this caller",
+                        crate::AcceptedTurnInputRefusal::HeldByLiveClaim => format!(
+                            "accepted turn input `{}` is held by another claim of this session's \
+                             live lease generation, so this turn cannot drive it; it is \
+                             answered once that claim settles or its generation turns over",
                             accepted.input_id
                         ),
                         crate::AcceptedTurnInputRefusal::SettledOrRemoved => format!(
@@ -429,6 +444,10 @@ impl LashRuntime {
         driven.turn_context = input.turn_context.clone();
 
         let claim_for_abandon = drive.clone();
+        // A replay carries the first execution's claim token; if another
+        // driver reclaimed these rows meanwhile, the commit cedes instead of
+        // dropping the settlement and answering them twice.
+        self.journaled_drive_claims.insert(drive.claim_id.clone());
         let scoped_effect_controller = opts.scoped_effect_controller();
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(driven),
@@ -441,6 +460,8 @@ impl LashRuntime {
             stopwatch,
         ))
         .await;
+        self.journaled_drive_claims
+            .remove(&claim_for_abandon.claim_id);
         if let Err(err) = &result {
             self.abandon_turn_input_claims_after_local_abort(
                 err,

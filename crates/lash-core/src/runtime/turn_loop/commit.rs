@@ -650,6 +650,7 @@ impl LashRuntime {
             );
         let commit_effects = claims.commit_effects(
             prepared.outcome(),
+            &self.journaled_drive_claims,
             &self.state.session_id,
             &trace_turn_id,
             Some(self.state.effective_protocol_turn_options().clone()),
@@ -1025,7 +1026,9 @@ impl LashRuntime {
             return;
         }
 
-        let trace_outcome = trace_outcome(outcome);
+        let Some(trace_outcome) = trace_outcome(outcome) else {
+            return;
+        };
         crate::trace::emit_trace(
             &self.host.core.tracing.trace_sink,
             &self.host.core.tracing.trace_context,

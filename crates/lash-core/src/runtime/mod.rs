@@ -543,6 +543,12 @@ pub struct LashRuntime {
     /// ledger's unreported rows; this is the attribution a later
     /// [`LashRuntime::reconcile_unreported_usage`] needs.
     pub unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
+    /// Claim ids of the journaled initial drive set the running direct turn
+    /// replays (ADR 0069 §6). Such a claim is exempt from the
+    /// recovered-settlement drop: if its rows were reclaimed while the turn was
+    /// down, another driver answered them, so the turn cedes at commit instead
+    /// of committing the same words without a settlement.
+    pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
 }
 
 #[cfg(any(test, feature = "testing"))]

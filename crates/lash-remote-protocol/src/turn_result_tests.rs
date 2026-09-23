@@ -15,6 +15,20 @@ fn remote_turn_status_projects_explicit_stopped_outcome_as_failed() {
 }
 
 #[test]
+fn remote_turn_status_projects_queued_outcome_as_queued_on_the_wire() {
+    let outcome = RemoteTurnOutcome::Queued { ahead: 3 };
+    assert_eq!(RemoteTurnStatus::from(&outcome), RemoteTurnStatus::Queued);
+    assert_eq!(
+        serde_json::to_value(&outcome).expect("encode queued outcome"),
+        serde_json::json!({"type": "queued", "ahead": 3})
+    );
+    assert_eq!(
+        serde_json::to_value(RemoteTurnStatus::Queued).expect("encode queued status"),
+        serde_json::json!("queued")
+    );
+}
+
+#[test]
 fn remote_turn_status_no_longer_accepts_in_progress_on_the_wire() {
     // Version 44 removed the variant; a version 43 peer can still emit the
     // literal, so pin that the decoder and the published schema both refuse

@@ -45,31 +45,22 @@ pub enum RuntimeErrorCode {
     /// retry policy - the runtime deliberately stops waiting instead of
     /// blocking one invocation indefinitely.
     SessionExecutionLaneBusy,
-    /// A turn that drove the acceptance it minted, without a claim on it, lost
-    /// the head CAS to whoever holds or already settled that row (ADR 0069
-    /// §5). The drive attempt is retired as superseded: no durable record was
-    /// written, the settlement is never retried under a new authority, and the
-    /// row stays exactly where recovery expects to find it. Re-running the
-    /// identical turn is explicitly safe - the journaled acceptance and drive
-    /// set re-derive the same turn, so a re-run either settles the rows or
-    /// finds the original commit's receipt and replays it rather than
-    /// duplicating it (ADR 0069 §6).
+    /// A claim-less turn-input settlement lost the head CAS to whoever holds or
+    /// already settled that row (ADR 0069 §5): no durable record was written.
+    /// Since the initial drive set is journaled with its claim (ADR 0069 §6),
+    /// no runtime path settles without a claim; the store still verifies the
+    /// claim-less predicate, and this code maps its refusal. The FIG-3540
+    /// ingress cutover deletes claim-less settlement together with this code.
     TurnInputSettlementSuperseded,
-    /// The journaled initial drive of a turn refused the input that turn
-    /// accepted: another driver holds it under a live claim, or it is no longer
-    /// open because it was settled, cancelled, or pruned by `vacuum()`. The
-    /// drive is a journaled effect (ADR 0069 §6), so re-running the same turn
-    /// replays the same refusal; the accepted input is answered, if at all, by
-    /// the driver that holds or settled it.
+    /// The journaled initial drive of a turn cannot drive the input that turn
+    /// accepted: another claim of the live lease generation holds it; it is no
+    /// longer open because it was settled, cancelled, or pruned by `vacuum()`;
+    /// or, on a replay, a recovery drain reclaimed the journaled rows before the
+    /// turn could commit them. Nothing is committed. The drive is a journaled
+    /// effect (ADR 0069 §6), so re-running the same turn cedes the same way; the
+    /// accepted input is answered, if at all, by the driver that holds or
+    /// settled it.
     AcceptedTurnInputCeded,
-    /// A direct turn's accepted input is queued, not driven: it sits behind
-    /// more earlier admissions than one claim absorbs, so this call drove
-    /// nothing and the queued-work drain answers it in arrival order. Nothing
-    /// was dropped. [`RuntimeErrorCause::TurnInputQueued`] carries the input's
-    /// acceptance receipt and how many inputs are ahead of it. The outcome is journaled (ADR 0069
-    /// §6), so re-running the same turn reports the same queue position, and
-    /// retrying the call as a new turn would admit the words a second time.
-    TurnInputQueued,
     /// A turn was attempted on a runtime opened with
     /// `ToolSurfaceOpenMode::PreservePersisted` (FIG-3353). That open declared
     /// it would not run a turn: its tool surface was never reconciled and no
@@ -497,7 +488,6 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
             Self::AcceptedTurnInputCeded => "accepted_turn_input_ceded",
-            Self::TurnInputQueued => "turn_input_queued",
             Self::TurnExecutionRequiresReconciledToolSurface => {
                 "turn_execution_requires_reconciled_tool_surface"
             }
@@ -789,7 +779,6 @@ impl RuntimeErrorCode {
             | Self::ExecutionScopeTurnIdMismatch
             | Self::ExecutionScopeAdmissionRefused
             | Self::AcceptedTurnInputCeded
-            | Self::TurnInputQueued
             | Self::TurnExecutionRequiresReconciledToolSurface
             | Self::QueuedRunFailed
             | Self::QueuedRunConfigurationChanged
@@ -975,7 +964,6 @@ impl RuntimeErrorCode {
         Self::SessionExecutionLaneBusy,
         Self::TurnInputSettlementSuperseded,
         Self::AcceptedTurnInputCeded,
-        Self::TurnInputQueued,
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
         Self::QueuedRunPending,
@@ -1174,7 +1162,6 @@ impl RuntimeErrorCode {
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
             "accepted_turn_input_ceded" => Self::AcceptedTurnInputCeded,
-            "turn_input_queued" => Self::TurnInputQueued,
             "turn_execution_requires_reconciled_tool_surface" => {
                 Self::TurnExecutionRequiresReconciledToolSurface
             }
@@ -1457,16 +1444,7 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
-    SessionDeleted {
-        session_id: SessionId,
-    },
-    /// The accepted input of a direct turn waits in the next-turn queue behind
-    /// `ahead` earlier admissions; the queued-work drain answers it in order.
-    /// `acceptance` is the same receipt a driven turn reports.
-    TurnInputQueued {
-        acceptance: Box<crate::turn_input_vocabulary::TurnInputAcceptanceReceipt>,
-        ahead: u64,
-    },
+    SessionDeleted { session_id: SessionId },
 }
 /// Runtime error for unexpected failures.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1513,7 +1491,6 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&str> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::TurnInputQueued { .. } => None,
         }
     }
 

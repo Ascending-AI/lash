@@ -625,6 +625,14 @@ pub(crate) fn validate_runtime_perf_turn(
                 frame_key.as_str()
             );
         }
+        TurnOutcome::Queued { ahead } => {
+            anyhow::bail!(
+                "runtime perf scenario {} turn {} was queued behind {} inputs",
+                scenario.name(),
+                turn_index + 1,
+                ahead
+            );
+        }
         TurnOutcome::Stopped(stop) => {
             anyhow::bail!(
                 "runtime perf scenario {} turn {} stopped with {:?}; assistant_output={:?}",

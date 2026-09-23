@@ -49,11 +49,12 @@ pub enum StoreError {
     /// ambiguous and all live lease/claim ownership can be handed back.
     #[error("failed to snapshot dirty execution state: {message}")]
     ExecutionStateCaptureFailed { message: String },
-    /// The turn's finalized outcome could not be materialized into resident
-    /// state, so the commit aborted before any durable write. The typed runtime
-    /// refusal travels unchanged: the turn's caller classifies it by its own
-    /// code, never by this wrapper. Boxed so the carried error does not grow
-    /// every `Result` that returns a store error.
+    /// The runtime refused the turn's final commit: its finalized outcome
+    /// could not be materialized into resident state, or a replayed journaled
+    /// drive set was superseded and the turn ceded (ADR 0069 §6). Nothing was
+    /// written. The typed runtime refusal travels unchanged: the turn's caller
+    /// classifies it by its own code, never by this wrapper. Boxed so the
+    /// carried error does not grow every `Result` that returns a store error.
     #[error("turn outcome materialization refused: {error}")]
     TurnOutcomeMaterializationRefused { error: Box<crate::RuntimeError> },
     /// The backend could not acquire its transactional write authority because

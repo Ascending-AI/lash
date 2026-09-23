@@ -46,9 +46,8 @@ pub(super) struct PhysicalTurnExecution {
 
 pub(super) struct LogicalTurnClaims {
     pub(super) queued: Vec<crate::QueuedWorkClaim>,
-    /// The turn-input rows this turn drives, each with the authority it will
-    /// settle under: a generation-fenced claim, or none at all when the turn
-    /// accepted the row itself and settles it at the head CAS (ADR 0069 §5).
+    /// The turn-input rows this turn drives, each under the generation-fenced
+    /// claim it will settle.
     pub(super) turn_inputs: Vec<crate::TurnInputClaim>,
     /// Work this turn claimed at its terminal checkpoint and withheld from the
     /// delivery. It is never settled as this turn's completed work: it is the
@@ -118,9 +117,13 @@ impl LogicalTurnClaims {
         withheld.take_if_any()
     }
 
+    /// `journaled_drive_claims` names the claims of a replayed journaled
+    /// initial drive set: they never join the recovered-settlement drop, so a
+    /// superseded one cedes the turn (ADR 0069 §6).
     pub(super) fn commit_effects(
         &self,
         outcome: &TurnOutcome,
+        journaled_drive_claims: &std::collections::BTreeSet<String>,
         session_id: &SessionId,
         turn_id: &TurnId,
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
@@ -138,10 +141,17 @@ impl LogicalTurnClaims {
             .iter()
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
-        let turn_input_claim_generations = self
+        let (ceding_turn_input_claims, recoverable_turn_input_claims): (Vec<_>, Vec<_>) = self
             .turn_inputs
             .iter()
+            .partition(|claim| journaled_drive_claims.contains(&claim.claim_id));
+        let turn_input_claim_generations = recoverable_turn_input_claims
+            .iter()
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
+            .collect();
+        let ceding_turn_input_claims = ceding_turn_input_claims
+            .iter()
+            .map(|claim| claim.claim_id.clone())
             .collect();
         let enqueued_queue_batches = match outcome {
             TurnOutcome::AgentFrameSwitch {
@@ -183,7 +193,8 @@ impl LogicalTurnClaims {
                 queue_claim_generations,
                 turn_input_claim_generations,
             )
-            .with_undelivered_turn_inputs(undelivered_turn_inputs),
+            .with_undelivered_turn_inputs(undelivered_turn_inputs)
+            .ceding_on_supersession(ceding_turn_input_claims),
             enqueued_queue_batches,
         }
     }

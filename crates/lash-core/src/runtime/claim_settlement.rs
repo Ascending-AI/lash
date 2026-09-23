@@ -47,6 +47,11 @@ pub(super) struct TurnClaimSettlement {
     /// is released for the cancellation's undelivered disposition, never
     /// completed (FIG-3531).
     pub(super) undelivered_turn_inputs: Vec<crate::TurnInputClaim>,
+    /// Turn-input claims whose supersession cedes the turn instead of being
+    /// dropped and retried: the replayed journaled initial drive set
+    /// (ADR 0069 §6). Its rows being reclaimed means another driver answered
+    /// them, and committing the same words again would answer them twice.
+    ceding_turn_input_claims: std::collections::BTreeSet<String>,
 }
 
 impl TurnClaimSettlement {
@@ -60,6 +65,7 @@ impl TurnClaimSettlement {
             queued: ClaimSettlement::new(queued, queue_generations),
             turn_inputs: ClaimSettlement::new(turn_inputs, input_generations),
             undelivered_turn_inputs: Vec::new(),
+            ceding_turn_input_claims: std::collections::BTreeSet::new(),
         }
     }
 
@@ -69,6 +75,24 @@ impl TurnClaimSettlement {
     ) -> Self {
         self.undelivered_turn_inputs = undelivered;
         self
+    }
+
+    pub(super) fn ceding_on_supersession(
+        mut self,
+        claims: std::collections::BTreeSet<String>,
+    ) -> Self {
+        self.ceding_turn_input_claims = claims;
+        self
+    }
+
+    /// Whether `error` supersedes a claim that cedes the turn rather than
+    /// being dropped from the settlement.
+    pub(super) fn cedes(&self, error: &crate::StoreError) -> bool {
+        matches!(
+            error,
+            crate::StoreError::TurnInputClaimSuperseded { claim_id, .. }
+                if self.ceding_turn_input_claims.contains(claim_id.as_str())
+        )
     }
 
     pub(super) fn has_recovered(&self, current: Option<u64>) -> bool {
@@ -111,6 +135,7 @@ impl TurnClaimSettlement {
                 input_generations,
             ),
             undelivered_turn_inputs: Vec::new(),
+            ceding_turn_input_claims: std::collections::BTreeSet::new(),
         }
     }
 }
