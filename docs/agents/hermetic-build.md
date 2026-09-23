@@ -550,10 +550,13 @@ exception: `rlm` is inside the resolved default workspace graph, so the label
 is recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`
 and keeps its Cargo recipe.
 
-The main CI workflow makes this a single authoritative partition. Trusted
-same-repository pull requests and merge-queue groups run `//:workspace_tests`
-with the authenticated shared cache. `main` pushes skip that core board (the
-queue already witnessed the SHA) and keep breadth jobs. A Rust PR runs no Cargo
+The main CI workflow makes the merge group the authoritative complete partition.
+Trusted same-repository pull requests select deterministic tests in changed
+packages and their reverse dependencies, with `//:workspace_tests` as the
+fallback for uncertain diffs or graph queries. Merge-queue groups run the full
+`//:workspace_tests` partition, split into core and tail jobs, on the combined
+tree. There is no `main` push CI trigger because the queue witnessed the merged
+tree. A Rust PR runs no Cargo
 workspace job on a trusted event. A merge-queue run before this cutover spent
 4m15s building the workbench on a two-core runner to execute one 1.3s browser
 test; Bazel now compiles the existing workbench unit binary on the shared pool

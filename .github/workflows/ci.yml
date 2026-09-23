@@ -3,7 +3,7 @@ name: CI
 # GitHub natively skips pull-request runs when the head commit requests a CI
 # skip, so no per-job guards are needed for that.
 #
-# CI validates pull requests and the resulting commits in the merge queue.
+# CI preflights pull requests and validates the combined tree in the merge queue.
 # Releases are separate: a maintainer manually dispatches release.yml for a
 # green commit on main, which in turn requires a manual full-profile dispatch
 # of this workflow against that exact commit. Ordinary merges never tag or
@@ -13,9 +13,9 @@ name: CI
 # nothing at all. Trunk breadth on push (FIG-2789) is retired: the queue
 # validates the required core board on its merge-group commit and main merges
 # by fast-forwarding to that same commit, so an automatic push carried a tree
-# CI had already seen. Pull requests and merge_group run the minimal core
-# board — the Bazel partition (tests and the workspace compile) plus
-# path-gated jobs — so wall time is pool queueing, not runner minutes. The
+# CI had already seen. Pull requests run a conservative reverse-dependency
+# Bazel test selection and path-gated jobs; merge_group runs the complete
+# deterministic Bazel partition on the combined tree. The
 # breadth families — Test heavy suites, Test S3 store, Functional E2E, Restate
 # workers E2E, Fuzz smoke, Stack budget, deferred Unicode, worker artifacts —
 # are gated to `workflow_dispatch` alone, which is also the profile
@@ -488,6 +488,7 @@ jobs:
           python3 scripts/test_generate_workflow_schemas.py
           python3 scripts/test_schema_validation.py
           python3 scripts/test_dev_test.py
+          python3 scripts/test_pr_test_targets.py
           python3 scripts/test_test_batch_runner.py
           python3 scripts/test_launcher_test_sandbox.py
           python3 scripts/test_check_checkpoint_component_flatten.py
@@ -763,8 +764,10 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
-  # The deterministic/default-feature partition is authoritative on trusted
-  # events. The job executes locally on a GitHub-hosted runner and only shares
+  # The merge group owns the complete deterministic/default-feature partition.
+  # Trusted pull requests preflight changed targets and their reverse dependencies,
+  # falling back to the complete suite when selection is uncertain. The job
+  # executes locally on a GitHub-hosted runner and only shares
   # action results with that exact runner image identity, never Kiln's executor
   # identity. Fork and Dependabot pull requests intentionally skip this
   # secret-bearing job and retain the full Cargo workspace suite below.
@@ -791,7 +794,9 @@ jobs:
           # Bounded and retried: a fetch that hangs used to hold the runner until the
           # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
           for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+            # PR GITHUB_SHA is a synthetic merge commit. Fetch its parents so
+            # the selector can prove the event base is an ancestor of HEAD.
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=2 origin "${GITHUB_SHA}"; then
               break
             fi
             [ "${attempt}" -lt 3 ] || exit 1
@@ -811,13 +816,28 @@ jobs:
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
-      # Every label here is deterministic and service-free, so reusing a
-      # successful result is sound. The service-backed labels are `manual` and
-      # never reach this aggregate; scripts/ci/store-tests.sh runs those with
-      # `--nocache_test_results`.
-      - name: Test deterministic workspace suite with shared cache
+      - name: Select deterministic PR tests
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/pr_test_targets.py \
+            --base "$PR_BASE_SHA" --output-user-root "$BAZEL_OUTPUT_USER_ROOT" \
+            > "$RUNNER_TEMP/pr-test-targets.txt"
+
+      # Every selected label is deterministic and service-free; service-backed
+      # tests remain manual and scripts/ci/store-tests.sh runs them fresh.
+      - name: Test deterministic PR selection or merge-group suite
         shell: bash
         run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            mapfile -t test_targets < "$RUNNER_TEMP/pr-test-targets.txt"
+          else
+            test_targets=(//:workspace_tests -//:workspace_tail_tests)
+          fi
           # shellcheck disable=SC2086
           # The all-targets compile proof rides the Lint job instead:
           # `//:workspace_clippy` type-checks the same 189-target workspace
@@ -837,7 +857,7 @@ jobs:
             --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
-            -- //:workspace_tests -//:workspace_tail_tests
+            -- "${test_targets[@]}"
 
       # FIG-3429 item 8: conformance laws leave an execution receipt in each
       # target's undeclared outputs; this census fails on any registered law
@@ -880,7 +900,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
+    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true' && github.event_name != 'pull_request'
     environment: build-cache
     steps:
       - name: Check out repository

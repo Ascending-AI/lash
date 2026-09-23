@@ -7,8 +7,10 @@ repository to already be present. The step is therefore inlined into every
 job, and this test is what keeps the copies from drifting. Three steps are
 deliberately different and listed here: the Lint job fetches every branch and
 tag unshallowed, the hygiene job deepens both sides of the scanned range
-(scripts/test_ci_plan_hygiene.py executes that text), and release.yml persists
-its credentials through a config include so a later `git push` can use them.
+(scripts/test_ci_plan_hygiene.py executes that text), the Bazel test job fetches
+the synthetic PR merge commit's parents for its base check, and release.yml
+persists its credentials through a config include so a later `git push` can
+use them.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CANONICAL = ROOT / "scripts" / "ci" / "checkout-step.sh"
 WORKFLOWS = ROOT / ".github" / "workflows"
-EXEMPT = {("ci.yml", "lint"), ("ci.yml", "hygiene")}
+EXEMPT = {("ci.yml", "lint"), ("ci.yml", "hygiene"), ("ci.yml", "bazel-tests")}
 EXEMPT_WORKFLOWS = {"release.yml"}
 ALLOWED_ENV = {"CHECKOUT_TOKEN", "CHECKOUT_TAGS"}
 
