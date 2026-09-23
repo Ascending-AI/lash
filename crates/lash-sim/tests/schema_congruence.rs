@@ -47,6 +47,14 @@ struct TablePair {
 }
 
 const TABLE_REGISTRY: &[TablePair] = &[
+    TablePair {
+        sqlite_table: Some("attachment_blobs"),
+        postgres_table: None,
+        parity: Parity::OneBackendOnly {
+            side: Backend::SQLite,
+            reason: "SQLite keeps attachment bytes in its catalog; a Postgres deployment takes an external attachment backend at construction (ADR 0102)",
+        },
+    },
     pair("attachment_condemnations", "lash_attachment_condemnations"),
     pair("attachment_manifest", "lash_attachment_manifest"),
     pair(

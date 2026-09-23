@@ -109,6 +109,7 @@ pub const TABLES: &[&str] = &[
     artifact::owner_retirements::TABLE,
     artifact::owners::TABLE,
     artifact::refs::TABLE,
+    attachment::blob::TABLE,
     attachment::condemnation::TABLE,
     attachment::manifest::TABLE,
     effect::replay::TABLE,

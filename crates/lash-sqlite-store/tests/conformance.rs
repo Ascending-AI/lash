@@ -4,7 +4,6 @@
     clippy::expect_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
-// No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
 // No live_replay_tests!: live replay is an in-process cache, not SQLite-backed storage.
 // No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
 
@@ -98,6 +97,8 @@ lash_conformance::abandoned_attachment_recovery_tests!({
     })
 });
 
+#[path = "conformance/attachment_store.rs"]
+mod attachment_store;
 #[path = "conformance/await_event_discovery.rs"]
 mod await_event_discovery;
 #[path = "conformance/claim_atomicity.rs"]

@@ -454,6 +454,13 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          runs against; the rows this session can reach are compared by `checkpoint_blobs`",
     ),
     (
+        "attachment_blobs",
+        "SQLite-only attachment byte store (`SqliteAttachmentStore`): no store-trait operation \
+         this differential drives writes it, and a PostgreSQL deployment takes an external \
+         attachment backend instead, so there is no counterpart table to compare; owned by the \
+         SQLite attachment-store conformance registrations (FIG-3578)",
+    ),
+    (
         "release_stamp",
         "deployment metadata, not session state: the single row records which lash release wrote \
          the store, it is written by the schema-open path rather than by any driven operation, \

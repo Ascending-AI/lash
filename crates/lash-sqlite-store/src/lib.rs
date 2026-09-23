@@ -104,6 +104,7 @@ use session_deletion::{
 };
 
 mod artifact_store;
+mod attachment_store;
 mod attachments;
 mod await_event;
 mod blobs;
@@ -145,6 +146,7 @@ pub mod testing;
 mod triggers;
 mod turn_ingress;
 
+pub use attachment_store::SqliteAttachmentStore;
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 
 /// File name of the one durable-core database under a session-store root.

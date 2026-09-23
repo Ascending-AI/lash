@@ -1,11 +1,15 @@
-//! The attachment family: the write-ahead manifest and the GC condemnation
-//! fence.
+//! The attachment family: the write-ahead manifest, the GC condemnation
+//! fence, and SQLite's attachment bytes.
 //!
 //! Two tables — [`manifest`] and [`condemnation`] — and one rule that spans
 //! them: a digest's bytes may be deleted only while no manifest row roots it,
 //! and a writer may record a root only while no delete is armed. The two
 //! tables are therefore always read and written inside one transaction, which
 //! is why they are one family.
+//!
+//! The third, [`blob`], is the bytes those rules govern when the backend is
+//! the SQLite session catalog itself. It exists on SQLite only; PostgreSQL
+//! takes an external attachment backend.
 //!
 //! # The GC predicates, and why some of them come in pairs
 //!
@@ -32,5 +36,6 @@
 //! statements cannot be rendered for it at all — the shape it must not issue
 //! is unavailable rather than merely unused.
 
+pub mod blob;
 pub mod condemnation;
 pub mod manifest;

@@ -122,6 +122,9 @@ const SUBMISSION_DIGEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const TOOL_RESULT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-109-b77f0ff6b/sqlite-expected.json",
 ];
+const ATTACHMENT_BLOB_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-110-27c3a1b77/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];
@@ -277,7 +280,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 77"),
+        message.contains("supports schema version 78"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -302,7 +305,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 77"),
+        message.contains("supports schema version 78"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
@@ -362,7 +365,7 @@ async fn sqlite_v73_envelope_database_is_refused_before_blob_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 77"),
+        message.contains("supports schema version 78"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -410,12 +413,46 @@ async fn sqlite_v76_pending_input_database_is_refused_before_replay() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 77"),
+        message.contains("supports schema version 78"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
         message.contains("reports version 76"),
         "open refusal must name the pre-77 database: {message}"
+    );
+}
+
+/// FIG-3578: durable-core schema 78 adds `attachment_blobs`, where a SQLite
+/// deployment keeps its attachment bytes. A pre-78 catalog has no such table,
+/// and an attachment store over it would fail at its first put, so the whole
+/// database is refused at the version boundary rather than midwifed the table.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_v77_catalog_without_attachment_blobs_is_refused() {
+    let fixture_dir = fixture_dir();
+    let temp = tempfile::tempdir().expect("SQLite fixture tempdir");
+    copy_sqlite_fixture(&fixture_dir, temp.path());
+    let durable_core = temp.path().join("durable-core.db");
+    let connection = rusqlite::Connection::open(&durable_core).expect("open copied fixture");
+    connection
+        .execute_batch("DROP TABLE attachment_blobs;")
+        .expect("rewrite the catalog to its pre-78 shape");
+    connection
+        .pragma_update(None, "user_version", 77)
+        .expect("stamp the pre-attachment-blob v77 boundary");
+    drop(connection);
+
+    let open_error = match Store::open(&durable_core).await {
+        Err(error) => error,
+        Ok(_) => panic!("a pre-78 durable core must be refused at the schema boundary"),
+    };
+    let message = open_error.to_string();
+    assert!(
+        message.contains("supports schema version 78"),
+        "open refusal must name the current reject-and-recreate boundary: {message}"
+    );
+    assert!(
+        message.contains("reports version 77"),
+        "open refusal must name the pre-78 database: {message}"
     );
 }
 
