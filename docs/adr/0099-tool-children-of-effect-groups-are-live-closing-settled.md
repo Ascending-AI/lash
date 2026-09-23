@@ -830,6 +830,8 @@ retained-work admission.
 today**. Reattachment, the two-dimensional bound with its reservation contract,
 and group-level retirement under a live opener are **new** (FIG-3397).
 
+*Amendment (FIG-3548).* The journal-less native tier retains every reaped group's settled record until its scope retires (`retire_effect_journal` evicts it), so a reopen after close serves the recorded settlements regardless of finalizer timing, in every build.
+
 ---
 
 ### 10. Aggregate laws

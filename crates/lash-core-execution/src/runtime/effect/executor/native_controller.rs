@@ -314,6 +314,13 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         NativeEffectGroups::read_settlement(&self.groups, group_key, rank)
     }
 
+    /// Releases caller interest; finalization runs on a spawned task. The
+    /// settled group is retained after it reaps — one entry per closed group
+    /// until its scope retires through
+    /// [`EffectHost::retire_effect_journal`](crate::EffectHost::retire_effect_journal)
+    /// — so a reopen of the same key serves the recorded settlements whether
+    /// or not the finalizer has reaped yet, instead of re-executing children
+    /// this journal-less tier cannot replay (FIG-3548).
     async fn close_effect_group(
         &self,
         handle: EffectGroupHandle,
@@ -475,6 +482,12 @@ impl NativeRuntimeEffectController {
     pub fn open_group_task_count(&self, group_key: &str) -> Option<usize> {
         self.groups.open_group_task_count(group_key)
     }
+
+    /// How many reaped groups are retained for a reopen — each held until
+    /// its scope retires (FIG-3548).
+    pub fn retained_group_count(&self) -> usize {
+        self.groups.retained_group_count()
+    }
 }
 
 impl std::fmt::Debug for NativeRuntimeEffectController {
@@ -509,12 +522,12 @@ pub(crate) struct NativeEffectGroups {
     /// after the decision committed — the same §7 bound the SQL tiers take at
     /// construction, set here by the controller builder.
     drain_budget: crate::runtime::effect::group::EffectGroupDrainBudget,
-    /// Every reaped group, so the reference tier's own tests can observe a
-    /// completed group's settlement order — and so a reopen resurrects it
-    /// rather than re-dispatching children whose effects already ran.
-    /// Test-only, in the style of `AwaitEventRegistry`'s cache counter:
-    /// production keeps nothing once a group is reaped.
-    #[cfg(any(test, feature = "testing"))]
+    /// Every reaped group, kept until its scope retires, so a reopen after
+    /// close resurrects the recorded settlements rather than re-dispatching
+    /// children whose effects already ran (FIG-3548). Without it a
+    /// close→reopen would be served or re-executed depending on whether the
+    /// spawned finalizer had reaped yet. One entry per closed group, evicted
+    /// by [`evict_retired`](Self::evict_retired) when the host retires the scope.
     retired: Mutex<HashMap<String, Arc<NativeEffectGroup>>>,
 }
 
@@ -873,7 +886,6 @@ impl NativeEffectGroups {
                     return Ok(handle);
                 }
             }
-            #[cfg(any(test, feature = "testing"))]
             if groups.resurrect(&mut open, executors, &group)? {
                 return Ok(handle);
             }
@@ -890,7 +902,6 @@ impl NativeEffectGroups {
                     return Ok(handle);
                 }
             }
-            #[cfg(any(test, feature = "testing"))]
             if groups.resurrect(&mut open, executors, &group)? {
                 return Ok(handle);
             }
@@ -1503,21 +1514,17 @@ impl NativeEffectGroups {
     }
 
     /// A group the reaper already retired still owes a reopening caller the
-    /// settlements it recorded: on this reference tier, retirement is a
-    /// retention detail — not contract state — so the reopen resurrects the
+    /// settlements it recorded: reaping is a retention detail — not contract
+    /// state — so until the group's scope retires the reopen resurrects the
     /// same state under the `open` map's write lock rather than
     /// re-dispatching children whose effects already ran. (The journaled
     /// tiers re-dispatch and let each child's claim replay; this tier
     /// journals nothing, so re-dispatch would re-execute.)
     ///
-    /// Test-only, like `retired` itself: production keeps nothing once a
-    /// group is reaped and a reopen there opens fresh.
-    ///
     /// The fence is judged before the group leaves `retired`, so a refused
     /// reopen costs the key nothing and `recorded` still answers for it. A
     /// record whose opener registration was superseded is dropped rather
     /// than resurrected, so the reopen dispatches under the live one.
-    #[cfg(any(test, feature = "testing"))]
     fn resurrect(
         &self,
         open: &mut HashMap<String, Arc<NativeEffectGroup>>,
@@ -1568,12 +1575,44 @@ impl NativeEffectGroups {
             open.remove(group_key);
             // The group itself, not a projection of it: a reopen resurrects
             // this state so the settlements it recorded are served rather
-            // than re-run.
-            #[cfg(any(test, feature = "testing"))]
+            // than re-run, until the scope retires.
             self.retired
                 .lock_recover()
                 .insert(group_key.to_string(), Arc::clone(state));
         }
+    }
+
+    /// Drop every settled record under a retiring scope (FIG-3548): the
+    /// reaped groups in `retired`, and the closed, fully settled groups still
+    /// in `open` whose finalizer has not reaped them yet — removed here under
+    /// the same write lock `reap` takes, so a finalizer that finishes later
+    /// finds nothing to retain. `retiring` answers which group scopes the
+    /// retirement covers: one scope exactly, or every scope of a session.
+    /// A reopen after a scope-exact retirement is refused by the scope fence;
+    /// one after a session retirement opens a fresh group. Groups with caller interest or unsettled children stay: they are live
+    /// work, not retained records.
+    pub(in crate::runtime::effect) fn evict_retired(
+        &self,
+        retiring: impl Fn(&ExecutionScope) -> bool,
+    ) {
+        let mut open = self.open.write_recover();
+        open.retain(|_, state| {
+            if !retiring(&state.scope) {
+                return true;
+            }
+            let inner = state.state.lock_recover();
+            !(inner.closed && inner.order.len() == state.children)
+        });
+        self.retired
+            .lock_recover()
+            .retain(|_, state| !retiring(&state.scope));
+    }
+
+    /// The number of reaped groups this controller still retains, for the
+    /// laws that pin retention to scope retirement.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn retained_group_count(&self) -> usize {
+        self.retired.lock_recover().len()
     }
 
     /// The children still unsettled in open groups under `scope` — seats

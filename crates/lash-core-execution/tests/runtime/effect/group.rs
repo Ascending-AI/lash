@@ -694,3 +694,228 @@ mod effect_group_contract_tests {
         );
     }
 }
+
+/// Retention of a closed group's record on the native tier (FIG-3548).
+///
+/// These laws are part of `effect_model`, which also runs in the zero-feature
+/// lane (`effect_model__test__fv_ecbe9667`): the retention they pin is
+/// production behavior, not a `testing` convenience.
+mod native_group_retention {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use lash_core_execution::core_internal::RuntimeEffectLocalRunner;
+    use lash_core_execution::runtime::effect::*;
+    use lash_core_execution::runtime::{NativeEffectHost, NativeRuntimeEffectController};
+    use lash_core_execution::{CancellationToken, ExecutionScope};
+
+    /// Runs every child as a counted no-op sleep, so a law can tell a served
+    /// record (the count holds) from a re-dispatch (it moves).
+    struct CountingExecutors {
+        runs: Arc<AtomicUsize>,
+    }
+
+    struct CountingRunner {
+        runs: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeEffectLocalRunner for CountingRunner {
+        async fn execute(
+            self: Box<Self>,
+            _envelope: RuntimeEffectEnvelope,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            Ok(RuntimeEffectOutcome::Sleep)
+        }
+    }
+
+    impl GroupExecutors for CountingExecutors {
+        fn executor_for(
+            &self,
+            _envelope: &RuntimeEffectEnvelope,
+        ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+            Some(RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(CountingRunner {
+                    runs: Arc::clone(&self.runs),
+                }),
+                None,
+            ))
+        }
+    }
+
+    struct World {
+        #[cfg(feature = "testing")]
+        controller: Arc<NativeRuntimeEffectController>,
+        host: NativeEffectHost,
+        runs: Arc<AtomicUsize>,
+    }
+
+    fn world() -> World {
+        let controller = Arc::new(NativeRuntimeEffectController::default());
+        let runs = Arc::new(AtomicUsize::new(0));
+        controller
+            .register_group_executors(Arc::new(CountingExecutors {
+                runs: Arc::clone(&runs),
+            }))
+            .expect("the counting resolver registers");
+        let host = NativeEffectHost::with_native_controller(Arc::clone(&controller));
+        World {
+            #[cfg(feature = "testing")]
+            controller,
+            host,
+            runs,
+        }
+    }
+
+    fn group(scope: &ExecutionScope, key: &str) -> RuntimeEffectGroup {
+        let address = |replay_key: String| {
+            lash_core_execution::EffectAddress::new(scope.clone(), replay_key)
+                .expect("valid address")
+        };
+        RuntimeEffectGroup::try_new(
+            RuntimeEffectInvocation::new(
+                address(format!("{key}:group")),
+                lash_core_execution::RuntimeAttribution::none(),
+                "group",
+            ),
+            key,
+            vec![RuntimeEffectEnvelope::new(
+                RuntimeEffectInvocation::new(
+                    address(format!("{key}:child:0")),
+                    lash_core_execution::RuntimeAttribution::none(),
+                    "child",
+                ),
+                RuntimeEffectCommand::Sleep {
+                    spec: lash_core_execution::SleepSpec::For { duration_ms: 1 },
+                },
+            )],
+            lash_core_execution::GroupWakePolicy::All,
+            lash_core_execution::LoserPolicy::RunToCompletion,
+        )
+        .expect("a one-child group assembles")
+    }
+
+    /// Opens `group`, takes its rank-0 settlement and closes it.
+    async fn settle_and_close(
+        host: &NativeEffectHost,
+        admitted: &lash_core_execution::AdmittedScope,
+        group: RuntimeEffectGroup,
+    ) -> GroupSettlement {
+        let scoped = host.scoped(admitted.clone()).expect("the scope binds");
+        let mut handle = scoped
+            .controller()
+            .open_effect_group(group)
+            .await
+            .expect("the group opens");
+        let settlement = scoped
+            .controller()
+            .await_next_settlement(&mut handle, CancellationToken::new())
+            .await
+            .expect("rank 0 settles");
+        scoped
+            .controller()
+            .close_effect_group(handle, lash_core_execution::LoserPolicy::RunToCompletion)
+            .await
+            .expect("the group closes");
+        settlement
+    }
+
+    /// Waits until the spawned finalizer has reaped `key` out of the open
+    /// table — the moment a reopen used to fall through to a fresh dispatch.
+    async fn until_reaped(host: &NativeEffectHost, key: &str) {
+        let closing = host
+            .effect_group_closing()
+            .expect("the native host exposes its group lifecycle");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while closing
+                .read_group_lifecycle(key)
+                .await
+                .expect("the lifecycle reads")
+                .is_some()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the finalizer reaps the closed group");
+    }
+
+    /// A reopen after the finalizer has reaped the closed group serves the
+    /// recorded settlement; the child does not run again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reopen_after_the_reap_serves_the_recorded_settlement() {
+        let world = world();
+        let admitted = lash_core_execution::AdmittedScope::turn("retention", "turn");
+        let group = group(admitted.scope(), "retention-reaped");
+
+        let first = settle_and_close(&world.host, &admitted, group.clone()).await;
+        assert_eq!(world.runs.load(Ordering::SeqCst), 1, "the child ran once");
+        until_reaped(&world.host, "retention-reaped").await;
+
+        let replayed = settle_and_close(&world.host, &admitted, group).await;
+        assert_eq!(replayed.sequence, first.sequence);
+        assert!(matches!(replayed.outcome, Ok(RuntimeEffectOutcome::Sleep)));
+        assert_eq!(
+            world.runs.load(Ordering::SeqCst),
+            1,
+            "the reopen served the retained record; the child did not re-run"
+        );
+    }
+
+    /// Retiring the owning session evicts the retained record: the next
+    /// open of the same key is a fresh group, and its child runs again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_retirement_evicts_the_retained_record() {
+        let world = world();
+        let admitted = lash_core_execution::AdmittedScope::turn("evicted", "turn");
+        let group = group(admitted.scope(), "retention-evicted");
+
+        settle_and_close(&world.host, &admitted, group.clone()).await;
+        until_reaped(&world.host, "retention-evicted").await;
+        world
+            .host
+            .retire_effect_journal(lash_core_execution::EffectJournalRetirement::session(
+                "evicted",
+            ))
+            .await
+            .expect("the session retires");
+
+        settle_and_close(&world.host, &admitted, group).await;
+        assert_eq!(
+            world.runs.load(Ordering::SeqCst),
+            2,
+            "the evicted record is gone, so the reopen dispatched fresh"
+        );
+    }
+
+    /// A scope-exact retirement evicts every record retained under that
+    /// scope, whether the finalizer has reaped it yet or not — and nothing
+    /// under another scope.
+    #[cfg(feature = "testing")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_scope_retirement_evicts_exactly_that_scopes_records() {
+        let world = world();
+        let retired = lash_core_execution::AdmittedScope::runtime_operation("retired-op");
+        let kept = lash_core_execution::AdmittedScope::runtime_operation("kept-op");
+
+        settle_and_close(&world.host, &retired, group(retired.scope(), "op-a")).await;
+        settle_and_close(&world.host, &kept, group(kept.scope(), "op-b")).await;
+        until_reaped(&world.host, "op-a").await;
+        until_reaped(&world.host, "op-b").await;
+        assert_eq!(world.controller.retained_group_count(), 2);
+
+        world
+            .host
+            .retire_effect_journal(
+                lash_core_execution::EffectJournalRetirement::runtime_operation("retired-op"),
+            )
+            .await
+            .expect("the operation retires");
+        assert_eq!(
+            world.controller.retained_group_count(),
+            1,
+            "only the retired scope's record is evicted"
+        );
+    }
+}
