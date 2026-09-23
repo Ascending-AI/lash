@@ -157,6 +157,10 @@ impl<'module> Linker<'module> {
                 signals,
                 return_ty: Some(output),
                 label: None,
+                origin: ProcessOrigin::Lifted {
+                    site: path.clone(),
+                    hidden_params: u32::try_from(hidden_args.len()).unwrap_or(u32::MAX),
+                },
                 body,
             }),
             span,

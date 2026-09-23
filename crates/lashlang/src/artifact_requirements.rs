@@ -196,6 +196,7 @@ impl<'program> RequirementsCollector<'program> {
                 self.requirements.language_features.label_annotations = true;
                 self.collect_expr(expr, scope)
             }
+            Expr::Role { expr, .. } => self.collect_expr(expr, scope),
             Expr::Variable(name) => match scope.get(name.as_str()).cloned() {
                 Some(binding) => Some(binding),
                 None => {
@@ -281,10 +282,14 @@ impl<'program> RequirementsCollector<'program> {
             Expr::For {
                 binding,
                 iterable,
+                bind,
                 body,
             } => {
                 self.collect_expr(iterable, scope);
                 let previous = scope.insert(binding.to_string(), RequirementBinding::Value);
+                if let Some(bind) = bind {
+                    self.collect_expr(bind, scope);
+                }
                 self.collect_expr(body, scope);
                 if let Some(previous) = previous {
                     scope.insert(binding.to_string(), previous);

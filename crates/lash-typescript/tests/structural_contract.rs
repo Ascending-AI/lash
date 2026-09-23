@@ -24,11 +24,11 @@ impl ExecutionHost for PrintHost {
 
 #[test]
 fn parameter_defaults_and_rest_are_accepted_while_declare_stays_rejected() {
-    lash_typescript::compile(
+    lash_typescript::testing::compile(
         "function f(value = 1, ...values) { return value + values.length; } finish(f());",
     )
     .expect("parameter defaults and rest compile");
-    let error = lash_typescript::compile("declare const value: number;")
+    let error = lash_typescript::testing::compile("declare const value: number;")
         .expect_err("ambient declarations remain outside executable cells");
     assert_eq!(error.code, DiagnosticCode::DeclareUnsupported);
 }
@@ -43,7 +43,7 @@ fn parameter_defaults_and_rest_are_accepted_while_declare_stays_rejected() {
 /// string, which is why `1` and `null` are untouched here.
 #[test]
 fn console_methods_accept_zero_and_multiple_arguments_with_observation_rendering() {
-    let program = lash_typescript::compile(
+    let program = lash_typescript::testing::compile(
         "console.log(); console.warn(1, null, [2, 3]); console.error('e'); console.info('i'); console.debug('d'); finish(0);",
     )
     .expect("console method arities compile");

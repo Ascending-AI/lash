@@ -261,7 +261,7 @@ fn documented_source_nesting_limit_fits_the_two_mebibyte_stack_budget() {
             let blocks = DOCUMENTED_SOURCE_NESTING_LIMIT - parens - 1;
             // The blocks, grouping parentheses, and `finish(` call consume the
             // complete shared budget.
-            let program = lash_typescript::compile(&stack_budget_source(blocks, parens))
+            let program = lash_typescript::testing::compile(&stack_budget_source(blocks, parens))
                 .expect("documented source nesting limit compiles");
             let outcome =
                 futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
@@ -349,7 +349,7 @@ fn no_accepted_grammar_shape_leaks_the_shared_ast_diagnostic() {
     for (name, build) in shapes {
         for count in 1..=80 {
             let source = build(count);
-            match lash_typescript::compile(&source) {
+            match lash_typescript::testing::compile(&source) {
                 Ok(_) => {}
                 Err(error) => {
                     assert_ne!(

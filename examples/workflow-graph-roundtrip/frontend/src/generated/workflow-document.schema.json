@@ -453,6 +453,13 @@
     }
   },
   "properties": {
+    "definition": {
+      "description": "The source identity of the admitted artifact this document's graph is the view of; absent for a draft whose source does not admit. A run overlay shows a run's events only when their `definition` is this one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "edges": {
       "items": {
         "$ref": "#/definitions/FlowEdge"

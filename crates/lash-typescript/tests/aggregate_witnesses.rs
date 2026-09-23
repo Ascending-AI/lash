@@ -113,7 +113,7 @@ fn execute(
     source: &str,
     host: &impl ExecutionHost,
 ) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
-    let compiled = lash_typescript::compile(source).expect(source);
+    let compiled = lash_typescript::testing::compile(source).expect(source);
     futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), host))
 }
 
@@ -317,7 +317,7 @@ fn execute_linked(
 ) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
     let linked = lash_typescript::link(source, &process_environment()).expect(source);
     futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         host,
     ))

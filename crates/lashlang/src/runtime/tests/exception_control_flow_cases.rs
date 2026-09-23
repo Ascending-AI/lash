@@ -39,6 +39,7 @@ fn control_flow_for(binding: &str, count: usize, body: Expr) -> Expr {
         iterable: Box::new(Expr::List(
             (0..count).map(|index| Expr::Number(index as f64)).collect(),
         )),
+        bind: None,
         body: Box::new(body),
     }
 }
@@ -465,6 +466,7 @@ async fn suspension_inside_a_finally_entered_by_break_resumes_to_the_break() {
         let slots = SlotState::from_globals(
             Record::new(),
             &program.chunk.slot_names,
+            &program.chunk.private_slots,
             &ProjectedBindings::new(),
             Vec::new(),
         );
@@ -583,6 +585,7 @@ async fn a_cleanup_only_scope_keeps_the_failing_expression_span() {
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &ProjectedBindings::new(),
         Vec::new(),
     );
@@ -620,6 +623,7 @@ async fn a_suspended_cleanup_chain_resumes_with_the_original_error() {
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &ProjectedBindings::new(),
         Vec::new(),
     );
@@ -673,6 +677,7 @@ async fn control_flow_terminal_cleanups(terminal: Expr) -> (String, usize) {
     let slots = SlotState::from_globals(
         Record::new(),
         &compiled.chunk.slot_names,
+        &compiled.chunk.private_slots,
         &ProjectedBindings::new(),
         Vec::new(),
     );

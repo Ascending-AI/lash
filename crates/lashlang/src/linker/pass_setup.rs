@@ -177,8 +177,10 @@ impl<'module> Linker<'module> {
             declarations.push(declaration);
         }
         Ok(Program {
+            language: self.program.language.clone(),
             declarations,
             main,
+            private_bindings: self.program.private_bindings.clone(),
             spans,
         })
     }
@@ -928,6 +930,7 @@ impl<'module> Linker<'module> {
                     // immutable process identity resolves to one complete signature.
                     return_ty: Some(return_ty),
                     label: process.label.clone(),
+                    origin: process.origin.clone(),
                     body,
                 })
             }
@@ -1081,6 +1084,7 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         // contributes no steps: the annotation would be silently inert.
         Expr::LabelAnnotated { .. } => Some("@label"),
         Expr::Block(_)
+        | Expr::Role { .. }
         | Expr::Null
         | Expr::Undefined
         | Expr::Bool(_)

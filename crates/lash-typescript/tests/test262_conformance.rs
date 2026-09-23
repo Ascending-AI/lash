@@ -333,8 +333,8 @@ fn source_for(path: &Path, test_metadata: &metadata::Metadata, finish: bool) -> 
 }
 
 fn execute_positive(path: &Path, source: &str) -> Result<(), String> {
-    let program =
-        lash_typescript::compile(source).map_err(|error| format!("{}: {error}", path.display()))?;
+    let program = lash_typescript::testing::compile(source)
+        .map_err(|error| format!("{}: {error}", path.display()))?;
     let outcome = futures::executor::block_on(lashlang::execute(
         &program,
         &mut State::new(),
@@ -351,7 +351,7 @@ fn execute_positive(path: &Path, source: &str) -> Result<(), String> {
 }
 
 fn execute_runtime_negative(path: &Path, source: &str, expected: ErrorType) -> Result<(), String> {
-    let program = lash_typescript::compile(source).map_err(|error| error.to_string())?;
+    let program = lash_typescript::testing::compile(source).map_err(|error| error.to_string())?;
     match futures::executor::block_on(lashlang::execute(
         &program,
         &mut State::new(),
@@ -434,7 +434,7 @@ fn selected_test262_cases_match_the_ratchet() {
 
         let result = if entry.disposition == "skip" {
             let source = source_for(&path, &test_metadata, false);
-            match lash_typescript::compile(&source) {
+            match lash_typescript::testing::compile(&source) {
                 Err(error) if error.code.as_str() == entry.expectation => Ok(()),
                 Err(error) => Err(format!(
                     "{}: skip expected {}, got {} ({error})",
@@ -449,7 +449,7 @@ fn selected_test262_cases_match_the_ratchet() {
             }
         } else if let Some(negative) = &test_metadata.negative {
             match negative.phase {
-                Phase::Parse | Phase::Resolution => match lash_typescript::compile(
+                Phase::Parse | Phase::Resolution => match lash_typescript::testing::compile(
                     &std::fs::read_to_string(&path).expect("read negative Test262 test"),
                 ) {
                     Err(error)
@@ -512,7 +512,7 @@ fn program_bounds_bypass_guest_catch_and_finally() {
         }
         finish(true);
     "#;
-    let program = lash_typescript::compile(source).expect("bound test compiles");
+    let program = lash_typescript::testing::compile(source).expect("bound test compiles");
     let host = Host::default();
     let environment = ExecutionEnvironment::new(&host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(32),
@@ -541,7 +541,7 @@ fn typescript_type_syntax_status_is_pinned() {
         const value: Alias<number> = identity<number>((1 as number satisfies number)!);
         finish(value);
     "#;
-    let program = lash_typescript::compile(erased).expect("type-only syntax is erased");
+    let program = lash_typescript::testing::compile(erased).expect("type-only syntax is erased");
     let outcome = futures::executor::block_on(lashlang::execute(
         &program,
         &mut State::new(),
@@ -550,7 +550,7 @@ fn typescript_type_syntax_status_is_pinned() {
     .expect("erased TypeScript program executes");
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(1.0)));
 
-    let enum_program = lash_typescript::compile("enum E { A } finish(E.A);")
+    let enum_program = lash_typescript::testing::compile("enum E { A } finish(E.A);")
         .expect("runtime enums are accepted TypeScript syntax");
     let enum_outcome = futures::executor::block_on(lashlang::execute(
         &enum_program,
@@ -564,7 +564,8 @@ fn typescript_type_syntax_status_is_pinned() {
         ("namespace N {}", DiagnosticCode::NamespaceUnsupported),
         ("@sealed class C {}", DiagnosticCode::DecoratorUnsupported),
     ] {
-        let error = lash_typescript::compile(source).expect_err("construct stays rejected");
+        let error =
+            lash_typescript::testing::compile(source).expect_err("construct stays rejected");
         assert_eq!(error.code, expected, "source: {source}");
     }
 }
@@ -606,7 +607,8 @@ fn rejected_census_rows_name_the_diagnostic_that_fires() {
             continue;
         }
         if expected == "TS_PENDING_TOOL" {
-            let program = lash_typescript::compile(probe).expect("await resolves at runtime");
+            let program =
+                lash_typescript::testing::compile(probe).expect("await resolves at runtime");
             let error = futures::executor::block_on(lashlang::execute(
                 &program,
                 &mut State::new(),

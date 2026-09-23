@@ -930,13 +930,13 @@ pub(super) async fn segmented_child_await_registration(
     ProcessRegistration::new(
         process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked.module_ref,
+            module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
                 .process_ref("main")
                 .expect("main process ref")
                 .clone(),
-            host_requirements_ref: linked.host_requirements_ref,
+            host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
         }),
@@ -1270,9 +1270,9 @@ pub(super) async fn snapshot_lashlang_registration(
     ProcessRegistration::new(
         process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked_module.module_ref,
+            module_ref: linked_module.artifact.module_ref().clone(),
             process_ref,
-            host_requirements_ref: linked_module.host_requirements_ref,
+            host_requirements_ref: linked_module.artifact.host_requirements_ref().clone(),
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
         }),

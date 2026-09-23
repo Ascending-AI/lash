@@ -1,16 +1,38 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub use crate::ast_string::AstString;
 use crate::span::Span;
 
+#[path = "ast_number.rs"]
+pub(crate) mod number;
+#[path = "ast_roles.rs"]
+mod roles;
+pub(crate) use roles::check_unique_declarations;
+pub use roles::{
+    AttributeAssignParts, AttributeStep, AttributeUpdate, BindingVisibility,
+    CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, SourceLanguage,
+    StructuralRole, UpdateOperator, lifted_process_identity, process_wrapper_run_path,
+};
+use roles::{check_process_origins, check_program_roles};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Program {
+    /// The front end the program was lowered from. It is part of a module's
+    /// identity: two front ends never share a module ref.
+    pub language: SourceLanguage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<Declaration>,
     pub main: Expr,
+    /// The visibility role of `main`'s bindings, assigned by the front end.
+    /// A binding named here is private: it is the front end's own slot (a
+    /// block-scoped shadow, an assignment temporary), and the VM neither
+    /// imports it from nor exports it to the session's globals. Every other
+    /// main-level binding is session-visible.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub private_bindings: BTreeSet<AstString>,
     /// Source spans for the program's nodes, addressed by [`AstPath`]. A
     /// declaration's own span lives at `AstPath::declaration(i, [])`; absence
     /// is "no span", so no sentinel ever doubles as offset zero.
@@ -24,7 +46,9 @@ pub struct Program {
 
 /// Which tree an [`AstPath`] walks down: `Program::main`, or one entry of
 /// `Program::declarations`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AstRoot {
     Main,
@@ -33,7 +57,9 @@ pub enum AstRoot {
 
 /// A node's address in a `Program`: the root it hangs from plus the
 /// `Expr::children()` index chain that reaches it.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 pub struct AstPath {
     pub root: AstRoot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -86,39 +112,8 @@ impl AstPath {
     }
 }
 
-/// `Program::spans` serializes as a list of entries: a `BTreeMap`'s struct
-/// key is not a JSON object key, and `ModuleArtifact` encodes `Program` as
-/// JSON. Iteration order is already key order, so the form stays canonical.
-mod span_table {
-    use super::{AstPath, Span};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use std::collections::BTreeMap;
-
-    #[derive(Serialize, Deserialize)]
-    struct SpanEntry {
-        path: AstPath,
-        span: Span,
-    }
-
-    pub(super) fn serialize<S: Serializer>(
-        spans: &BTreeMap<AstPath, Span>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(spans.iter().map(|(path, span)| SpanEntry {
-            path: path.clone(),
-            span: *span,
-        }))
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<AstPath, Span>, D::Error> {
-        Ok(Vec::<SpanEntry>::deserialize(deserializer)?
-            .into_iter()
-            .map(|entry| (entry.path, entry.span))
-            .collect())
-    }
-}
+#[path = "ast_span_table.rs"]
+mod span_table;
 
 /// The nesting limit an AST must satisfy, whether it came from source or was
 /// built directly.
@@ -181,6 +176,22 @@ pub enum InvalidAst {
     /// A host-only unknown callable shape was placed in program-owned IR.
     #[error("process type with unknown signature is only valid in host schemas")]
     UnknownProcessSignature,
+    /// A structural role wraps IR that does not have the role's shape.
+    #[error("malformed `{role}` role: {reason}")]
+    MalformedRole {
+        role: &'static str,
+        reason: &'static str,
+    },
+    /// Two declarations share a name.
+    #[error("`{name}` is declared twice")]
+    DuplicateDeclaration { name: String },
+    /// A process's origin contradicts its declaration. An origin is derived
+    /// when the linker admits a program, never authored.
+    #[error("process `{process}` has an impossible origin: {reason}")]
+    InvalidProcessOrigin {
+        process: String,
+        reason: &'static str,
+    },
 }
 
 /// Rejects an AST the compiler cannot lower as written.
@@ -191,6 +202,8 @@ pub enum InvalidAst {
 pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
     check_ast_nesting_depth(program)?;
     check_program_process_types(program)?;
+    check_program_roles(program)?;
+    check_process_origins(program)?;
     check_loop_control(&program.main)?;
     for declaration in &program.declarations {
         match declaration {
@@ -309,8 +322,16 @@ fn check_loop_control_inner(root: &Expr, in_function: bool) -> Result<(), Invali
                 });
             }
             Expr::Return(_) if !in_function => return Err(InvalidAst::ReturnOutsideFunction),
-            Expr::For { iterable, body, .. } => {
+            Expr::For {
+                iterable,
+                bind,
+                body,
+                ..
+            } => {
                 pending.push((iterable, in_loop, in_function));
+                if let Some(bind) = bind {
+                    pending.push((bind, true, in_function));
+                }
                 pending.push((body, true, in_function));
                 continue;
             }
@@ -362,10 +383,13 @@ pub fn check_ast_nesting_depth(program: &Program) -> Result<(), NestingTooDeep> 
 }
 
 impl Program {
+    /// A program authored directly as IR.
     pub fn block(expressions: Vec<Expr>) -> Self {
         Self {
+            language: SourceLanguage::ir(),
             declarations: Vec::new(),
             main: Expr::Block(expressions),
+            private_bindings: BTreeSet::new(),
             spans: BTreeMap::new(),
         }
     }
@@ -382,7 +406,10 @@ impl Program {
 
 impl PartialEq for Program {
     fn eq(&self, other: &Self) -> bool {
-        self.declarations == other.declarations && self.main == other.main
+        self.language == other.language
+            && self.declarations == other.declarations
+            && self.main == other.main
+            && self.private_bindings == other.private_bindings
     }
 }
 
@@ -409,6 +436,11 @@ pub struct ProcessDecl {
     pub return_ty: Option<TypeExpr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<LabelMetadata>,
+    /// Where the declaration came from: authored as a declaration, or lifted
+    /// by the linker out of an inline process literal. Consumers that treat
+    /// the two differently read this, never the declaration's name.
+    #[serde(default, skip_serializing_if = "ProcessOrigin::is_declared")]
+    pub origin: ProcessOrigin,
     pub body: Expr,
 }
 
@@ -492,7 +524,14 @@ pub enum Expr {
     /// The JavaScript `undefined` value. This node is AST-only.
     Undefined,
     Bool(bool),
-    Number(f64),
+    /// A number literal. Its identity and stored form follow the one IR
+    /// number rule ([`number`]): distinct `-0`, one canonical NaN, and a
+    /// lossless spelling for non-finite values.
+    Number(
+        #[serde(with = "number")]
+        #[schemars(with = "number::IrNumber")]
+        f64,
+    ),
     String(AstString),
     Variable(AstString),
     Tuple(Vec<Expr>),
@@ -511,14 +550,31 @@ pub enum Expr {
         then_block: Box<Expr>,
         else_block: Box<Expr>,
     },
+    /// Iteration: for each element of `iterable`, bind it to `binding`, run
+    /// `bind` (the generated code that binds the element into the authored
+    /// names, if the front end needs any), then run `body`. `bind` belongs to
+    /// the loop itself; only `body` holds the authored statements.
     For {
         binding: AstString,
         iterable: Box<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bind: Option<Box<Expr>>,
         body: Box<Expr>,
     },
     While {
         condition: Box<Expr>,
         body: Box<Expr>,
+    },
+    /// A language-neutral structural role around front-end-generated IR.
+    ///
+    /// A role never changes what runs: it executes, links and types exactly
+    /// as `expr`. It tells every structural consumer (ownership, the
+    /// projector, a dialect's printer) what the wrapped shape *is*, so none of
+    /// them has to infer structure from generated names. [`validate_ast`]
+    /// refuses a role whose `expr` does not have the role's shape.
+    Role {
+        role: StructuralRole,
+        expr: Box<Expr>,
     },
     Break,
     Continue,
@@ -635,30 +691,6 @@ pub struct FunctionExpr {
     pub body: Box<Expr>,
 }
 
-/// The prefix on every declaration name the linker derives from a lifted
-/// process literal. A dialect that authors process names from source text can
-/// never collide with one, because the linker invents these and no authored
-/// name can start with it by accident.
-pub const LIFTED_PROCESS_NAME_PREFIX: &str = "__process_";
-
-/// The name a body at a given AST path lifts to.
-///
-/// A digest over the canonical body plus the path, so it is a function of what
-/// the body *is* and where it sits — never of link order, span tables, or
-/// anything else a re-derivation could reorder. The linker's lift and the
-/// workflow lens's literal projection must agree on this spelling.
-pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
-    let preimage = serde_json::json!({
-        "body": body,
-        "path": path,
-    });
-    let digest = lash_sansio::core_support::blake3_domain_hash_hex(
-        "lash-lifted-process-name/v1",
-        preimage.to_string(),
-    );
-    format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")
-}
-
 /// The authored shape of an inline process body, as a dialect lowers it.
 ///
 /// `params` carries the parameter names and their declared types, so a
@@ -756,14 +788,23 @@ impl Expr {
                 buffer.push(then_block);
                 buffer.push(else_block);
             }
-            Expr::For { iterable, body, .. } => {
+            Expr::For {
+                iterable,
+                bind,
+                body,
+                ..
+            } => {
                 buffer.push(iterable);
+                if let Some(bind) = bind {
+                    buffer.push(bind);
+                }
                 buffer.push(body);
             }
             Expr::While { condition, body } => {
                 buffer.push(condition);
                 buffer.push(body);
             }
+            Expr::Role { expr, .. } => buffer.push(expr),
             Expr::HostDescriptorConstructor { input, .. } => buffer.push(input),
             Expr::ReceiverCall { receiver, args, .. } => {
                 buffer.push(receiver);
@@ -873,14 +914,23 @@ impl Expr {
                 buffer.push(then_block);
                 buffer.push(else_block);
             }
-            Expr::For { iterable, body, .. } => {
+            Expr::For {
+                iterable,
+                bind,
+                body,
+                ..
+            } => {
                 buffer.push(iterable);
+                if let Some(bind) = bind {
+                    buffer.push(bind);
+                }
                 buffer.push(body);
             }
             Expr::While { condition, body } => {
                 buffer.push(condition);
                 buffer.push(body);
             }
+            Expr::Role { expr, .. } => buffer.push(expr),
             Expr::HostDescriptorConstructor { input, .. } => buffer.push(input),
             Expr::ReceiverCall { receiver, args, .. } => {
                 buffer.push(receiver);
@@ -935,6 +985,14 @@ impl Expr {
         ExprChildrenMut {
             inner: buffer.into_iter(),
         }
+    }
+}
+
+impl Expr {
+    /// The [`Expr::children`] index of a `For`'s body: after the iterable and,
+    /// when present, the bind.
+    pub fn for_body_index(bind: Option<&Expr>) -> u32 {
+        if bind.is_some() { 2 } else { 1 }
     }
 }
 
@@ -1065,11 +1123,17 @@ where
         Expr::For {
             binding,
             iterable,
+            bind,
             body,
         } => Expr::For {
             binding,
             iterable: Box::new(folder.fold_expr(*iterable)),
+            bind: bind.map(|bind| Box::new(folder.fold_expr(*bind))),
             body: Box::new(folder.fold_expr(*body)),
+        },
+        Expr::Role { role, expr } => Expr::Role {
+            role,
+            expr: Box::new(folder.fold_expr(*expr)),
         },
         Expr::While { condition, body } => Expr::While {
             condition: Box::new(folder.fold_expr(*condition)),

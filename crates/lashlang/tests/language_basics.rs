@@ -170,9 +170,14 @@ async fn range_supports_python_style_steps() {
         let host = TestHost::default();
         let mut state = State::new();
         let value = finished(
-            lashlang::execute(&finish_program(call("range", args)), &mut state, &host)
-                .await
-                .expect("range should run"),
+            lashlang::execute(
+                &lashlang_compile_program(&finish_program(call("range", args)))
+                    .expect("the program compiles"),
+                &mut state,
+                &host,
+            )
+            .await
+            .expect("range should run"),
         );
         assert_eq!(
             value,
@@ -202,9 +207,13 @@ async fn integer_division_helpers_use_mathematical_rounding() {
         let mut state = State::new();
         let program = finish_program(call(name, vec![number(left), number(right)]));
         let value = finished(
-            lashlang::execute(&program, &mut state, &host)
-                .await
-                .expect("division helper should run"),
+            lashlang::execute(
+                &lashlang_compile_program(&program).expect("the program compiles"),
+                &mut state,
+                &host,
+            )
+            .await
+            .expect("division helper should run"),
         );
         assert_eq!(value, Value::Number(expected), "{name}({left}, {right})");
     }
@@ -226,9 +235,13 @@ async fn numeric_helper_errors_are_rejected() {
         let host = TestHost::default();
         let mut state = State::new();
         let program = finish_program(call(name, args));
-        let err = lashlang::execute(&program, &mut state, &host)
-            .await
-            .expect_err("numeric helper should reject");
+        let err = lashlang::execute(
+            &lashlang_compile_program(&program).expect("the program compiles"),
+            &mut state,
+            &host,
+        )
+        .await
+        .expect_err("numeric helper should reject");
         assert!(
             matches!(
                 err,
@@ -255,7 +268,7 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
     let mut state = State::new();
     let value = finished(
         lashlang::execute(
-            &program(vec![finish(lashlang::Expr::Record(vec![
+            &lashlang_compile_program(&program(vec![finish(lashlang::Expr::Record(vec![
                 ("len_pair".into(), call("len", vec![pair()])),
                 (
                     "contains_x".into(),
@@ -279,7 +292,8 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
                     },
                 ),
                 ("text".into(), call("to_string", vec![pair()])),
-            ]))]),
+            ]))]))
+            .expect("the program compiles"),
             &mut state,
             &host,
         )
@@ -298,7 +312,8 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
     let host = TestHost::default();
     let mut state = State::new();
     let err = lashlang::execute(
-        &finish_program(call("push", vec![pair(), number(3.0)])),
+        &lashlang_compile_program(&finish_program(call("push", vec![pair(), number(3.0)])))
+            .expect("the program compiles"),
         &mut state,
         &host,
     )
@@ -316,10 +331,11 @@ async fn tuple_snapshot_round_trip_preserves_tuple_identity() {
     let host = TestHost::default();
     let mut state = State::new();
     let outcome = lashlang::execute(
-        &program(vec![lashlang::Expr::Assign {
+        &lashlang_compile_program(&program(vec![lashlang::Expr::Assign {
             target: lashlang::AssignTarget::variable("pair".into()),
             expr: Box::new(lashlang::Expr::Tuple(vec![number(1.0), number(2.0)])),
-        }]),
+        }]))
+        .expect("the program compiles"),
         &mut state,
         &host,
     )
@@ -334,4 +350,17 @@ async fn tuple_snapshot_round_trip_preserves_tuple_identity() {
     let snapshot = lashlang::Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
     let restored = State::from_snapshot(snapshot);
     assert!(matches!(restored.globals()["pair"], Value::Tuple(_)));
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

@@ -106,7 +106,12 @@ async fn runtime_failed_resource_operation_unwrap() {
     let source = "finish(await tools.err({}));";
     let program = lower(source);
     let linked = lashlang::LinkedModule::link(program, environment()).expect("program should link");
-    let compiled = lashlang::compile_linked(&linked);
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Main,
+        Some(linked.spans()),
+    )
+    .expect("a module main entry compiles");
     let mut state = State::new();
     let host = ExecutionEnvironment::new(&DiagnosticHost).traced();
     lashlang::execute(&compiled, &mut state, &host)

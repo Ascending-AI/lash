@@ -95,6 +95,7 @@ mod error_return;
 mod expectations;
 mod held_turn_input;
 mod invocation_effect_host;
+mod pre_cutover_generation;
 mod recovery;
 mod seam_controllers;
 
@@ -117,6 +118,7 @@ use expectations::{
 };
 pub use held_turn_input::held_turn_input_visibility_survives_claim_holder_crash;
 use invocation_effect_host::InvocationEffectHost;
+pub use pre_cutover_generation::pre_cutover_generation_turn_redrive_is_refused_before_any_effect;
 use pretty_assertions::assert_eq;
 pub(crate) use seam_controllers::{
     CrashAfterCheckpointExecutionController, SeamEffectController, StoreOwnedTurnControlController,
@@ -1524,9 +1526,35 @@ async fn build_runtime_with_lease_timings(
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
-    mut trace_tool: TraceTool,
+    trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
 ) -> crate::LashRuntime {
+    Box::pin(try_build_runtime_with_lease_timings(
+        store,
+        control,
+        effect_controller,
+        identity,
+        trace_tool,
+        lease_timings,
+    ))
+    .await
+    .expect("build reference runtime")
+}
+
+/// Build the reference runtime, returning the builder's refusal instead of
+/// panicking on it: session admission runs inside `build`.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn try_build_runtime_with_lease_timings(
+    store: Arc<dyn RuntimePersistence>,
+    control: SeamControl,
+    effect_controller: Arc<dyn RuntimeEffectController>,
+    identity: &ReferenceIdentity,
+    mut trace_tool: TraceTool,
+    lease_timings: crate::LeaseTimings,
+) -> Result<crate::LashRuntime, crate::SessionError> {
     super::bind_conformance_session(&store, &identity.session_id).await;
     // The live host watcher must share the turn controller's await-event registry.
     let effect_host: Arc<dyn crate::EffectHost> = match effect_controller.effect_journaling() {
@@ -1579,7 +1607,6 @@ async fn build_runtime_with_lease_timings(
         .build(),
     )
     .await
-    .expect("build reference runtime")
 }
 
 #[expect(

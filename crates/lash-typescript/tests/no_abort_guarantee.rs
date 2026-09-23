@@ -308,11 +308,12 @@ fn oversized_sources_reject_by_name() {
         "const x = '{}';",
         "a".repeat(lash_typescript::MAX_SOURCE_BYTES)
     );
-    let error = lash_typescript::compile(&source).expect_err("an oversized source must reject");
+    let error =
+        lash_typescript::testing::compile(&source).expect_err("an oversized source must reject");
     assert_eq!(error.code.as_str(), "TS_SOURCE_TOO_LARGE");
     // One byte under the bound is still an ordinary program.
     let filler = lash_typescript::MAX_SOURCE_BYTES - "const x = '';finish(x);".len();
-    lash_typescript::compile(&format!("const x = '{}';finish(x);", "a".repeat(filler)))
+    lash_typescript::testing::compile(&format!("const x = '{}';finish(x);", "a".repeat(filler)))
         .expect("a source at the bound compiles");
 }
 
@@ -552,7 +553,7 @@ fn guest_named_allocations_fail_without_aborting() {
             format!("finish(Array.from({{ length: {length} }}, (_, i: number) => i).length);"),
             format!("finish(Array.of(...Array.from({{ length: {length} }})).length);"),
         ] {
-            let Ok(program) = lash_typescript::compile(&source) else {
+            let Ok(program) = lash_typescript::testing::compile(&source) else {
                 continue;
             };
             let outcome = futures::executor::block_on(lashlang::execute(

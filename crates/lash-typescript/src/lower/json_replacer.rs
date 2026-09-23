@@ -118,6 +118,7 @@ impl Lowerer {
             LashExpr::For {
                 binding: property.as_str().into(),
                 iterable: Box::new(variable(&keys)),
+                bind: None,
                 body: Box::new(LashExpr::Block(vec![
                     assign(&transformed, recurse(current_value(), variable(&property))),
                     LashExpr::If {

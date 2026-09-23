@@ -39,7 +39,7 @@ impl ExecutionHost for Host {
 }
 
 fn compile(source: &str) -> lashlang::CompiledProgram {
-    lash_typescript::compile(source).unwrap_or_else(|error| panic!("`{source}`: {error}"))
+    lash_typescript::testing::compile(source).unwrap_or_else(|error| panic!("`{source}`: {error}"))
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {

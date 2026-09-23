@@ -92,7 +92,7 @@ fn label_on_await_assignment_attaches_to_await_instruction() {
         .with_language_features(crate::LashlangLanguageFeatures::default().with_label_annotations())
         .with_globals(["handle"]);
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let compiled = crate::compile_linked(&linked);
+    let compiled = crate::testing::harness::compile_linked_main(&linked);
     let await_instruction = compiled
         .chunk
         .code
@@ -1579,12 +1579,13 @@ fn compile_labeled_program_with_historical_context(
         crate::LashlangLanguageFeatures::default().with_label_annotations(),
     );
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let current = crate::compile_linked(&linked);
-    let mut historical_artifact = linked.artifact.clone();
-    historical_artifact.module_ref = historical_module_ref(historical_module_hash);
+    let current = crate::testing::harness::compile_linked_main(&linked);
+    let mut historical_context = crate::artifact::CompiledModuleContext::from(&linked.artifact);
+    historical_context.module_ref = historical_module_ref(historical_module_hash);
     let (chunk, compile_stats) = Compiler::compile_linked_program(
-        linked.program(),
-        (&historical_artifact).into(),
+        linked.artifact.ir(),
+        Default::default(),
+        historical_context,
         crate::tracking::LashlangExecutionContext::main(),
     );
     let historical = CompiledProgram {
@@ -1605,20 +1606,23 @@ fn compile_labeled_process_with_historical_context(
         crate::LashlangLanguageFeatures::default().with_label_annotations(),
     );
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let current = crate::compile_linked_process(&linked, process_name)
+    let current = crate::testing::harness::compile_linked_process_named(&linked, process_name)
         .expect("current process should compile");
     let process = linked
-        .program()
+        .artifact
+        .ir()
         .process(process_name)
         .expect("historical process should exist");
     let process_program = Program {
-        declarations: linked.program().declarations.clone(),
+        language: linked.artifact.ir().language.clone(),
+        declarations: linked.artifact.ir().declarations.clone(),
         main: process.body.clone(),
+        private_bindings: Default::default(),
         spans: Default::default(),
     };
-    let mut historical_artifact = linked.artifact.clone();
-    historical_artifact.module_ref = historical_module_ref(historical_module_hash);
-    historical_artifact.exports.processes.insert(
+    let mut historical_context = crate::artifact::CompiledModuleContext::from(&linked.artifact);
+    historical_context.module_ref = historical_module_ref(historical_module_hash);
+    historical_context.process_refs.insert(
         process_name.to_string(),
         crate::ProcessRef::new(
             crate::ContentHash::new(historical_process_component),
@@ -1627,7 +1631,8 @@ fn compile_labeled_process_with_historical_context(
     );
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
-        (&historical_artifact).into(),
+        Default::default(),
+        historical_context,
         crate::tracking::LashlangExecutionContext::process(process_name),
     );
     let historical = CompiledProgram {

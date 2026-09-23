@@ -56,6 +56,30 @@ impl StoreTestSupport for PostgresSessionStore {
         tx.commit().await.map_err(store_sqlx_error)
     }
 
+    async fn stamp_session_state_version_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        sqlx::query(
+            crate::session_sql::session_sql()
+                .meta
+                .set_state_version
+                .sql(),
+        )
+        .bind(self.session_id.as_str())
+        .bind(
+            i32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
+                record_kind: "SessionStateVersion",
+                message: format!("test marker {version} exceeds PostgreSQL INTEGER"),
+            })?,
+        )
+        .execute(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        Ok(())
+    }
+
     async fn stamp_session_state_version_and_corrupt_payload_for_testing(
         &self,
         version: u32,

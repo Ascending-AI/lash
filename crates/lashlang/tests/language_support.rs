@@ -78,9 +78,13 @@ async fn end_to_end_type_value_is_json_schema_shaped() {
     let program = Program::block(vec![Expr::Finish(Box::new(books_type()))]);
     let host = TestHost::default();
     let mut state = State::new();
-    let outcome = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect("should run");
+    let outcome = lashlang::execute(
+        &lashlang_compile_program(&program).expect("the program compiles"),
+        &mut state,
+        &host,
+    )
+    .await
+    .expect("should run");
     let ExecutionOutcome::Finished(value) = outcome else {
         panic!("expected finish");
     };
@@ -144,9 +148,13 @@ async fn type_is_usable_as_a_tool_call_argument() {
         Expr::Finish(Box::new(Expr::Null)),
     ]);
     let host = CaptureHost::default();
-    lashlang::execute(&program, &mut State::new(), &host)
-        .await
-        .expect("should run");
+    lashlang::execute(
+        &lashlang_compile_program(&program).expect("the program compiles"),
+        &mut State::new(),
+        &host,
+    )
+    .await
+    .expect("should run");
     let captured = host.captured.lock_recover().clone().expect("captured arg");
     let inner = lashlang::unwrap_type_value(&captured).expect("wrapped type");
     let schema = inner.as_record().expect("schema record");
@@ -196,9 +204,13 @@ async fn validate_reuses_type_literals_for_intermediate_checks() {
     ]);
     let mut state = State::new();
     let value = finished(
-        lashlang::execute(&program, &mut state, &host)
-            .await
-            .expect("validate should succeed"),
+        lashlang::execute(
+            &lashlang_compile_program(&program).expect("the program compiles"),
+            &mut state,
+            &host,
+        )
+        .await
+        .expect("validate should succeed"),
     );
     let package = value.as_record().expect("package record");
     assert_eq!(
@@ -224,9 +236,13 @@ async fn validate_reuses_type_literals_for_intermediate_checks() {
         ],
     }))]);
     let mut state = State::new();
-    let err = lashlang::execute(&failing, &mut state, &host)
-        .await
-        .expect_err("validate should fail");
+    let err = lashlang::execute(
+        &lashlang_compile_program(&failing).expect("the program compiles"),
+        &mut state,
+        &host,
+    )
+    .await
+    .expect_err("validate should fail");
     let RuntimeError::ValidationFailed { reason } = err else {
         panic!("expected validation runtime error");
     };
@@ -247,9 +263,13 @@ async fn undefined_ref_in_type_produces_runtime_error() {
     ))))]);
     let host = TestHost::default();
     let mut state = State::new();
-    let err = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect_err("Missing is undefined");
+    let err = lashlang::execute(
+        &lashlang_compile_program(&program).expect("the program compiles"),
+        &mut state,
+        &host,
+    )
+    .await
+    .expect_err("Missing is undefined");
     assert!(matches!(err, RuntimeError::UndefinedVariable { .. }));
 }
 
@@ -267,9 +287,13 @@ async fn snapshot_round_trip_preserves_type_values() {
     ]);
     let host = TestHost::default();
     let mut state = State::new();
-    let outcome = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect("should run");
+    let outcome = lashlang::execute(
+        &lashlang_compile_program(&program).expect("the program compiles"),
+        &mut state,
+        &host,
+    )
+    .await
+    .expect("should run");
     let ExecutionOutcome::Finished(value) = outcome else {
         panic!("expected finish");
     };
@@ -280,11 +304,28 @@ async fn snapshot_round_trip_preserves_type_values() {
     // Re-execute a program that references Books — the ref should still resolve.
     let program2 = Program::block(vec![Expr::Finish(Box::new(Expr::Variable("Books".into())))]);
     let mut state2 = restored_state;
-    let outcome2 = lashlang::execute(&program2, &mut state2, &host)
-        .await
-        .expect("run");
+    let outcome2 = lashlang::execute(
+        &lashlang_compile_program(&program2).expect("the program compiles"),
+        &mut state2,
+        &host,
+    )
+    .await
+    .expect("run");
     let ExecutionOutcome::Finished(v2) = outcome2 else {
         panic!("expected finish");
     };
     assert_eq!(value, v2);
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

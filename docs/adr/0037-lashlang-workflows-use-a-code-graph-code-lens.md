@@ -22,6 +22,15 @@ The TypeScript parser and canonical printer now implement the lens's exact
 source fixpoint. Expression-valued graph fields carry IR and use the TypeScript
 fragment parser only when a host edits text.
 
+Amended by FIG-3571 (arc FIG-3570): the lens edits drafts, and a run is
+observed on the admitted artifact. A draft projected from source claims no
+runtime identity; a runnable view is projected from the admitted artifact's
+own IR (`workflow_graph_from_artifact`), with equal node ids and lifted owners
+and the artifact's `source_identity` (ADR 0100 R6). Node ids are minted from
+structural owner and AST path (ADR 0100 R0), not from canonical source, and
+runtime sites carry the same id, so no join helper exists. The structural walk
+reads language-neutral IR roles, not a front end's generated names.
+
 ## Context
 
 Hosts need to visualize and structurally edit Lashlang workflows and correlate

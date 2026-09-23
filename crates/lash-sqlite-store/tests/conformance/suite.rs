@@ -128,6 +128,12 @@ impl ScenarioBackends {
     }
 
     fn store(&self, scenario: &str) -> Arc<dyn RuntimePersistence> {
+        self.concrete_store(scenario) as Arc<dyn RuntimePersistence>
+    }
+
+    /// The scenario's store as its concrete type, for laws that also reach
+    /// its test-support seams.
+    fn concrete_store(&self, scenario: &str) -> Arc<lash_sqlite_store::Store> {
         let existing = self.by_scenario.lock_recover().get(scenario).cloned();
         let backend = existing.unwrap_or_else(|| {
             let clock = Arc::clone(&self.clock);
@@ -139,7 +145,7 @@ impl ScenarioBackends {
                 .or_insert(backend)
                 .clone()
         });
-        backend.blocking_store() as Arc<dyn RuntimePersistence>
+        backend.blocking_store()
     }
 }
 
@@ -1213,6 +1219,20 @@ lash_conformance::turn_crash_matrix_tests!({
         },
     )
 });
+
+/// FIG-3571: a turn the pre-cutover build left in flight is refused, typed,
+/// before any effect when this build redrives it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_pre_cutover_generation_turn_redrive_is_refused_before_any_effect() {
+    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
+    Box::pin(
+        lash_conformance::pre_cutover_generation_turn_redrive_is_refused_before_any_effect(
+            |scenario| scenarios.concrete_store(scenario),
+            |_| lash_conformance::ConformanceInvocation::native(),
+        ),
+    )
+    .await;
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {

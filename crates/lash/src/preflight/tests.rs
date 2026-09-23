@@ -676,7 +676,7 @@ async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
     ))
     .expect("frozen fixture should be JSON");
     raw["compilation_dialect"] = serde_json::json!("future_dialect");
-    raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
     let item = DurableItem {
         surface: DurableSurface::ModuleArtifact,
         cursor: "lashlang:v1:sha256:future".to_string(),

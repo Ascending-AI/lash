@@ -12,6 +12,13 @@ description = "Lashlang runtime integration for lash-core process engines and to
 keywords = ["lash", "agent", "runtime", "lashlang"]
 categories = ["asynchronous", "api-bindings"]
 
+
+# FIG-3571 (ADR 0100 R8): `scripts/check-workflow-graph-model.sh` reads this
+# role. A language-neutral crate may not reach a front-end crate through its
+# dependency graph.
+[package.metadata.lash]
+role = "language-neutral"
+
 [lib]
 name = "lash_lashlang_runtime"
 doctest = false
@@ -30,7 +37,6 @@ lash-core = { workspace = true }
 lash-core-worker = { workspace = true }
 lash-remote-protocol = { workspace = true }
 lash-trace = { workspace = true }
-lash-typescript = { workspace = true }
 lashlang = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }

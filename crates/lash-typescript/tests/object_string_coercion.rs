@@ -33,7 +33,7 @@ impl ExecutionHost for Host {
 }
 
 fn finished(source: &str) -> Value {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = Host::default();
     match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
         .expect("TypeScript should execute")
@@ -52,7 +52,7 @@ fn finished_string(source: &str) -> String {
 
 /// Runs `source` and returns the refusal's debug text.
 fn refusal(source: &str) -> String {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = Host::default();
     let error = futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
         .expect_err("string coercion of a tag-only object refuses");

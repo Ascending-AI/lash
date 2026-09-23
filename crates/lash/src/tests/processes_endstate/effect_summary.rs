@@ -11,17 +11,13 @@
 use super::*;
 use lash_core::ProcessEffectOutcomeClass;
 
-const TYPESCRIPT_RUNTIME_MODULE_PATH: &str = "__typescript_runtime";
-const TYPESCRIPT_RUNTIME_RESOURCE_TYPE: &str = "typescript.Runtime";
-const TYPESCRIPT_RUNTIME_NOW_OPERATION: &str = "now";
-
 fn summary_catalog() -> lashlang::LashlangHostCatalog {
     let mut catalog = programs::process_control_catalog();
     catalog
         .add_module_operation_contract(
-            [TYPESCRIPT_RUNTIME_MODULE_PATH],
-            TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
-            TYPESCRIPT_RUNTIME_NOW_OPERATION,
+            [lashlang::LANGUAGE_RUNTIME_MODULE_PATH],
+            lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
+            lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
             "typescript.runtime.now",
             &lashlang::OperationContract::new(
                 serde_json::json!({}),
@@ -34,7 +30,7 @@ fn summary_catalog() -> lashlang::LashlangHostCatalog {
 }
 
 fn now_call() -> lashlang::Expr {
-    b::module_call(&[TYPESCRIPT_RUNTIME_MODULE_PATH], "now", Vec::new())
+    b::module_call(&[lashlang::LANGUAGE_RUNTIME_MODULE_PATH], "now", Vec::new())
 }
 
 fn list_triggers() -> lashlang::Expr {

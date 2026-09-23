@@ -184,8 +184,8 @@ pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reop
     // The alias the linker rewrites the lowerer's `builtin` receiver to once a
     // module call is linked; before FIG-3079 this form never reached here.
     let receiver = lashlang::Value::Resource(lashlang::ResourceHandle::new(
-        lash_lashlang_runtime::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
-        lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH,
+        lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
+        lashlang::LANGUAGE_RUNTIME_MODULE_PATH,
     ));
 
     async fn sample(
@@ -224,8 +224,8 @@ pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reop
                 other => panic!("`{operation}` returns a number, got {other:?}"),
             }
         };
-        let now = number(lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION).await;
-        let random = number(lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION).await;
+        let now = number(lashlang::LANGUAGE_RUNTIME_NOW_OPERATION).await;
+        let random = number(lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION).await;
         (now, random)
     }
 

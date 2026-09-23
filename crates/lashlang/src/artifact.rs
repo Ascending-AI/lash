@@ -17,11 +17,12 @@ mod requirements;
 mod write_helpers;
 use requirements::RequirementsCollector;
 use write_helpers::{
-    write_binary_op, write_label_metadata, write_resource_ref, write_unary_expr, write_unary_op,
+    write_binary_op, write_label_metadata, write_process_origin, write_resource_ref,
+    write_structural_role, write_unary_expr, write_unary_op,
 };
 
 use crate::ast::{
-    AssignPathStep, AstString, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause,
+    AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause,
     ProcessDecl, Program, ResourceRefExpr, TypeExpr, UnaryOp,
 };
 use crate::linker::{
@@ -140,58 +141,82 @@ pub struct ModuleExports {
     pub processes: BTreeMap<String, ProcessRef>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// One admitted module: the executable program, exactly as the linker
+/// produced it, and the identities derived from it.
+///
+/// `ir` is the only program an artifact carries. Execution, node identity,
+/// trace maps and runnable graph views all read it; nothing re-derives a
+/// second program from it. It keeps every binding name and carries no spans
+/// (the durable form is span-free; a linked module keeps its diagnostic spans
+/// beside the artifact).
+///
+/// An artifact is admitted by construction: its fields are private, and the
+/// only ways to obtain one are the validating builders (the linker,
+/// [`Self::from_program`]) and the verifying store decoder
+/// ([`Self::from_store_bytes`]). There is no struct literal, no field write
+/// and no `Deserialize` path around them, so every artifact [`crate::compile`]
+/// sees has a valid program and refs derived from its own content.
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ModuleArtifact {
-    pub module_ref: ModuleRef,
-    pub host_requirements_ref: HostRequirementsRef,
-    pub host_requirements: HostRequirements,
-    pub exports: ModuleExports,
-    pub canonical_ir: Program,
+    module_ref: ModuleRef,
+    host_requirements_ref: HostRequirementsRef,
+    host_requirements: HostRequirements,
+    exports: ModuleExports,
+    ir: Program,
+}
+
+/// The stored shape of a [`ModuleArtifact`], decoded only to be verified.
+#[derive(Deserialize)]
+struct StoredModuleArtifact {
+    module_ref: ModuleRef,
+    host_requirements_ref: HostRequirementsRef,
+    host_requirements: HostRequirements,
+    exports: ModuleExports,
+    ir: Program,
 }
 
 impl ModuleArtifact {
     /// Builds a raw module artifact from already-complete program IR.
     ///
     /// Source programs whose process output is inferred must go through the
-    /// linker; this builder refuses an incomplete exported signature.
-    pub fn from_program(program: Program) -> Result<Self, ModuleArtifactError> {
-        let canonical_ir = canonical_program_ir(program);
-        let requirements = host_requirements_for_program(&canonical_ir);
-        Self::from_canonical_ir_and_requirements(canonical_ir, requirements)
+    /// linker; this builder refuses an incomplete exported signature. Spans are
+    /// diagnostics, not identity, and never reach the artifact.
+    pub fn from_program(mut program: Program) -> Result<Self, ModuleArtifactError> {
+        program.spans.clear();
+        let requirements = host_requirements_for_program(&program);
+        Self::from_ir_and_requirements(program, requirements)
     }
 
-    pub(crate) fn from_program_with_requirements(
-        program: Program,
+    /// `ir` must already be span-free: the linker keeps the spans it strips.
+    pub(crate) fn from_ir_and_requirements(
+        ir: Program,
         requirements: HostRequirements,
     ) -> Result<Self, ModuleArtifactError> {
-        let canonical_ir = canonical_program_ir(program);
-        Self::from_canonical_ir_and_requirements(canonical_ir, requirements)
-    }
-
-    fn from_canonical_ir_and_requirements(
-        canonical_ir: Program,
-        requirements: HostRequirements,
-    ) -> Result<Self, ModuleArtifactError> {
-        Self::check_canonical_ir(&canonical_ir)?;
-        let host_requirements_ref = host_requirements_ref(&requirements);
-        let exports = module_exports(&canonical_ir);
-        let module_ref = module_ref(&canonical_ir, &host_requirements_ref, &exports);
+        Self::check_ir(&ir)?;
+        let host_requirements_ref = hash_host_requirements(&requirements);
+        let exports = module_exports(&ir);
+        let module_ref = module_ref(&ir, &host_requirements_ref, &exports);
         Ok(Self {
             module_ref,
             host_requirements_ref,
             host_requirements: requirements,
             exports,
-            canonical_ir,
+            ir,
         })
     }
 
-    /// Refuses IR the compiler cannot lower, independently of its refs.
+    /// Refuses IR the compiler cannot lower, independently of its refs, and
+    /// IR that carries spans: the durable form is span-free.
     ///
     /// Shared by the builder and by `verify` so an admission check sees exactly
     /// what construction does.
-    fn check_canonical_ir(canonical_ir: &Program) -> Result<(), ModuleArtifactError> {
-        crate::ast::validate_ast(canonical_ir)?;
-        if let Some(process) = canonical_ir.declarations.iter().find_map(|declaration| {
+    fn check_ir(ir: &Program) -> Result<(), ModuleArtifactError> {
+        if !ir.spans.is_empty() {
+            return Err(ModuleArtifactError::DurableSpans);
+        }
+        crate::ast::validate_ast(ir)?;
+        crate::ast::check_unique_declarations(ir)?;
+        if let Some(process) = ir.declarations.iter().find_map(|declaration| {
             let Declaration::Process(process) = declaration else {
                 return None;
             };
@@ -202,6 +227,43 @@ impl ModuleArtifact {
             });
         }
         Ok(())
+    }
+
+    /// The definition identity a trace and an admitted graph both name
+    /// (ADR 0100 R6): a digest, under `lash-workflow-source/v4`, of the same
+    /// deterministic atom stream the module ref hashes for the program (its
+    /// language and its span-free IR, names and number literals by the one IR
+    /// number rule). It never depends on how a dialect would print the program
+    /// or on a serializer's spelling.
+    pub fn source_identity(&self) -> String {
+        let mut writer = HashWriter::for_source_identity();
+        writer.atom("source");
+        writer.atom(self.ir.language.as_str());
+        write_program(&mut writer, &self.ir);
+        writer.finish().as_str().to_string()
+    }
+
+    /// The module's identity: a hash of its language, host requirements,
+    /// exports and complete program.
+    pub fn module_ref(&self) -> &ModuleRef {
+        &self.module_ref
+    }
+
+    pub fn host_requirements_ref(&self) -> &HostRequirementsRef {
+        &self.host_requirements_ref
+    }
+
+    pub fn host_requirements(&self) -> &HostRequirements {
+        &self.host_requirements
+    }
+
+    pub fn exports(&self) -> &ModuleExports {
+        &self.exports
+    }
+
+    /// The executable program: the linked program, verbatim and span-free.
+    pub fn ir(&self) -> &Program {
+        &self.ir
     }
 
     pub fn process_ref(&self, process_name: &str) -> Option<&ProcessRef> {
@@ -219,7 +281,7 @@ impl ModuleArtifact {
     /// immutable requirements snapshot.
     pub fn resolve_type(&self, ty: &TypeExpr) -> TypeExpr {
         let aliases = self
-            .canonical_ir
+            .ir
             .declarations
             .iter()
             .filter_map(|declaration| match declaration {
@@ -238,7 +300,7 @@ impl ModuleArtifact {
     }
 
     pub fn process_type(&self, process_name: &str) -> Option<TypeExpr> {
-        let process = self.canonical_ir.process(process_name)?;
+        let process = self.ir.process(process_name)?;
         let output = process.return_ty.as_ref()?;
         let signature = crate::ProcessSignature::try_new(
             process
@@ -261,26 +323,18 @@ impl ModuleArtifact {
         crate::ModuleIntrospection::from_artifact(self)
     }
 
-    /// Refuses an artifact whose recorded refs do not match its own content.
+    /// Refuses decoded content whose recorded refs do not match the content.
     ///
     /// The refs are derived from borrowed content rather than by rebuilding the
-    /// artifact: a rebuild cloned the whole canonical IR and the host
-    /// requirements only to hash them, which made every publish cost a deep
-    /// copy of the program (FIG-3088). What this refuses is unchanged - the
-    /// same AST validation, the same incomplete-signature refusal, and the same
-    /// three ref comparisons in the same order. Canonicalisation only clears the
-    /// span tables, which neither `write_program` nor `validate_ast` reads, so
-    /// deriving from the artifact's own IR is equivalent to deriving from a
-    /// canonicalised copy of it.
-    pub fn verify(&self) -> Result<(), ModuleArtifactError> {
-        Self::check_canonical_ir(&self.canonical_ir)?;
-        let derived_host_requirements_ref = host_requirements_ref(&self.host_requirements);
-        let derived_exports = module_exports(&self.canonical_ir);
-        let derived_module_ref = module_ref(
-            &self.canonical_ir,
-            &derived_host_requirements_ref,
-            &derived_exports,
-        );
+    /// artifact, so a decode never deep-copies the program only to hash it
+    /// (FIG-3088). Only the store decoder needs it: every other artifact was
+    /// built by a validating builder.
+    fn verify(&self) -> Result<(), ModuleArtifactError> {
+        Self::check_ir(&self.ir)?;
+        let derived_host_requirements_ref = hash_host_requirements(&self.host_requirements);
+        let derived_exports = module_exports(&self.ir);
+        let derived_module_ref =
+            module_ref(&self.ir, &derived_host_requirements_ref, &derived_exports);
         if derived_module_ref != self.module_ref {
             return Err(ModuleArtifactError::HashMismatch {
                 field: "module_ref",
@@ -298,7 +352,7 @@ impl ModuleArtifact {
         if derived_exports != self.exports {
             return Err(ModuleArtifactError::HashMismatch {
                 field: "exports",
-                expected: "canonical exports".to_string(),
+                expected: "derived exports".to_string(),
                 actual: "artifact exports".to_string(),
             });
         }
@@ -306,7 +360,6 @@ impl ModuleArtifact {
     }
 
     pub fn to_store_bytes(&self) -> Result<Vec<u8>, ModuleArtifactError> {
-        self.verify()?;
         serde_json::to_vec(self).map_err(|err| ModuleArtifactError::Codec(err.to_string()))
     }
 
@@ -314,7 +367,7 @@ impl ModuleArtifact {
         let raw: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
         reject_future_shape(&raw)?;
-        let artifact: Self = serde_json::from_slice(bytes).map_err(|err| {
+        let stored: StoredModuleArtifact = serde_json::from_slice(bytes).map_err(|err| {
             let message = err.to_string();
             if message.contains("unknown variant") {
                 ModuleArtifactError::FutureShape {
@@ -325,6 +378,13 @@ impl ModuleArtifact {
                 ModuleArtifactError::Codec(message)
             }
         })?;
+        let artifact = Self {
+            module_ref: stored.module_ref,
+            host_requirements_ref: stored.host_requirements_ref,
+            host_requirements: stored.host_requirements,
+            exports: stored.exports,
+            ir: stored.ir,
+        };
         artifact.verify()?;
         Ok(artifact)
     }
@@ -434,8 +494,10 @@ fn contains_obsolete_process_type(value: &serde_json::Value) -> bool {
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ModuleArtifactError {
-    #[error("invalid canonical program: {0}")]
+    #[error("invalid module program: {0}")]
     InvalidAst(#[from] crate::InvalidAst),
+    #[error("a module artifact carries no source spans; spans stay with the linked module")]
+    DurableSpans,
     #[error(
         "module artifact uses the obsolete anonymous process type shape; recompile and republish the module"
     )]
@@ -524,6 +586,7 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
     fn from(value: ModuleArtifactError) -> Self {
         match value {
             ModuleArtifactError::InvalidAst(source) => Self::Decode(source.to_string()),
+            ModuleArtifactError::DurableSpans => Self::Decode(value.to_string()),
             ModuleArtifactError::ObsoleteProcessTypeShape => Self::Decode(
                 "module artifact uses the obsolete anonymous process type shape; recompile and republish the module"
                     .to_string(),
@@ -679,7 +742,6 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
                 "invalid module reference".into(),
             ));
         }
-        artifact.verify()?;
         let publication_pause = self.publication_pause.lock_recover().take();
         if let Some(pause) = publication_pause {
             pause.pause().await;
@@ -827,128 +889,6 @@ impl From<&ModuleArtifact> for CompiledModuleContext {
     }
 }
 
-pub fn canonical_program_ir(mut program: Program) -> Program {
-    program.spans.clear();
-    normalize_local_binder_names(&mut program);
-    program
-}
-
-/// The shape a normalized local binder name is rewritten to.
-///
-/// `#` is not an identifier character in any dialect that reaches the IR, so a
-/// normalized binder can never collide with an authored name, a lifted process
-/// declaration name, or a session global carried by name.
-fn normalized_local_name(index: u32) -> AstString {
-    AstString::from(format!("local#{index}"))
-}
-
-/// Rewrites every local binder name the module identity alpha-normalizes.
-///
-/// `module_ref` writes a local binder as `local:<index>` rather than as its
-/// name (`NameNormalizer`), so two modules that differ only in a local name
-/// share one module ref. The artifact stored under that ref must therefore not
-/// carry the name either: every artifact store addresses a module by its ref
-/// and refuses a second publish whose bytes differ, so a name the identity
-/// drops but the bytes keep makes one ref name two byte strings and the second
-/// session to run an alpha-variant cell fails its turn (FIG-3120). Spans are
-/// already cleared above for exactly this reason; local names are the same
-/// class of fact.
-///
-/// The walk mirrors the hash's unit by unit: a function body binds its params
-/// as ABI names, a process body binds its params plus `input`/`inputs`, and
-/// `main` starts empty — so a name that hashes as `local:<i>` here is the name
-/// renamed here, and equal refs now carry equal bytes.
-fn normalize_local_binder_names(program: &mut Program) {
-    let mut declaration_locals = Vec::with_capacity(program.declarations.len());
-    for declaration in &program.declarations {
-        declaration_locals.push(match declaration {
-            Declaration::Type(_) => LocalNames::default(),
-            Declaration::Function(function) => {
-                let mut normalizer = NameNormalizer::default();
-                for param in &function.params {
-                    normalizer.bind_abi(param.name.as_str());
-                }
-                normalizer.collect_expr(&function.body);
-                normalizer.local_names()
-            }
-            Declaration::Process(process) => {
-                let mut normalizer = NameNormalizer::default();
-                for param in &process.params {
-                    normalizer.bind_abi(param.name.as_str());
-                }
-                normalizer.bind_abi("input");
-                normalizer.bind_abi("inputs");
-                normalizer.collect_expr(&process.body);
-                normalizer.local_names()
-            }
-        });
-    }
-    let main_locals = {
-        let mut normalizer = NameNormalizer::default();
-        normalizer.collect_expr(&program.main);
-        normalizer.local_names()
-    };
-
-    for (declaration, locals) in program.declarations.iter_mut().zip(declaration_locals) {
-        match declaration {
-            Declaration::Type(_) => {}
-            Declaration::Function(function) => rename_local_names(&mut function.body, &locals),
-            Declaration::Process(process) => rename_local_names(&mut process.body, &locals),
-        }
-    }
-    rename_local_names(&mut program.main, &main_locals);
-}
-
-/// Renames one name mention if the identity hashes it as a local.
-fn rename_name(name: &mut AstString, locals: &LocalNames) {
-    if let Some(&index) = locals.get(name.as_str()) {
-        *name = normalized_local_name(index);
-    }
-}
-
-/// Rewrites every name position `write_expr` passes through
-/// `NameNormalizer::name_token`, then recurses through `children_mut`, which is
-/// pinned to visit the same nodes `write_expr` does. A process literal's
-/// parameter names are deliberately absent: the identity writes those verbatim,
-/// so they are not local names.
-fn rename_local_names(expr: &mut Expr, locals: &LocalNames) {
-    if locals.is_empty() {
-        return;
-    }
-    match expr {
-        Expr::Variable(name) => rename_name(name, locals),
-        Expr::Assign { target, .. } => rename_name(&mut target.root, locals),
-        Expr::For { binding, .. } => rename_name(binding, locals),
-        Expr::ListComprehension { clauses, .. } => {
-            for clause in clauses {
-                if let ListComprehensionClause::For { binding, .. } = clause {
-                    rename_name(binding, locals);
-                }
-            }
-        }
-        Expr::Function(function) => {
-            if let Some(name) = function.name.as_mut() {
-                rename_name(name, locals);
-            }
-            for param in &mut function.params {
-                rename_name(param, locals);
-            }
-            for capture in &mut function.captures {
-                rename_name(capture, locals);
-            }
-        }
-        Expr::Try(scope) => {
-            if let Some(catch) = scope.catch.as_mut() {
-                rename_name(&mut catch.binding, locals);
-            }
-        }
-        _ => {}
-    }
-    for child in expr.children_mut() {
-        rename_local_names(child, locals);
-    }
-}
-
 pub fn host_requirements_for_program(program: &Program) -> HostRequirements {
     RequirementsCollector::new(program).collect()
 }
@@ -977,7 +917,7 @@ fn module_exports(program: &Program) -> ModuleExports {
     exports
 }
 
-fn host_requirements_ref(requirements: &HostRequirements) -> HostRequirementsRef {
+fn hash_host_requirements(requirements: &HostRequirements) -> HostRequirementsRef {
     let mut writer = HashWriter::new();
     writer.atom(LASHLANG_SEMANTIC_HASH_VERSION);
     writer.atom("host-requirements");
@@ -1079,9 +1019,12 @@ fn write_program(writer: &mut HashWriter, program: &Program) {
     for declaration in &program.declarations {
         write_declaration(writer, declaration);
     }
-    let mut normalizer = NameNormalizer::default();
-    normalizer.collect_expr(&program.main);
-    write_expr(writer, &program.main, &normalizer);
+    write_expr(writer, &program.main);
+    writer.atom("private-bindings");
+    writer.usize(program.private_bindings.len());
+    for name in &program.private_bindings {
+        write_name(writer, name);
+    }
 }
 
 fn write_declaration(writer: &mut HashWriter, declaration: &Declaration) {
@@ -1106,12 +1049,7 @@ fn write_function(writer: &mut HashWriter, function: &crate::ast::FunctionDecl) 
     }
     writer.atom("return");
     write_type(writer, &function.return_ty);
-    let mut normalizer = NameNormalizer::default();
-    for param in &function.params {
-        normalizer.bind_abi(param.name.as_str());
-    }
-    normalizer.collect_expr(&function.body);
-    write_expr(writer, &function.body, &normalizer);
+    write_expr(writer, &function.body);
 }
 
 fn write_process(writer: &mut HashWriter, process: &ProcessDecl) {
@@ -1138,14 +1076,8 @@ fn write_process(writer: &mut HashWriter, process: &ProcessDecl) {
     if let Some(label) = &process.label {
         write_label_metadata(writer, label);
     }
-    let mut normalizer = NameNormalizer::default();
-    for param in &process.params {
-        normalizer.bind_abi(param.name.as_str());
-    }
-    normalizer.bind_abi("input");
-    normalizer.bind_abi("inputs");
-    normalizer.collect_expr(&process.body);
-    write_expr(writer, &process.body, &normalizer);
+    write_process_origin(writer, &process.origin);
+    write_expr(writer, &process.body);
 }
 
 fn write_type(writer: &mut HashWriter, ty: &TypeExpr) {
@@ -1208,31 +1140,26 @@ fn write_type(writer: &mut HashWriter, ty: &TypeExpr) {
     }
 }
 
-fn write_name_token(writer: &mut HashWriter, token: NameToken<'_>) {
-    match token {
-        NameToken::Abi(name) => writer.prefixed_atom("abi:", name),
-        NameToken::Global(name) => writer.prefixed_atom("global:", name),
-        NameToken::Local(index) => writer.numbered_atom("local:", u64::from(index)),
-    }
+/// A binding name, written verbatim: a module's identity is its program with
+/// every name in it, so two programs that differ only in a name are two
+/// modules (FIG-3571).
+fn write_name(writer: &mut HashWriter, name: &str) {
+    writer.prefixed_atom("name:", name);
 }
 
-fn write_expr<'program>(
-    writer: &mut HashWriter,
-    expr: &'program Expr,
-    normalizer: &NameNormalizer<'program>,
-) {
+fn write_expr(writer: &mut HashWriter, expr: &Expr) {
     match expr {
         Expr::Block(expressions) => {
             writer.atom("block");
             writer.usize(expressions.len());
             for expression in expressions {
-                write_expr(writer, expression, normalizer);
+                write_expr(writer, expression);
             }
         }
         Expr::LabelAnnotated { label, expr } => {
             writer.atom("label-annotated");
             write_label_metadata(writer, label);
-            write_expr(writer, expr, normalizer);
+            write_expr(writer, expr);
         }
         Expr::ProcessLiteral(literal) => {
             writer.atom("process-literal");
@@ -1241,7 +1168,12 @@ fn write_expr<'program>(
                 writer.atom(param.name.as_str());
                 write_type(writer, &param.ty);
             }
-            write_expr(writer, &literal.body, normalizer);
+            for param in &literal.hidden_args {
+                writer.atom("hidden-arg");
+                writer.atom(param.name.as_str());
+                write_type(writer, &param.ty);
+            }
+            write_expr(writer, &literal.body);
         }
         Expr::Null => writer.atom("null"),
         Expr::Undefined => writer.atom("javascript:undefined"),
@@ -1251,7 +1183,7 @@ fn write_expr<'program>(
         }
         Expr::Number(value) => {
             writer.atom("number");
-            writer.u64(if *value == 0.0 { 0 } else { value.to_bits() });
+            writer.u64(crate::ast::number::canonical_bits(*value));
         }
         Expr::String(value) => {
             writer.atom("string");
@@ -1259,20 +1191,20 @@ fn write_expr<'program>(
         }
         Expr::Variable(name) => {
             writer.atom("variable");
-            write_name_token(writer, normalizer.name_token(name.as_str()));
+            write_name(writer, name.as_str());
         }
         Expr::Tuple(items) => {
             writer.atom("tuple");
             writer.usize(items.len());
             for item in items {
-                write_expr(writer, item, normalizer);
+                write_expr(writer, item);
             }
         }
         Expr::List(items) => {
             writer.atom("list");
             writer.usize(items.len());
             for item in items {
-                write_expr(writer, item, normalizer);
+                write_expr(writer, item);
             }
         }
         Expr::ListComprehension { element, clauses } => {
@@ -1282,28 +1214,28 @@ fn write_expr<'program>(
                 match clause {
                     ListComprehensionClause::For { binding, iterable } => {
                         writer.atom("for");
-                        write_name_token(writer, normalizer.name_token(binding.as_str()));
-                        write_expr(writer, iterable, normalizer);
+                        write_name(writer, binding.as_str());
+                        write_expr(writer, iterable);
                     }
                     ListComprehensionClause::If { condition } => {
                         writer.atom("if");
-                        write_expr(writer, condition, normalizer);
+                        write_expr(writer, condition);
                     }
                 }
             }
-            write_expr(writer, element, normalizer);
+            write_expr(writer, element);
         }
         Expr::Record(entries) => {
             writer.atom("record");
             writer.usize(entries.len());
             for (key, value) in entries {
                 writer.atom(key.as_str());
-                write_expr(writer, value, normalizer);
+                write_expr(writer, value);
             }
         }
         Expr::Assign { target, expr } => {
             writer.atom("assign");
-            write_name_token(writer, normalizer.name_token(target.root.as_str()));
+            write_name(writer, target.root.as_str());
             writer.usize(target.steps.len());
             for step in &target.steps {
                 match step {
@@ -1313,11 +1245,11 @@ fn write_expr<'program>(
                     }
                     AssignPathStep::Index(index) => {
                         writer.atom("index");
-                        write_expr(writer, index, normalizer);
+                        write_expr(writer, index);
                     }
                 }
             }
-            write_expr(writer, expr, normalizer);
+            write_expr(writer, expr);
         }
         Expr::If {
             condition,
@@ -1325,24 +1257,37 @@ fn write_expr<'program>(
             else_block,
         } => {
             writer.atom("if");
-            write_expr(writer, condition, normalizer);
-            write_expr(writer, then_block, normalizer);
-            write_expr(writer, else_block, normalizer);
+            write_expr(writer, condition);
+            write_expr(writer, then_block);
+            write_expr(writer, else_block);
         }
         Expr::For {
             binding,
             iterable,
+            bind,
             body,
         } => {
             writer.atom("for");
-            write_name_token(writer, normalizer.name_token(binding.as_str()));
-            write_expr(writer, iterable, normalizer);
-            write_expr(writer, body, normalizer);
+            write_name(writer, binding.as_str());
+            write_expr(writer, iterable);
+            match bind {
+                Some(bind) => {
+                    writer.atom("bind");
+                    write_expr(writer, bind);
+                }
+                None => writer.atom("no-bind"),
+            }
+            write_expr(writer, body);
+        }
+        Expr::Role { role, expr } => {
+            writer.atom("role");
+            write_structural_role(writer, role);
+            write_expr(writer, expr);
         }
         Expr::While { condition, body } => {
             writer.atom("while");
-            write_expr(writer, condition, normalizer);
-            write_expr(writer, body, normalizer);
+            write_expr(writer, condition);
+            write_expr(writer, body);
         }
         Expr::Break => writer.atom("break"),
         Expr::Continue => writer.atom("continue"),
@@ -1353,7 +1298,7 @@ fn write_expr<'program>(
         Expr::HostDescriptorConstructor { type_name, input } => {
             writer.atom("host-value-constructor");
             writer.atom(type_name.as_str());
-            write_expr(writer, input, normalizer);
+            write_expr(writer, input);
         }
         Expr::ResourceRef(resource) => {
             writer.atom("resource-ref");
@@ -1365,31 +1310,31 @@ fn write_expr<'program>(
             args,
         } => {
             writer.atom("receiver-call");
-            write_expr(writer, receiver, normalizer);
+            write_expr(writer, receiver);
             writer.atom(operation.as_str());
             writer.usize(args.len());
             for arg in args {
-                write_expr(writer, arg, normalizer);
+                write_expr(writer, arg);
             }
         }
-        Expr::Await(expr) => write_unary_expr(writer, "await", expr, normalizer),
-        Expr::SleepFor(expr) => write_unary_expr(writer, "sleep-for", expr, normalizer),
-        Expr::SleepUntil(expr) => write_unary_expr(writer, "sleep-until", expr, normalizer),
+        Expr::Await(expr) => write_unary_expr(writer, "await", expr),
+        Expr::SleepFor(expr) => write_unary_expr(writer, "sleep-for", expr),
+        Expr::SleepUntil(expr) => write_unary_expr(writer, "sleep-until", expr),
         Expr::WaitSignal { name } => {
             writer.atom("wait-signal");
             writer.atom(name.as_str());
         }
-        Expr::ResultUnwrap(expr) => write_unary_expr(writer, "unwrap", expr, normalizer),
-        Expr::Print(expr) => write_unary_expr(writer, "print", expr, normalizer),
-        Expr::Yield(expr) => write_unary_expr(writer, "yield", expr, normalizer),
-        Expr::Finish(expr) => write_unary_expr(writer, "finish", expr, normalizer),
-        Expr::Fail(expr) => write_unary_expr(writer, "fail", expr, normalizer),
+        Expr::ResultUnwrap(expr) => write_unary_expr(writer, "unwrap", expr),
+        Expr::Print(expr) => write_unary_expr(writer, "print", expr),
+        Expr::Yield(expr) => write_unary_expr(writer, "yield", expr),
+        Expr::Finish(expr) => write_unary_expr(writer, "finish", expr),
+        Expr::Fail(expr) => write_unary_expr(writer, "fail", expr),
         Expr::BuiltinCall { name, args } => {
             writer.atom("builtin-call");
             writer.atom(name.as_str());
             writer.usize(args.len());
             for arg in args {
-                write_expr(writer, arg, normalizer);
+                write_expr(writer, arg);
             }
         }
         Expr::FunctionCall { function, args } => {
@@ -1397,96 +1342,96 @@ fn write_expr<'program>(
             writer.atom(function.as_str());
             writer.usize(args.len());
             for arg in args {
-                write_expr(writer, arg, normalizer);
+                write_expr(writer, arg);
             }
         }
         Expr::Function(function) => {
             writer.atom("function");
             match &function.name {
-                Some(name) => write_name_token(writer, normalizer.name_token(name.as_str())),
+                Some(name) => write_name(writer, name.as_str()),
                 None => writer.atom("anonymous"),
             }
             writer.usize(function.params.len());
             for param in &function.params {
-                write_name_token(writer, normalizer.name_token(param.as_str()));
+                write_name(writer, param.as_str());
             }
             writer.usize(function.captures.len());
             for capture in &function.captures {
-                write_name_token(writer, normalizer.name_token(capture.as_str()));
+                write_name(writer, capture.as_str());
             }
-            write_expr(writer, &function.body, normalizer);
+            write_expr(writer, &function.body);
         }
         Expr::Call { function, args } => {
             writer.atom("function-call");
-            write_expr(writer, function, normalizer);
+            write_expr(writer, function);
             writer.usize(args.len());
             for arg in args {
-                write_expr(writer, arg, normalizer);
+                write_expr(writer, arg);
             }
         }
         Expr::Map { items, function } => {
             writer.atom("function-map");
-            write_expr(writer, items, normalizer);
-            write_expr(writer, function, normalizer);
+            write_expr(writer, items);
+            write_expr(writer, function);
         }
         Expr::Try(scope) => {
             writer.atom("try");
-            write_expr(writer, &scope.body, normalizer);
+            write_expr(writer, &scope.body);
             match &scope.catch {
                 Some(catch) => {
                     writer.atom("catch");
-                    write_name_token(writer, normalizer.name_token(catch.binding.as_str()));
-                    write_expr(writer, &catch.body, normalizer);
+                    write_name(writer, catch.binding.as_str());
+                    write_expr(writer, &catch.body);
                 }
                 None => writer.atom("no-catch"),
             }
             match &scope.finally {
                 Some(finally) => {
                     writer.atom("finally");
-                    write_expr(writer, finally, normalizer);
+                    write_expr(writer, finally);
                 }
                 None => writer.atom("no-finally"),
             }
         }
-        Expr::Throw(value) => write_unary_expr(writer, "throw", value, normalizer),
-        Expr::Return(value) => write_unary_expr(writer, "javascript:return", value, normalizer),
+        Expr::Throw(value) => write_unary_expr(writer, "throw", value),
+        Expr::Return(value) => write_unary_expr(writer, "javascript:return", value),
         Expr::Field { target, field } => {
             writer.atom("field-access");
-            write_expr(writer, target, normalizer);
+            write_expr(writer, target);
             writer.atom(field.as_str());
         }
         Expr::Index { target, index } => {
             writer.atom("index-access");
-            write_expr(writer, target, normalizer);
-            write_expr(writer, index, normalizer);
+            write_expr(writer, target);
+            write_expr(writer, index);
         }
         Expr::Unary { op, expr } => {
             writer.atom("unary");
             write_unary_op(writer, *op);
-            write_expr(writer, expr, normalizer);
+            write_expr(writer, expr);
         }
         Expr::Binary { left, op, right } => {
             writer.atom("binary");
             write_binary_op(writer, *op);
-            write_expr(writer, left, normalizer);
-            write_expr(writer, right, normalizer);
+            write_expr(writer, left);
+            write_expr(writer, right);
         }
         Expr::JavaScriptUnary { op, expr } => {
             writer.atom("javascript:unary");
             writer.atom(&format!("{op:?}"));
-            write_expr(writer, expr, normalizer);
+            write_expr(writer, expr);
         }
         Expr::JavaScriptBinary { left, op, right } => {
             writer.atom("javascript:binary");
             writer.atom(&format!("{op:?}"));
-            write_expr(writer, left, normalizer);
-            write_expr(writer, right, normalizer);
+            write_expr(writer, left);
+            write_expr(writer, right);
         }
         Expr::JavaScriptLogical { left, op, right } => {
             writer.atom("javascript:logical");
             writer.atom(&format!("{op:?}"));
-            write_expr(writer, left, normalizer);
-            write_expr(writer, right, normalizer);
+            write_expr(writer, left);
+            write_expr(writer, right);
         }
         Expr::TypeLiteral(ty) => {
             writer.atom("type-literal");
@@ -1497,113 +1442,3 @@ fn write_expr<'program>(
 
 #[cfg(test)]
 mod tests;
-
-/// The local-bound names of one hashing unit, as `name -> local index`.
-type LocalNames = rustc_hash::FxHashMap<String, u32>;
-
-/// One name's hashed identity, held as a description rather than as a rendered
-/// string.
-///
-/// Rendering the token (`abi:x`, `local:3`, `global:x`) allocated once per
-/// binding and once per mention, which is the bulk of what hashing a module
-/// cost (FIG-3088). `HashWriter` writes the same bytes from the parts.
-#[derive(Clone, Copy)]
-enum NameToken<'program> {
-    Abi(&'program str),
-    Local(u32),
-    Global(&'program str),
-}
-
-/// Name bindings are looked up, never iterated, so the map is unordered: a
-/// `BTreeMap` allocates a ~KiB node for the handful of names one scope binds,
-/// which showed up directly in the artifact roundtrip's byte budget
-/// (FIG-3088). The hashed bytes do not depend on the map's order - the local
-/// index a name gets is assigned in binder order by `next_local`.
-#[derive(Default)]
-struct NameNormalizer<'program> {
-    names: rustc_hash::FxHashMap<&'program str, NameToken<'program>>,
-    next_local: u32,
-}
-
-impl<'program> NameNormalizer<'program> {
-    fn bind_abi(&mut self, name: &'program str) {
-        self.names.insert(name, NameToken::Abi(name));
-    }
-
-    fn bind_local(&mut self, name: &'program str) {
-        // An ABI name is in `names` too, so one lookup covers both.
-        if self.names.contains_key(name) {
-            return;
-        }
-        let token = NameToken::Local(self.next_local);
-        self.next_local += 1;
-        self.names.insert(name, token);
-    }
-
-    /// The local-bound names this unit carries, owned, for the canonical-IR
-    /// rewrite that has to drop exactly the names the hash drops.
-    fn local_names(&self) -> LocalNames {
-        self.names
-            .iter()
-            .filter_map(|(name, token)| match token {
-                NameToken::Local(index) => Some(((*name).to_string(), *index)),
-                NameToken::Abi(_) | NameToken::Global(_) => None,
-            })
-            .collect()
-    }
-
-    /// The hashed token for one name reference.
-    fn name_token(&self, name: &'program str) -> NameToken<'program> {
-        self.names
-            .get(name)
-            .copied()
-            .unwrap_or(NameToken::Global(name))
-    }
-
-    fn collect_expr(&mut self, expr: &'program Expr) {
-        // Local binders are the only nodes that carry naming semantics; every
-        // other node just feeds its sub-expressions back through `collect_expr`,
-        // so the generic arm folds over `Expr::children()`. `Assign` and `For`
-        // stay explicit because they must register their binder name in the
-        // same order the original full walk did.
-        match expr {
-            Expr::Assign { target, expr } => {
-                self.bind_local(target.root.as_str());
-                for step in &target.steps {
-                    if let AssignPathStep::Index(index) = step {
-                        self.collect_expr(index);
-                    }
-                }
-                self.collect_expr(expr);
-            }
-            Expr::For {
-                binding,
-                iterable,
-                body,
-            } => {
-                self.collect_expr(iterable);
-                self.bind_local(binding.as_str());
-                self.collect_expr(body);
-            }
-            Expr::ListComprehension { element, clauses } => {
-                for clause in clauses {
-                    match clause {
-                        ListComprehensionClause::For { binding, iterable } => {
-                            self.collect_expr(iterable);
-                            self.bind_local(binding.as_str());
-                        }
-                        ListComprehensionClause::If { condition } => {
-                            self.collect_expr(condition);
-                        }
-                    }
-                }
-                self.collect_expr(element);
-            }
-            _ => {
-                for child in expr.children() {
-                    self.collect_expr(child);
-                }
-            }
-        }
-    }
-}

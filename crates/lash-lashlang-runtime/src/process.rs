@@ -85,9 +85,12 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// child count and consumed cursor — so a successor segment reattaches losers
 /// that are still running instead of declining the boundary (ADR 0099 §8, §9),
 /// and embeds VM continuation v18.
+/// v18 (FIG-3571) embeds VM continuation v19 over the carrier IR's node ids. A
+/// v17 segment parked before the cutover is refused before continuation
+/// restore; it is never re-driven under the new node ids.
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 17;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 18;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -314,6 +317,22 @@ pub async fn run_lashlang_process(
                 )
                 .into());
             }
+            // Stored bytes this build cannot decode — an artifact published by
+            // a retired generation (FIG-3571) or a corrupt blob — fail the same
+            // way on every attempt: a typed terminal before any effect, never a
+            // retried infrastructure fault.
+            Err(lashlang::ArtifactStoreError::Decode(message)) => {
+                return Ok(process_lashlang_failure(
+                    LashlangProcessFailureCode::ProcessArtifactGenerationRetired,
+                    format!(
+                        "lashlang module artifact `{}` was written by a retired artifact \
+                         generation and cannot run on this build: {message}",
+                        input.module_ref
+                    ),
+                    None,
+                )
+                .into());
+            }
             Err(err) => {
                 return Err(lash_core::ProcessInfraError::new(
                     lash_core::PluginError::Session(format!(
@@ -423,8 +442,8 @@ pub async fn run_lashlang_process(
         LashlangProcessTraceIdentity {
             session_id,
             process_id: process_id.clone(),
-            source_identity: trace_lashlang_source_identity(&artifact),
-            module_ref: artifact.module_ref.clone(),
+            source_identity: artifact.source_identity(),
+            module_ref: artifact.module_ref().clone(),
             process_ref: input.process_ref.clone(),
             process_name: input.process_name.clone(),
             attempt,
@@ -1329,7 +1348,7 @@ mod trace_map;
 use trace_map::language_event_node_id;
 pub use trace_map::{
     TraceLanguageExecutionMapError, trace_lashlang_main_map, trace_lashlang_process_map,
-    trace_lashlang_process_map_snapshot, trace_lashlang_source_identity,
+    trace_lashlang_process_map_snapshot,
 };
 
 #[path = "process/resource_invocation.rs"]

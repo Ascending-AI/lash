@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[path = "agent_surface/fig3463_observation.rs"]
 mod fig3463_observation;
+#[path = "agent_surface/journaled_randomness.rs"]
+mod journaled_randomness;
 
 struct Host;
 
@@ -66,7 +68,7 @@ fn process_environment_with(
 }
 
 fn finished(source: &str) -> Value {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
         .expect("TypeScript should execute")
     {
@@ -87,7 +89,7 @@ fn a_process_literal_is_a_lifted_declaration_and_return_stays_a_function_return(
     let linked =
         lash_typescript::link(source, &process_environment()).expect("agent program should link");
 
-    let [Declaration::Process(process)] = linked.program().declarations.as_slice() else {
+    let [Declaration::Process(process)] = linked.artifact.ir().declarations.as_slice() else {
         panic!("expected exactly one lifted process declaration")
     };
     assert_eq!(process.params[0].name.as_str(), "input");
@@ -95,7 +97,14 @@ fn a_process_literal_is_a_lifted_declaration_and_return_stays_a_function_return(
         process.signals.is_empty(),
         "the set is inferred, not declared"
     );
-    let Expr::Try(wrapper) = &process.body else {
+    let Expr::Role {
+        role: lashlang::StructuralRole::ProcessWrapper,
+        expr: wrapper,
+    } = &process.body
+    else {
+        panic!("a lifted body is marked as a process wrapper")
+    };
+    let Expr::Try(wrapper) = wrapper.as_ref() else {
         panic!("process wrapper should translate uncaught errors into failure")
     };
     let Expr::Finish(call) = wrapper.body.as_ref() else {
@@ -128,12 +137,15 @@ fn durable_process_agent_primitives_link_through_existing_effects() {
     "#;
     let linked = lash_typescript::link(source, &process_environment())
         .expect("all TypeScript agent primitives should link to shared effects");
-    assert_eq!(linked.artifact.exports.processes.len(), 1);
-    let artifact: lashlang::ModuleArtifact = serde_json::from_slice(
-        &serde_json::to_vec(&linked.artifact).expect("encode TypeScript artifact"),
+    assert_eq!(linked.artifact.exports().processes.len(), 1);
+    let artifact = lashlang::ModuleArtifact::from_store_bytes(
+        &linked
+            .artifact
+            .to_store_bytes()
+            .expect("encode TypeScript artifact"),
     )
     .expect("decode TypeScript artifact");
-    assert_eq!(artifact.module_ref, linked.artifact.module_ref);
+    assert_eq!(artifact.module_ref(), linked.artifact.module_ref());
 }
 
 #[test]
@@ -151,7 +163,8 @@ fn production_link_cache_preserves_typescript_artifact_identity() {
     assert!(
         linked
             .linked_module()
-            .module_ref
+            .artifact
+            .module_ref()
             .as_str()
             .starts_with("lashlang:v2:blake3:")
     );
@@ -244,7 +257,7 @@ fn a_foreground_signal_delivers_a_named_process_signal() {
         lash_typescript::link(source, &process_environment()).expect("signal program links");
     let host = SignalHost::default();
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &host,
     ))
@@ -310,7 +323,7 @@ fn start_and_await_process_execute_through_shared_process_effects() {
     "#;
     let linked = lash_typescript::link(source, &process_environment()).expect("start should link");
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &StartHost,
     ))
@@ -367,7 +380,7 @@ fn caught_process_await(host: &impl ExecutionHost, probe: &str) -> Value {
     let linked =
         lash_typescript::link(&source, &process_environment()).expect("process await should link");
     match futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         host,
     ))
@@ -503,7 +516,7 @@ fn process_handle_exposes_id_member_for_subsequent_operations() {
         .expect("TypeScript should link");
     let host = ProcessHandleIdInspectionHost::default();
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &host,
     ))
@@ -612,7 +625,7 @@ fn tool_operations_colliding_with_instance_stdlib_names_lower_and_dispatch() {
         assert_eq!(path, expected_path);
         assert_eq!(op, expected_op);
 
-        let compiled = lash_typescript::compile(source)
+        let compiled = lash_typescript::testing::compile(source)
             .unwrap_or_else(|error| panic!("failed to compile {source}: {error}"));
         let host = ToolCallRecordingHost {
             dispatched: std::sync::Mutex::new(Vec::new()),
@@ -646,7 +659,7 @@ fn tool_operations_colliding_with_instance_stdlib_names_lower_and_dispatch() {
             dispatched: std::sync::Mutex::new(Vec::new()),
         };
         let linked_outcome = futures::executor::block_on(lashlang::execute(
-            &lash_typescript::compile_linked(&linked),
+            &lashlang::testing::harness::compile_linked_main(&linked),
             &mut State::new(),
             &host_linked,
         ))
@@ -843,15 +856,16 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
     // Branch :775 — Unbound ECMA globals and unsupported methods on bound
     // receivers refuse with TS_METHOD_UNSUPPORTED, while unawaited tool
     // operations create pending handles and require runtime consumption.
-    let ecma_err = lash_typescript::compile("finish(Error.isError(new Error('x')));")
+    let ecma_err = lash_typescript::testing::compile("finish(Error.isError(new Error('x')));")
         .expect_err("ECMA static namespace method must refuse");
     assert_eq!(
         ecma_err.code,
         lash_typescript::DiagnosticCode::MethodUnsupported
     );
 
-    let bound_err = lash_typescript::compile("const x = { a: 1 }; finish(x.nonExistentMethod());")
-        .expect_err("unsupported method on bound receiver must refuse");
+    let bound_err =
+        lash_typescript::testing::compile("const x = { a: 1 }; finish(x.nonExistentMethod());")
+            .expect_err("unsupported method on bound receiver must refuse");
     assert_eq!(
         bound_err.code,
         lash_typescript::DiagnosticCode::MethodUnsupported
@@ -864,7 +878,7 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
         "tools.search({ query: 'x' });",
         "inbox.alpha.delete({ id: '1' });",
     ] {
-        let program = lash_typescript::compile(source).expect("pending tool compiles");
+        let program = lash_typescript::testing::compile(source).expect("pending tool compiles");
         let error = futures::executor::block_on(lashlang::execute(
             &program,
             &mut State::new(),
@@ -964,7 +978,7 @@ fn promise_all_settled_async_map_catches_each_effect_failure_and_continues() {
         calls: AtomicUsize::new(0),
     };
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &host,
     ))
@@ -999,7 +1013,7 @@ fn promise_all_executes_on_the_shared_aggregate_batch_machine() {
         &environment,
     )
     .expect("Promise.all tool calls should link");
-    let compiled = lash_typescript::compile_linked(&linked);
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     let outcome = futures::executor::block_on(lashlang::execute(
         &compiled,
         &mut State::new(),
@@ -1034,7 +1048,7 @@ fn promise_all_settled_preserves_javascript_result_shape() {
     )
     .expect("Promise.allSettled tool calls should link");
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &SettledHost,
     ))
@@ -1068,7 +1082,7 @@ fn promise_all_settled_rejection_reason_is_an_idiomatic_error() {
     )
     .expect("Promise.allSettled tool calls should link");
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &SettledHost,
     ))
@@ -1107,7 +1121,7 @@ fn caught_rejection(probe: &str) -> Value {
     );
     let linked = lash_typescript::link(&source, &environment).expect("probe should link");
     match futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &RejectingToolHost,
     ))
@@ -1208,15 +1222,15 @@ impl ExecutionHost for RuntimeValueHost {
                 };
                 assert_eq!(
                     receiver.resource_type.as_str(),
-                    lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE
+                    lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE
                 );
                 assert_eq!(receiver.alias.as_str(), "builtin");
                 assert!(operation.args.is_empty());
                 match operation.operation.as_str() {
-                    lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION => {
+                    lashlang::LANGUAGE_RUNTIME_NOW_OPERATION => {
                         Ok(AbilityResult::Value(Value::Number(1_723_456.0)))
                     }
-                    lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION => {
+                    lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION => {
                         Ok(AbilityResult::Value(Value::Number(0.25)))
                     }
                     other => Err(ExecutionHostError::new(format!(
@@ -1238,8 +1252,9 @@ fn time_and_randomness_are_host_effects_instead_of_vm_nondeterminism() {
         lashlang::referenced_module_call_paths(&lowered).is_empty(),
         "resolved runtime intrinsics must not enter deferred tool discovery"
     );
-    let program = lash_typescript::compile("finish({ now: Date.now(), random: Math.random() });")
-        .expect("runtime values should compile");
+    let program =
+        lash_typescript::testing::compile("finish({ now: Date.now(), random: Math.random() });")
+            .expect("runtime values should compile");
     let outcome = futures::executor::block_on(lashlang::execute(
         &program,
         &mut State::new(),
@@ -1257,7 +1272,7 @@ fn time_and_randomness_are_host_effects_instead_of_vm_nondeterminism() {
 
 #[test]
 fn argless_date_uses_the_same_journaled_clock_effect_as_date_now() {
-    let program = lash_typescript::compile(
+    let program = lash_typescript::testing::compile(
         "const d=new Date(); finish(`${d.getTime()}|${Date.now()}|${d.toISOString()}`);",
     )
     .expect("argless Date should compile through the runtime clock");
@@ -1393,7 +1408,8 @@ impl ExecutionHost for ProcessDurabilityHost {
 /// one it means by shape instead of by name.
 fn lifted_process_name(linked: &lashlang::LinkedModule, params: usize) -> String {
     linked
-        .program()
+        .artifact
+        .ir()
         .declarations
         .iter()
         .find_map(|declaration| match declaration {
@@ -1427,8 +1443,9 @@ fn suspend_and_resume_process(
         // authored one, so the fixture asks the artifact for the process it
         // lifted rather than spelling a name the source no longer carries.
         let process_name = lifted_process_name(&linked, params);
-        let compiled = lashlang::compile_linked_process(&linked, &process_name)
-            .expect("process should compile");
+        let compiled =
+            lashlang::testing::harness::compile_linked_process_named(&linked, &process_name)
+                .expect("process should compile");
         let mut state = State::from_snapshot(lashlang::Snapshot::new(
             lashlang::from_json(globals)
                 .as_record()
@@ -1515,7 +1532,8 @@ fn uncaught_throw_fails_a_durable_process() {
             lash_typescript::link(source, &process_environment()).expect("process should link");
         let process_name = lifted_process_name(&linked, 0);
         let compiled =
-            lashlang::compile_linked_process(&linked, &process_name).expect("process compiles");
+            lashlang::testing::harness::compile_linked_process_named(&linked, &process_name)
+                .expect("process compiles");
         let mut state = State::new();
         let host = ProcessDurabilityHost;
         let execution_environment = lashlang::ExecutionEnvironment::new(&host).process();
@@ -1645,7 +1663,7 @@ fn promise_all_rejects_with_the_rejection_its_host_consumed_first() {
     )
     .expect("Promise.all should link");
     let error = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &FirstSettledRejectionHost,
     ))
@@ -1673,7 +1691,7 @@ fn promise_all_settled_stays_input_ordered_under_out_of_order_settlement() {
     )
     .expect("Promise.allSettled should link");
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &FirstSettledRejectionHost,
     ))
@@ -1736,7 +1754,7 @@ fn a_reply_that_does_not_fit_its_aggregate_fails_closed() {
     ] {
         let linked = lash_typescript::link(source, &environment).expect("the aggregate links");
         let error = futures::executor::block_on(lashlang::execute(
-            &lash_typescript::compile_linked(&linked),
+            &lashlang::testing::harness::compile_linked_main(&linked),
             &mut State::new(),
             &MisfitReplyHost,
         ))
@@ -1760,7 +1778,7 @@ fn the_selected_rejection_is_replay_deterministic() {
         &environment,
     )
     .expect("Promise.all should link");
-    let compiled = lash_typescript::compile_linked(&linked);
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     let mut reasons = Vec::new();
     for _ in 0..8 {
         let error = futures::executor::block_on(lashlang::execute(
@@ -2057,7 +2075,7 @@ fn a_leaf_that_failed_before_the_batch_ran_settles_first() {
     )
     .expect("Promise.all should link");
     let error = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &PreparationFailureHost,
     ))
@@ -2074,7 +2092,7 @@ fn run_typescript(source: &str) -> Value {
     let linked = lash_typescript::link(source, &environment)
         .unwrap_or_else(|error| panic!("link `{source}`: {error}"));
     match futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &AggregateHost,
     ))
@@ -2251,7 +2269,7 @@ fn map_callbacks_cannot_perform_effects() {
     )
     .expect("an effect inside a callback is not a link-time rejection today");
     let error = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &AggregateHost,
     ))
@@ -2273,73 +2291,6 @@ fn map_callbacks_cannot_perform_effects() {
     assert!(
         rejected.code.as_str().starts_with("TS_"),
         "the rejection is named: {rejected}"
-    );
-}
-
-/// Every `Math.random()` draw crosses the journal, in order, so a replayed turn
-/// reproduces the sequence it drew the first time.
-///
-/// This is the one accepted operation with no oracle: pinning it against Node
-/// is impossible by construction. The property that makes it admissible in a
-/// durable program is not the distribution but the seam — the VM samples no
-/// RNG of its own, so a host serving a recorded journal replays the run
-/// exactly. If a draw were ever computed in-VM, the second run below would
-/// still succeed while the host's draw count fell short.
-#[test]
-fn math_random_draws_replay_from_the_journal_in_order() {
-    struct JournalHost {
-        recorded: Vec<f64>,
-        served: std::sync::Mutex<usize>,
-    }
-
-    impl ExecutionHost for JournalHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
-            match op {
-                AbilityOp::ResourceOperation(operation) => {
-                    assert_eq!(
-                        operation.operation.as_str(),
-                        lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION
-                    );
-                    let mut cursor = self.served.lock().expect("journal cursor");
-                    let value = *self
-                        .recorded
-                        .get(*cursor)
-                        .expect("the journal has a recorded draw for every call");
-                    *cursor += 1;
-                    Ok(AbilityResult::Value(Value::Number(value)))
-                }
-                AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-                _ => Err(ExecutionHostError::new("unexpected ability")),
-            }
-        }
-    }
-
-    let recorded = vec![0.125, 0.5, 0.875, 0.0];
-    let program = lash_typescript::compile(
-        "const out: number[] = []; for (let i = 0; i < 4; i++) { out[out.length] = Math.random(); } finish(out.join(','));",
-    )
-    .expect("a journaled random sequence should compile");
-
-    let mut results = Vec::new();
-    for _ in 0..2 {
-        let host = JournalHost {
-            recorded: recorded.clone(),
-            served: std::sync::Mutex::new(0),
-        };
-        let outcome =
-            futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
-                .expect("a journaled random sequence should execute");
-        assert_eq!(
-            *host.served.lock().expect("journal cursor"),
-            recorded.len(),
-            "every draw must reach the host"
-        );
-        results.push(outcome);
-    }
-    assert_eq!(results[0], results[1], "replay must reproduce the sequence");
-    assert_eq!(
-        results[0],
-        ExecutionOutcome::Finished(Value::String("0.125,0.5,0.875,0".into()))
     );
 }
 
@@ -2368,7 +2319,7 @@ fn runtime_array_rejections_report_the_selected_rejection() {
         let source = format!("const pending = {array}; finish(await Promise.all(pending));");
         let linked = lash_typescript::link(&source, &environment).expect("runtime array links");
         let error = futures::executor::block_on(lashlang::execute(
-            &lash_typescript::compile_linked(&linked),
+            &lashlang::testing::harness::compile_linked_main(&linked),
             &mut State::new(),
             &FirstSettledRejectionHost,
         ))
@@ -2499,7 +2450,7 @@ fn run_mixed_aggregate(body: &str) -> Result<ExecutionOutcome, lashlang::Runtime
     let linked = lash_typescript::link(&source, &mixed_aggregate_environment())
         .expect("mixed aggregate should link");
     futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &MixedAggregateHost,
     ))
@@ -2599,7 +2550,7 @@ fn tool_handles_do_not_cross_cells() {
     )
     .expect("first cell should link");
     futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut state,
         &MixedAggregateHost,
     ))
@@ -2626,7 +2577,7 @@ fn tool_handles_do_not_cross_cells() {
     )
     .expect("second cell should link");
     let error = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut state,
         &MixedAggregateHost,
     ))

@@ -101,7 +101,12 @@ impl ExecutionHost for FailingOperationHost {
 async fn runtime_diagnostic(source: &str) -> String {
     let program = lash_typescript::parse(source).expect("TypeScript source lowers");
     let linked = LinkedModule::link(program, environment()).expect("program links");
-    let compiled = lashlang::compile_linked(&linked);
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Main,
+        Some(linked.spans()),
+    )
+    .expect("a module main entry compiles");
     let mut state = State::new();
     let host = ExecutionEnvironment::new(&FailingOperationHost).traced();
     lashlang::execute(&compiled, &mut state, &host)

@@ -241,7 +241,7 @@ fn assignment_indexes_retain_lowering_and_their_own_registrations_in_evaluation_
     );
     let linked = LinkedModule::link(program, full_host_environment().with_globals(["items"]))
         .expect("every registration stays at its own site");
-    let Expr::Block(main) = &linked.program().main else {
+    let Expr::Block(main) = &linked.artifact.ir().main else {
         unreachable!("parsed main is a block")
     };
     let [Expr::Assign { target, expr: rhs }, subsequent] = main.as_slice() else {
@@ -280,7 +280,7 @@ fn assignment_indexes_retain_lowering_and_their_own_registrations_in_evaluation_
         }
     }
     let mut ordered = Ordered(Vec::new());
-    crate::walk_expr(&mut ordered, &linked.program().main);
+    crate::walk_expr(&mut ordered, &linked.artifact.ir().main);
     assert_eq!(ordered.0, sources);
 }
 

@@ -19,7 +19,6 @@ mod cache;
 mod compiler;
 pub use compiler::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
-    lowered_for_of_parts,
 };
 mod entry_points;
 mod error;
@@ -42,15 +41,14 @@ mod value;
 mod vm;
 
 pub use cache::{
-    CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgramCache,
+    CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey,
     CompiledProgramCacheStats, LinkedProgramCache, LinkedProgramCacheError,
 };
 #[allow(unused_imports)]
 pub(crate) use compiler::*;
-pub use entry_points::{
-    ExecutableProgram, compile_ast, compile_linked, compile_linked_process,
-    compile_module_artifact_process, compile_process, execute, prewarm,
-};
+#[cfg(test)]
+pub(crate) use entry_points::compile_ast;
+pub use entry_points::{Entry, compile, execute, prewarm};
 pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
     HeapId,

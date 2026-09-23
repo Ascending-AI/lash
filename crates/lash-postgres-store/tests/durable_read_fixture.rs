@@ -132,6 +132,9 @@ const DRIVE_SET_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const TURN_BOUND_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-112-18c87504b/postgres-expected.json",
 ];
+const CARRIER_CUTOVER_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-113-709567432/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];

@@ -474,10 +474,10 @@ async fn execute_code_inner(
         }
     };
     let linked_module = cached_program.linked_module();
-    if !linked_module.artifact.exports.processes.is_empty()
+    if !linked_module.artifact.exports().processes.is_empty()
         && !state
             .stored_lashlang_modules
-            .contains(&linked_module.module_ref)
+            .contains(linked_module.artifact.module_ref())
     {
         let stored = {
             let _phase = ctx.named_phase("rlm_lashlang.store_module_artifact");
@@ -497,7 +497,7 @@ async fn execute_code_inner(
         }
         state
             .stored_lashlang_modules
-            .insert(linked_module.module_ref.clone());
+            .insert(linked_module.artifact.module_ref().clone());
     }
     let compiled = cached_program.compiled_program();
 
@@ -935,8 +935,8 @@ fn foreground_lashlang_execution_trace(
                 address,
                 effect_id: effect_id.to_string(),
             },
-            source_identity: lash_lashlang_runtime::trace_lashlang_source_identity(artifact),
-            module_ref: artifact.module_ref.to_string(),
+            source_identity: artifact.source_identity(),
+            module_ref: artifact.module_ref().to_string(),
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),

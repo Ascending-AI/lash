@@ -13,6 +13,13 @@ description = "The ECMA-exact TypeScript dialect front-end for the Lash heap VM.
 keywords = ["lash", "typescript", "codeact", "agent"]
 categories = ["compilers", "parser-implementations"]
 
+
+# FIG-3571 (ADR 0100 R8): `scripts/check-workflow-graph-model.sh` reads this
+# role. A language-neutral crate may not reach a front-end crate through its
+# dependency graph.
+[package.metadata.lash]
+role = "front-end"
+
 [lib]
 name = "lash_typescript"
 doctest = false
@@ -24,7 +31,6 @@ testing = []
 workspace = true
 
 [dependencies]
-lash-sansio = { workspace = true }
 lashlang = { workspace = true }
 ryu-js = { workspace = true }
 serde_json = { workspace = true }
@@ -37,6 +43,7 @@ thiserror = { workspace = true }
 futures = "0.3"
 jsonschema = { workspace = true, default-features = false }
 lashlang = { workspace = true, features = ["testing"] }
+lash-sansio = { workspace = true }
 lash-typescript = { package = "lash-internal-typescript", path = ".", features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"
@@ -54,3 +61,10 @@ path = "tests/main.rs"
 [[test]]
 name = "race_any_runtime"
 path = "tests/race_any_runtime.rs"
+
+# Its own binary for the same reason: the carrier laws (FIG-3571) link
+# modules, compile artifacts and project graphs, and the integration binary's
+# compile is already at its memory request.
+[[test]]
+name = "carrier_laws"
+path = "tests/carrier_laws.rs"

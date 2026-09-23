@@ -26,6 +26,18 @@ pub trait StoreTestSupport: Send + Sync {
         })
     }
 
+    /// Conformance seam for a session a previous build left behind: rewrite
+    /// only its physical session-state generation marker, leaving every
+    /// guarded payload as it was written.
+    async fn stamp_session_state_version_for_testing(
+        &self,
+        _version: u32,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "stamp_session_state_version_for_testing",
+        })
+    }
+
     /// Conformance seam for a marker guarding bytes the current codec cannot read.
     async fn stamp_session_state_version_and_corrupt_payload_for_testing(
         &self,

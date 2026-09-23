@@ -16,12 +16,20 @@ fn var(name: &str) -> lashlang::Expr {
     lashlang::Expr::Variable(name.into())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fixture programs are well formed; only execution errors are under test"
+)]
 async fn run(program: lashlang::Program) -> Result<Value, RuntimeError> {
     let host = TestHost::default();
     let mut state = State::new();
-    lashlang::execute(&program, &mut state, &host)
-        .await
-        .map(finished)
+    lashlang::execute(
+        &lashlang_compile_program(&program).expect("the program compiles"),
+        &mut state,
+        &host,
+    )
+    .await
+    .map(finished)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1269,4 +1277,17 @@ async fn source_errors_are_reported_by_the_dialect_front_end() {
         diagnostic.span.is_some(),
         "the refusal must carry a span: {diagnostic:?}"
     );
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

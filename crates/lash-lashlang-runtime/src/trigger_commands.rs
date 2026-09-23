@@ -130,7 +130,7 @@ async fn prepare_trigger_draft(
     })?;
     let target_identity = lashlang_process_identity_for_definition(&request.target);
     let process = artifact
-        .canonical_ir
+        .ir()
         .process(&request.target.process_name)
         .ok_or_else(|| {
             ExecutionHostError::new(format!(

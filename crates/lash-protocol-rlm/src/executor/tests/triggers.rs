@@ -688,9 +688,13 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // the target's definition, and the target is now a lifted process
         // whose declaration is named by its lift digest rather than by the
         // `const` the source spells. The derivation is unchanged; its input
-        // moved with the dialect.
+        // moved with the dialect. Re-pinned again by FIG-3571: the target's
+        // definition names the artifact that carries the linked program
+        // verbatim, so its module ref moved; the derivation is unchanged. The
+        // FIG-3571 cutover moved it once more with the semantic hash version
+        // and the lifted-process name domain.
         let expected_key =
-            "derived/v3/c8727a9bd798917885c10ca9e76bde549e48c950c36e8201c959c02d9f9c8af2";
+            "derived/v3/9579ddf94026db8f3517f8e16148c3a089d710c7efbbeffb4f74744a5b90f1dd";
         // The fixture's production effect address gives the deferred-resolution
         // journal its link identity, so the journaled resolution production
         // always wrote is now the first envelope; the register is the second.
@@ -1645,6 +1649,17 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// written as `local#0`, `local#1` and `local#2` in the canonical IR. The
 /// process parameter names and the lifted process declaration name are
 /// unchanged, because those are ABI names, not locals.
+///
+/// They were re-pinned again by FIG-3571, which deleted that normalizer: the
+/// artifact carries the linked program verbatim as `ir`, so `remember`,
+/// `source` and `handle` are spelled as authored again, the lifted process
+/// records its origin, and the module ref, the lifted name and the
+/// registration identity moved with them. The compiled program is unchanged.
+///
+/// The FIG-3571 cutover re-pinned them once more: `LASHLANG_SEMANTIC_HASH_VERSION`
+/// moved to `v17` and the lifted-process name domain to `v2`, so the lifted
+/// name, the module and host-requirement hashes and the registration identity
+/// moved. The canonical IR is otherwise byte-identical.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
@@ -1711,15 +1726,15 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
             "the arrow form must produce byte-identical canonical artifacts"
         );
         assert_eq!(
-            serde_json::json!(artifact.module_ref.to_string()),
+            serde_json::json!(artifact.module_ref().to_string()),
             fixture["module_ref"]
         );
         assert_eq!(
-            serde_json::json!(artifact.host_requirements_ref.to_string()),
+            serde_json::json!(artifact.host_requirements_ref().to_string()),
             fixture["host_requirements_ref"]
         );
         assert_eq!(
-            serde_json::to_value(&artifact.exports).expect("exports serialize"),
+            serde_json::to_value(artifact.exports()).expect("exports serialize"),
             fixture["exports"]
         );
         assert_eq!(
@@ -1727,8 +1742,8 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
             fixture["process_definition_identity"]
         );
 
-        let compiled =
-            lashlang::compile_ast(&artifact.canonical_ir).expect("the canonical IR compiles");
+        let compiled = lashlang::testing::harness::try_compile_program(artifact.ir())
+            .expect("the canonical IR compiles");
         assert_eq!(
             serde_json::json!(format!("{compiled:?}")),
             fixture["compiled_program_debug"]
@@ -1788,16 +1803,16 @@ fn repin_trigger_inputs_retired_record_form() {
         .await
         .expect("the store is readable")
         .expect("the registered module was stored");
-        let compiled =
-            lashlang::compile_ast(&artifact.canonical_ir).expect("the canonical IR compiles");
+        let compiled = lashlang::testing::harness::try_compile_program(artifact.ir())
+            .expect("the canonical IR compiles");
 
         fixture["artifact"] =
             serde_json::from_slice(&artifact.to_store_bytes().expect("artifact serializes"))
                 .expect("artifact bytes are JSON");
-        fixture["module_ref"] = serde_json::json!(artifact.module_ref.to_string());
+        fixture["module_ref"] = serde_json::json!(artifact.module_ref().to_string());
         fixture["host_requirements_ref"] =
-            serde_json::json!(artifact.host_requirements_ref.to_string());
-        fixture["exports"] = serde_json::to_value(&artifact.exports).expect("exports serialize");
+            serde_json::json!(artifact.host_requirements_ref().to_string());
+        fixture["exports"] = serde_json::to_value(artifact.exports()).expect("exports serialize");
         fixture["process_definition_identity"] =
             serde_json::to_value(&identity).expect("identity serializes");
         fixture["compiled_program_debug"] = serde_json::json!(format!("{compiled:?}"));

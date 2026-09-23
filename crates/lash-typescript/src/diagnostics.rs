@@ -714,6 +714,10 @@ mod tests {
             ("lower/stdlib.rs", include_str!("lower/stdlib.rs")),
             ("lower/graph.rs", include_str!("lower/graph.rs")),
             (
+                "lower/attribute_update.rs",
+                include_str!("lower/attribute_update.rs"),
+            ),
+            (
                 "lower/process_wrapper.rs",
                 include_str!("lower/process_wrapper.rs"),
             ),

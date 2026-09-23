@@ -5,9 +5,10 @@ use lash_trace::{
     TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
 };
 
-pub fn trace_lashlang_source_identity(artifact: &lashlang::ModuleArtifact) -> String {
-    lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir)
-        .source_identity
+/// The admitted artifact's graph: identity, structure and sites, with no
+/// dialect text (a trace map carries none).
+fn artifact_graph(artifact: &lashlang::ModuleArtifact) -> lashlang::WorkflowGraph {
+    lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -54,16 +55,13 @@ pub fn trace_lashlang_process_map(
     artifact: &lashlang::ModuleArtifact,
     process_name: &str,
 ) -> Option<TraceLanguageExecutionMap> {
-    let graph =
-        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
+    let graph = artifact_graph(artifact);
     let process = graph.process(process_name)?;
     Some(trace_workflow_subgraph(&process.body))
 }
 
 pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecutionMap {
-    let graph =
-        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
-    trace_workflow_subgraph(&graph.main)
+    trace_workflow_subgraph(&artifact_graph(artifact).main)
 }
 
 type TraceNodeKey = (String, lash_sansio::ExecutionNodeKind);
@@ -245,7 +243,7 @@ mod tests {
             lashlang::Expr::Block(expressions) => expressions,
             _ => unreachable!(),
         }));
-        let graph = lash_typescript::workflow_graph::workflow_graph_from_program(linked.program());
+        let graph = artifact_graph(&linked.artifact);
         let map = trace_lashlang_main_map(&linked.artifact);
         assert_map_contract(&map, &graph.main);
     }
@@ -256,7 +254,7 @@ mod tests {
             vec![b::process("worker", Vec::new(), body())],
             Vec::new(),
         ));
-        let graph = lash_typescript::workflow_graph::workflow_graph_from_program(linked.program());
+        let graph = artifact_graph(&linked.artifact);
         let process = graph.process("worker").expect("worker graph");
         let map = trace_lashlang_process_map(&linked.artifact, "worker").expect("worker map");
         assert_map_contract(&map, &process.body);

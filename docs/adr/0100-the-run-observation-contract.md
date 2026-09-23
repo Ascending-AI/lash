@@ -10,6 +10,12 @@ Amends [ADR 0037](0037-lashlang-workflows-use-a-code-graph-code-lens.md) and
 [ADR 0073](0073-gradual-value-types-through-to-the-workflow-editor.md). The
 dialect and VM work beyond decisions R7 and R8 belongs to FIG-3476.
 
+Amended by FIG-3571 (arc FIG-3570): R1 and R6 now hold by mechanism, and the
+projection half of R8 is delivered. The mechanism is stated in each decision
+below. The version constants in the compatibility matrix are still the values
+on main when FIG-3469 closed the arc; FIG-3571 moves each of them once, in its
+final commit, and this note and the matrix are updated with them.
+
 The source investigation is
 `/workspace/notes/lash/prospect-viz-2026-09-21.md`. Its replay-scope check is
 `/workspace/notes/lash/prospect-viz-arc/verify-R0-replay-scope.md`.
@@ -94,9 +100,9 @@ and refuse the prior `LASHLANG_SEGMENT_STATE_VERSION`.
 
 Version identity lives on the workflow document as `source_identity` and on
 the trace execution identity as both `source_identity` and `module_ref`.
-`source_identity` is the existing `lash-workflow-source/v3` digest minted in
-`crates/lash-typescript/src/workflow_graph/mod.rs::GraphProjector::new`. It is
-not the graph schema version, facet schema version, or executable module ref.
+`source_identity` is the admitted artifact's `lash-workflow-source/v4` digest
+(R6). It is not the graph schema version, facet schema version, or executable
+module ref.
 
 ### R1: the map carries the site
 
@@ -107,6 +113,29 @@ host locate a node without first projecting the workflow. There is no pairing
 table, secondary definition id, or join helper. Both map emitters, the process
 emitter in `crates/lash-lashlang-runtime/src/process.rs` and the RLM cell
 emitter in `crates/lash-protocol-rlm/src/executor`, use the same shape.
+
+The mechanism is one executable program and one structural walk (FIG-3571).
+`ModuleArtifact::ir` is the linked program, names verbatim and spans stripped;
+it is the only executable carrier, and `lashlang::compile` compiles an entry
+(`Entry::Main` or `Entry::Process`) from it and nothing else. An artifact is
+admitted by construction: its fields are private, and it is obtained only from
+the linker, the validating builder or the verifying store decoder. The trace
+map, the editor's runnable view and the VM's sites all come from that
+artifact: `lashlang::workflow_graph_from_artifact` projects it, and the
+compiler mints each site from the same owner and AST path. Front ends mark
+generated structure with the language-neutral `StructuralRole`s (`Scope`,
+`Completion`, `AttributeAssign` for plain and compound member assignment,
+`CollectionTransform`, `ProcessWrapper`), a `for` loop's per-element
+destructuring is its `bind`, a lifted process carries its derived
+`ProcessOrigin::Lifted`, and a binding's visibility (session-visible or the
+front end's private slot) is part of the program. The walk
+(`WorkflowProjection`) reads only those forms, so no reader recognises a front
+end's generated names. Law L1 checks the complete compiled site inventory (the
+instruction table and the aggregate batch tables) against the map by id, kind
+and owner path on both production paths: an RLM cell through the executor, and
+a TypeScript process, with a literal nested in it, through the process engine
+after its module is read back through a SQLite store's decoder. Law L12 checks
+the same for a second, test-only front end with no TypeScript dependency.
 
 ### R2: process-scoped subscription with epochs
 
@@ -177,15 +206,21 @@ or Restate command addressing. The effect-key grammar in
 keeps two telemetry attempts observable without realizing an external effect
 twice.
 
-### R6: expose existing source identity
+### R6: expose the admitted artifact's identity
 
-`WorkflowGraph` exposes the projector's existing
-`lash-workflow-source/v3` digest as `source_identity`. Projection from source
-hashes canonical printed source. Projection from an IR that cannot be printed
-uses the serialized-program fallback already selected by
-`crates/lash-typescript/src/workflow_graph/mod.rs::workflow_graph_from_program`.
-The trace identity receives the same value at the
-`lash-lashlang-runtime` integration boundary.
+`WorkflowGraph::source_identity` is `ModuleArtifact::source_identity`: a
+digest, under `lash-workflow-source/v4`, of the same deterministic atom stream
+the module ref hashes for the program (its language and its span-free linked
+IR, names verbatim, number literals by the one IR number rule: distinct `-0`,
+one canonical NaN, lossless non-finite values). It is never a digest of
+printed text or of a serializer's spelling, and there is no fallback. A draft
+projected from source for editing (`workflow_graph_from_source`) claims no
+runtime identity: its `source_identity` is always absent. A runnable view, and
+a faceted view of source that admits, is projected from the admitted artifact
+(`workflow_graph_from_artifact`) and carries the artifact's identity; its node
+ids, node kinds, execution sites and lifted owners equal the draft's (law L4).
+The trace identity reads the same method at the `lash-lashlang-runtime` and
+RLM integration boundaries; there is no separate trace projection of it.
 
 Reconciliation only checks a submitted graph against its own canonical
 reprojection. It reports pairs, unmatched nodes, and ambiguous nodes for real
@@ -217,6 +252,12 @@ visible in `crates/lash-lashlang-runtime/Cargo.toml` and
 Neutral runtime modules, a dialect trait for execution, IR-expressed
 intrinsics, truthiness, printer totality, and the wider dialect and VM split are
 out of scope for this arc.
+
+FIG-3571 delivered the projection half. `lashlang::WorkflowGraphProjector`
+projects a program or an admitted artifact; a dialect supplies statement text
+through `WorkflowStatementText` (TypeScript's printer does), and the trace map
+uses `NoStatementText`. `lash-lashlang-runtime` has no `lash-typescript`
+dependency, and `scripts/check-workflow-graph-model.sh` refuses one.
 
 ## Compatibility matrix
 

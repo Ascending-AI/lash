@@ -3,7 +3,10 @@
 //! guest function implements the ECMA sequential loop without adding a new VM
 //! continuation shape.
 
-use lashlang::{AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp};
+use lashlang::{
+    AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp,
+    StructuralRole,
+};
 
 use super::{GENERATED_BINDING_PREFIX, Lowerer};
 use crate::adapter::Expr;
@@ -309,7 +312,12 @@ impl Lowerer {
         } else {
             setup.push(stdlib("__singleCallbackResult", vec![driven]));
         }
-        Ok(LashExpr::Block(setup))
+        Ok(LashExpr::Role {
+            role: StructuralRole::CollectionTransform {
+                operation: method.into(),
+            },
+            expr: Box::new(LashExpr::Block(setup)),
+        })
     }
 }
 

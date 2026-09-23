@@ -52,6 +52,26 @@ impl StoreTestSupport for Store {
             .map_err(sqlite_error)
     }
 
+    async fn stamp_session_state_version_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), StoreError> {
+        let session_id = self.selected_session_id()?;
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    crate::session_sql::session_sql()
+                        .meta
+                        .set_state_version
+                        .sql(),
+                    params![session_id.as_str(), i64::from(version)],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn stamp_session_state_version_and_corrupt_payload_for_testing(
         &self,
         version: u32,

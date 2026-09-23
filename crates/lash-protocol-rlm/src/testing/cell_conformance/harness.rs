@@ -201,21 +201,6 @@ impl Session {
         })
     }
 
-    /// The session's user-visible bindings.
-    ///
-    /// Excludes the TypeScript lowering's `__typescript_<n>_callback_receiver`
-    /// scratch binding. It is an artefact of how an array callback is lowered
-    /// rather than something a cell bound, and it keeps the previous
-    /// callback's receiver until the next one overwrites it, so a law stated
-    /// over "what the cells bound" must not read it. [`Session::globals`]
-    /// keeps the unfiltered view for anything that needs it.
-    pub(crate) fn user_bindings(&self) -> BTreeMap<String, serde_json::Value> {
-        self.globals()
-            .into_iter()
-            .filter(|(name, _)| !name.starts_with("__typescript_"))
-            .collect()
-    }
-
     /// The session's persisted execution state: the root record and every leaf
     /// body, exactly as a host would store them.
     pub(crate) fn persisted_state(&self) -> lash_core::plugin::HydratedExecutionState {

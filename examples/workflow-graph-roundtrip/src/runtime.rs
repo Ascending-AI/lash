@@ -9,9 +9,9 @@ use lash::rlm::{
     lang::{
         AbilityOp, AbilityResult, AggregateConsumer, ExecutionEnvironment, ExecutionHost,
         ExecutionHostError, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
-        LashlangLanguageFeatures, LinkedModule, OperationContract, ResourceOperation,
+        LashlangLanguageFeatures, LinkedModule, OperationContract, ProcessRef, ResourceOperation,
         ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
-        State, Value, WorkflowGraph, compile_linked_process, from_json,
+        State, Value, WorkflowGraph, compile, from_json,
     },
 };
 use lash::tracing::TraceLanguageExecutionPayload;
@@ -34,38 +34,109 @@ impl Default for RunTiming {
     }
 }
 
+/// A saved version's admission: the linked module a run executes, its runnable
+/// view, and the entry process the version records, by ref.
+#[derive(Clone)]
+pub(crate) struct AdmittedWorkflow {
+    linked: LinkedModule,
+    view: WorkflowGraph,
+    entry: Option<ProcessRef>,
+}
+
+impl AdmittedWorkflow {
+    /// Admits `source` against the toy host. The entry is the artifact's first
+    /// process declaration, recorded by ref so a run never selects it by name.
+    pub(crate) fn admit(source: &str) -> Result<Self> {
+        let linked = lash::typescript::link(source, &host_environment())
+            .map_err(|error| anyhow!("admit saved workflow: {error}"))?;
+        let entry = linked
+            .artifact
+            .ir()
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                lash::rlm::lang::Declaration::Process(process) => {
+                    linked.artifact.process_ref(process.name.as_str()).cloned()
+                }
+                _ => None,
+            });
+        let view = lash::typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
+        Ok(Self {
+            linked,
+            view,
+            entry,
+        })
+    }
+
+    /// The runnable view the version's run overlay binds to.
+    pub(crate) fn view(&self) -> &WorkflowGraph {
+        &self.view
+    }
+}
+
 pub(crate) struct PreparedRun {
     compiled: lash::rlm::lang::CompiledProgram,
     workflow_version: u64,
+    definition: String,
     run_id: String,
 }
 
 impl PreparedRun {
-    pub(crate) fn new(graph: WorkflowGraph, source: &str, workflow_version: u64) -> Result<Self> {
-        let program = lash::typescript::parse(source).context("parse saved workflow")?;
-        let linked = LinkedModule::link(program, host_environment()).context("link toy tools")?;
-        let process_name = graph
-            .declarations
-            .iter()
-            .find_map(|declaration| match declaration {
-                lash::rlm::lang::WorkflowDeclaration::Process(process) => {
-                    Some(process.name.as_str())
-                }
-                _ => None,
-            })
+    /// Prepares the run the overlay `graph` shows: `graph` must be the admitted
+    /// artifact's own view (its identity, and exactly its nodes), and the run
+    /// is the entry process the version recorded, selected by ref.
+    pub(crate) fn new(
+        graph: &WorkflowGraph,
+        admitted: &AdmittedWorkflow,
+        workflow_version: u64,
+    ) -> Result<Self> {
+        let artifact = &admitted.linked.artifact;
+        let definition = artifact.source_identity();
+        if graph.source_identity.as_deref() != Some(definition.as_str()) {
+            return Err(anyhow!(
+                "the run overlay's graph is not the admitted artifact's (its definition is {:?}, the artifact's is {definition})",
+                graph.source_identity
+            ));
+        }
+        let node_ids = |graph: &WorkflowGraph| {
+            graph
+                .nodes()
+                .map(|node| node.id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let (shown, admitted_ids) = (node_ids(graph), node_ids(&admitted.view));
+        if let Some(node) = shown.symmetric_difference(&admitted_ids).next() {
+            return Err(anyhow!(
+                "workflow node `{node}` is not shared by the run overlay's graph and its admitted artifact"
+            ));
+        }
+        let entry = admitted
+            .entry
+            .as_ref()
             .ok_or_else(|| anyhow!("saved workflow has no process to run"))?;
-        let compiled = compile_linked_process(&linked, process_name)
-            .context("compile saved workflow process")?;
+        let compiled = compile(
+            artifact,
+            lash::rlm::lang::Entry::Process(entry),
+            Some(admitted.linked.spans()),
+        )
+        .context("compile saved workflow process")?;
         Ok(Self {
             compiled,
             workflow_version,
+            definition,
             run_id: uuid::Uuid::new_v4().to_string(),
         })
     }
 
     pub(crate) async fn execute(self, sender: mpsc::Sender<RunEvent>, timing: RunTiming) {
         let host = LanguageTraceHost::new(
-            RunHost::new(sender, self.run_id, self.workflow_version, timing),
+            RunHost::new(
+                sender,
+                self.run_id,
+                self.workflow_version,
+                self.definition,
+                timing,
+            ),
             RunHost::project_language_trace,
         );
         let environment = ExecutionEnvironment::new(&host).process();
@@ -149,6 +220,7 @@ struct RunHost {
     sender: mpsc::Sender<RunEvent>,
     run_id: String,
     workflow_version: u64,
+    definition: String,
     sequence: AtomicU64,
     display: Mutex<DisplayState>,
     pending_delta: Mutex<DisplayDelta>,
@@ -161,12 +233,14 @@ impl RunHost {
         sender: mpsc::Sender<RunEvent>,
         run_id: String,
         workflow_version: u64,
+        definition: String,
         timing: RunTiming,
     ) -> Self {
         Self {
             sender,
             run_id,
             workflow_version,
+            definition,
             sequence: AtomicU64::new(0),
             display: Mutex::new(DisplayState::default()),
             pending_delta: Mutex::new(DisplayDelta::default()),
@@ -181,6 +255,7 @@ impl RunHost {
         let _ = self.sender.try_send(RunEvent {
             run_id: self.run_id.clone(),
             workflow_version: self.workflow_version,
+            definition: self.definition.clone(),
             sequence,
             node_id,
             status,
@@ -393,4 +468,57 @@ fn parse_duration(value: &str) -> Result<Duration, ExecutionHostError> {
     Err(ExecutionHostError::new(format!(
         "invalid duration `{value}`"
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn admitted() -> AdmittedWorkflow {
+        AdmittedWorkflow::admit(crate::DEFAULT_WORKFLOW).expect("the default workflow admits")
+    }
+
+    #[test]
+    fn a_run_binds_to_the_admitted_view_and_its_recorded_entry() {
+        let admitted = admitted();
+        assert!(
+            admitted.entry.is_some(),
+            "the version records its entry by ref"
+        );
+        PreparedRun::new(admitted.view(), &admitted, 1).expect("the admitted view runs");
+    }
+
+    #[test]
+    fn a_run_refuses_a_graph_that_is_not_its_admitted_view() {
+        let admitted = admitted();
+        let refused = |graph: &WorkflowGraph, what: &str| {
+            let Err(error) = PreparedRun::new(graph, &admitted, 1) else {
+                panic!("{what} must be refused");
+            };
+            error.to_string()
+        };
+
+        // Same shape, another definition: node ids hash only owner and path,
+        // so a foreign graph of the same shape shares every id.
+        let mut foreign = admitted.view().clone();
+        foreign.source_identity = Some("another-definition".to_string());
+        assert!(refused(&foreign, "a foreign definition").contains("not the admitted artifact's"));
+
+        // A draft claims no definition.
+        let mut draft = admitted.view().clone();
+        draft.source_identity = None;
+        refused(&draft, "a draft");
+
+        // Fewer nodes than the artifact's view.
+        let mut fewer = admitted.view().clone();
+        fewer.main.nodes.pop();
+        assert!(refused(&fewer, "a graph missing a node").contains("not shared"));
+
+        // More nodes than the artifact's view.
+        let mut more = admitted.view().clone();
+        let mut extra = more.main.nodes[0].clone();
+        extra.id = lash::rlm::lang::WorkflowNodeId::new("node:foreign".to_string());
+        more.main.nodes.push(extra);
+        assert!(refused(&more, "a graph with a foreign node").contains("node:foreign"));
+    }
 }

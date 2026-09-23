@@ -22,13 +22,13 @@ pub struct ModuleIntrospection {
 impl ModuleIntrospection {
     pub fn from_artifact(artifact: &ModuleArtifact) -> Result<Self, ModuleIntrospectionError> {
         let mut exported_processes = Vec::new();
-        for process_name in artifact.exports.processes.keys() {
+        for process_name in artifact.exports().processes.keys() {
             let definition =
                 ProcessDefinitionIdentity::from_artifact_export(artifact, process_name)
                     .ok_or_else(|| ModuleIntrospectionError::MissingProcess {
                         process_name: process_name.clone(),
                     })?;
-            let process = artifact.canonical_ir.process(process_name).ok_or_else(|| {
+            let process = artifact.ir().process(process_name).ok_or_else(|| {
                 ModuleIntrospectionError::MissingProcess {
                     process_name: process_name.clone(),
                 }
@@ -57,14 +57,14 @@ impl ModuleIntrospection {
         }
 
         Ok(Self {
-            module_ref: artifact.module_ref.clone(),
-            host_requirements_ref: artifact.host_requirements_ref.clone(),
-            host_requirements: artifact.host_requirements.clone(),
+            module_ref: artifact.module_ref().clone(),
+            host_requirements_ref: artifact.host_requirements_ref().clone(),
+            host_requirements: artifact.host_requirements().clone(),
             exported_processes,
             required_module_instances: module_instances(artifact),
             required_resource_types: resource_types(artifact),
             named_data_types: artifact
-                .host_requirements
+                .host_requirements()
                 .resources
                 .named_data_types()
                 .map(|(name, data_type)| NamedDataTypeIntrospection {
@@ -73,7 +73,7 @@ impl ModuleIntrospection {
                 })
                 .collect(),
             value_constructors: artifact
-                .host_requirements
+                .host_requirements()
                 .resources
                 .value_constructors()
                 .map(|(path, constructor)| ValueConstructorIntrospection {
@@ -85,7 +85,7 @@ impl ModuleIntrospection {
                 })
                 .collect(),
             trigger_source_requirements: artifact
-                .host_requirements
+                .host_requirements()
                 .resources
                 .trigger_sources()
                 .map(trigger_source)
@@ -196,7 +196,7 @@ pub enum ModuleIntrospectionError {
 
 fn module_instances(artifact: &ModuleArtifact) -> Vec<ModuleInstanceIntrospection> {
     artifact
-        .host_requirements
+        .host_requirements()
         .resources
         .module_instances()
         .map(|(_, module)| module_instance(module, artifact))
@@ -212,7 +212,7 @@ fn module_instance(
         .iter()
         .map(|(operation, binding)| {
             let resource_binding = artifact
-                .host_requirements
+                .host_requirements()
                 .resources
                 .resource_types()
                 .find(|(resource_type, _)| *resource_type == module.resource_type.as_str())
@@ -237,7 +237,7 @@ fn module_instance(
 
 fn resource_types(artifact: &ModuleArtifact) -> Vec<ResourceTypeIntrospection> {
     artifact
-        .host_requirements
+        .host_requirements()
         .resources
         .resource_types()
         .map(resource_type)

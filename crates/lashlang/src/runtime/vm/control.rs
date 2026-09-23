@@ -738,6 +738,7 @@ mod tests {
             SlotState::from_globals(
                 Record::new(),
                 &chunk.slot_names,
+                &chunk.private_slots,
                 &ProjectedBindings::new(),
                 Vec::new(),
             ),

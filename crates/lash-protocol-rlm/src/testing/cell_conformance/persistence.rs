@@ -51,11 +51,11 @@ fn a_snapshot_after_closure_bearing_cells_restores_and_runs_different_cells() {
     session.run_ok(&Cell::bind("base", Literal::List(vec![1.0, 2.0])).render());
     session.run_ok(&Cell::closure_garbage("scaled").render());
     session.run_ok(&Cell::closure_binding("callback").render());
-    let before = session.user_bindings();
+    let before = session.globals();
 
     session.restart();
     assert_eq!(
-        session.user_bindings(),
+        session.globals(),
         before,
         "restoring must not change what the session holds"
     );
@@ -73,8 +73,8 @@ fn restarting_between_every_pair_of_cells_preserves_the_session() {
     let (resident, _) = drive(HarnessMode::Resident, &cells);
     let (restarting, _) = drive(HarnessMode::RestartBetweenCells, &cells);
     assert_eq!(
-        resident.user_bindings(),
-        restarting.user_bindings(),
+        resident.globals(),
+        restarting.globals(),
         "a session that survived a restart between every cell must hold what a resident one holds"
     );
 }
@@ -124,9 +124,9 @@ fn a_snapshot_after_a_failing_cell_restores_cleanly() {
             Cell::RuntimeError,
         ],
     );
-    let before = session.user_bindings();
+    let before = session.globals();
     session.restart();
-    assert_eq!(session.user_bindings(), before);
+    assert_eq!(session.globals(), before);
     let outcome = session.run_ok(&Cell::finish("kept").render());
     assert_eq!(outcome.finish, Some(serde_json::json!([1, 2])));
 }
@@ -138,12 +138,12 @@ fn a_snapshot_after_a_failing_cell_restores_cleanly() {
 #[test]
 fn restoring_twice_without_running_a_cell_is_a_fixed_point() {
     let (mut session, _) = drive(HarnessMode::Resident, &representative_session());
-    let bindings = session.user_bindings();
+    let bindings = session.globals();
     let persisted = session.persisted_state();
     session.restart();
     session.restart();
     session.restart();
-    assert_eq!(session.user_bindings(), bindings);
+    assert_eq!(session.globals(), bindings);
     let after = session.persisted_state();
     assert_eq!(after.root, persisted.root);
     assert_eq!(after.components, persisted.components);

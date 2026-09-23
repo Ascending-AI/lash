@@ -73,6 +73,7 @@ pub(super) fn continuation_test_vm<'a>(
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &ProjectedBindings::new(),
         Vec::new(),
     );
@@ -536,6 +537,7 @@ fn continuation_carries_a_projected_binding_slot_by_identity() {
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &projected,
         Vec::new(),
     );
@@ -581,6 +583,7 @@ async fn resumed_projected_slot_still_refuses_assignment() {
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &projected,
         Vec::new(),
     );
@@ -702,12 +705,13 @@ async fn requested_boundary_mid_run_leaves_the_vm_runnable() {
     let linked =
         crate::LinkedModule::link(program, runtime_test_environment().with_globals(["input"]))
             .expect("program should link");
-    let program = crate::compile_linked(&linked);
+    let program = crate::testing::harness::compile_linked_main(&linked);
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &projected,
         Vec::new(),
     );
@@ -1063,6 +1067,7 @@ async fn suspend_collects_live_heap_before_park_or_keep_running_diverge() {
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &ProjectedBindings::new(),
         Vec::new(),
     );

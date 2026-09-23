@@ -287,9 +287,9 @@ pub(super) async fn trigger_lashlang_registration(
     ProcessRegistration::new(
         process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked_module.module_ref,
+            module_ref: linked_module.artifact.module_ref().clone(),
             process_ref,
-            host_requirements_ref: linked_module.host_requirements_ref,
+            host_requirements_ref: linked_module.artifact.host_requirements_ref().clone(),
             process_name: "notify".to_string(),
             args,
         }),
@@ -316,14 +316,15 @@ pub(super) async fn trigger_lashlang_registration(
 /// source spelled. A fixture that wants "the process this module declares"
 /// asks the artifact rather than repeating a name the source no longer owns.
 fn sole_lifted_process_name(artifact: &lashlang::ModuleArtifact) -> String {
-    let mut processes = artifact
-        .canonical_ir
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) => Some(process.name.to_string()),
-            _ => None,
-        });
+    let mut processes =
+        artifact
+            .ir()
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                lashlang::Declaration::Process(process) => Some(process.name.to_string()),
+                _ => None,
+            });
     let name = processes
         .next()
         .expect("the linked module declares one process");
@@ -356,20 +357,20 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
     let worker = sole_lifted_process_name(&linked.artifact);
     let process = linked
         .artifact
-        .canonical_ir
+        .ir()
         .process(&worker)
         .expect("worker process declaration");
     let env_ref = persist_recovery_env_ref().await;
     ProcessRegistration::new(
         process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked.module_ref,
+            module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
                 .process_ref(&worker)
                 .expect("worker process ref")
                 .clone(),
-            host_requirements_ref: linked.host_requirements_ref,
+            host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: worker.clone(),
             args: serde_json::Map::new(),
         }),
@@ -415,13 +416,13 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
     ProcessRegistration::new(
         process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked.module_ref,
+            module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
                 .process_ref(&worker)
                 .expect("worker process ref")
                 .clone(),
-            host_requirements_ref: linked.host_requirements_ref,
+            host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: worker,
             args: serde_json::Map::new(),
         }),
@@ -496,13 +497,13 @@ pub(super) async fn sleeping_then_tool_process_registration(
     ProcessRegistration::new(
         process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked.module_ref,
+            module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
                 .process_ref("worker")
                 .expect("worker process ref")
                 .clone(),
-            host_requirements_ref: linked.host_requirements_ref,
+            host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
         }),

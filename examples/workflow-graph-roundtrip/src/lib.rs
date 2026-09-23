@@ -94,7 +94,11 @@ struct WorkflowStore {
 struct SavedWorkflow {
     version: u64,
     source: String,
+    /// The canonical draft an edit is rebuilt on.
     graph: WorkflowGraph,
+    /// The version's admission, when its source admits: what a run executes
+    /// and the view its overlay binds to.
+    admitted: Option<runtime::AdmittedWorkflow>,
 }
 
 impl AppState {
@@ -115,6 +119,7 @@ impl AppState {
             store: Arc::new(Mutex::new(WorkflowStore {
                 versions: vec![SavedWorkflow {
                     version: 1,
+                    admitted: runtime::AdmittedWorkflow::admit(&source).ok(),
                     source,
                     graph,
                 }],
@@ -141,6 +146,7 @@ impl AppState {
         let version = store.versions.last().map_or(1, |saved| saved.version + 1);
         let saved = SavedWorkflow {
             version,
+            admitted: runtime::AdmittedWorkflow::admit(&source).ok(),
             source,
             graph,
         };
@@ -296,7 +302,11 @@ async fn run_workflow(
     State(state): State<AppState>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, RenderErrorResponse> {
     let saved = state.current();
-    let prepared = runtime::PreparedRun::new(saved.graph, &saved.source, saved.version)
+    let admitted = saved
+        .admitted
+        .as_ref()
+        .ok_or_else(|| RenderErrorResponse::run_preparation("saved workflow does not admit"))?;
+    let prepared = runtime::PreparedRun::new(admitted.view(), admitted, saved.version)
         .map_err(RenderErrorResponse::run_preparation)?;
     let (tx, rx) = mpsc::channel::<RunEvent>(64);
     let timing = state.timing;

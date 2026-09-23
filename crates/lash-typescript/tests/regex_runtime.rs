@@ -16,7 +16,7 @@ impl ExecutionHost for Host {
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    let program = lash_typescript::compile(source)
+    let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
 }
@@ -223,7 +223,7 @@ fn function_replacers_receive_captures_offset_input_and_groups() {
 #[test]
 fn global_last_index_survives_a_real_park_between_exec_calls() {
     futures::executor::block_on(async {
-        let program = lash_typescript::compile(
+        let program = lash_typescript::testing::compile(
             "const r=/a/g; const first=r.exec('a a'); print(first.index); const second=r.exec('a a'); finish([first.index,second.index,r.lastIndex]);",
         )
         .expect("compile durable RegExp program");
@@ -346,7 +346,7 @@ impl ExecutionHost for BudgetedHost {
 }
 
 fn execute_budgeted(source: &str, instructions: u64) -> Result<ExecutionOutcome, RuntimeError> {
-    let program = lash_typescript::compile(source)
+    let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
     let host = BudgetedHost {
         instructions: std::num::NonZeroU64::new(instructions).expect("nonzero budget"),

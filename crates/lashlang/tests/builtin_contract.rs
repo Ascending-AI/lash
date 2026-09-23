@@ -39,9 +39,19 @@ impl ExecutionHost for PureHost {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fixture programs are well formed; only execution errors are under test"
+)]
 async fn run(program: lashlang::Program) -> Result<Value, RuntimeError> {
     let mut state = State::new();
-    match lashlang::execute(&program, &mut state, &PureHost).await? {
+    match lashlang::execute(
+        &lashlang_compile_program(&program).expect("the program compiles"),
+        &mut state,
+        &PureHost,
+    )
+    .await?
+    {
         ExecutionOutcome::Finished(value) => Ok(value),
         other => panic!("expected the program to finish, got {other:?}"),
     }
@@ -594,4 +604,17 @@ async fn every_registered_builtin_is_covered_and_runs() {
             .await
             .unwrap_or_else(|error| panic!("builtin `{name}` failed to execute: {error}"));
     }
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

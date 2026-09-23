@@ -217,7 +217,7 @@ while (final_ids.length < 2 && pool_i < candidate_pools.length) {
 finish(final_ids);"#;
 
     let program = lash_typescript::parse(source).expect("while should parse");
-    lashlang::compile_ast(&program).expect("while should compile");
+    lashlang::testing::harness::try_compile_program(&program).expect("while should compile");
 }
 
 /// Closure-bearing TypeScript cells, mirroring the closure shapes of

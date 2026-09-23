@@ -144,9 +144,6 @@ pub enum LashlangRuntimeError {
     /// The requested Lashlang module artifact is missing from storage.
     #[error("missing lashlang module artifact `{module_ref}` for process `{process}`")]
     MissingArtifact { module_ref: String, process: String },
-    /// A loaded module artifact does not verify against its content identity.
-    #[error("invalid lashlang module artifact `{module_ref}`: {message}")]
-    InvalidArtifact { module_ref: String, message: String },
     /// The module artifact does not export the requested process reference.
     #[error(
         "lashlang module artifact `{module_ref}` does not export process `{process}` as requested ref {process_ref}"
@@ -311,6 +308,11 @@ pub enum LashlangProcessFailureCode {
     ProcessPayloadInvalid,
     /// The process's module artifact is missing.
     ProcessModuleArtifactMissing,
+    /// The process's stored module artifact was written by a retired artifact
+    /// generation — or is otherwise undecodable — so this build cannot run it
+    /// (FIG-3571). Deterministic: the same bytes fail the same way on every
+    /// attempt, so the run ends here, before any effect, instead of retrying.
+    ProcessArtifactGenerationRetired,
     /// The process and artifact host requirements differ.
     ProcessHostRequirementsMismatch,
     /// The process reference does not match the artifact export.
@@ -339,6 +341,7 @@ impl LashlangProcessFailureCode {
             Self::RestateSegmentProgramHashMismatch => "restate_segment_program_hash_mismatch",
             Self::ProcessPayloadInvalid => "process_payload_invalid",
             Self::ProcessModuleArtifactMissing => "process_module_artifact_missing",
+            Self::ProcessArtifactGenerationRetired => "process_artifact_generation_retired",
             Self::ProcessHostRequirementsMismatch => "process_host_requirements_mismatch",
             Self::ProcessRefMismatch => "process_ref_mismatch",
             Self::ProcessHostEnvironmentInvalid => "process_host_environment_invalid",
@@ -397,6 +400,11 @@ mod tests {
         process_module_artifact_missing,
         ProcessModuleArtifactMissing,
         "process_module_artifact_missing"
+    );
+    failure_code_test!(
+        process_artifact_generation_retired,
+        ProcessArtifactGenerationRetired,
+        "process_artifact_generation_retired"
     );
     failure_code_test!(
         process_host_requirements_mismatch,

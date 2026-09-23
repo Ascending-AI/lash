@@ -715,8 +715,7 @@ fn decode_process_definition_identity(
                     format!("invalid {field}: {message}")
                 }
                 other @ (ProcessDefinitionIdentityError::ArtifactMismatch { .. }
-                | ProcessDefinitionIdentityError::MissingSignature { .. }
-                | ProcessDefinitionIdentityError::InvalidArtifact { .. }) => other.to_string(),
+                | ProcessDefinitionIdentityError::MissingSignature { .. }) => other.to_string(),
             },
         }
     })
@@ -755,7 +754,7 @@ pub struct TriggerCompatibility {
 pub fn check_trigger_compatibility(
     request: TriggerCompatibilityRequest<'_>,
 ) -> Result<TriggerCompatibility, TriggerCompatibilityError> {
-    let resources = &request.artifact.host_requirements.resources;
+    let resources = &request.artifact.host_requirements().resources;
     let binding = resources
         .resolve_trigger_source(request.source_type)
         .ok_or_else(|| TriggerCompatibilityError::UnknownSourceType {
@@ -856,18 +855,18 @@ fn validate_trigger_compatibility_target(
     inputs: &TriggerInputTemplate,
     artifact: &ModuleArtifact,
 ) -> Result<TriggerCompatibilityValidation, TriggerCompatibilityError> {
-    if artifact.module_ref != target.module_ref {
+    if artifact.module_ref() != &target.module_ref {
         return Err(TriggerCompatibilityError::ModuleRefMismatch {
             process_name: target.process_name.clone(),
             target_module_ref: target.module_ref.to_string(),
-            artifact_module_ref: artifact.module_ref.to_string(),
+            artifact_module_ref: artifact.module_ref().to_string(),
         });
     }
-    if artifact.host_requirements_ref != target.host_requirements_ref {
+    if artifact.host_requirements_ref() != &target.host_requirements_ref {
         return Err(TriggerCompatibilityError::HostRequirementsMismatch {
             process_name: target.process_name.clone(),
             target_host_requirements: target.host_requirements_ref.to_string(),
-            artifact_host_requirements: artifact.host_requirements_ref.to_string(),
+            artifact_host_requirements: artifact.host_requirements_ref().to_string(),
         });
     }
     let Some(exported_process_name) = artifact.process_name_for_ref(&target.process_ref) else {
@@ -885,7 +884,7 @@ fn validate_trigger_compatibility_target(
         });
     }
     let process = artifact
-        .canonical_ir
+        .ir()
         .process(exported_process_name)
         .ok_or_else(|| TriggerCompatibilityError::MissingProcess {
             module_ref: target.module_ref.to_string(),
@@ -932,7 +931,7 @@ fn validate_trigger_compatibility_target(
                 validate_fixed_input_value(
                     value,
                     &input_ty,
-                    &artifact.host_requirements.resources,
+                    &artifact.host_requirements().resources,
                     target.process_name.as_str(),
                     param.name.as_str(),
                 )?;

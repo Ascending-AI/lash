@@ -1,0 +1,13 @@
+{
+  "schema": "lash.bytecode-predecessor-provenance.v1",
+  "source_commit": "3e7301d21cdddb0126761cba300645b15a2b9cda",
+  "captured_by": "lash-protocol-rlm executor::tests trigger_inputs_retired_record_form fixture (artifact field)",
+  "capture_command": "git show 3e7301d21cdddb0126761cba300645b15a2b9cda:crates/lash-protocol-rlm/src/executor/tests/fixtures/trigger_inputs_retired_record_form.json, field artifact, re-serialized as compact JSON store bytes",
+  "capture_setup": "The module artifact the pre-FIG-3571 writer published for the retired-record-form trigger cell; its module_ref is lashlang:v2:blake3:d099d2566f7c5e244b60e46be7f08e58b1addef8c0013fc3f2e12e64d11e049b.",
+  "relationship": "origin/main before FIG-3571 moved module artifacts to the shared carrier IR (LASHLANG_SEMANTIC_HASH_VERSION lashlang-semantic-v16)",
+  "module_ref": "lashlang:v2:blake3:d099d2566f7c5e244b60e46be7f08e58b1addef8c0013fc3f2e12e64d11e049b",
+  "artifact": {
+    "path": "lashlang_module_artifact_pre_fig3571.json",
+    "sha256": "87743c830e5a3835d17daa177672b4e1f160906ebe02a60cac960f6b869e0227"
+  }
+}

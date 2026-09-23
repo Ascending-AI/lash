@@ -1019,7 +1019,7 @@ mod tests {
             "signal_run",
             "define_process",
             "register_trigger",
-            lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH,
+            lashlang::LANGUAGE_RUNTIME_MODULE_PATH,
         ];
         // Misuse shapes for the primitives the Host API block declares. Each
         // must reject, and reject in TypeScript's own vocabulary.
@@ -1371,7 +1371,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(lashlang::execute(
-                &lash_typescript::compile_linked(&linked),
+                &lashlang::testing::harness::compile_linked_main(&linked),
                 &mut lashlang::State::new(),
                 &host,
             ))

@@ -15,18 +15,9 @@ use lashlang::{AssignPathStep, AssignTarget, Expr, Program};
 use super::printer::typescript_statement_source;
 use super::{GraphRenderError, RenderContext, RenderScope, WorkflowNode};
 
-pub(super) fn statement_text(
-    expression: &Expr,
-    bound: &[String],
-    allow_non_sourceable: bool,
-) -> String {
-    match typescript_statement_source(expression, bound) {
-        Ok(text) => text,
-        Err(error) if allow_non_sourceable => format!("<non-sourceable statement: {error}>"),
-        Err(error) => {
-            panic!("a statement parsed from canonical source must remain sourceable: {error}")
-        }
-    }
+pub(super) fn statement_text(expression: &Expr, bound: &[String]) -> String {
+    typescript_statement_source(expression, bound)
+        .unwrap_or_else(|error| format!("<non-sourceable statement: {error}>"))
 }
 
 /// Returns the parsed program and the number of leading statements the wrapper
@@ -64,14 +55,8 @@ pub(super) fn parse_typescript_fragment(
 }
 
 /// The names a fragment may read, in the order the wrapper declares them.
-///
-/// Generated bindings are not authored names and never reach a fragment.
 fn fragment_bindings(node: &WorkflowNode) -> Vec<String> {
-    node.available_variables
-        .iter()
-        .filter(|name| !name.starts_with(crate::GENERATED_BINDING_PREFIX))
-        .cloned()
-        .collect()
+    node.available_variables.clone()
 }
 
 /// The name the opaque-statement wrapper binds. It never reaches a graph.
@@ -84,7 +69,8 @@ const OPAQUE_WRAPPER: &str = "workflowGraphOpaque";
 /// (ADR 0095). So the wrapper is read back out of its own binding, and the
 /// authored body out of the run wrapper the literal carries.
 pub(super) fn opaque_wrapper_run_body(program: &Program) -> Option<&Expr> {
-    let [Expr::Assign { target, expr }] = super::printer::statement_block_contents(&program.main)
+    let [Expr::Assign { target, expr }] =
+        super::printer::statement_block_contents(&program.main).as_slice()
     else {
         return None;
     };
@@ -192,7 +178,7 @@ pub fn parse_typescript_process_statement(
         ));
     };
     let statements = super::printer::statement_block_contents(body)
-        .iter()
+        .into_iter()
         .skip(globals.len())
         .cloned()
         .collect::<Vec<_>>();

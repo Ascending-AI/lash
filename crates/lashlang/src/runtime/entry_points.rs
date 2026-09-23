@@ -1,8 +1,15 @@
 //! Public compile/execute entry points for lashlang programs.
+//!
+//! Execution is artifact-only: [`compile`] is the one public way to turn a
+//! program into bytecode, and it compiles an entry point of an admitted
+//! [`ModuleArtifact`]. The raw-AST compiler under it is crate-private.
 
-use crate::ast::Program;
+use std::collections::BTreeMap;
+
+use crate::ast::{AstPath, AstRoot, Program};
+use crate::span::Span;
 use crate::tracking::LashlangExecutionContext;
-use crate::{LinkedModule, ModuleArtifact, ProcessRef};
+use crate::{ModuleArtifact, ProcessRef};
 
 use super::record::intern_symbol;
 use super::{
@@ -10,51 +17,105 @@ use super::{
     ProjectedBindings, RuntimeError, SlotState, State, Vm,
 };
 
-pub enum ExecutableProgram<'program> {
-    Program(&'program Program),
-    Compiled(&'program CompiledProgram),
+/// Which program of a module artifact to compile.
+#[derive(Clone, Copy, Debug)]
+pub enum Entry<'a> {
+    /// The module's top-level program.
+    Main,
+    /// One exported process, by its ref.
+    Process(&'a ProcessRef),
 }
 
-impl<'program> From<&'program Program> for ExecutableProgram<'program> {
-    fn from(program: &'program Program) -> Self {
-        Self::Program(program)
-    }
-}
-
-impl<'program> From<&'program CompiledProgram> for ExecutableProgram<'program> {
-    fn from(program: &'program CompiledProgram) -> Self {
-        Self::Compiled(program)
-    }
-}
-
-/// Compiles a program assembled through the AST API.
+/// Compiles one entry point of an admitted module artifact.
 ///
-/// This is the entry point for AST-only nodes such as user functions, calls,
-/// callback-driven maps and structured exception scopes, which intentionally
-/// have no source syntax — and therefore no parser to bound how deeply a caller
-/// nests them. The depth cap is applied here instead, so an over-deep tree is a
-/// typed error rather than a stack overflow in a later AST walk.
-pub fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::ast::InvalidAst> {
-    crate::ast::validate_ast(program)?;
-    let (chunk, compile_stats) = Compiler::compile_program(program);
-    Ok(CompiledProgram {
-        chunk,
-        compile_stats,
-    })
-}
-
-pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
-    let (chunk, compile_stats) = Compiler::compile_program(program);
-    CompiledProgram {
-        chunk,
-        compile_stats,
+/// `source_spans` are the authored spans a linked module keeps beside its
+/// artifact ([`crate::LinkedModule::spans`]), keyed by the artifact program's
+/// AST paths; they only position runtime diagnostics and never change what is
+/// compiled.
+pub fn compile(
+    artifact: &ModuleArtifact,
+    entry: Entry<'_>,
+    source_spans: Option<&BTreeMap<AstPath, Span>>,
+) -> Result<CompiledProgram, RuntimeError> {
+    let program = &artifact.ir();
+    match entry {
+        Entry::Main => Ok(compile_main(artifact, source_spans)),
+        Entry::Process(process_ref) => {
+            let process_name = artifact.process_name_for_ref(process_ref).ok_or_else(|| {
+                RuntimeError::ProcessRefNotExported {
+                    module_ref: artifact.module_ref().clone(),
+                    process_ref: process_ref.clone(),
+                }
+            })?;
+            let (index, process) = program
+                .declarations
+                .iter()
+                .enumerate()
+                .find_map(|(index, declaration)| match declaration {
+                    crate::Declaration::Process(process)
+                        if process.name.as_str() == process_name =>
+                    {
+                        Some((index, process))
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| RuntimeError::ArtifactProcessMissing {
+                    module_ref: artifact.module_ref().clone(),
+                    name: process_name.to_string(),
+                })?;
+            // The process body compiles as the program's main, so its spans
+            // move from the declaration's root to `main`.
+            let root = AstRoot::Declaration(u32::try_from(index).unwrap_or(u32::MAX));
+            let spans = source_spans
+                .map(|spans| {
+                    spans
+                        .iter()
+                        .filter(|(path, _)| path.root == root)
+                        .map(|(path, span)| (AstPath::main(path.steps.clone()), *span))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let process_program = Program {
+                language: program.language.clone(),
+                declarations: program.declarations.clone(),
+                main: process.body.clone(),
+                // A process body's bindings never reach session globals.
+                private_bindings: Default::default(),
+                spans: BTreeMap::new(),
+            };
+            let (chunk, compile_stats) = Compiler::compile_linked_process_program(
+                &process_program,
+                spans,
+                artifact.into(),
+                LashlangExecutionContext::process(process_name),
+            );
+            Ok(CompiledProgram {
+                chunk,
+                compile_stats,
+            })
+        }
     }
 }
 
-pub fn compile_linked(linked: &LinkedModule) -> CompiledProgram {
+/// [`compile`] of [`Entry::Main`], which cannot fail: the artifact's own
+/// program is its main entry.
+pub(crate) fn compile_main(
+    artifact: &ModuleArtifact,
+    source_spans: Option<&BTreeMap<AstPath, Span>>,
+) -> CompiledProgram {
+    let spans = source_spans
+        .map(|spans| {
+            spans
+                .iter()
+                .filter(|(path, _)| path.root == AstRoot::Main)
+                .map(|(path, span)| (path.clone(), *span))
+                .collect()
+        })
+        .unwrap_or_default();
     let (chunk, compile_stats) = Compiler::compile_linked_program(
-        linked.program(),
-        (&linked.artifact).into(),
+        artifact.ir(),
+        spans,
+        artifact.into(),
         LashlangExecutionContext::main(),
     );
     CompiledProgram {
@@ -63,92 +124,22 @@ pub fn compile_linked(linked: &LinkedModule) -> CompiledProgram {
     }
 }
 
-pub fn compile_process(
-    program: &Program,
-    process_name: &str,
-) -> Result<CompiledProgram, RuntimeError> {
-    crate::ast::check_ast_nesting_depth(program).map_err(|error| {
-        RuntimeError::ValidationFailed {
-            reason: error.to_string(),
-        }
-    })?;
-    let process = program
-        .process(process_name)
-        .ok_or_else(|| RuntimeError::UnknownProcess {
-            name: process_name.to_string(),
-        })?;
-    let process_program = Program {
-        declarations: program.declarations.clone(),
-        main: process.body.clone(),
-        spans: Default::default(),
-    };
-    compile_ast(&process_program).map_err(|error| RuntimeError::ValidationFailed {
-        reason: error.to_string(),
-    })
+/// Compiles a program assembled through the AST API, with no module around
+/// it: the unit-test primitive the VM's own tests drive. Every compile outside
+/// this crate's tests goes through [`compile`].
+#[cfg(test)]
+pub(crate) fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::ast::InvalidAst> {
+    crate::ast::validate_ast(program)?;
+    Ok(compile_program_internal(program))
 }
 
-pub fn compile_linked_process(
-    linked: &LinkedModule,
-    process_name: &str,
-) -> Result<CompiledProgram, RuntimeError> {
-    let linked_program = linked.program();
-    let process =
-        linked_program
-            .process(process_name)
-            .ok_or_else(|| RuntimeError::UnknownProcess {
-                name: process_name.to_string(),
-            })?;
-    let process_program = Program {
-        declarations: linked_program.declarations.clone(),
-        main: process.body.clone(),
-        spans: Default::default(),
-    };
-    if linked.artifact.process_ref(process_name).is_none() {
-        return Err(RuntimeError::ProcessNotExported {
-            name: process_name.to_string(),
-        });
+#[cfg(test)]
+pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
+    let (chunk, compile_stats) = Compiler::compile_program(program);
+    CompiledProgram {
+        chunk,
+        compile_stats,
     }
-    let (chunk, compile_stats) = Compiler::compile_linked_process_program(
-        &process_program,
-        (&linked.artifact).into(),
-        LashlangExecutionContext::process(process_name),
-    );
-    Ok(CompiledProgram {
-        chunk,
-        compile_stats,
-    })
-}
-
-pub fn compile_module_artifact_process(
-    artifact: &ModuleArtifact,
-    process_ref: &ProcessRef,
-) -> Result<CompiledProgram, RuntimeError> {
-    let process_name = artifact.process_name_for_ref(process_ref).ok_or_else(|| {
-        RuntimeError::ProcessRefNotExported {
-            module_ref: artifact.module_ref.clone(),
-            process_ref: process_ref.clone(),
-        }
-    })?;
-    let process = artifact.canonical_ir.process(process_name).ok_or_else(|| {
-        RuntimeError::ArtifactProcessMissing {
-            module_ref: artifact.module_ref.clone(),
-            name: process_name.to_string(),
-        }
-    })?;
-    let process_program = Program {
-        declarations: artifact.canonical_ir.declarations.clone(),
-        main: process.body.clone(),
-        spans: Default::default(),
-    };
-    let (chunk, compile_stats) = Compiler::compile_linked_process_program(
-        &process_program,
-        artifact.into(),
-        LashlangExecutionContext::process(process_name),
-    );
-    Ok(CompiledProgram {
-        chunk,
-        compile_stats,
-    })
 }
 
 pub fn prewarm() {
@@ -174,20 +165,12 @@ pub fn prewarm() {
     }
 }
 
-pub async fn execute<'program, H: ExecutionHost>(
-    program: impl Into<ExecutableProgram<'program>>,
+pub async fn execute<H: ExecutionHost>(
+    program: &CompiledProgram,
     state: &mut State,
     host: &H,
 ) -> Result<ExecutionOutcome, RuntimeError> {
-    match program.into() {
-        ExecutableProgram::Program(program) => {
-            let compiled = compile_program_internal(program);
-            execute_compiled_internal(&compiled, state, host).await
-        }
-        ExecutableProgram::Compiled(compiled) => {
-            execute_compiled_internal(compiled, state, host).await
-        }
-    }
+    execute_compiled_internal(program, state, host).await
 }
 
 pub(crate) async fn execute_compiled_internal<H: ExecutionHost>(
@@ -225,6 +208,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         let slots = SlotState::from_globals(
             globals,
             &program.chunk.slot_names,
+            &program.chunk.private_slots,
             projected,
             std::mem::take(&mut scratch.slot_values),
         );
@@ -244,8 +228,13 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         let (mut globals, mut heap) = state.take_runtime();
         crate::runtime::projected_refresh::refresh_record(&mut globals, projected);
         crate::runtime::projected_refresh::refresh_heap(&mut heap, projected);
-        let slots =
-            SlotState::from_globals(globals, &program.chunk.slot_names, projected, Vec::new());
+        let slots = SlotState::from_globals(
+            globals,
+            &program.chunk.slot_names,
+            &program.chunk.private_slots,
+            projected,
+            Vec::new(),
+        );
         let mut vm = Vm::new(&program.chunk, slots, host, None, host.execution_mode());
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;

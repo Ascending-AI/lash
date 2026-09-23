@@ -148,7 +148,9 @@ pub use lashlang_graph::{
 /// Version 33 (FIG-3515) gives a traced tool result its ordered content:
 /// `tool_result.content` is a list of text and attachment blocks, one
 /// result per call, instead of a string beside loose attachment blocks.
-pub const TRACE_SCHEMA_VERSION: u32 = 33;
+/// Version 34 (FIG-3571) keys language observations by carrier IR node ids:
+/// the same source traces under different node ids than version 33.
+pub const TRACE_SCHEMA_VERSION: u32 = 34;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

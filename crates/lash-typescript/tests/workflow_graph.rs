@@ -13,8 +13,8 @@ use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
     GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError,
     parse_typescript_assign_target, parse_typescript_expression, typescript_program_source,
-    validate, workflow_graph_from_program, workflow_graph_from_source,
-    workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    validate, workflow_graph_from_source, workflow_graph_from_source_with_facets,
+    workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
@@ -26,6 +26,14 @@ use lashlang::{
     WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSlotPath, WorkflowSlotPathSegment,
     WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile, workflow_call_to_ir, workflow_slot_value,
 };
+
+/// The language-neutral IR projection, with TypeScript opaque-statement text.
+fn workflow_graph_from_program(program: &lashlang::Program) -> lashlang::WorkflowGraph {
+    lashlang::workflow_graph_from_program(
+        program,
+        &lash_typescript::workflow_graph::TypeScriptStatementText,
+    )
+}
 
 /// The one process a fixture lifts.
 ///
@@ -387,7 +395,7 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
 
     let function_graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
-        source_identity: "fixture".to_string(),
+        source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
         declarations: vec![WorkflowDeclaration::Function(lashlang::FunctionDecl {
             name: "describe".into(),
@@ -429,35 +437,49 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
 }
 
 #[test]
-fn source_identity_tracks_canonical_definition_not_input_formatting() {
-    let compact = workflow_graph_from_source("const value=1;finish(value);\n")
-        .expect("compact source projects");
-    let formatted = workflow_graph_from_source("const value = 1;\n\nfinish(value);\n")
-        .expect("formatted source projects");
-    assert_eq!(compact.source_identity, formatted.source_identity);
+fn source_identity_is_the_admitted_artifacts_and_ignores_input_formatting() {
+    let environment = lashlang::testing::harness::labeled_test_environment();
+    let admitted = |source: &str| {
+        workflow_graph_from_source_with_facets(source, Some(&environment))
+            .expect("source projects")
+            .source_identity
+            .expect("an admitted source names its artifact identity")
+    };
+    let compact = admitted("const value=1;finish(value);\n");
+    let formatted = admitted("const value = 1;\n\nfinish(value);\n");
+    assert_eq!(compact, formatted, "spans are not identity");
 
-    let program = parse("const value = 1;\nfinish(value);\n").expect("fixture parses");
-    let artifact = workflow_graph_from_program(&program);
-    assert_eq!(formatted.source_identity, artifact.source_identity);
+    let linked = lash_typescript::link("const value = 1;\nfinish(value);\n", &environment)
+        .expect("fixture links");
+    assert_eq!(
+        formatted,
+        linked.artifact.source_identity(),
+        "the draft names the identity of the artifact it admits to"
+    );
+    assert_eq!(
+        lash_typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact)
+            .source_identity,
+        Some(formatted.clone()),
+        "the runnable view and the trace name the same identity"
+    );
 
-    let labeled = workflow_graph_from_source(
-        "/** @label Finish value */\nconst value = 1;\nfinish(value);\n",
-    )
-    .expect("labeled source projects");
-    assert_ne!(formatted.source_identity, labeled.source_identity);
+    let labeled = admitted("/** @label Finish value */\nconst value = 1;\nfinish(value);\n");
+    assert_ne!(formatted, labeled);
 }
 
 #[test]
-fn non_sourceable_program_source_identity_uses_serialized_program_fallback() {
-    let mut program = parse("const value = 1;\n").expect("fixture parses");
-    program.main = lashlang::Expr::Block(vec![lashlang::Expr::SleepUntil(Box::new(
-        lashlang::Expr::String("tomorrow".into()),
-    ))]);
-    assert!(typescript_program_source(&program).is_err());
-    assert_eq!(
-        workflow_graph_from_program(&program).source_identity,
-        "05a32bb1d435bdadd1604800482ecbedce57432fee9cf6aa744d37d63e89f7ec"
-    );
+fn a_draft_claims_no_runtime_identity_and_identity_never_depends_on_printing() {
+    let draft = workflow_graph_from_source("const value = 1;\n").expect("draft projects");
+    assert_eq!(draft.source_identity, None);
+
+    let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
+        lashlang::Expr::SleepUntil(Box::new(lashlang::Expr::String("tomorrow".into()))),
+    ]))
+    .expect("a non-sourceable program still forms an artifact");
+    assert!(typescript_program_source(artifact.ir()).is_err());
+    let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact);
+    assert_eq!(graph.source_identity, Some(artifact.source_identity()));
+    assert!(graph.nodes().all(|node| node.source_span.is_none()));
 }
 
 #[test]
@@ -559,7 +581,7 @@ fn workflow_graph_ir_json_golden_is_exact() {
     let graph =
         workflow_graph_from_source("await tools.lookup({ query: \"x\" });\nawait sleep(\"1s\");\n")
             .expect("fixture projects");
-    assert_eq!(graph.schema_version, 15);
+    assert_eq!(graph.schema_version, 16);
     let kinds = serde_json::Value::Array(
         graph
             .main
@@ -636,7 +658,7 @@ fn workflow_graph_with_facets_json_golden_is_exact() {
     assert_eq!(
         actual,
         include_str!("fixtures/workflow_graph_with_facets.json"),
-        "nodes={:?}, edges={:?}, source_identity={}",
+        "nodes={:?}, edges={:?}, source_identity={:?}",
         graph
             .nodes()
             .map(|node| node.id.to_string())
@@ -655,7 +677,7 @@ fn workflow_graph_with_facets_json_golden_is_exact() {
 fn workflow_graph_refuses_unknown_type_expr_variant() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
-        source_identity: "fixture".to_string(),
+        source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
         declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
             name: "Name".into(),
@@ -693,7 +715,7 @@ fn facet_reader_refuses_unknown_type_expr_variant() {
 fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
-        source_identity: "fixture".to_string(),
+        source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
         declarations: vec![WorkflowDeclaration::Type(lashlang::TypeDecl {
             name: "Record".into(),
@@ -929,6 +951,7 @@ fn missing_and_null_container_children_fail_at_decode() {
             WorkflowContainer::For {
                 binding: "item".to_string(),
                 iterable: ir("[]"),
+                bind: None,
                 body: empty(),
             },
             "body",
@@ -1046,7 +1069,9 @@ finish(1);
         panic!("expected while container")
     };
     *condition = ir("state.count < 2");
-    let WorkflowNodeKind::StateUpdate { target, expression } = &mut edited.main.nodes[3].kind
+    let WorkflowNodeKind::StateUpdate {
+        target, expression, ..
+    } = &mut edited.main.nodes[3].kind
     else {
         panic!("expected state update")
     };
@@ -1085,7 +1110,7 @@ finish(1);
     ));
     assert!(matches!(
         &reprojected.main.nodes[3].kind,
-        WorkflowNodeKind::StateUpdate { target, expression }
+        WorkflowNodeKind::StateUpdate { target, expression, update: None }
             if target == &ir_target("state.other") && expression == &ir("state.count + 40")
     ));
     assert!(matches!(
@@ -1485,13 +1510,15 @@ fn cloned_do_while_conditions_keep_provenance_for_every_destination_path() {
 }
 
 #[test]
-fn program_projection_rebuilds_canonical_spans_for_lifted_processes() {
+fn artifact_projection_rebuilds_canonical_spans_for_lifted_processes() {
     let authored = "const worker=async()=>{await sleep(1);return 1;};";
-    let program = parse(authored).expect("compact process source parses");
-    let canonical = typescript_program_source(&program).expect("program prints canonically");
+    let linked = lash_typescript::link(authored, &lashlang::testing::harness::test_environment())
+        .expect("compact process source links");
+    let canonical =
+        typescript_program_source(linked.artifact.ir()).expect("the artifact prints canonically");
     assert_ne!(authored, canonical, "the fixture must change formatting");
 
-    let graph = workflow_graph_from_program(&program);
+    let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
     let process = only_process(&graph);
     assert_eq!(
         process
@@ -1502,10 +1529,28 @@ fn program_projection_rebuilds_canonical_spans_for_lifted_processes() {
             .collect::<Vec<_>>(),
         ["sleep(1)", "return 1;"]
     );
+    let draft = workflow_graph_from_source(authored).expect("source projection succeeds");
     assert_eq!(
-        graph,
-        workflow_graph_from_source(authored).expect("source projection succeeds"),
-        "the public program entry point must derive the same canonical provenance as the source entry point"
+        graph
+            .nodes()
+            .map(|node| node.id.clone())
+            .collect::<Vec<_>>(),
+        draft
+            .nodes()
+            .map(|node| node.id.clone())
+            .collect::<Vec<_>>(),
+        "the runnable view and the draft mint the same node ids"
+    );
+    assert_eq!(
+        graph
+            .nodes()
+            .map(|node| node.source_span)
+            .collect::<Vec<_>>(),
+        draft
+            .nodes()
+            .map(|node| node.source_span)
+            .collect::<Vec<_>>(),
+        "the runnable view carries the draft's canonical provenance"
     );
 }
 
@@ -2461,3 +2506,6 @@ fn effect_argument_ir_edit_renders_without_an_expression_text_field() {
     let rendered = workflow_graph_to_source(&graph).expect("edited effect argument IR renders");
     assert_eq!(rendered, "await sleep(\"2s\");\n");
 }
+
+#[path = "workflow_graph/carrier_fix_round.rs"]
+mod carrier_fix_round;

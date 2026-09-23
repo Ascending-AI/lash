@@ -208,7 +208,7 @@ fn comprehension_compile(program: Program) -> CompiledProgram {
         crate::LashlangHostEnvironment::new(catalog, crate::LashlangAbilities::all()),
     )
     .expect("program should link");
-    crate::compile_linked(&linked)
+    crate::testing::harness::compile_linked_main(&linked)
 }
 
 async fn comprehension_finish(host: &ComprehensionBatchHost, program: Program) -> Value {

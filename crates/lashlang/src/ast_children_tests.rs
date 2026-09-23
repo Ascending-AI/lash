@@ -88,6 +88,7 @@ fn every_expr_variant() -> Vec<Expr> {
         Expr::For {
             binding: "item".into(),
             iterable: Box::new(var("for_iterable")),
+            bind: None,
             body: Box::new(var("for_body")),
         },
         Expr::While {

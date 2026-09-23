@@ -44,7 +44,7 @@ fn named_process_signature_round_trips_and_names_change_identity() {
 fn artifact_explicitly_refuses_obsolete_process_type_shape() {
     let artifact = process_typed_artifact("event");
     let mut raw = serde_json::to_value(&artifact).expect("artifact serializes");
-    let declarations = raw["canonical_ir"]["declarations"]
+    let declarations = raw["ir"]["declarations"]
         .as_array_mut()
         .expect("declarations array");
     let install = declarations
@@ -160,7 +160,9 @@ fn a_recorded_compilation_dialect_is_refused_as_a_retired_field() {
 }
 
 #[test]
-fn frozen_sha256_artifact_without_the_obsolete_field_hits_the_identity_fence() {
+fn frozen_predecessor_artifact_is_refused_by_its_shape() {
+    // A pre-FIG-3571 artifact carries a renamed `canonical_ir` and no program
+    // `language`; the one-carrier shape refuses it before any identity check.
     let mut raw: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/module-artifact-old.json"
     ))
@@ -170,15 +172,15 @@ fn frozen_sha256_artifact_without_the_obsolete_field_hits_the_identity_fence() {
     // The frozen fixture predates ADR 0096 and still records a dialect,
     // which is its own typed refusal (see
     // `a_recorded_compilation_dialect_is_refused_as_a_retired_field`).
-    // Drop it so the subject here stays the identity fence.
     object.remove("compilation_dialect");
-    raw["canonical_ir"]["declarations"][0]["Process"]["return_ty"] = serde_json::json!("Str");
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("legacy artifact should encode"),
     )
-    .expect_err("a SHA-256 artifact must not verify under the BLAKE3 generation");
-    assert!(matches!(error, ModuleArtifactError::HashMismatch { .. }));
-    assert!(error.to_string().contains("lashlang:v2:blake3:"));
+    .expect_err("a predecessor artifact must be refused");
+    assert!(
+        matches!(&error, ModuleArtifactError::Codec(message) if message.contains("`ir`")),
+        "{error}"
+    );
 }
 
 #[test]
@@ -188,7 +190,7 @@ fn future_shape_refuses_before_serde_reaches_unknown_variants() {
     ))
     .expect("frozen fixture should be JSON");
     raw["compilation_dialect"] = serde_json::json!("future_dialect");
-    raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
 
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("future fixture should encode"),
@@ -206,7 +208,7 @@ fn unchanged_dialect_with_unknown_nested_variant_is_a_future_shape_refusal() {
         "../../tests/fixtures/module-artifact-old.json"
     ))
     .expect("frozen fixture should be JSON");
-    raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
 
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("future fixture should encode"),
@@ -226,44 +228,32 @@ fn malformed_artifact_json_remains_an_undecodable_codec_error() {
     assert!(!matches!(error, ModuleArtifactError::FutureShape { .. }));
 }
 
-/// The refs are now derived from borrowed content instead of by rebuilding the
-/// artifact, so the store's admission check has to keep refusing an artifact
-/// whose refs do not describe the content it carries.
+/// An artifact's refs are private and derived from its content, so a forged
+/// ref can only arrive as stored bytes; the store decoder is what refuses it.
+/// The refs are derived from borrowed content rather than by rebuilding the
+/// artifact (FIG-3088), and each comparison is exercised on its own.
 ///
 /// Red side: dropping the `artifact.verify()?;` line from
-/// `InMemoryLashlangArtifactStore::publish_module_artifact`, or either of the
-/// two ref comparisons exercised here, lets the forged artifacts publish.
-/// Each half gets its own store so the refusal under test is the ref check and
-/// never the immutability check on an already-published ref.
-#[tokio::test(flavor = "current_thread")]
-async fn publish_refuses_an_artifact_whose_refs_do_not_match_its_content() {
-    let owner = lash_core_execution::ArtifactOwner::host("fig-3088");
+/// `ModuleArtifact::from_store_bytes`, or either of the two ref comparisons
+/// exercised here, lets the forged bytes decode.
+#[test]
+fn store_decode_refuses_bytes_whose_refs_do_not_match_their_content() {
     let honest = process_typed_artifact("event");
 
     // A forged `module_ref`: the content is the "payload" program, the ref is
     // the one the "event" program hashes to.
     let mut forged_module_ref = process_typed_artifact("payload");
-    let payload_ref = forged_module_ref.module_ref.clone();
     forged_module_ref.module_ref = honest.module_ref.clone();
-    let store = InMemoryLashlangArtifactStore::new();
-    let error = store
-        .publish_module_artifact(&owner, &forged_module_ref)
-        .await
-        .expect_err("a module_ref that does not hash its own content must be refused");
+    let error = ModuleArtifact::from_store_bytes(
+        &forged_module_ref
+            .to_store_bytes()
+            .expect("the forged artifact encodes"),
+    )
+    .expect_err("a module_ref that does not hash its own content must be refused");
     assert!(
         error.to_string().contains("module_ref"),
         "expected a module_ref mismatch, got {error}"
     );
-    for refused in [&honest.module_ref, &payload_ref] {
-        assert!(
-            store
-                .get_module_artifact(refused)
-                .await
-                .expect("the store reads back")
-                .is_none(),
-            "a refused publish must retain nothing"
-        );
-    }
 
     // A forged `host_requirements_ref`: the content and the module_ref are the
     // honest ones, only the requirements ref names requirements this artifact
@@ -272,58 +262,45 @@ async fn publish_refuses_an_artifact_whose_refs_do_not_match_its_content() {
     let mut forged_requirements_ref = process_typed_artifact("event");
     let mut unrequested = forged_requirements_ref.host_requirements.clone();
     unrequested.globals.insert("unrequested_global".to_string());
-    forged_requirements_ref.host_requirements_ref = host_requirements_ref(&unrequested);
+    forged_requirements_ref.host_requirements_ref = hash_host_requirements(&unrequested);
     assert_ne!(
         forged_requirements_ref.host_requirements_ref,
         honest.host_requirements_ref
     );
     assert_eq!(forged_requirements_ref.module_ref, honest.module_ref);
-    let store = InMemoryLashlangArtifactStore::new();
-    let error = store
-        .publish_module_artifact(&owner, &forged_requirements_ref)
-        .await
-        .expect_err("host requirements that do not hash to their ref must be refused");
+    let error = ModuleArtifact::from_store_bytes(
+        &forged_requirements_ref
+            .to_store_bytes()
+            .expect("the forged artifact encodes"),
+    )
+    .expect_err("host requirements that do not hash to their ref must be refused");
     assert!(
         error.to_string().contains("host_requirements_ref"),
         "expected a host_requirements_ref mismatch, got {error}"
     );
-    assert!(
-        store
-            .get_module_artifact(&honest.module_ref)
-            .await
-            .expect("the store reads back")
-            .is_none(),
-        "a refused publish must retain nothing"
-    );
 
-    // The same store still admits the artifact whose refs do match, so the
-    // refusals above are the ref check and not a blanket rejection.
-    let store = InMemoryLashlangArtifactStore::new();
-    store
-        .publish_module_artifact(&owner, &honest)
-        .await
-        .expect("an artifact whose refs match its content publishes");
-    let stored = store
-        .get_module_artifact(&honest.module_ref)
-        .await
-        .expect("the store reads back")
-        .expect("the honest artifact is retained");
-    assert_eq!(*stored, honest);
+    // The honest artifact's bytes decode, so the refusals above are the ref
+    // check and not a blanket rejection.
+    let decoded = ModuleArtifact::from_store_bytes(
+        &honest
+            .to_store_bytes()
+            .expect("the honest artifact encodes"),
+    )
+    .expect("an artifact whose refs match its content decodes");
+    assert_eq!(decoded, honest);
 }
 
-/// One module ref addresses one byte string.
+/// One module ref addresses one byte string, and a name is part of it.
 ///
-/// The identity alpha-normalizes a local binder name (`NameNormalizer` writes
-/// `local:<index>`), so two cells that differ only in a local name share one
-/// module ref. Every artifact store refuses a second publish under a ref whose
-/// bytes differ, so the stored canonical IR must drop the same name the
-/// identity drops. Before `canonical_program_ir` normalized local binders, the
-/// perf guard's `durable_agent_child_turn_*` cell (`const spawnChild = ...`)
-/// and its high-traffic twin (`const loadChild = ...`) published one ref with
-/// two byte strings and the second session's turn died at `Stopped(MaxTurns)`
-/// (FIG-3120).
+/// The FIG-3120 pair: the perf guard's `durable_agent_child_turn_*` cell
+/// (`const spawnChild = ...`) and its high-traffic twin (`const loadChild =
+/// ...`) differ only in one main-level binder. Before FIG-3571 the identity
+/// alpha-normalized that binder, so the pair shared a ref and the stored IR had
+/// to be renamed to match. The artifact now stores the linked program verbatim
+/// and the ref hashes it names included, so the pair names two modules, each
+/// ref addresses exactly the bytes it hashes, and both round-trip.
 #[test]
-fn one_module_ref_addresses_one_byte_string_across_local_binder_names() {
+fn alpha_variant_cells_name_distinct_modules() {
     fn artifact(binding: &str) -> ModuleArtifact {
         ModuleArtifact::from_program(b::module(
             vec![b::process_returning(
@@ -342,33 +319,29 @@ fn one_module_ref_addresses_one_byte_string_across_local_binder_names() {
 
     let spawn_child = artifact("spawnChild");
     let load_child = artifact("loadChild");
-    assert_eq!(
+    assert_ne!(
         spawn_child.module_ref, load_child.module_ref,
-        "alpha variants share one module ref by design"
+        "alpha variants name distinct modules"
     );
-    assert_eq!(
-        spawn_child.to_store_bytes().expect("spawnChild encodes"),
-        load_child.to_store_bytes().expect("loadChild encodes"),
-        "the same module ref must address the same bytes"
-    );
-    let encoded = String::from_utf8(spawn_child.to_store_bytes().expect("encodes"))
-        .expect("artifact bytes are UTF-8");
-    assert!(
-        !encoded.contains("spawnChild") && !encoded.contains("loadChild"),
-        "a local binder name the identity drops must not reach the stored artifact: {encoded}"
-    );
-    assert!(
-        ModuleArtifact::from_store_bytes(&spawn_child.to_store_bytes().expect("encodes"))
-            .expect("normalized artifact decodes")
-            == spawn_child,
-        "the normalized artifact must round-trip"
-    );
+    for (artifact, name) in [(&spawn_child, "spawnChild"), (&load_child, "loadChild")] {
+        let bytes = artifact.to_store_bytes().expect("artifact encodes");
+        let encoded = String::from_utf8(bytes.clone()).expect("artifact bytes are UTF-8");
+        assert!(
+            encoded.contains(name),
+            "the stored artifact keeps the binder name: {encoded}"
+        );
+        assert_eq!(
+            &ModuleArtifact::from_store_bytes(&bytes).expect("artifact decodes"),
+            artifact,
+            "the artifact round-trips"
+        );
+    }
 }
 
 /// An ABI name is not a local: a process parameter still names itself in the
 /// stored artifact, and renaming one still moves the module ref.
 #[test]
-fn process_parameter_names_stay_in_the_canonical_ir() {
+fn process_parameter_names_stay_in_the_ir() {
     let event = process_typed_artifact("event");
     let encoded =
         String::from_utf8(event.to_store_bytes().expect("encodes")).expect("bytes are UTF-8");
@@ -377,4 +350,62 @@ fn process_parameter_names_stay_in_the_canonical_ir() {
         event.module_ref,
         process_typed_artifact("payload").module_ref
     );
+}
+
+/// A process's origin is derived by the linker (FIG-3571): a program handed
+/// to it cannot claim a lifted process, and no program an artifact carries can
+/// hold an origin its declaration contradicts.
+#[test]
+fn process_origins_are_derived_never_authored() {
+    let lifted_body =
+        || crate::testing::ast_builders::finish(crate::testing::ast_builders::bool_lit(true));
+    let with_process = |name: &str, origin: crate::ProcessOrigin, params: usize| {
+        let mut declaration = crate::testing::ast_builders::process_returning(
+            name,
+            (0..params)
+                .map(|index| {
+                    crate::testing::ast_builders::param(&format!("p{index}"), TypeExpr::Any)
+                })
+                .collect(),
+            TypeExpr::Bool,
+            lifted_body(),
+        );
+        if let Declaration::Process(process) = &mut declaration {
+            process.origin = origin;
+        }
+        crate::testing::ast_builders::module(vec![declaration], Vec::new())
+    };
+    let lifted_name = format!("{}{}", crate::LIFTED_PROCESS_NAME_PREFIX, "0".repeat(64));
+    let lifted = |hidden_params| crate::ProcessOrigin::Lifted {
+        site: crate::AstPath::main(vec![0, 0]),
+        hidden_params,
+    };
+    for (program, reason) in [
+        (
+            with_process(&lifted_name, crate::ProcessOrigin::Declared, 0),
+            "a declared process cannot take a lifted process's name",
+        ),
+        (
+            with_process("authored", lifted(0), 0),
+            "a lifted process is named by its literal's digest",
+        ),
+        (
+            with_process(&lifted_name, lifted(2), 1),
+            "a lifted process has more hidden parameters than parameters",
+        ),
+    ] {
+        assert!(matches!(
+            crate::validate_ast(&program),
+            Err(crate::InvalidAst::InvalidProcessOrigin { reason: refused, .. }) if refused == reason
+        ));
+        assert!(ModuleArtifact::from_program(program).is_err(), "{reason}");
+    }
+    let claimed = with_process(&lifted_name, lifted(0), 0);
+    crate::validate_ast(&claimed).expect("a well-formed lifted declaration validates");
+    assert!(matches!(
+        crate::LinkedModule::link(claimed, crate::testing::harness::test_environment()),
+        Err(crate::LinkError::InvalidAst {
+            source: crate::InvalidAst::InvalidProcessOrigin { .. }
+        })
+    ));
 }

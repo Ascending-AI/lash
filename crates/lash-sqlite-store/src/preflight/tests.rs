@@ -395,19 +395,10 @@ mod walk {
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
         let store = Store::open(&core).await.expect("provision durable core");
-        let frozen: lashlang::ModuleArtifact = serde_json::from_slice(include_bytes!(
-            "../../../lashlang/tests/fixtures/module-artifact-old.json"
-        ))
-        .expect("decode frozen artifact shape");
-        let artifact = lashlang::LinkedModule::link(
-            frozen.canonical_ir,
-            lashlang::LashlangHostEnvironment::new(
-                lashlang::LashlangHostCatalog::default(),
-                lashlang::LashlangAbilities::all(),
-            ),
-        )
-        .expect("link the frozen source IR with a complete process signature")
-        .artifact;
+        let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
+            lashlang::Expr::Finish(Box::new(lashlang::Expr::String("done".into()))),
+        ]))
+        .expect("a one-statement module forms an artifact");
         store
             .publish_module_artifact(
                 &lash_core_execution::ArtifactOwner::host("preflight-test"),
@@ -423,10 +414,10 @@ mod walk {
             .expect("walk module artifacts");
         assert_eq!(page.coverage, ScanCoverage::Scanned);
         assert_eq!(page.items.len(), 1, "{page:?}");
-        assert_eq!(page.items[0].cursor, artifact.module_ref.as_str());
+        assert_eq!(page.items[0].cursor, artifact.module_ref().as_str());
         match &page.items[0].payload {
             DurablePayload::Json(json) => assert!(
-                json.contains("host_requirements_ref") && json.contains("canonical_ir"),
+                json.contains("host_requirements_ref") && json.contains("\"ir\""),
                 "{json}"
             ),
             other => panic!("expected module artifact JSON, got {other:?}"),

@@ -32,7 +32,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-google-upload-credential-scope/v2",
     "lash-history-node/v3",
     "lash-intent/v2",
-    "lash-lifted-process-name/v1",
+    "lash-lifted-process-name/v2",
     "lash-lashlang-content/v2",
     "lash-lashlang-execution-site/v2",
     "lash-lashlang-program/v2",
@@ -73,6 +73,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-workflow-node/v2",
     "lash-workflow-node/v3",
     "lash-workflow-source/v3",
+    "lash-workflow-source/v4",
     "lash.agent-frame-key/v2",
     "lashlang-process-start/v2",
     "lashlang-process-start/v3",
@@ -409,6 +410,9 @@ mod blake3_domain_tests {
         // retired rather than reused.
         "lash-tool-output-spill/v2",
         "lash-workflow-node/v2",
+        // FIG-3571: source identity digests the admitted program, never
+        // printed text, under v4.
+        "lash-workflow-source/v3",
         "lashlang-process-start/v2",
     ];
 

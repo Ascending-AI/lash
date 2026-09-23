@@ -327,7 +327,7 @@ fn compile_program_for_tests(program: Program) -> CompiledProgram {
     if program_references_a_resource(&program.main)
         && let Ok(linked) = crate::LinkedModule::link(program.clone(), runtime_test_environment())
     {
-        crate::compile_linked(&linked)
+        crate::testing::harness::compile_linked_main(&linked)
     } else {
         compile_program(&program)
     }
@@ -393,10 +393,15 @@ async fn execute_program<H: ExecutionHost>(
     host: &H,
 ) -> Result<ExecutionOutcome, RuntimeError> {
     if let Ok(linked) = crate::LinkedModule::link(program.clone(), runtime_test_environment()) {
-        let compiled = crate::compile_linked(&linked);
+        let compiled = crate::testing::harness::compile_linked_main(&linked);
         return super::execute(&compiled, state, host).await;
     }
-    super::execute(program, state, host).await
+    super::execute(
+        &crate::compile_ast(program).expect("the program compiles"),
+        state,
+        host,
+    )
+    .await
 }
 
 async fn execute_compiled_with_scratch<H: ExecutionHost>(

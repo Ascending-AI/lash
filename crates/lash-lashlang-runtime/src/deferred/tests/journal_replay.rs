@@ -6,15 +6,15 @@ async fn recorded_unavailable_masks_incompatible_surface_before_environment_vali
     // await web.now({})?
     let program = b::program(vec![b::module_call(
         &["web"],
-        lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+        lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
         vec![b::record(Vec::new())],
     )]);
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
         .add_module_operation(
             ["web"],
-            lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
-            lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+            lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
+            lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
             "surface:web.now",
             lashlang::TypeExpr::Any,
             lashlang::TypeExpr::Bool,
@@ -46,10 +46,10 @@ async fn recorded_unavailable_masks_incompatible_surface_before_environment_vali
     assert!(
         !effective
             .resources
-            .provides_module_operation("web", lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION)
+            .provides_module_operation("web", lashlang::LANGUAGE_RUNTIME_NOW_OPERATION)
     );
     assert!(effective.resources.provides_module_operation(
-        lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH,
-        lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+        lashlang::LANGUAGE_RUNTIME_MODULE_PATH,
+        lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
     ));
 }

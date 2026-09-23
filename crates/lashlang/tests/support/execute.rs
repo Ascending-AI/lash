@@ -15,6 +15,8 @@ pub enum ExecuteError {
     Runtime(#[from] lashlang::RuntimeError),
     #[error("{0}")]
     InvalidAst(#[from] lashlang::InvalidAst),
+    #[error(transparent)]
+    Artifact(lashlang::ModuleArtifactError),
 }
 
 impl From<lash_typescript::Diagnostic> for ExecuteError {
@@ -38,11 +40,32 @@ pub async fn execute<H: ExecutionHost>(
     globals.extend(state.globals().iter().map(|(name, _)| name.to_string()));
     let program = lash_typescript::parse_with_globals(source, &globals)?;
     let compiled = if let Ok(linked) = lashlang::LinkedModule::link(program.clone(), &environment) {
-        lashlang::compile_linked(&linked)
+        lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )?
     } else {
-        lashlang::compile_ast(&program)?
+        lashlang_compile_program(&program)?
     };
     lashlang::execute(&compiled, state, host)
         .await
         .map_err(ExecuteError::Runtime)
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, ExecuteError> {
+    let artifact =
+        lashlang::ModuleArtifact::from_program(program.clone()).map_err(|error| match error {
+            lashlang::ModuleArtifactError::InvalidAst(error) => ExecuteError::InvalidAst(error),
+            other => ExecuteError::Artifact(other),
+        })?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

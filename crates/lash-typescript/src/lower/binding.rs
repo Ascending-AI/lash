@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    CallArg, Expr, FunctionBody, GENERATED_BINDING_PREFIX, MemberProperty, Pattern, Stmt,
+    CallArg, Expr, FunctionBody, MemberProperty, Pattern, Stmt, is_reserved_name,
     reserved_identifier,
 };
 use crate::{Diagnostic, DiagnosticCode};
@@ -100,22 +100,21 @@ impl super::Lowerer {
                 None,
             ));
         }
-        if name.starts_with(GENERATED_BINDING_PREFIX) {
+        if is_reserved_name(name) {
             return Err(reserved_identifier(name));
         }
         // Mangling exists to stop an inner scope from overwriting an outer slot
         // of the same name. Where nothing of that name is visible there is
-        // nothing to protect, and a mangled root-level binding would publish a
-        // generated name into the durable globals and the bound-variables
-        // prompt, so keep the author's name in that case.
+        // nothing to protect, and a mangled root-level binding would be a
+        // private slot, so the author's binding would not survive the cell as
+        // a session global; keep the author's name in that case.
         let preserve_name = preserve_name || !self.has_binding(name);
         let owner_function = self.current_function();
-        #[expect(
-            clippy::expect_used,
-            reason = "the lowerer pushes the program root scope before any declaration and never pops past it"
-        )]
-        let scope = self.scopes.last_mut().expect("a scope is always active");
-        if scope.bindings.contains_key(name) {
+        if self
+            .scopes
+            .last()
+            .is_some_and(|scope| scope.bindings.contains_key(name))
+        {
             return Err(Diagnostic::new(
                 DiagnosticCode::DuplicateBinding,
                 format!("duplicate lexical binding `{name}`"),
@@ -125,10 +124,19 @@ impl super::Lowerer {
         let internal = if preserve_name {
             name.to_string()
         } else {
-            let id = self.next_binding;
-            self.next_binding += 1;
-            format!("{GENERATED_BINDING_PREFIX}{id}_{name}")
+            self.generated_binding(name)
         };
+        // A binding declared in a block of the cell's top level ends with its
+        // block (ECMA-262 lexical scoping), so it never becomes a session
+        // global. A function frame's locals are never globals to begin with.
+        if owner_function == 0 && self.scopes.len() > self.root_scope_depth {
+            self.private_bindings.insert(internal.clone());
+        }
+        #[expect(
+            clippy::expect_used,
+            reason = "the lowerer pushes the program root scope before any declaration and never pops past it"
+        )]
+        let scope = self.scopes.last_mut().expect("a scope is always active");
         scope.bindings.insert(
             name.to_string(),
             Binding {

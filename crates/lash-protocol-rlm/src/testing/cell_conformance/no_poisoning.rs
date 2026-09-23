@@ -97,7 +97,7 @@ fn a_compile_error_does_not_poison_the_session() {
     assert_not_inherited(&outcome, "after a compile error");
     assert!(outcome.succeeded(), "{:?}", outcome.error);
     assert_eq!(
-        session.user_bindings().get("before"),
+        session.globals().get("before"),
         Some(&serde_json::json!([1, 2]))
     );
 }
@@ -116,7 +116,7 @@ fn a_runtime_error_does_not_poison_the_session() {
     assert_not_inherited(&outcome, "after a runtime error");
     assert!(outcome.succeeded(), "{:?}", outcome.error);
     assert_eq!(
-        session.user_bindings().get("before"),
+        session.globals().get("before"),
         Some(&serde_json::json!([1, 2]))
     );
 }
@@ -170,7 +170,7 @@ fn a_run_of_failing_cells_does_not_poison_the_session() {
 
     let (session, _) = drive(HarnessMode::Resident, &cells);
     assert_eq!(
-        session.user_bindings().get("grown"),
+        session.globals().get("grown"),
         Some(&serde_json::json!([1, 2, 3, 4]))
     );
 }

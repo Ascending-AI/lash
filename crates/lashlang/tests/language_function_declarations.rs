@@ -91,7 +91,12 @@ fn link_error(program: Program) -> LinkError {
 )]
 async fn finish_value(program: Program) -> Value {
     let linked = link(program).expect("linking should succeed");
-    let compiled = lashlang::compile_linked(&linked);
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Main,
+        Some(linked.spans()),
+    )
+    .expect("a module main entry compiles");
     let host = TestHost::default();
     let mut state = State::new();
     finished(
@@ -133,6 +138,7 @@ async fn one_function_serves_many_call_sites() {
             Expr::For {
                 binding: "name".into(),
                 iterable: Box::new(Expr::List(vec![string("a"), string("b")])),
+                bind: None,
                 body: Box::new(Expr::Block(vec![assign(
                     "parts",
                     call(
@@ -539,6 +545,7 @@ async fn a_function_may_be_called_from_a_process_body() {
                 signals: Vec::new(),
                 return_ty: None,
                 label: None,
+                origin: Default::default(),
                 body: Expr::Block(vec![finish(call("shout", vec![string("ada")]))]),
             }),
         ],
@@ -546,8 +553,17 @@ async fn a_function_may_be_called_from_a_process_body() {
     ))
     .expect("linking should succeed");
 
-    let compiled = lashlang::compile_linked_process(&linked, "greet")
-        .expect("the process chunk should compile");
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Process(
+            linked
+                .artifact
+                .process_ref("greet")
+                .expect("the process is exported"),
+        ),
+        Some(linked.spans()),
+    )
+    .expect("the process chunk should compile");
     let host = TestHost::default();
     let mut state = State::new();
     let value = finished(
@@ -635,6 +651,7 @@ async fn a_process_name_is_rejected_in_a_function() {
         signals: Vec::new(),
         return_ty: None,
         label: None,
+        origin: Default::default(),
         body: Expr::Block(vec![finish(number(1.0))]),
     });
     let (function, construct) = forbidden_construct(vec![worker], var("worker"));
@@ -652,6 +669,7 @@ async fn an_effect_nested_deep_in_a_function_is_still_rejected() {
             Expr::For {
                 binding: "path".into(),
                 iterable: Box::new(Expr::List(vec![string("a.txt")])),
+                bind: None,
                 body: Box::new(Expr::Block(vec![if_else(
                     binary(
                         call("len", vec![var("path")]),

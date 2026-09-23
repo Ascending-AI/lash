@@ -61,6 +61,10 @@ export type NodeData1 =
     };
 
 export interface WorkflowDocument {
+  /**
+   * The source identity of the admitted artifact this document's graph is the view of; absent for a draft whose source does not admit. A run overlay shows a run's events only when their `definition` is this one.
+   */
+  definition?: string | null;
   edges: FlowEdge[];
   facetSchemaVersion?: number | null;
   nodes: FlowNode[];

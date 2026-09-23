@@ -256,10 +256,9 @@ impl<'run> HostBridge<'run> {
     /// dispatch counter, and an unsited batch leaf took its position inside
     /// the batch — which two identical aggregates share, so they minted one
     /// set of identities twice. The fallback was never reachable. Every
-    /// production compile entrypoint for this bridge and for the process
-    /// bridge enables execution-site tracking (`compile_linked` and
-    /// `compile_module_artifact_process`, both through
-    /// `Compiler::compile_linked*`); `lashlang_execution_paths` walks
+    /// production compile for this bridge and for the process bridge goes
+    /// through the one entry, `lashlang::compile`, which always enables
+    /// execution-site tracking; `lashlang_execution_paths` walks
     /// `program.main` through the total `Expr::children()` walk, which
     /// descends into function literals, process literals, callbacks, `try`
     /// bodies and comprehension clauses; a TypeScript `function` statement

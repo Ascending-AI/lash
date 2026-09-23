@@ -129,7 +129,7 @@ async fn execute_with_view(
     let globals = BTreeSet::from_iter(names);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::compile_ast(&program)
+    let program = lashlang::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let mut state = State::new();
     lashlang::execute(&program, &mut state, &Host { view }).await
@@ -464,7 +464,7 @@ async fn finished_over_rows(source: &str) -> Value {
     let globals = BTreeSet::from_iter(["rows".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::compile_ast(&program)
+    let program = lashlang::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let mut state = State::new();
     let outcome = lashlang::execute(&program, &mut state, &RowsHost)

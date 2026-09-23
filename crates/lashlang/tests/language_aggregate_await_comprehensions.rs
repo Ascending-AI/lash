@@ -232,9 +232,13 @@ async fn awaiting_an_already_resolved_value_is_a_loud_runtime_error() {
     let host = TestHost::default();
     let mut state = State::new();
     let program = finish_program(lashlang::Expr::Await(Box::new(number(1.0))));
-    let error = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect_err("awaiting a resolved value must fail");
+    let error = lashlang::execute(
+        &lashlang_compile_program(&program).expect("the program compiles"),
+        &mut state,
+        &host,
+    )
+    .await
+    .expect_err("awaiting a resolved value must fail");
 
     assert!(
         matches!(&error, RuntimeError::AwaitExpectsHandle { .. }),
@@ -244,4 +248,17 @@ async fn awaiting_an_already_resolved_value_is_a_loud_runtime_error() {
         error.to_string().contains("already resolved"),
         "the diagnostic names the repair: {error}"
     );
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

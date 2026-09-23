@@ -157,9 +157,70 @@ pub fn labeled_test_environment() -> LashlangHostEnvironment {
         .with_language_features(LashlangLanguageFeatures::default().with_label_annotations())
 }
 
+/// Compiles a linked module's main program through the one compile entry,
+/// keeping its source spans for diagnostics.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls: a module's main entry always compiles"
+)]
+pub fn compile_linked_main(linked: &LinkedModule) -> CompiledProgram {
+    crate::compile(&linked.artifact, crate::Entry::Main, Some(linked.spans()))
+        .expect("a module's main entry compiles")
+}
+
+/// Compiles one exported process of a linked module, by name, through the one
+/// compile entry.
+pub fn compile_linked_process_named(
+    linked: &LinkedModule,
+    process_name: &str,
+) -> Result<CompiledProgram, RuntimeError> {
+    let process_ref = linked.artifact.process_ref(process_name).ok_or_else(|| {
+        RuntimeError::ProcessNotExported {
+            name: process_name.to_string(),
+        }
+    })?;
+    crate::compile(
+        &linked.artifact,
+        crate::Entry::Process(process_ref),
+        Some(linked.spans()),
+    )
+}
+
+/// Compiles a program built directly as IR, as the main entry of the raw
+/// module artifact it forms, keeping its spans for diagnostics. A program
+/// that forms no module (an invalid AST, an incomplete process signature) is
+/// the error.
+pub fn try_compile_program(
+    program: &Program,
+) -> Result<CompiledProgram, crate::ModuleArtifactError> {
+    let artifact = crate::ModuleArtifact::from_program(program.clone())?;
+    Ok(compile_artifact_main(&artifact, &program.spans))
+}
+
+/// [`try_compile_program`] for a fixture program that forms a module.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls: the fixture program forms a module or its author is at fault, per the message"
+)]
+pub fn compile_program(program: &Program) -> CompiledProgram {
+    try_compile_program(program).expect("the fixture program forms a module artifact")
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture: a module's main entry always compiles"
+)]
+fn compile_artifact_main(
+    artifact: &crate::ModuleArtifact,
+    spans: &std::collections::BTreeMap<crate::AstPath, crate::Span>,
+) -> CompiledProgram {
+    crate::compile(artifact, crate::Entry::Main, Some(spans))
+        .expect("a module's main entry compiles")
+}
+
 /// Links and compiles `program` as a main program, with labels enabled.
 pub fn compile_labeled_program(program: Program) -> CompiledProgram {
-    crate::compile_linked(&link_labeled(program))
+    compile_linked_main(&link_labeled(program))
 }
 
 /// Links and compiles one declared process of `program`, with labels enabled.
@@ -168,7 +229,7 @@ pub fn compile_labeled_program(program: Program) -> CompiledProgram {
     reason = "test-support fixture a #[test] fn calls: the runbook-style program compiles or the fixture author's assumption breaks, per the message"
 )]
 pub fn compile_labeled_process_program(program: Program, process_name: &str) -> CompiledProgram {
-    crate::compile_linked_process(&link_labeled(program), process_name)
+    compile_linked_process_named(&link_labeled(program), process_name)
         .expect("process should compile")
 }
 
@@ -213,18 +274,58 @@ pub async fn execute_compiled_traced<H: ExecutionHost>(
     }
 }
 
-/// Every execution site a compiled program's instructions carry, in
-/// instruction order.
+/// Every execution site a compiled program can emit: the sites its
+/// instructions carry, in instruction order, then the leaf sites of its
+/// aggregate batch tables (literal batches, their comprehension templates,
+/// and list batches).
 ///
 /// A compiled program's chunk is private, and the execution sites are the one
 /// thing a correlation proof outside this crate has to read off it: the whole
 /// question is whether a site the VM emits names the workflow node the
 /// projector minted for the same source position.
 pub fn compiled_execution_sites(compiled: &CompiledProgram) -> Vec<&LashlangExecutionSite> {
-    compiled
+    fn batch_sites<'c>(
+        batch: &'c crate::runtime::CompiledResourceOperationBatch,
+        sites: &mut Vec<&'c LashlangExecutionSite>,
+    ) {
+        sites.extend(batch.leaves.iter().filter_map(|leaf| leaf.site.as_ref()));
+        shape_sites(&batch.shape, sites);
+    }
+    fn shape_sites<'c>(
+        shape: &'c crate::runtime::CompiledAggregateAwaitShape,
+        sites: &mut Vec<&'c LashlangExecutionSite>,
+    ) {
+        use crate::runtime::CompiledAggregateAwaitShape as Shape;
+        match shape {
+            Shape::Comprehension { template, .. } => batch_sites(template, sites),
+            Shape::Tuple(items) | Shape::List(items) => {
+                for item in items {
+                    shape_sites(item, sites);
+                }
+            }
+            Shape::Record { values, .. } => {
+                for value in values {
+                    shape_sites(value, sites);
+                }
+            }
+            Shape::BatchLeaf(_) | Shape::Value(_) => {}
+        }
+    }
+    let mut sites = compiled
         .chunk
         .lashlang_execution_sites
         .iter()
         .flatten()
-        .collect()
+        .collect::<Vec<_>>();
+    for batch in &compiled.chunk.resource_operation_batches {
+        batch_sites(batch, &mut sites);
+    }
+    sites.extend(
+        compiled
+            .chunk
+            .resource_operation_list_batches
+            .iter()
+            .filter_map(|batch| batch.site.as_ref()),
+    );
+    sites
 }

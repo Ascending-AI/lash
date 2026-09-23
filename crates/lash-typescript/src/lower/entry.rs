@@ -7,7 +7,7 @@
 
 use lashlang::{AssignTarget, Expr as LashExpr, Program as LashProgram};
 
-use super::{Binding, BindingKind, BindingRole, GENERATED_BINDING_PREFIX, Lowerer, Scope};
+use super::{Binding, BindingKind, BindingRole, Lowerer, Scope};
 use crate::Diagnostic;
 use crate::adapter;
 
@@ -106,11 +106,6 @@ fn lower_with_ambient_kind(
     };
     let mut ambient_scope = Scope::default();
     for name in ambient.union(ambient_processes) {
-        // The generated namespace is reserved and never durable, so a name
-        // carrying it is not a session global this cell may read.
-        if name.starts_with(GENERATED_BINDING_PREFIX) {
-            continue;
-        }
         ambient_scope.bindings.insert(
             name.clone(),
             Binding {
@@ -140,8 +135,13 @@ fn lower_with_ambient_kind(
     root_global_initializers.extend(expressions);
     let main = LashExpr::Block(root_global_initializers);
     let mut program = LashProgram {
+        language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations: lowerer.declarations,
         main,
+        private_bindings: std::mem::take(&mut lowerer.private_bindings)
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         spans: Default::default(),
     };
     lowerer.span_markers.resolve(&mut program);

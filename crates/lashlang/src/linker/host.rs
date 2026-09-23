@@ -423,13 +423,16 @@ pub(super) fn module_path_key(path: &[impl AsRef<str>]) -> String {
         .join(".")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A linked module: the admitted [`ModuleArtifact`] and the authored source
+/// spans its diagnostics point at.
+///
+/// The artifact's program is the one executable carrier. The spans are a
+/// non-durable side table keyed by that program's AST paths: they are neither
+/// identity nor persisted, so a linked module has no serialized form.
+#[derive(Clone, Debug, PartialEq)]
 pub struct LinkedModule {
-    pub module_ref: crate::ModuleRef,
-    pub host_requirements_ref: crate::HostRequirementsRef,
     pub artifact: ModuleArtifact,
-    #[serde(skip)]
-    pub(super) linked_program: Option<Program>,
+    spans: BTreeMap<AstPath, Span>,
 }
 
 impl LinkedModule {
@@ -438,27 +441,39 @@ impl LinkedModule {
         surface: impl Borrow<LashlangHostEnvironment>,
     ) -> Result<Self, LinkError> {
         crate::ast::validate_ast(&program)?;
+        // The linker derives every lifted declaration; a program handed to it
+        // declares its processes and cannot claim one was lifted.
+        if let Some(process) = program
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                crate::Declaration::Process(process) if process.origin.is_lifted() => Some(process),
+                _ => None,
+            })
+        {
+            return Err(LinkError::InvalidAst {
+                source: crate::InvalidAst::InvalidProcessOrigin {
+                    process: process.name.to_string(),
+                    reason: "a linked program's lifted processes are derived by the linker",
+                },
+            });
+        }
         let surface = surface.borrow();
         let mut linker = Linker::new(&program, surface);
-        let program = linker.link_program()?;
+        let mut program = linker.link_program()?;
+        let spans = std::mem::take(&mut program.spans);
         let requirements = host_requirements_for_program_with_catalog(&program, &surface.resources);
         let artifact =
-            ModuleArtifact::from_program_with_requirements(program.clone(), requirements).map_err(
-                |err| LinkError::ModuleHash {
+            ModuleArtifact::from_ir_and_requirements(program, requirements).map_err(|err| {
+                LinkError::ModuleHash {
                     message: err.to_string(),
-                },
-            )?;
-        Ok(Self {
-            module_ref: artifact.module_ref.clone(),
-            host_requirements_ref: artifact.host_requirements_ref.clone(),
-            artifact,
-            linked_program: Some(program),
-        })
+                }
+            })?;
+        Ok(Self { artifact, spans })
     }
 
-    pub fn program(&self) -> &Program {
-        self.linked_program
-            .as_ref()
-            .unwrap_or(&self.artifact.canonical_ir)
+    /// The authored source spans of the artifact's program, by AST path.
+    pub fn spans(&self) -> &BTreeMap<AstPath, Span> {
+        &self.spans
     }
 }

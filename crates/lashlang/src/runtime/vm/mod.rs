@@ -83,9 +83,13 @@ pub(crate) struct SlotState {
 impl SlotState {
     /// `values` is the buffer to build the slot table in — `Vec::new()` on a
     /// cold start, or the recycled `ExecutionScratch::slot_values` buffer.
+    ///
+    /// A private slot (`private_slots`) starts empty: the session's globals
+    /// never reach a front end's own slot.
     pub(crate) fn from_globals(
         mut globals: Record,
         slot_names: &[Name],
+        private_slots: &[bool],
         projected_bindings: &ProjectedBindings,
         values: Vec<Option<Value>>,
     ) -> Self {
@@ -94,8 +98,10 @@ impl SlotState {
         if values.capacity() < slot_names.len() {
             values.reserve(slot_names.len() - values.capacity());
         }
-        for name in slot_names {
-            if let Some(value) = projected_bindings.get_symbol(name.symbol) {
+        for (index, name) in slot_names.iter().enumerate() {
+            if private_slots.get(index).copied().unwrap_or(false) {
+                values.push(None);
+            } else if let Some(value) = projected_bindings.get_symbol(name.symbol) {
                 globals.remove_symbol(name.symbol);
                 values.push(Some(Value::Projected(value)));
             } else {
@@ -171,15 +177,23 @@ impl SlotState {
     /// a projected binding is read-only and leaves no global behind, while a
     /// slot that merely holds a projected *value* materializes into globals
     /// like any other binding (FIG-2865 lets the two coexist).
+    ///
+    /// A private slot (`private_slots`) is dropped: a front end's own slot
+    /// never becomes a session global.
     pub(crate) fn into_globals(
         self,
         slot_names: &[Name],
+        private_slots: &[bool],
         projected_bindings: &ProjectedBindings,
         reclaim: Option<&mut Vec<Option<Value>>>,
     ) -> Result<Record, RuntimeError> {
         let mut extras = self.extras;
         let mut values = self.values;
-        for (name, value) in slot_names.iter().zip(values.iter_mut()) {
+        for (index, (name, value)) in slot_names.iter().zip(values.iter_mut()).enumerate() {
+            if private_slots.get(index).copied().unwrap_or(false) {
+                value.take();
+                continue;
+            }
             if projected_bindings.get_symbol(name.symbol).is_some() {
                 extras.remove_symbol(name.symbol);
                 continue;
@@ -1565,7 +1579,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 
     fn record_assignment(&mut self, slot: usize) {
-        if self.active_function.is_some() {
+        if self.active_function.is_some()
+            || self.chunk.private_slots.get(slot).copied().unwrap_or(false)
+        {
             return;
         }
         let name = &self.chunk.slot_names[slot].text;
@@ -1577,16 +1593,22 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Materializes host-visible globals, omitting any entire binding that
     /// contains a function value at any depth.
     pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
-        let runtime_globals =
-            self.slots
-                .into_globals(&self.chunk.slot_names, &self.projected_bindings, None)?;
+        let runtime_globals = self.slots.into_globals(
+            &self.chunk.slot_names,
+            &self.chunk.private_slots,
+            &self.projected_bindings,
+            None,
+        )?;
         super::state::host_view(&runtime_globals, &mut self.heap)
     }
 
     pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
-        let globals =
-            self.slots
-                .into_globals(&self.chunk.slot_names, &self.projected_bindings, None)?;
+        let globals = self.slots.into_globals(
+            &self.chunk.slot_names,
+            &self.chunk.private_slots,
+            &self.projected_bindings,
+            None,
+        )?;
         Ok((globals, self.heap))
     }
 
@@ -1601,6 +1623,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         scratch.assigned_globals = std::mem::take(&mut self.assigned_globals);
         let globals = self.slots.into_globals(
             &self.chunk.slot_names,
+            &self.chunk.private_slots,
             &self.projected_bindings,
             Some(&mut scratch.slot_values),
         )?;

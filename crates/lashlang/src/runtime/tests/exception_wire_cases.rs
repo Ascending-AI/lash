@@ -726,6 +726,7 @@ async fn the_handler_chain_holds_across_control_flow_shapes() {
         let loop_expr = Expr::For {
             binding: "i".into(),
             iterable: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
+            bind: None,
             body: Box::new(body),
         };
         let program = compile_program(&exception_finish(cleanup(loop_expr)));
@@ -735,6 +736,7 @@ async fn the_handler_chain_holds_across_control_flow_shapes() {
         let loop_expr = Expr::For {
             binding: "i".into(),
             iterable: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
+            bind: None,
             body: Box::new(leaving),
         };
         let program = compile_program(&exception_finish(cleanup(loop_expr)));

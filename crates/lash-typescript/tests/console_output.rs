@@ -23,7 +23,7 @@ fn console_methods_follow_observation_rendering() {
             ("undefined", "undefined"),
         ] {
             let source = format!("console.{method}({args});");
-            let program = lash_typescript::compile(&source).unwrap();
+            let program = lash_typescript::testing::compile(&source).unwrap();
             let host = Host::default();
             futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
                 .unwrap();

@@ -383,7 +383,7 @@ fn process_params(source: &str) -> Vec<(String, lashlang::TypeExpr)> {
     let linked = lash_typescript::link(source, &environment()).expect("this program must link");
     linked
         .artifact
-        .canonical_ir
+        .ir()
         .declarations
         .iter()
         .find_map(|declaration| match declaration {

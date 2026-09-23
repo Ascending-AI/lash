@@ -40,6 +40,14 @@ impl HashWriter {
         }
     }
 
+    /// A writer for a module's source identity (ADR 0100 R6): the same
+    /// deterministic atom stream as its content hash, under its own domain.
+    pub(super) fn for_source_identity() -> Self {
+        Self {
+            hasher: Blake3DomainHasher::new("lash-workflow-source/v4"),
+        }
+    }
+
     pub(super) fn atom(&mut self, value: &str) {
         self.integer(value.len() as u64);
         self.hasher.update(b":");
@@ -53,17 +61,6 @@ impl HashWriter {
         self.hasher.update(b":");
         self.hasher.update(prefix.as_bytes());
         self.hasher.update(value.as_bytes());
-        self.hasher.update(b";");
-    }
-
-    /// One atom whose content is `prefix` followed by `value` in decimal.
-    pub(super) fn numbered_atom(&mut self, prefix: &str, value: u64) {
-        let mut buffer = [0u8; DECIMAL_CAPACITY];
-        let digits = decimal(value, &mut buffer);
-        self.integer((prefix.len() + digits.len()) as u64);
-        self.hasher.update(b":");
-        self.hasher.update(prefix.as_bytes());
-        self.hasher.update(digits);
         self.hasher.update(b";");
     }
 

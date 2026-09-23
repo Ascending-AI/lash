@@ -64,7 +64,7 @@ fn dispatch(call_path: &str, modules: &[&str], operation: &str) -> Vec<(String, 
         dispatched: std::sync::Mutex::new(Vec::new()),
     };
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &host,
     ))
@@ -179,7 +179,7 @@ fn console_log_without_a_module_root_still_observes() {
         dispatched: std::sync::Mutex::new(Vec::new()),
     };
     let outcome = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &host,
     ))

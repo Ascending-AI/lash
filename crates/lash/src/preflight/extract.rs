@@ -540,7 +540,9 @@ mod tests {
 
     #[test]
     #[cfg(feature = "rlm")]
-    fn a_frozen_sha256_module_artifact_is_an_identity_refusal() {
+    fn a_frozen_predecessor_module_artifact_is_undecodable() {
+        // A pre-FIG-3571 artifact stores a renamed `canonical_ir` and no
+        // program language, so the one-carrier artifact cannot decode it.
         let mut raw: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
@@ -548,27 +550,17 @@ mod tests {
         let object = raw.as_object_mut().expect("artifact should be an object");
         object.remove("trigger_key_manifest");
         // The retired `compilation_dialect` field is refused ahead of the
-        // identity fence now that TypeScript is the only RLM language
-        // (ADR 0096); drop it so this test still reaches the fence it is about.
+        // shape (ADR 0096); drop it so this test reaches the carrier refusal.
         object.remove("compilation_dialect");
-        raw["canonical_ir"]["declarations"][0]["Process"]["return_ty"] = serde_json::json!("Str");
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(
                 serde_json::to_string(&raw).expect("legacy artifact should encode"),
             ),
         ));
-        let detail = extractions
-            .iter()
-            .find_map(|extraction| match extraction {
-                Extraction::IdentityMismatch {
-                    format: DurableFormat::ModuleArtifact,
-                    detail,
-                } => Some(detail.as_str()),
-                _ => None,
-            })
-            .expect("the SHA-256 artifact should be refused by its identity fence");
-        assert!(detail.contains("lashlang:v2:blake3:"), "{detail}");
+        let reasons = undecodable(&extractions, DurableFormat::ModuleArtifact);
+        assert_eq!(reasons.len(), 1, "{reasons:?}");
+        assert!(reasons[0].contains("`ir`"), "{reasons:?}");
     }
 
     #[test]
@@ -603,7 +595,7 @@ mod tests {
         ))
         .expect("frozen fixture should be JSON");
         raw["compilation_dialect"] = serde_json::json!("future_dialect");
-        raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+        raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(

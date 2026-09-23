@@ -69,7 +69,7 @@ fn compile(source: &str) -> lashlang::CompiledProgram {
     let globals = BTreeSet::from(["report".to_string(), "rows".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
-    lashlang::compile_ast(&program)
+    lashlang::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"))
 }
 

@@ -3,9 +3,7 @@ use crate::{
     LashlangHostEnvironment, LinkError, LinkedModule, ModuleArtifact, ProcessRef, Program,
 };
 
-use super::entry_points::{
-    compile_linked, compile_module_artifact_process, compile_program_internal,
-};
+use super::entry_points::{Entry, compile, compile_main};
 use super::{CompiledProgram, prewarm};
 use rustc_hash::FxHasher;
 use std::borrow::Borrow;
@@ -14,7 +12,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use thiserror::Error;
 
-const DEFAULT_COMPILED_PROGRAM_CACHE_CAPACITY: usize = 64;
 const DEFAULT_LINKED_PROGRAM_CACHE_CAPACITY: usize = 64;
 const SOURCE_CACHE_VERSION: &str = "lashlang-source-v1";
 
@@ -187,17 +184,17 @@ impl CompiledProcessCache {
         if let Some(entry) = self.mru.lookup(|entry| {
             entry
                 .key
-                .matches(&artifact.module_ref, process_ref, host_requirements_ref)
+                .matches(artifact.module_ref(), process_ref, host_requirements_ref)
         }) {
             return Ok(entry.compiled.clone());
         }
 
         self.mru.miss();
-        let compiled = Arc::new(compile_module_artifact_process(artifact, process_ref)?);
+        let compiled = Arc::new(compile(artifact, Entry::Process(process_ref), None)?);
         // Only a miss stores an entry, so only a miss pays for the owned key.
         self.mru.insert(CachedCompiledProcess {
             key: CompiledProcessCacheKey::new(
-                artifact.module_ref.clone(),
+                artifact.module_ref().clone(),
                 process_ref.clone(),
                 host_requirements_ref.clone(),
             ),
@@ -312,7 +309,7 @@ impl LinkedProgramCache {
         let source_hash = program_source_hash(source);
         self.mru.miss();
         let linked = LinkedModule::link(program, surface)?;
-        let compiled = Arc::new(compile_linked(&linked));
+        let compiled = Arc::new(compile_main(&linked.artifact, Some(linked.spans())));
         let program = Arc::new(CompiledLinkedProgram { linked, compiled });
         self.mru.insert(CachedLinkedProgram {
             source_hash,
@@ -338,88 +335,6 @@ impl Default for LinkedProgramCache {
     }
 }
 
-pub struct CompiledProgramCache {
-    mru: MruEntries<CachedCompiledProgram>,
-}
-
-struct CachedCompiledProgram {
-    source_hash: u64,
-    source: Arc<str>,
-    compiled: Arc<CompiledProgram>,
-}
-
-impl CompiledProgramCache {
-    pub fn new() -> Self {
-        Self::with_capacity(DEFAULT_COMPILED_PROGRAM_CACHE_CAPACITY)
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        prewarm();
-        Self {
-            mru: MruEntries::with_capacity(capacity),
-        }
-    }
-
-    /// Compiles and caches an already-parsed shared-AST program.
-    ///
-    /// The dialect front-end owns parsing (ADR 0096), so the cache is only ever
-    /// handed a `Program`. A host should ask [`Self::cached_compiled_program`]
-    /// first, so that a hit does not pay for the parse this method's `program`
-    /// argument required.
-    pub fn get_or_compile_ast(&mut self, source: &str, program: Program) -> Arc<CompiledProgram> {
-        if let Some(compiled) = self.cached_compiled_program(source) {
-            return compiled;
-        }
-        self.compile_and_cache(source, program)
-    }
-
-    /// The compiled program already cached for this source, without parsing or
-    /// compiling anything.
-    ///
-    /// A hit is recorded and promoted exactly as it is on the compiling paths,
-    /// so this is the lookup those paths use rather than a peek beside them.
-    pub fn cached_compiled_program(&mut self, source: &str) -> Option<Arc<CompiledProgram>> {
-        let source_hash = program_source_hash(source);
-        self.mru
-            .lookup(|entry| program_source_matches(entry, source_hash, source))
-            .map(|entry| entry.compiled.clone())
-    }
-
-    fn compile_and_cache(&mut self, source: &str, program: Program) -> Arc<CompiledProgram> {
-        self.mru.miss();
-        let compiled = Arc::new(compile_program_internal(&program));
-        self.mru.insert(CachedCompiledProgram {
-            source_hash: program_source_hash(source),
-            source: Arc::<str>::from(source),
-            compiled: compiled.clone(),
-        });
-        compiled
-    }
-
-    pub fn clear(&mut self) {
-        self.mru.clear();
-    }
-
-    pub fn stats(&self) -> CompiledProgramCacheStats {
-        self.mru.stats()
-    }
-}
-
-impl Default for CompiledProgramCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-fn program_source_matches(entry: &CachedCompiledProgram, source_hash: u64, source: &str) -> bool {
-    source_matches(
-        entry.source_hash,
-        entry.source.as_ref(),
-        source_hash,
-        source,
-    )
-}
-
 fn linked_program_matches(
     entry: &CachedLinkedProgram,
     source_hash: u64,
@@ -432,7 +347,7 @@ fn linked_program_matches(
         source_hash,
         source,
     ) && entry.process_handles == surface.process_handles
-        && surface.satisfies(&entry.program.linked.artifact.host_requirements)
+        && surface.satisfies(entry.program.linked.artifact.host_requirements())
 }
 
 fn source_matches(cached_hash: u64, cached_source: &str, source_hash: u64, source: &str) -> bool {

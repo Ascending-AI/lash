@@ -25,18 +25,22 @@ pub use artifact::{
     ArtifactPublicationPause, ArtifactStoreError, ContentHash, DurabilityTier, HostRequirements,
     HostRequirementsRef, InMemoryLashlangArtifactStore, LASHLANG_COMPILER_VERSION,
     LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, LashlangArtifactStore, ModuleArtifact,
-    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef, canonical_program_ir,
+    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef,
     global_in_memory_lashlang_artifact_store, host_requirements_for_program,
 };
 pub use ast::{
-    AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BinaryOp, CatchClause, Declaration,
-    Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
-    LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
-    ProcessLiteralExpr, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessSignatureError,
-    ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
-    lifted_process_identity, validate_ast, walk_expr,
+    AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BinaryOp, BindingVisibility,
+    CatchClause, Declaration, Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr,
+    FunctionParam, InvalidAst, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp,
+    LIFTED_PROCESS_NAME_PREFIX, LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH,
+    NestingTooDeep, ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessParam,
+    ProcessSignalDecl, ProcessSignature, ProcessSignatureError, ProcessType, Program,
+    ResourceRefExpr, SourceLanguage, StructuralRole, TryExpr, TypeDecl, TypeExpr, TypeField,
+    UnaryOp, UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
+    lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
+};
+pub use ast::{
+    AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, UpdateOperator,
 };
 
 /// Names of every source Lashlang builtin, in registry order.
@@ -69,27 +73,28 @@ pub use linker::{
     OperationContract, OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding,
     ResourceTypeCatalog, TriggerSourceBinding, ValueConstructorBinding,
 };
+#[cfg(test)]
+pub(crate) use runtime::compile_ast;
 pub use runtime::{
     AbilityOp, AbilityResult, AggregateConsumer, BudgetedJsonProjectionConfig,
     BudgetedJsonProjector, CompileStats, CompiledLinkedProgram, CompiledProcessCache,
-    CompiledProcessCacheKey, CompiledProgram, CompiledProgramCache, CompiledProgramCacheStats,
-    ContinuationError, ErrorTaxonomy, ExecutableProgram, ExecutionBound, ExecutionBounds,
-    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ExecutionScratch, FormatError, GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue,
-    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
-    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
-    LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError,
-    ListValue, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport,
-    ProfileStat, ProjectedBindingError, ProjectedBindings, ProjectedFuture,
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
-    ResourceHandle, ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf,
+    CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats, ContinuationError, Entry,
+    ErrorTaxonomy, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
+    ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError,
+    GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
+    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
+    LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError, ListValue,
+    ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
+    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf,
     ResourceOperationBatchResult, ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep,
     SleepKind, Snapshot, SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value,
     ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation,
     VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
     VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
-    compile_ast, compile_linked, compile_linked_process, compile_module_artifact_process,
-    compile_process, execute, from_json, is_process_handle, prewarm, unwrap_type_value,
+    compile, execute, from_json, is_process_handle, prewarm, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -104,13 +109,35 @@ pub use runtime::{
 pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
 pub use span::Span;
 
+/// The module path under which a host registers a front end's journaled
+/// language-runtime values (the clock and the random source), and the alias a
+/// linked receiver rewrites to. The spellings are the wire values every
+/// journal and replay key already carries.
+pub const LANGUAGE_RUNTIME_MODULE_PATH: &str = "__typescript_runtime";
+
+/// The reserved resource type of the language-runtime receiver a front end
+/// mints for its clock and random-source reads.
+pub const LANGUAGE_RUNTIME_RESOURCE_TYPE: &str = "typescript.Runtime";
+
+/// The journaled language-runtime clock read.
+pub const LANGUAGE_RUNTIME_NOW_OPERATION: &str = "now";
+
+/// The journaled language-runtime random-source read.
+pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
+
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
 ///
 /// v19: `AwaitArray` carries the aggregate's consumer mode instead of a
 /// settled flag, and `PendingTimer` mints a pending timer (ADR 0099 §10, §11).
-pub const BYTECODE_FORMAT_VERSION: u32 = 19;
+///
+/// v20 (FIG-3571): cells compile from the shared carrier IR. Compiler-generated
+/// and block-scoped bindings are private slots that never cross the session
+/// globals boundary, lifted process bodies compile from their `ProcessOrigin`,
+/// and node ids — and so every node-keyed occurrence counter and replay key —
+/// come from the canonical carrier paths. A v19 instruction stream is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 20;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,
@@ -128,6 +155,11 @@ pub use trigger::{
 };
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{
+    ListedStatement, NoStatementText, WorkflowBody, WorkflowBodySlot, WorkflowGraphProjector,
+    WorkflowStatement, WorkflowStatementText, else_if_chain, statement_list,
+    workflow_graph_from_artifact, workflow_graph_from_program,
+};
+pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
     WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClass,
     WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
@@ -138,7 +170,9 @@ pub use workflow_graph::{
     WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets,
     WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
     WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
-    WorkflowTypedVariable, child_path, execution_sites, process_workflow_projection,
+    WorkflowTypedVariable, child_path, execution_sites,
+};
+pub use workflow_graph::{
     projected_node_type_facets, reconcile, workflow_call_from_ir, workflow_call_to_ir,
     workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id, workflow_slot_accepts_value,
     workflow_slot_value,
@@ -152,7 +186,6 @@ pub use workflow_graph::{
 pub use linker::{WorkflowLinkAnalysis, analyze_workflow_program};
 pub use runtime::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
-    lowered_for_of_parts,
 };
 
 pub fn format_runtime_diagnostic(source: &str, error: &RuntimeError, span: Option<Span>) -> String {
@@ -288,10 +321,6 @@ mod tests {
     use crate::testing::ast_builders as b;
 
     /// `finish <value>`
-    fn finish_number(value: f64) -> Program {
-        b::program(vec![b::finish(b::num(value))])
-    }
-
     /// `finish (await tools.read_file({ path: "." }))?`
     fn read_file_program() -> Program {
         b::program(vec![b::finish(b::module_call(
@@ -465,28 +494,6 @@ mod tests {
     }
 
     #[test]
-    fn compiled_program_cache_reuses_source_and_tracks_lru_stats() {
-        let mut cache = CompiledProgramCache::with_capacity(2);
-        let first = cache.get_or_compile_ast("finish 1", finish_number(1.0));
-        let second = cache.get_or_compile_ast("finish 1", finish_number(1.0));
-        let same_ast = cache.get_or_compile_ast("finish 1\n", finish_number(1.0));
-        let other = cache.get_or_compile_ast("finish 2", finish_number(2.0));
-        let third = cache.get_or_compile_ast("finish 3", finish_number(3.0));
-
-        assert!(std::sync::Arc::ptr_eq(&first, &second));
-        assert!(!std::sync::Arc::ptr_eq(&first, &same_ast));
-        assert!(!std::sync::Arc::ptr_eq(&first, &other));
-        assert!(!std::sync::Arc::ptr_eq(&other, &third));
-
-        let stats = cache.stats();
-        assert_eq!(stats.hits, 1);
-        assert_eq!(stats.misses, 4);
-        assert_eq!(stats.evictions, 2);
-        assert_eq!(stats.entries, 2);
-        assert_eq!(stats.capacity, 2);
-    }
-
-    #[test]
     fn linked_program_cache_reuses_source_when_host_environment_satisfies_requirements() {
         let source = r#"finish (await tools.read_file({ path: "." }))?"#;
         let base_environment = LashlangHostEnvironment::new(
@@ -512,8 +519,8 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&first, &second));
         assert!(std::sync::Arc::ptr_eq(&first, &extra));
         assert_eq!(
-            first.linked_module().host_requirements_ref,
-            extra.linked_module().host_requirements_ref
+            first.linked_module().artifact.host_requirements_ref(),
+            extra.linked_module().artifact.host_requirements_ref()
         );
 
         let stats = cache.stats();
@@ -621,8 +628,8 @@ mod tests {
         assert!(!std::sync::Arc::ptr_eq(&first, &newline));
         assert!(!std::sync::Arc::ptr_eq(&first, &changed));
         assert_ne!(
-            first.linked_module().host_requirements_ref,
-            changed.linked_module().host_requirements_ref
+            first.linked_module().artifact.host_requirements_ref(),
+            changed.linked_module().artifact.host_requirements_ref()
         );
         assert!(matches!(
             missing,
@@ -647,7 +654,7 @@ mod tests {
             .get_or_compile_ast(source, finish_persisted(), &available)
             .expect("live global should link");
         assert_eq!(
-            linked.linked_module().artifact.host_requirements.globals,
+            linked.linked_module().artifact.host_requirements().globals,
             ["persisted".to_string()].into_iter().collect()
         );
         let error = cache
@@ -733,7 +740,7 @@ mod tests {
             ),
         )
         .expect("source should link");
-        let compiled = compile_linked(&linked);
+        let compiled = crate::testing::harness::compile_linked_main(&linked);
         let mut state = State::new();
         let outcome = execute(&compiled, &mut state, &Host)
             .await

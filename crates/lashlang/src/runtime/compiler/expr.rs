@@ -252,13 +252,15 @@ impl Compiler {
                 }
                 self.compile_expr(expr, &path.child(0));
             }
+            Expr::Role { expr, .. } => self.compile_expr(expr, &path.child(0)),
             Expr::Block(expressions) => self.compile_block_value(expressions, path),
             Expr::Assign { target, expr } => self.compile_assignment_expr(target, expr, true, path),
             Expr::For {
                 binding,
                 iterable,
+                bind,
                 body,
-            } => self.compile_for_expr(binding, iterable, body, true, path),
+            } => self.compile_for_expr(binding, iterable, bind.as_deref(), body, true, path),
             Expr::While { condition, body } => self.compile_while_expr(condition, body, true, path),
             Expr::Break => {
                 let scope_depth = self

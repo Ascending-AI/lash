@@ -36,8 +36,10 @@ pub fn program(expressions: Vec<Expr>) -> Program {
 /// A program with declarations ahead of its top-level expressions.
 pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program {
     Program {
+        language: crate::SourceLanguage::ir(),
         declarations,
         main: Expr::Block(expressions),
+        private_bindings: Default::default(),
         spans: Default::default(),
     }
 }
@@ -118,6 +120,7 @@ pub fn process(name: &str, params: Vec<ProcessParam>, body: Expr) -> Declaration
         signals: Vec::new(),
         return_ty: None,
         label: None,
+        origin: crate::ProcessOrigin::Declared,
         body,
     })
 }
@@ -147,6 +150,7 @@ pub fn process_returning(
         signals: Vec::new(),
         return_ty: Some(return_ty),
         label: None,
+        origin: crate::ProcessOrigin::Declared,
         body,
     })
 }
@@ -164,6 +168,7 @@ pub fn process_with_signals(
         signals,
         return_ty: None,
         label: None,
+        origin: crate::ProcessOrigin::Declared,
         body,
     })
 }
@@ -181,6 +186,7 @@ pub fn labelled_process(
         signals: Vec::new(),
         return_ty: None,
         label: Some(label),
+        origin: crate::ProcessOrigin::Declared,
         body,
     })
 }
@@ -368,7 +374,26 @@ pub fn for_in(binding: &str, iterable: Expr, body: Expr) -> Expr {
     Expr::For {
         binding: binding.into(),
         iterable: Box::new(iterable),
+        bind: None,
         body: Box::new(body),
+    }
+}
+
+/// An iteration whose `bind` runs before each body.
+pub fn for_bind(binding: &str, iterable: Expr, bind: Expr, body: Expr) -> Expr {
+    Expr::For {
+        binding: binding.into(),
+        iterable: Box::new(iterable),
+        bind: Some(Box::new(bind)),
+        body: Box::new(body),
+    }
+}
+
+/// A structural role around `expr`.
+pub fn role(role: crate::StructuralRole, expr: Expr) -> Expr {
+    Expr::Role {
+        role,
+        expr: Box::new(expr),
     }
 }
 

@@ -24,7 +24,7 @@ fn garbage_from_one_cell_does_not_reach_the_next_cells_validation() {
     let outcome = session.run_ok(&Cell::number("answer", 42.0).render());
     assert!(outcome.succeeded());
     assert_eq!(
-        session.user_bindings().get("scaled"),
+        session.globals().get("scaled"),
         Some(&serde_json::json!(6)),
         "the value the garbage-producing cell computed still belongs to the session"
     );
@@ -43,7 +43,7 @@ fn garbage_from_a_failed_cell_does_not_reach_the_next_cell() {
         ],
     );
     assert_eq!(
-        session.user_bindings().get("answer"),
+        session.globals().get("answer"),
         Some(&serde_json::json!(42))
     );
 }
@@ -58,7 +58,7 @@ fn a_rooted_structure_survives_the_boundary_collection() {
     }
     let (session, _) = drive(HarnessMode::Resident, &cells);
     assert_eq!(
-        session.user_bindings().get("rooted"),
+        session.globals().get("rooted"),
         Some(
             &payload
                 .iter()

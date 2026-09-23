@@ -1,0 +1,14 @@
+{
+  "schema": "lash.bytecode-predecessor-provenance.v1",
+  "source_commit": "d5d4956d33935d4f25bd8f2e311173d8e482a21b",
+  "captured_by": "process::segment_trace_tests::capture_segment_v17_parked_loop_from_pre_fig3571_writer",
+  "capture_command": ". ./env.sh && cargo test -p lash-internal-lashlang-runtime process::segment_trace_tests::capture_segment_v17_parked_loop_from_pre_fig3571_writer --locked -- --ignored --exact",
+  "capture_setup": "Run the ignored writer in an export of origin/main at d5d4956d3 (LASHLANG_SEGMENT_STATE_VERSION 17, BYTECODE_FORMAT_VERSION 19, VM_CONTINUATION_FORMAT_VERSION 18); it parks the loop program inside its for body after one sleep and writes /tmp/lashlang_segment_v17_parked_pre_fig3571.json.",
+  "relationship": "origin/main immediately before FIG-3571 moved cells onto the shared carrier IR",
+  "segment_state_version": 17,
+  "bytecode_format_version": 19,
+  "artifact": {
+    "path": "lashlang_segment_v17_parked_pre_fig3571.json",
+    "sha256": "23a1700d63a7a53a3ca4c80311ffc5c861b08ae9efb2e4f368d69a99086849d7"
+  }
+}

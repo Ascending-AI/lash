@@ -1,6 +1,6 @@
 {
-  "schema_version": 15,
-  "source_identity": "193717879dc3001c17bf012f74f773dd5541591172311f5845a6d9fc49ec8d4a",
+  "schema_version": 16,
+  "source_identity": "1f134528b7dab8035c69a204693bd64cd7b00aa50b82ef36dfa48c637a2ceecd",
   "facet_schema_version": 3,
   "declarations": [],
   "main": {
@@ -19,8 +19,8 @@
               "path": [
                 "tools"
               ],
-              "resource_type": "",
-              "alias": ""
+              "resource_type": "Tools",
+              "alias": "tools"
             }
           },
           "operation": "lookup",

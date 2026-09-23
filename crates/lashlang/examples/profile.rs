@@ -9,10 +9,7 @@ use bench_support::{
     BenchHost, Scenario, benchmark_main, linked_benchmark_program, projected_bindings,
     seeded_state_for,
 };
-use lashlang::{
-    ExecutionEnvironment, ExecutionOutcome, ExecutionScratch, ProfileReport, compile_linked,
-    execute,
-};
+use lashlang::{ExecutionEnvironment, ExecutionOutcome, ExecutionScratch, ProfileReport, execute};
 use std::env;
 
 #[expect(
@@ -63,7 +60,12 @@ fn main() {
     for scenario in &scenarios {
         program_expressions += benchmark_main(*scenario).len();
         let linked = linked_benchmark_program(*scenario);
-        let compiled = compile_linked(&linked);
+        let compiled = lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )
+        .expect("a module main entry compiles");
 
         for _ in 0..iterations {
             let mut state = seeded_state_for(*scenario);

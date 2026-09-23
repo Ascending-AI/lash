@@ -430,6 +430,11 @@ const BYTECODE_V17_PARKED_LOOP: &[u8] =
 // effect parked. Only nondeterministic elapsed time and nonce were normalized.
 const SEGMENT_V12_PARKED_OLD_IDS: &[u8] =
     include_bytes!("../fixtures/lashlang_segment_v12_parked_old_ids.json");
+// Captured by the real pre-FIG-3571 writer at
+// d5d4956d33935d4f25bd8f2e311173d8e482a21b (segment v17, bytecode v19, VM
+// continuation v18): the loop program parked inside its `for` after one sleep.
+const SEGMENT_V17_PARKED_PRE_FIG3571: &[u8] =
+    include_bytes!("../fixtures/lashlang_segment_v17_parked_pre_fig3571.json");
 
 struct SegmentFixtureHost;
 
@@ -481,7 +486,8 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
         17,
         "capture this fixture only from the version-17 predecessor writer"
     );
-    let compiled = lashlang::compile_ast(&bytecode_v17_loop_program()).expect("compile loop");
+    let compiled = lashlang::testing::harness::try_compile_program(&bytecode_v17_loop_program())
+        .expect("compile loop");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).process();
@@ -541,7 +547,8 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         10,
         "capture this fixture only from predecessor writer commit ccab40166"
     );
-    let program = lashlang::compile_ast(&finish_null()).expect("compile fixture program");
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile fixture program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
@@ -721,7 +728,8 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
 /// durable field with no producer is removed rather than round-tripped.
 #[test]
 fn the_current_envelope_carries_no_dead_send_ordinal() {
-    let program = lashlang::compile_ast(&finish_null()).expect("compile pinning program");
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile pinning program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
@@ -803,9 +811,58 @@ fn predecessor_segment_with_old_node_id_occurrence_counters_is_refused() {
     assert!(message.contains("recreate development/test stores"));
 }
 
+/// Under the current, temporary cutover policy, a segment parked by the
+/// pre-FIG-3571 writer is refused at both of its fences — program identity and
+/// segment version, which names the old version — and is never restored under
+/// the carrier IR's node ids.
+#[test]
+fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
+    let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
+        .expect("the pre-FIG-3571 parked-segment fixture is JSON");
+    assert_eq!(fixture["segment_state_version"], 17);
+    assert_eq!(fixture["bytecode_format_version"], 19);
+    assert_eq!(fixture["source_commit"], "d5d4956d3");
+    assert_eq!(fixture["segment_state"]["version"], 17);
+    assert_eq!(fixture["segment_state"]["vm"]["format_version"], 18);
+
+    let input: crate::LashlangProcessInput =
+        serde_json::from_value(fixture["input"].clone()).expect("fixture input decodes");
+    let persisted = fixture["program_hash"]
+        .as_str()
+        .expect("fixture program hash");
+    let current = super::lashlang_program_hash(&input);
+    assert_ne!(persisted, current, "the bytecode bump must move identity");
+    let output = validate_lashlang_program_hash(persisted, &current)
+        .expect_err("the predecessor must fail at the program-identity fence");
+    assert!(matches!(
+        *output,
+        lash_core::ProcessAwaitOutput::Settled { output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
+                if failure.code == "restate_segment_program_hash_mismatch")
+    ));
+
+    // The literal handover bytes, unedited, meet the segment-version fence.
+    let engine_state =
+        serde_json::to_vec(&fixture["segment_state"]).expect("re-encode the parked handover");
+    let Err(error) = decode_lashlang_segment_state(&engine_state) else {
+        panic!("a pre-FIG-3571 segment must not decode against the carrier generation");
+    };
+    assert!(
+        matches!(
+            &error,
+            LashlangSegmentStateError::VersionMismatch {
+                expected: LASHLANG_SEGMENT_STATE_VERSION,
+                found: 17,
+            }
+        ),
+        "unexpected error: {error}"
+    );
+}
+
 #[test]
 fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_change() {
-    let program = lashlang::compile_ast(&finish_null()).expect("compile pinning program");
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile pinning program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();

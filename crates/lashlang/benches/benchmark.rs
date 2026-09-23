@@ -9,7 +9,7 @@ use bench_support::{
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use lashlang::{
     ExecutionEnvironment, ExecutionOutcome, Expr, LinkedModule, Program, Snapshot, State, Value,
-    compile_linked, execute, prewarm,
+    execute, prewarm,
 };
 use std::hint::black_box;
 use std::time::Duration;
@@ -47,14 +47,24 @@ fn benchmark_one_shot_modes(
     scenario: Scenario,
 ) {
     let linked = linked_benchmark_program(scenario);
-    let compiled = compile_linked(&linked);
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Main,
+        Some(linked.spans()),
+    )
+    .expect("a module main entry compiles");
     let projected = projected_bindings(scenario);
 
     group.bench_function(BenchmarkId::new("one_shot", scenario), |b| {
         b.iter(|| {
             let mut state = seeded_state_for(scenario);
             let linked = linked_benchmark_program(black_box(scenario));
-            let compiled = compile_linked(&linked);
+            let compiled = lashlang::compile(
+                &linked.artifact,
+                lashlang::Entry::Main,
+                Some(linked.spans()),
+            )
+            .expect("a module main entry compiles");
             let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
             let outcome = rt
                 .block_on(execute(&compiled, &mut state, &env))
@@ -68,7 +78,12 @@ fn benchmark_one_shot_modes(
         b.iter(|| {
             let mut state = seeded_state_for(scenario);
             let linked = linked_benchmark_program(black_box(scenario));
-            let compiled = compile_linked(&linked);
+            let compiled = lashlang::compile(
+                &linked.artifact,
+                lashlang::Entry::Main,
+                Some(linked.spans()),
+            )
+            .expect("a module main entry compiles");
             let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
             let outcome = rt
                 .block_on(execute(&compiled, &mut state, &env))
@@ -129,7 +144,12 @@ fn lashlang_m9_benchmarks(c: &mut Criterion) {
     ] {
         let linked = LinkedModule::link(program, benchmark_host_environment())
             .expect("M9 benchmark program should link");
-        let compiled = compile_linked(&linked);
+        let compiled = lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )
+        .expect("a module main entry compiles");
         group.bench_function(BenchmarkId::new("vm_attribution", mode), |b| {
             b.iter(|| {
                 let mut state = seeded_state_for(scenario);

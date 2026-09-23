@@ -26,8 +26,7 @@ use std::cell::Cell;
 
 use lashlang::{
     AbilityOp, AbilityResult, AssignPathStep, AssignTarget, BinaryOp, ExecutionHost,
-    ExecutionHostError, ExecutionOutcome, Expr, Program, Snapshot, State, Value, compile_ast,
-    execute,
+    ExecutionHostError, ExecutionOutcome, Expr, Program, Snapshot, State, Value, execute,
 };
 
 #[global_allocator]
@@ -110,7 +109,7 @@ impl ExecutionHost for Host {
     reason = "the measured append probe compiles and executes its fixture cell, per each message"
 )]
 fn run_measured(program: &Program) -> (Value, u64) {
-    let compiled = compile_ast(program).expect("cost probe should compile");
+    let compiled = lashlang_compile_program(program).expect("cost probe should compile");
     let mut state = State::new();
     let before = allocated_bytes_on_this_thread();
     let outcome = futures::executor::block_on(execute(&compiled, &mut state, &Host))
@@ -186,6 +185,7 @@ fn probe_program(body: Expr, iterations: usize) -> Program {
                 "range",
                 vec![Expr::Number(0.0), Expr::Number(iterations as f64)],
             )),
+            bind: None,
             body: Box::new(Expr::Block(vec![body])),
         },
         Expr::Finish(Box::new(Expr::Binary {
@@ -286,6 +286,7 @@ fn an_append_charges_what_the_object_measures() {
                 "range",
                 vec![Expr::Number(0.0), Expr::Number(64.0)],
             )),
+            bind: None,
             body: Box::new(Expr::Block(vec![
                 index_append(Expr::Binary {
                     op: BinaryOp::Add,
@@ -307,7 +308,8 @@ fn an_append_charges_what_the_object_measures() {
             field: "length".into(),
         })),
     ]);
-    let compiled = compile_ast(&program).expect("byte-accounting probe should compile");
+    let compiled =
+        lashlang_compile_program(&program).expect("byte-accounting probe should compile");
     let mut state = State::new();
     let outcome = futures::executor::block_on(execute(&compiled, &mut state, &Host))
         .expect("byte-accounting probe should execute");
@@ -330,12 +332,26 @@ fn an_append_charges_what_the_object_measures() {
     // And the array the charge was accumulated for is still the array that was
     // built, so the equality was not bought by losing members.
     // finish items.length
-    let compiled = compile_ast(&Program::block(vec![Expr::Finish(Box::new(Expr::Field {
-        target: Box::new(var("items")),
-        field: "length".into(),
-    }))]))
-    .expect("restored probe should compile");
+    let compiled =
+        lashlang_compile_program(&Program::block(vec![Expr::Finish(Box::new(Expr::Field {
+            target: Box::new(var("items")),
+            field: "length".into(),
+        }))]))
+        .expect("restored probe should compile");
     let outcome = futures::executor::block_on(execute(&compiled, &mut restored, &Host))
         .expect("restored probe should execute");
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(192.0)));
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

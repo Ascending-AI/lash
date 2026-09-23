@@ -5,10 +5,10 @@
 //! comments and authored formatting are discarded. Hosts own graph mutation,
 //! drafts, layout, and versioning.
 //!
-//! Projection, validation, printing and parsing live in `lash-typescript`
-//! (`lash_typescript::workflow_graph`): TypeScript is the only cell language,
-//! so every piece of the lens that renders or parses node text belongs with
-//! that dialect. This module names no source syntax at all.
+//! Projection from IR lives here, beside the IR (ADR 0100 R8), and names no
+//! source syntax: a dialect injects the text of opaque statements. Printing a
+//! graph back to source and parsing edited node text belong to the dialect
+//! (`lash_typescript::workflow_graph` for TypeScript).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,25 +20,33 @@ use lash_sansio::WorkflowExecutionSite;
 use lash_sansio::core_support::Blake3DomainHasher;
 
 use crate::ast::{
-    AssignTarget, AstString, Expr, FunctionDecl, ProcessParam, ProcessSignalDecl, TypeDecl,
-    TypeExpr,
+    AssignTarget, AstString, Expr, FunctionDecl, ProcessOrigin, ProcessParam, ProcessSignalDecl,
+    TypeDecl, TypeExpr,
 };
 use crate::span::Span;
 
 mod execution_sites;
 mod facets;
 mod ownership;
+mod projection;
 
 pub use execution_sites::execution_sites;
 pub use facets::*;
-pub(crate) use ownership::main_workflow_projection;
 pub use ownership::{
-    WorkflowNodePath, WorkflowOwnership, WorkflowProjection, process_workflow_projection,
+    ListedStatement, WorkflowBody, WorkflowBodySlot, WorkflowNodePath, WorkflowOwnership,
+    WorkflowProjection, WorkflowStatement, statement_list,
+};
+pub use projection::{
+    NoStatementText, WorkflowGraphProjector, WorkflowStatementText, else_if_chain,
+    workflow_graph_from_artifact, workflow_graph_from_program,
 };
 
 /// Version of the serialized workflow graph contract. Version 15 closes the
-/// execution-site kind vocabulary; v14 graph documents are refused.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 15;
+/// execution-site kind vocabulary; v14 graph documents are refused. Version 16
+/// (FIG-3571) projects the carrier IR: compound state updates carry their
+/// operator, node ids come from canonical carrier paths, and non-finite
+/// numbers use the IR number encoding; v15 graph documents are refused.
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 16;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(
@@ -80,18 +88,14 @@ impl std::fmt::Display for WorkflowNodeId {
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct WorkflowGraph {
     pub schema_version: u32,
-    /// Content identity of the projected definition.
-    ///
-    /// The TypeScript projector hashes the canonical source bytes under
-    /// `lash-workflow-source/v3`. The BLAKE3 preimage is the big-endian `u64`
-    /// domain length, the domain bytes, then the canonical source bytes.
-    /// Projection from an IR value uses those same source bytes when the IR can
-    /// be printed and reparsed; otherwise the final preimage component is the
-    /// JSON-serialized [`crate::Program`]. This value identifies definition
-    /// content. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's
-    /// wire shape, `facet_schema_version` identifies optional derived facts,
-    /// and `module_ref` identifies compiled artifact bytes.
-    pub source_identity: String,
+    /// The definition identity of the admitted module artifact this graph
+    /// projects ([`crate::ModuleArtifact::source_identity`]), which the
+    /// module's traces carry too. A draft projected from source that has not
+    /// been admitted claims no runtime identity and carries `None`.
+    /// [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape,
+    /// `facet_schema_version` identifies optional derived facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facet_schema_version: Option<u32>,
     #[serde(default)]
@@ -508,7 +512,8 @@ pub enum WorkflowGraphDecodeError {
 #[serde(deny_unknown_fields)]
 struct WorkflowGraphWire {
     schema_version: u32,
-    source_identity: String,
+    #[serde(default)]
+    source_identity: Option<String>,
     #[serde(default)]
     facet_schema_version: Option<u32>,
     #[serde(default)]
@@ -551,6 +556,10 @@ pub struct WorkflowProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "deserialize_strict")]
     pub return_ty: Option<TypeExpr>,
+    /// Whether the process was declared or lifted from an inline literal.
+    #[serde(default, skip_serializing_if = "ProcessOrigin::is_declared")]
+    #[serde(deserialize_with = "deserialize_strict")]
+    pub origin: ProcessOrigin,
     pub body: WorkflowSubgraph,
 }
 
@@ -638,8 +647,12 @@ pub enum WorkflowNodeKind {
     StateUpdate {
         #[serde(deserialize_with = "deserialize_strict")]
         target: AssignTarget,
+        /// The assigned value, or with `update`, the operand the update applies
+        /// to the target's current value (`target op= expression`).
         #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        update: Option<crate::UpdateOperator>,
     },
     Terminal {
         terminal: WorkflowTerminalKind,
@@ -875,10 +888,16 @@ pub enum WorkflowContainer {
         then_graph: Box<WorkflowSubgraph>,
         else_graph: Box<WorkflowSubgraph>,
     },
+    /// An iteration: the IR's element binding, iterable and bind, exactly as
+    /// the loop runs them. A dialect's printer reads its authored loop header
+    /// back off these fields.
     For {
         binding: String,
         #[serde(deserialize_with = "deserialize_strict")]
         iterable: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        bind: Option<Expr>,
         body: Box<WorkflowSubgraph>,
     },
     While {
@@ -977,8 +996,8 @@ pub enum WorkflowEdgeKind {
 impl WorkflowNodeId {
     /// Wraps an already-minted node identifier.
     ///
-    /// The projector that mints these lives in `lash-typescript`, so the
-    /// constructor is public; the value is opaque everywhere else.
+    /// Graph documents a host builds carry ids it read off a projection, so
+    /// the constructor is public; the value is opaque everywhere else.
     pub fn new(id: String) -> Self {
         Self(id)
     }

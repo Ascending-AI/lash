@@ -210,7 +210,7 @@ fn loop_control_outside_a_loop_is_a_typed_error_not_a_panic() {
     assert!(error.to_string().contains("outside a loop"), "{error}");
 
     let error =
-        lashlang::compile_ast(&program).expect_err("compiling must refuse it rather than panic");
+        lashlang_compile_program(&program).expect_err("compiling must refuse it rather than panic");
     assert!(error.to_string().contains("outside a loop"), "{error}");
 }
 
@@ -219,6 +219,19 @@ fn a_bare_continue_at_the_program_root_is_a_typed_error() {
     use lashlang::{Expr, Program};
 
     let program = Program::block(vec![Expr::Continue, Expr::Finish(Box::new(Expr::Null))]);
-    let error = lashlang::compile_ast(&program).expect_err("a bare continue must be refused");
+    let error = lashlang_compile_program(&program).expect_err("a bare continue must be refused");
     assert!(error.to_string().contains("outside a loop"), "{error}");
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

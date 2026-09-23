@@ -22,7 +22,7 @@ impl ExecutionHost for Host {
 }
 
 fn run(source: &str) -> ExecutionOutcome {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
         .expect("TypeScript should execute")
 }
@@ -74,7 +74,7 @@ fn typescript_lowering_and_the_stated_ir_share_vm_behavior() {
     //
     // ADR 0096 retired the Lashlang front-end, so the equivalence is stated
     // against the IR directly: what the TypeScript lowering must produce.
-    let stated = lashlang::compile_ast(&b::program(vec![
+    let stated = lashlang::testing::harness::try_compile_program(&b::program(vec![
         b::assign(
             "value",
             b::binary(b::num(1.0), lashlang::BinaryOp::Add, b::num(2.0)),
@@ -87,9 +87,10 @@ fn typescript_lowering_and_the_stated_ir_share_vm_behavior() {
         )),
     ]))
     .expect("compile stated IR");
-    let typescript =
-        lash_typescript::compile("const value: number = 1 + 2; print(value); finish(value === 3);")
-            .expect("compile TypeScript");
+    let typescript = lash_typescript::testing::compile(
+        "const value: number = 1 + 2; print(value); finish(value === 3);",
+    )
+    .expect("compile TypeScript");
     let stated_host = JournalHost::default();
     let typescript_host = JournalHost::default();
 
@@ -189,7 +190,7 @@ fn type_level_typescript_syntax_is_erased_while_namespaces_and_decorators_reject
         ),
     ] {
         assert_eq!(
-            lash_typescript::compile(source)
+            lash_typescript::testing::compile(source)
                 .expect_err("runtime-emitting TypeScript syntax must reject")
                 .code,
             code
@@ -272,7 +273,7 @@ impl ExecutionHost for DurabilityHost {
 
 fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
     futures::executor::block_on(async move {
-        let program = lash_typescript::compile(
+        let program = lash_typescript::testing::compile(
             "const shared = { value: 1 }; const alias = shared; print(alias.value); shared.value = 2; finish(alias.value);",
         )
         .expect("TypeScript should compile");
@@ -311,7 +312,7 @@ fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
 #[test]
 fn resumed_typescript_can_capture_aliases_created_after_the_first_suspend() {
     futures::executor::block_on(async {
-        let program = lash_typescript::compile(
+        let program = lash_typescript::testing::compile(
             "const shared = { value: 1 }; print(1); const holder = { a: shared, b: shared }; print(2); finish(holder.a.value);",
         )
         .expect("TypeScript should compile");
@@ -381,12 +382,13 @@ fn normalized_continuation_bytes(
 
 #[test]
 fn typescript_lowering_and_the_stated_ir_have_identical_continuation_bytes() {
-    let stated = lashlang::compile_ast(&b::program(vec![
+    let stated = lashlang::testing::harness::try_compile_program(&b::program(vec![
         b::print(b::num(1.0)),
         b::finish(b::num(2.0)),
     ]))
     .expect("compile stated IR");
-    let typescript = lash_typescript::compile("print(1); finish(2);").expect("compile TypeScript");
+    let typescript =
+        lash_typescript::testing::compile("print(1); finish(2);").expect("compile TypeScript");
 
     assert_eq!(
         normalized_continuation_bytes(&typescript, &Host),
@@ -475,7 +477,7 @@ mod durability {
 
     fn suspended_continuation_json(source: &str) -> String {
         futures::executor::block_on(async move {
-            let program = lash_typescript::compile(source)
+            let program = lash_typescript::testing::compile(source)
                 .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
             let mut state = State::new();
             let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
@@ -493,7 +495,7 @@ mod durability {
 
     fn suspend_and_snapshot(source: &str) -> Vec<String> {
         futures::executor::block_on(async move {
-            let program = lash_typescript::compile(source)
+            let program = lash_typescript::testing::compile(source)
                 .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
             let mut state = State::new();
             let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
@@ -537,7 +539,8 @@ mod durability {
     fn map_set_and_date_aliases_survive_a_continuation_restart() {
         futures::executor::block_on(async {
             let source = "const key={id:1}; const map=new Map([[key,'value']]); const mapAlias=map; const set=new Set([key,NaN]); const setAlias=set; const date=new Date('2000-02-29T12:34:56.789Z'); const dateAlias=date; print('park'); finish(`${mapAlias===map}|${mapAlias.get(key)}|${setAlias===set}|${setAlias.has(key)}|${setAlias.has(NaN)}|${dateAlias===date}|${dateAlias.toISOString()}`);";
-            let program = lash_typescript::compile(source).expect("durable exotics compile");
+            let program =
+                lash_typescript::testing::compile(source).expect("durable exotics compile");
             let mut state = State::new();
             let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
             assert_eq!(
@@ -568,7 +571,7 @@ mod durability {
     /// The globals an RLM session carries between turns, which is also what the
     /// bound-variables prompt renders from.
     fn persisted_globals(source: &str) -> Vec<String> {
-        let program = lash_typescript::compile(source)
+        let program = lash_typescript::testing::compile(source)
             .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
         let mut state = State::new();
         futures::executor::block_on(lashlang::execute(&program, &mut state, &Host))
@@ -596,19 +599,18 @@ mod durability {
                 "a generated binding leaked into the continuation of `{source}`"
             );
         }
-        // A block binding that shadows an outer name is the one shape that
-        // still needs a generated slot. It stays out of the model-facing
-        // surface, which filters the generated prefix.
+        // A block binding that shadows an outer name still needs a slot of
+        // its own, but the lowering marks that slot private, so the VM drops
+        // it when the cell ends: no surface has to filter it by name.
         let shadowing = "const e = 'outer'; let seen = ''; try { throw 'boom'; } catch (e) { seen = e; } finish(`${e}|${seen}`);";
+        let globals = persisted_globals(shadowing);
         assert!(
-            persisted_globals(shadowing)
-                .iter()
-                .any(|name| name.starts_with(lash_typescript::GENERATED_BINDING_PREFIX)),
-            "a shadowing binding needs a slot of its own"
+            globals.iter().all(|name| !name.starts_with("__typescript")),
+            "a private shadow slot persisted: {globals:?}"
         );
         assert!(
-            lash_typescript::GENERATED_BINDING_PREFIX.starts_with("__typescript"),
-            "the reserved prefix is what callers filter on"
+            globals.iter().any(|name| name == "e") && globals.iter().any(|name| name == "seen"),
+            "the authored bindings persist: {globals:?}"
         );
     }
 
@@ -621,7 +623,7 @@ mod durability {
             "function a(n: number): number { if (n === 0) { return 0; } return b(n - 1); } function b(n: number): number { return c(n); } function c(n: number): number { return 1 + a(n); } finish(`${a(3)}`);",
             "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(`${shell(5)}`);",
         ] {
-            let error = lash_typescript::compile(source)
+            let error = lash_typescript::testing::compile(source)
                 .expect_err("mutually recursive declarations must reject statically");
             assert_eq!(
                 error.code,
@@ -645,7 +647,7 @@ mod durability {
 #[test]
 fn a_process_suspended_inside_for_of_resumes() {
     futures::executor::block_on(async {
-        let program = lash_typescript::compile(
+        let program = lash_typescript::testing::compile(
             "const xs = [1, 2, 3]; let total = 0; for (const x of xs) { print('step'); total = total + x; } finish(`${total}`);",
         )
         .expect("for-of with an effect compiles");
@@ -688,7 +690,8 @@ fn a_process_suspended_inside_for_of_resumes() {
 #[test]
 fn array_mutators_survive_a_park_in_the_middle_of_the_loop() {
     let source = "const out: number[] = []; for (let i = 0; i < 4; i++) { out.push(i); print(out.length); } out.unshift(-1); out.pop(); finish(out.join(','));";
-    let program = lash_typescript::compile(source).expect("the mutating loop should compile");
+    let program =
+        lash_typescript::testing::compile(source).expect("the mutating loop should compile");
 
     let resumed = futures::executor::block_on(async {
         let mut state = State::new();
