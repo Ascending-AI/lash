@@ -22,17 +22,19 @@ fn turn_scope(session: &str, turn: &str) -> lash_core_execution::ParentScope {
     )
 }
 
-/// Every injected row's `parent_id` carries this prefix so a test can drain
-/// its own experiments; a malformed row left behind would fail every later
-/// ledger read on the shared database.
-const INJECTED_ID_PREFIX: &str = "pg-%";
-
-async fn clean_injected(pool: &PgPool) {
-    sqlx::query("DELETE FROM lash_parent_end_plans WHERE parent_id LIKE $1")
-        .bind(INJECTED_ID_PREFIX)
+/// Drain one injected row by the exact `(parent_kind, parent_id)` key the
+/// test passed to [`inject`]; a malformed row left behind would fail every
+/// later ledger read on the shared database. Matching the key itself — not a
+/// guessed id prefix — keeps the drain in step with however the id was
+/// minted (a literal, or a scope's rendered `storage_id`), and never touches
+/// another test's rows.
+async fn clean_injected(pool: &PgPool, kind: &str, id: &str) {
+    sqlx::query("DELETE FROM lash_parent_end_plans WHERE parent_kind = $1 AND parent_id = $2")
+        .bind(kind)
+        .bind(id)
         .execute(pool)
         .await
-        .expect("drain injected ledger rows");
+        .expect("drain the injected ledger row");
 }
 
 /// Insert a ledger row bypassing the registry so payloads the write path
@@ -124,20 +126,21 @@ async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
 
     // The pre-FIG-3418 row: a `ParentScope` serialized without the version
     // wrapper, keyed by the rendered `{session}/{turn}` id it used to parse.
-    clean_injected(&pool).await;
+    let (kind, id) = ("turn", "pg-old-session/pg-old-turn");
+    clean_injected(&pool, kind, id).await;
     let old_payload = serde_json::json!({
         "kind": "turn",
         "session_id": "pg-old-session",
         "turn_id": "pg-old-turn",
     })
     .to_string();
-    inject(&pool, "turn", "pg-old-session/pg-old-turn", &old_payload).await;
+    inject(&pool, kind, id, &old_payload).await;
 
     let error = registry
         .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
         .await
         .expect_err("an old-format row must fail closed, not decode");
-    clean_injected(&pool).await;
+    clean_injected(&pool, kind, id).await;
     assert!(
         error.to_string().contains("malformed parent-scope payload"),
         "the refusal names the payload shape: {error}"
@@ -158,20 +161,16 @@ async fn an_unsupported_payload_version_is_refused() {
         "scope": serde_json::to_value(&scope).expect("scope json"),
     })
     .to_string();
-    clean_injected(&pool).await;
-    inject(
-        &pool,
-        scope.storage_kind(),
-        &scope.storage_id().expect("turn scopes carry an id"),
-        &payload,
-    )
-    .await;
+    let kind = scope.storage_kind();
+    let id = scope.storage_id().expect("turn scopes carry an id");
+    clean_injected(&pool, kind, &id).await;
+    inject(&pool, kind, &id, &payload).await;
 
     let error = registry
         .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
         .await
         .expect_err("a newer payload version must refuse");
-    clean_injected(&pool).await;
+    clean_injected(&pool, kind, &id).await;
     assert!(
         error
             .to_string()
@@ -192,14 +191,15 @@ async fn a_payload_that_disagrees_with_its_projection_is_refused() {
     let payload = scope.storage_payload().expect("encode the payload");
     // The payload names one turn; the projection names another. A reader that
     // trusted either side alone would resurrect the wrong scope.
-    clean_injected(&pool).await;
-    inject(&pool, "turn", "pg-mismatch-session/other-turn", &payload).await;
+    let (kind, id) = ("turn", "pg-mismatch-session/other-turn");
+    clean_injected(&pool, kind, id).await;
+    inject(&pool, kind, id, &payload).await;
 
     let error = registry
         .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
         .await
         .expect_err("a projection/payload disagreement must refuse");
-    clean_injected(&pool).await;
+    clean_injected(&pool, kind, id).await;
     assert!(
         error
             .to_string()
