@@ -1092,7 +1092,11 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
     let output = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            host_queued_scope(&runtime.host.core, &SessionId::from("root"), &TurnId::from("retained-service")),
+            host_queued_scope(
+                &runtime.host.core,
+                &SessionId::from("root"),
+                &TurnId::from("retained-service"),
+            ),
         ))
         .await
         .expect_err("post-commit delivery failure leaves the handoff pending");

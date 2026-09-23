@@ -929,7 +929,11 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            host_queued_scope(&runtime.host.core, &SessionId::from("root"), &TurnId::from("queued-busy-turn")),
+            host_queued_scope(
+                &runtime.host.core,
+                &SessionId::from("root"),
+                &TurnId::from("queued-busy-turn"),
+            ),
         ))
         .await
         .expect("busy queued drain should not error")
