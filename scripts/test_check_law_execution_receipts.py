@@ -574,7 +574,7 @@ class RealTreeTests(unittest.TestCase):
         )
         macros = MODULE.load_macros()
         expected = MODULE.suite_expected(macros, "drain_end_tests")
-        self.assertEqual(len(expected), 8)
+        self.assertEqual(len(expected), 9)
         self.assertIn(
             ("a_crash_after_the_drain_receipt_recovers_its_ledger_row", "drain-end-crash-window"),
             expected,
@@ -583,6 +583,13 @@ class RealTreeTests(unittest.TestCase):
             (
                 "a_durably_failed_drain_settles_its_closing_group_and_ends",
                 "drain-end-durably-failed",
+            ),
+            expected,
+        )
+        self.assertIn(
+            (
+                "an_abandoned_drain_settles_its_closing_group_and_ends",
+                "drain-end-abandoned",
             ),
             expected,
         )

@@ -14,7 +14,8 @@
 //! A durable `Failed` settlement is an end as well (FIG-3559): it is terminal,
 //! so nothing retries it, and the epilogue runs right after it under the
 //! same held lane — the failed run's closing groups settle and its `Cancel`
-//! children are swept like any other ended drain's.
+//! children are swept like any other ended drain's. A host abandoning a
+//! pending run settles it `Failed` through the same method (FIG-3560).
 //!
 //! What is *not* a drain end: the worker dying (nothing is written — the
 //! retry under the same `drain_id` ends it), a physical-turn commit inside
@@ -32,7 +33,8 @@ impl LashRuntime {
     /// Run the drain-end epilogue for `drain_scope` after a successful drain
     /// (`ran` = this process just committed the drain's final head), or after
     /// a drain that ran nothing here (`ran` = false): the replay of a settled
-    /// run, a frozen empty selection, or a run just settled durably `Failed`.
+    /// run, a frozen empty selection, or a run just settled durably `Failed`
+    /// — by a terminal error or by the host's abandonment.
     /// Only called with the session execution lease still held and
     /// only when the admitted scope is `QueueDrain`; a `turn_id`-scoped drain
     /// is a `Turn` owner and takes `record_turn_parent_end` instead.

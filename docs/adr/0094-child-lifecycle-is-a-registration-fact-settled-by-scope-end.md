@@ -413,8 +413,8 @@ in the session store — `OperationId::new(ExecutionScope::queue_drain(session,
 drain_id), "final")` — committed by the drain epilogue
 (`turn_loop/drain_end.rs`) as a state-preserving `RuntimeCommit` under the
 still-held session execution lease, after `drive_logical_turn` returns
-successfully — or after a terminal error settles the run durably `Failed` —
-and before the lease is released. `drain_id` is the caller's
+successfully — or after the run is settled durably `Failed`, by a terminal
+error or by the host abandoning it — and before the lease is released. `drain_id` is the caller's
 idempotency identity: a retried drain under the same `drain_id` is the same
 owner, so receipt replay makes a repeated epilogue a no-op.
 
@@ -437,9 +437,16 @@ end is its own write), and a failed `drive_logical_turn` whose error retains
 ownership (interrupted, not ended — its retry ends it). A durable `Failed` is
 different (FIG-3559): it is terminal, nothing retries it, so it counts as an
 end and the epilogue runs on that path too, under the same held lane, with the
-same ordering and the same ownership test. The sweep then settles
-`OnParentEnd::Cancel` children with `ParentEnded`; `Abandon` children stay
-host-managed.
+same ordering and the same ownership test. A host's abandonment of a pending
+run is that same settlement (FIG-3560): `abandon_queued_run` is a runtime
+operation that claims the lane and settles through the one method every
+`Failed` settlement takes, so the abandoned drain ends there too — its closing
+groups settle first, then the receipt and the row land. The store-only Durable
+Session cannot abandon: the end needs the effect host's closing-group resume,
+the resident state the receipt checkpoints, and the registry, and a settlement
+without its end is the ownerless drain this rule exists to prevent. The sweep
+then settles `OnParentEnd::Cancel` children with `ParentEnded`; `Abandon`
+children stay host-managed.
 
 The incarnation stays *beside* `ExecutionScope`, not inside it: the scope
 remains the claim address, the pin is the admission-time fact, and

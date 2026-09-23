@@ -853,6 +853,34 @@ impl LashSession {
         }
     }
 
+    /// Abandon this session's unfinished queued run: settle it durably
+    /// `Failed` with `reason`, cancelling its assigned work, and end its
+    /// drain.
+    ///
+    /// `scope` and `expected_revision` name the run as
+    /// [`DurableSession::pending_queued_run`] reported it; a stale revision is
+    /// refused. The session claims its execution lane for the call, so a lane
+    /// held elsewhere answers the retryable `SessionExecutionLaneBusy`.
+    /// Abandonment is a terminal settlement, so it ends the drain the way every
+    /// other one does (ADR 0094): the drain's closing groups settle first — a
+    /// tool child still running under one is waited out — and then its end
+    /// receipt lands and its `Cancel` children are swept. Direct execution
+    /// resumes afterwards. The returned receipt carries the `Failed` terminal.
+    pub async fn abandon_queued_run(
+        &self,
+        scope: lash_core::ExecutionScope,
+        expected_revision: u64,
+        reason: impl Into<String>,
+    ) -> Result<lash_core::store::QueuedRunAdmission> {
+        let writer_handle = self.runtime.writer();
+        let mut writer = writer_handle.lock().await;
+        let receipt = writer
+            .abandon_queued_run(scope, expected_revision, reason.into())
+            .await?;
+        self.runtime.publish_from(&writer);
+        Ok(receipt)
+    }
+
     /// Request cooperative cancellation of exactly one turn in this session.
     ///
     /// The request is compiled onto the deployment's keyed-promise control

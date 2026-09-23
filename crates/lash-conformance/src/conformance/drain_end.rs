@@ -4,12 +4,14 @@
 //! The end fact is the session-store receipt `{queue_drain scope}/final`; the
 //! parent-end ledger row in the process registry follows it. A durable
 //! `Failed` settlement is an end: it is terminal, so the drain that settled it
-//! ends there (FIG-3559). What is *not* an end: a fresh empty poll, an
+//! ends there (FIG-3559), and a host's abandonment of a pending run is such a
+//! settlement (FIG-3560). What is *not* an end: a fresh empty poll, an
 //! intermediate physical-turn commit, a run whose failure retains ownership,
 //! an interrupted run, or the worker dying — a retry under the same
 //! `drain_id` is the drain that ends. These laws drive real drains through
 //! `LashRuntime::stream_next_queued_work` under an admitted `QueueDrain` scope
-//! and read the outcome only through the surfaces a backend already owes:
+//! — and abandon one through `LashRuntime::abandon_queued_run`, the host API's
+//! body — and read the outcome only through the surfaces a backend already owes:
 //! `SessionCommitStore::drain_end_exists`, the parent-end ledger, and the
 //! `Cancel`/`Abandon` split the work driver's sweep performs.
 //!
@@ -1154,6 +1156,162 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
     );
 }
 
+/// **L9 — an abandoned drain ends.** A host that no longer wants a pending
+/// run recovered abandons it through `abandon_queued_run`, which settles it
+/// durably `Failed`; that settlement is terminal, so it is the drain's end
+/// exactly as L8's is. Here the drain's run is left pending by an
+/// unclassified failure while a tool child is still live under a `closing`
+/// group of its scope; the abandonment waits out that protected obligation,
+/// then writes the receipt and the ledger row, and the sweep cancels the
+/// drain's `Cancel` child. No drain under the abandoned `drain_id` ever runs
+/// again — without the end on the abandonment path nothing would reach it.
+///
+/// As in L8 the group runs on the drain's own host, so on every tier its
+/// loser is this host's running obligation and the finalizer waits for it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
+    prefix: &str,
+    world: DrainEndWorld,
+) {
+    let Some(closing) = world.effect_host.effect_group_closing() else {
+        // No group seam on this tier's embedding — see the module doc.
+        return;
+    };
+    let drain_id = format!("{prefix}-l9-drain");
+    let cancel_id = format!("{prefix}-l9-cancel");
+    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
+    seed_turn_input(&world.store, "a drain its host abandons").await;
+
+    // A `before_turn` refusal is unclassified: the run stays pending, owned
+    // by the drain, for a recovery the host then declines.
+    let refuse: Arc<dyn PluginFactory> = Arc::new(crate::plugin::StaticPluginFactory::new(
+        "conformance-drain-end-refuse",
+        crate::facade_support::PluginSpec::new().with_before_turn(Arc::new(|_ctx| {
+            Box::pin(async {
+                Err(PluginError::Invoke(
+                    "conformance drain refused before the run commits".to_string(),
+                ))
+            })
+        })),
+    ));
+    let mut runtime = drain_runtime(
+        &world,
+        Arc::clone(&world.registry),
+        fixed_text_provider("unreached"),
+        vec![refuse],
+        crate::testing::runtime_lease_owner(),
+    )
+    .await;
+    drive_drain(&mut runtime, &world.effect_host, &drain_id)
+        .await
+        .expect_err("the refused run fails");
+    let pending = world
+        .store
+        .pending_queued_run(&SessionId::from(SESSION_ID))
+        .await
+        .expect("read the pending queued run")
+        .expect("the refused run stays pending for recovery");
+    assert_eq!(
+        pending.scope,
+        drain_scope(&drain_id),
+        "the pending run is the drain's"
+    );
+
+    // A group under the drain's scope, closed while its loser — the live tool
+    // child — still runs.
+    let loser_release = CancellationToken::new();
+    let loser_entered = Arc::new(AtomicUsize::new(0));
+    let scoped = world
+        .effect_host
+        .scoped(admit(drain_scope(&drain_id)))
+        .expect("scope the closing group's opener");
+    let group_key = super::effect_group_drain::group_key(prefix, "l9");
+    let mut handle = super::effect_group_drain::open(
+        &scoped,
+        &group_key,
+        2,
+        crate::LoserPolicy::RunToCompletion,
+        vec![
+            super::effect_group_drain::settles(0),
+            gated_executor(&loser_entered, loser_release.clone()),
+        ],
+    )
+    .await;
+    let _winner = super::effect_group_drain::next(&scoped, &mut handle).await;
+    super::effect_group_drain::close(&scoped, handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group records closing");
+    super::effect_group_drain::until(|| loser_entered.load(Ordering::SeqCst) == 1).await;
+
+    let epilogue_entered = Arc::new(tokio::sync::Notify::new());
+    runtime.set_turn_phase_probe(Arc::new(EpilogueSignal {
+        entered: Arc::clone(&epilogue_entered),
+    }));
+    let abandonment = crate::task::spawn(async move {
+        runtime
+            .abandon_queued_run(
+                pending.scope,
+                pending.revision,
+                "the host declines recovery".to_string(),
+            )
+            .await
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        epilogue_entered.notified(),
+    )
+    .await
+    .expect("the abandonment reaches the drain-end epilogue");
+
+    assert!(
+        world
+            .store
+            .pending_queued_run(&SessionId::from(SESSION_ID))
+            .await
+            .expect("read the pending queued run")
+            .is_none(),
+        "the abandonment settled the run: nothing is left to recover"
+    );
+    assert!(
+        !drain_ended(&world.store, &drain_id).await,
+        "the live tool child's obligation withholds the end until it settles"
+    );
+
+    loser_release.cancel();
+    let receipt = abandonment
+        .await
+        .expect("the abandonment task joins")
+        .expect("the abandonment settles the run");
+    assert!(
+        matches!(
+            receipt.terminal,
+            Some(crate::store::QueuedRunTerminal::Failed { .. })
+        ),
+        "the abandoned run keeps failed-terminal evidence: {:?}",
+        receipt.terminal
+    );
+    until_group_settled(&closing, &group_key).await;
+    assert!(
+        drain_ended(&world.store, &drain_id).await,
+        "the abandoned drain wrote its end receipt"
+    );
+    assert!(
+        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        "the abandoned drain wrote its ledger row"
+    );
+
+    run_sweep(&world).await;
+    assert_eq!(
+        cancel_origin(&child(&world.registry, &cancel_id).await),
+        Some(crate::CancelOrigin::ParentEnded),
+        "the abandoned drain's Cancel child is swept"
+    );
+}
+
 /// The probe a law parks on: signals that the drain reached its epilogue, so
 /// "still running" below means "parked on the closing group's obligation",
 /// not "still running the turn".
@@ -1258,6 +1416,10 @@ macro_rules! drain_end_tests {
             (
                 a_durably_failed_drain_settles_its_closing_group_and_ends,
                 "drain-end-durably-failed"
+            ),
+            (
+                an_abandoned_drain_settles_its_closing_group_and_ends,
+                "drain-end-abandoned"
             ),
         ]);
     };

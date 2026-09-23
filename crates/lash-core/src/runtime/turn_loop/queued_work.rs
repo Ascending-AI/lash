@@ -426,10 +426,12 @@ impl LashRuntime {
                     self.settle_failed_queued_run(
                         &store,
                         &lease,
-                        &admission,
-                        anonymous_caller,
-                        RuntimeErrorCode::QueuedWork,
-                        error.to_string(),
+                        failed_settlement(
+                            &admission,
+                            anonymous_caller,
+                            RuntimeErrorCode::QueuedWork,
+                            error.to_string(),
+                        ),
                     )
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
@@ -701,10 +703,12 @@ impl LashRuntime {
                 .settle_failed_queued_run(
                     store,
                     lease,
-                    run,
-                    anonymous_caller,
-                    error.code.clone(),
-                    error.message.clone(),
+                    failed_settlement(
+                        run,
+                        anonymous_caller,
+                        error.code.clone(),
+                        error.message.clone(),
+                    ),
                 )
                 .await
             {
@@ -722,41 +726,129 @@ impl LashRuntime {
         error
     }
 
-    /// Settle `run` terminally failed — durably `Failed`, or forgotten when an
-    /// anonymous caller's run never worked anything — and then end the drain.
+    /// Settle a queued run terminally failed and then end its drain.
     ///
-    /// A durable `Failed` is terminal: nothing retries it, so no later drain
-    /// would end it, and the settlement is the drain's end exactly as a
-    /// successful run's commit is (FIG-3559). The drain-end epilogue therefore
-    /// runs here, under the lane the caller still holds, and decides as it
-    /// does on every other end path — a drain that owns no children has no end
-    /// to write.
+    /// Every terminal failure of a queued run comes through here: the
+    /// runtime's own terminal errors and a host's
+    /// [`abandon_queued_run`](Self::abandon_queued_run). A durable `Failed` is
+    /// terminal: nothing retries it, so no later drain would end it, and the
+    /// settlement is the drain's end exactly as a successful run's commit is
+    /// (FIG-3559, FIG-3560). The drain-end epilogue therefore runs here, under
+    /// the lane the caller still holds, and decides as it does on every other
+    /// end path — a drain that owns no children has no end to write.
     async fn settle_failed_queued_run(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
         lease: &SessionExecutionLeaseGuard,
-        run: &crate::store::QueuedRunAdmission,
-        anonymous_caller: bool,
-        code: RuntimeErrorCode,
-        message: String,
-    ) -> Result<(), crate::StoreError> {
-        store
-            .settle_queued_run(
-                &lease.fence(),
+        settlement: crate::store::QueuedRunCommit,
+    ) -> Result<crate::store::QueuedRunAdmission, crate::StoreError> {
+        let settled = store.settle_queued_run(&lease.fence(), settlement).await?;
+        Box::pin(self.end_queue_drain(&settled.scope, lease, store, false)).await;
+        Ok(settled)
+    }
+
+    /// Abandon this session's unfinished queued run: settle it durably
+    /// `Failed` with `reason` and end its drain.
+    ///
+    /// This is the host's disposition for a run it no longer wants recovered
+    /// (ADR 0099): `scope` and `expected_revision` name the run exactly as
+    /// [`pending_queued_run`](crate::store::QueuedWorkStore::pending_queued_run)
+    /// reported it, and a stale revision is refused. The run's assigned work
+    /// is cancelled and its failed-terminal evidence retained. Abandonment is
+    /// a terminal settlement like any other, so it ends the drain through the
+    /// same epilogue: the drain's closing groups settle first — a live tool
+    /// child under one is waited out — then the end receipt and ledger row
+    /// land and the sweep cancels the drain's `Cancel` children (FIG-3560).
+    ///
+    /// The runtime claims the session execution lane itself; a busy lane is
+    /// the retryable [`RuntimeErrorCode::SessionExecutionLaneBusy`]. A retry
+    /// of a completed abandonment replays the settlement and its end.
+    pub async fn abandon_queued_run(
+        &mut self,
+        scope: crate::ExecutionScope,
+        expected_revision: u64,
+        reason: String,
+    ) -> Result<crate::store::QueuedRunAdmission, RuntimeError> {
+        let store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::QueuedWork,
+                    "queued-run abandonment requires persistence",
+                )
+            })?;
+        let Some(lease) = SessionExecutionLeaseGuard::try_acquire_for_executor(
+            Arc::clone(&store),
+            &self.state.session_id,
+            &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
+            self.host.core.control.lease_timings,
+            Arc::clone(&self.host.core.clock),
+        )
+        .await
+        .map_err(super::runtime_error_from_store_commit)?
+        else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::SessionExecutionLaneBusy,
+                format!(
+                    "session `{}` cannot abandon its queued run until it acquires the execution lane",
+                    self.state.session_id
+                ),
+            ));
+        };
+        if let Err(error) = self
+            .reload_invalidated_resident_session_state_under_lease(Some(&lease))
+            .await
+        {
+            let _ = lease.release_if_live().await;
+            return Err(error);
+        }
+        if let Err(error) = self.refresh_session_graph_from_store().await {
+            let _ = lease.release_if_live().await;
+            return Err(session_head_refresh_error(error));
+        }
+        let settled = self
+            .settle_failed_queued_run(
+                &store,
+                &lease,
                 crate::store::QueuedRunCommit {
-                    scope: run.scope.clone(),
-                    expected_revision: run.revision,
-                    progress: if anonymous_caller && run.can_forget_unworked() {
-                        crate::store::QueuedRunProgress::ForgetUnworked
-                    } else {
-                        crate::store::QueuedRunProgress::Settle {
-                            terminal: crate::store::QueuedRunTerminal::Failed { code, message },
-                        }
+                    scope,
+                    expected_revision,
+                    progress: crate::store::QueuedRunProgress::Settle {
+                        terminal: crate::store::QueuedRunTerminal::Failed {
+                            code: RuntimeErrorCode::QueuedWork,
+                            message: reason,
+                        },
                     },
                 },
             )
-            .await?;
-        Box::pin(self.end_queue_drain(&run.scope, lease, store, false)).await;
-        Ok(())
+            .await;
+        let released = lease.release_if_live().await;
+        let settled = settled.map_err(super::runtime_error_from_store_commit)?;
+        released.map_err(super::runtime_error_from_store_commit)?;
+        Ok(settled)
+    }
+}
+
+/// The terminal failure of `run`: durably `Failed`, or forgotten when an
+/// anonymous caller's run never worked anything.
+fn failed_settlement(
+    run: &crate::store::QueuedRunAdmission,
+    anonymous_caller: bool,
+    code: RuntimeErrorCode,
+    message: String,
+) -> crate::store::QueuedRunCommit {
+    crate::store::QueuedRunCommit {
+        scope: run.scope.clone(),
+        expected_revision: run.revision,
+        progress: if anonymous_caller && run.can_forget_unworked() {
+            crate::store::QueuedRunProgress::ForgetUnworked
+        } else {
+            crate::store::QueuedRunProgress::Settle {
+                terminal: crate::store::QueuedRunTerminal::Failed { code, message },
+            }
+        },
     }
 }
