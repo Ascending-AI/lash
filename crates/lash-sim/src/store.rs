@@ -1002,16 +1002,22 @@ impl ModelStore {
                     "runtime_queued_work": {
                         "source_key": source_key,
                         "work_class": "TurnWork",
-                        "enqueued": true,
+                        "enqueued": claimed_once,
                         "claimed": claimed_once,
                         "claimed_batch_count": usize::from(claimed_once),
                         "claim_fencing_token": claimed_once.then_some(1_u64),
-                        "batch_id_present": true,
+                        "batch_id_present": claimed_once,
                         "claim_id_present": claimed_once,
                         "runtime_turn_id": claimed_once
                             .then(|| format!("wake-turn:{}", event.boundary_id)),
                     },
                 });
+                // A redelivery is refused at the receiver floor the first
+                // delivery's settlement raised (FIG-3545), as the stores report.
+                if !claimed_once {
+                    observed["runtime_queued_work"]["receiver_floor_refused"] = json!(true);
+                    observed["runtime_queued_work"]["receiver_allocation_floor"] = json!(sequence);
+                }
                 if !event
                     .payload
                     .get("omit_join_session")
