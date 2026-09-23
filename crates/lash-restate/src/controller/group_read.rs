@@ -9,8 +9,7 @@
 //! position map. The rank read names the settled child by its retained replay
 //! key, which is the identity `SettlementSource::GroupRank` records.
 
-use lash_core::RuntimeEffectControllerError;
-use lash_core::runtime::effect::RankedGroupSettlement;
+use lash_core::{RankedGroupSettlement, RuntimeEffectControllerError};
 
 use crate::effect_group::{
     EffectGroupPayloadGetResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,

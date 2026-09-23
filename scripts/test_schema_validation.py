@@ -106,6 +106,13 @@ class SchemaValidationTests(unittest.TestCase):
                 "cargo check -p lash-runtime --lib --no-default-features --locked",
                 log.read_text(),
             )
+            # The Restate release witness still runs after the OFF witness
+            # fails (FIG-3610).
+            self.assertIn(
+                "cargo check -p lash-runtime --lib --no-default-features "
+                "--features restate --locked",
+                log.read_text(),
+            )
             self.assertIn(
                 "npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types",
                 log.read_text(),

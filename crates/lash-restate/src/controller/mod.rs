@@ -19,13 +19,12 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use lash_core::runtime::effect::RankedGroupSettlement;
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
     EffectGroupHandle, EffectHost, EffectJournaling, ExecutionScope, GroupSettlement, LoserPolicy,
     PluginError, ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord,
-    ProcessRegistry, QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    ProcessRegistry, QueuedLaneAcquisition, QueuedLaneProbe, RankedGroupSettlement, Resolution,
+    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
     ScopedEffectController, SleepSpec, facade_support::CanonicalRuntimeEffectEnvelope,

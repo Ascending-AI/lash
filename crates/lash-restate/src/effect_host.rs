@@ -637,10 +637,8 @@ impl RuntimeEffectController for FencedRestateController {
         &self,
         group_key: &str,
         rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
+    ) -> Result<Option<lash_core::RankedGroupSettlement>, lash_core::RuntimeEffectControllerError>
+    {
         self.controller.read_group_settlement(group_key, rank).await
     }
 
@@ -1324,10 +1322,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         &self,
         group_key: &str,
         rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        RuntimeEffectControllerError,
-    > {
+    ) -> Result<Option<lash_core::RankedGroupSettlement>, RuntimeEffectControllerError> {
         let ingress = &self.await_event_ingress.ingress;
         let read = ingress
             .call_object_json::<_, EffectGroupReadRankResponse>(
@@ -1386,7 +1381,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             None
         };
         let settlement = settlement_from_payload(record, payload)?;
-        Ok(Some(lash_core::runtime::effect::RankedGroupSettlement {
+        Ok(Some(lash_core::RankedGroupSettlement {
             sequence: settlement.sequence,
             child_replay_key,
             outcome: settlement.outcome,

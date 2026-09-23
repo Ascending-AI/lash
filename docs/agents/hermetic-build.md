@@ -379,6 +379,15 @@ recipes for these correctness contracts:
   `cargo check -p lash-runtime --lib --no-default-features --locked`, which
   is where a third-party divergence would surface.
 
+  The Restate release witness, `//:restate_release`, is the same kind of
+  named lane unit: `cargo check -p lash-runtime --lib --no-default-features
+  --features restate`, which compiles lash-restate at the resolution the
+  dispatch-only release worker build uses, with no dev-dependency to unify
+  `lash-core/testing` in (FIG-3610). The generator writes it as
+  `RESTATE_RELEASE_TARGET`, and the root package type-checks it without
+  codegen. Every trusted event builds it alongside Clippy, pull requests
+  included; untrusted CI runs the Cargo command in `lint-contracts.sh`.
+
   Cargo-required targets omitted from the resolved default graph are still
   recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`.
   The `dependency-boundary` check (21 s of `cargo tree`, no compilation) moved

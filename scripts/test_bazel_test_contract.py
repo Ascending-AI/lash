@@ -996,8 +996,11 @@ class BazelTestContractTests(unittest.TestCase):
         # builds only the workspace clippy and the schema checks.
         self.assertIn("//:feature_lane_clippy", clippy_bazel["run"])
         self.assertIn("//:runtime_off", clippy_bazel["run"])
+        # The Restate release witness is cheap enough for every event: the
+        # release worker build is dispatch-only (FIG-3610).
         self.assertIn(
-            'targets=(//:workspace_clippy //:schema_checks)', clippy_bazel["run"]
+            "targets=(//:workspace_clippy //:schema_checks //:restate_release)",
+            clippy_bazel["run"],
         )
         self.assertIn(
             'if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then\n'

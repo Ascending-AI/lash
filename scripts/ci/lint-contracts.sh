@@ -17,6 +17,7 @@ cargo_contracts() {
   local status=0
   if [[ "$BAZEL_TRUSTED" == false ]]; then
     cargo check -p lash-runtime --lib --no-default-features --locked || status=$?
+    cargo check -p lash-runtime --lib --no-default-features --features restate --locked || status=$?
     bash scripts/ci/check-schema-contracts.sh || status=$?
   fi
   return "$status"
