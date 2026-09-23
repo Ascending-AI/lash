@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 149,
+  "cargo_target_count": 150,
   "feature_lane_units": [
     {
       "features": [],
@@ -11626,6 +11626,24 @@
       "package": "lash-internal-remote-protocol"
     },
     {
+      "features": [
+        "core-conversions",
+        "default"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-remote-protocol:remote_schema_generator__bin__fv_e76f1385",
+      "package": "lash-internal-remote-protocol"
+    },
+    {
+      "features": [
+        "core-conversions",
+        "default"
+      ],
+      "kind": "bin-unit-test",
+      "label": "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test__fv_e76f1385",
+      "package": "lash-internal-remote-protocol"
+    },
+    {
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-restate:lash-restate",
@@ -15057,6 +15075,14 @@
       "package": "lash-internal-trace"
     },
     {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-trace:lash-trace",
+      "package": "lash-internal-trace"
+    },
+    {
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-trace:lash-trace__fv_8ada4082",
@@ -17529,7 +17555,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 205,
+  "generated_label_count": 207,
   "packages": [
     {
       "declared_features": [
@@ -19096,6 +19122,7 @@
         "base64",
         "lash-internal-core",
         "lash-internal-sansio",
+        "lash-internal-trace",
         "schemars",
         "serde",
         "serde_json",
@@ -19120,11 +19147,26 @@
           "kind": "unit-test",
           "label": "//crates/lash-remote-protocol:lash-remote-protocol__unit_test",
           "tags": []
+        },
+        {
+          "cargo": "remote_schema_generator",
+          "kind": "bin",
+          "label": "//crates/lash-remote-protocol:remote_schema_generator__bin",
+          "tags": []
+        },
+        {
+          "cargo": "remote_schema_generator",
+          "kind": "bin-unit-test",
+          "label": "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test",
+          "tags": []
         }
       ],
       "test_batch": {
-        "label": null,
-        "members": []
+        "label": "//crates/lash-remote-protocol:test_batch",
+        "members": [
+          "//crates/lash-remote-protocol:lash-remote-protocol__unit_test",
+          "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test"
+        ]
       }
     },
     {
@@ -19657,7 +19699,6 @@
         "lash-internal-sansio",
         "opentelemetry",
         "opentelemetry_sdk",
-        "schemars",
         "serde",
         "serde_json",
         "sha2",

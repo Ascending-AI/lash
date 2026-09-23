@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn assert_working_process_lifecycle(
     events: &[lash_core::ProcessEvent],
     process_id: &ProcessId,
-    session_events: &[lash_core::SessionObservationEvent],
+    session_events: &[Arc<lash_core::SessionObservationEvent>],
 ) {
     let first_started = events
         .iter()

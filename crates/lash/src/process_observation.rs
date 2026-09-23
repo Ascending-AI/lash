@@ -202,7 +202,7 @@ struct Published {
 
 #[derive(Clone)]
 enum PublishedNotification {
-    Event(ProcessObservationCursor, TraceRecord),
+    Event(ProcessObservationCursor, Box<TraceRecord>),
     Replaced(ProcessObservationGapReason),
 }
 
@@ -215,6 +215,7 @@ struct ProcessState {
     current_graph: Option<TraceLashlangGraph>,
     joined_at_start: bool,
     terminal: bool,
+    last_published: Instant,
     ring: VecDeque<Published>,
     trim_reason: ProcessObservationGapReason,
     sender: broadcast::Sender<PublishedNotification>,
@@ -232,6 +233,7 @@ impl ProcessState {
             current_graph: None,
             joined_at_start: false,
             terminal: false,
+            last_published: Instant::now(),
             ring: VecDeque::new(),
             trim_reason: ProcessObservationGapReason::Overflow,
             sender,
@@ -305,9 +307,17 @@ impl ProcessState {
 }
 
 /// One publisher-local observation route. A new core build creates a new epoch.
+///
+/// Lock order: the `states` map lock is taken before a per-process state lock
+/// and only for lookup, insertion and release; graph folds run under the
+/// per-process lock alone. A process's state is released once no subscription
+/// holds it and it has either published `ExecutionFinished` or published
+/// nothing for `ttl`, so retention follows the ring and TTL settings rather
+/// than the life of the core.
 pub struct ProcessObservationHub {
     config: ProcessObservationConfig,
     states: Mutex<HashMap<ProcessId, Arc<Mutex<ProcessState>>>>,
+    last_sweep: Mutex<Instant>,
 }
 
 impl Default for ProcessObservationHub {
@@ -321,6 +331,7 @@ impl ProcessObservationHub {
         Self {
             config,
             states: Mutex::new(HashMap::new()),
+            last_sweep: Mutex::new(Instant::now()),
         }
     }
 
@@ -442,6 +453,26 @@ impl ProcessObservationHub {
         }
     }
 
+    /// Release every state no subscription holds whose publisher finished or
+    /// went idle for `ttl`. Runs at most once per `ttl` from `append`.
+    fn sweep_idle(&self, now: Instant) {
+        {
+            let mut last_sweep = self.last_sweep.lock_recover();
+            if now.duration_since(*last_sweep) < self.config.ttl {
+                return;
+            }
+            *last_sweep = now;
+        }
+        // Clones of a state are only taken under the map lock, so a count of
+        // one here means no subscription or publisher holds this state.
+        self.states.lock_recover().retain(|_, state| {
+            Arc::strong_count(state) > 1 || {
+                let state = state.lock_recover();
+                !state.terminal && now.duration_since(state.last_published) <= self.config.ttl
+            }
+        });
+    }
+
     /// Lock order: map before a state only for this short terminal check.
     /// Append and subscribe release the map lock before folding a graph.
     fn evict_if_terminal(&self, process_id: &ProcessId, state: &Arc<Mutex<ProcessState>>) {
@@ -518,24 +549,29 @@ impl TraceSink for ProcessObservationHub {
             &event.payload,
             TraceLanguageExecutionPayload::ExecutionFinished { .. }
         );
+        let now = Instant::now();
         publisher.current_graph = Some(graph);
         publisher.position += 1;
+        publisher.last_published = now;
         let position = publisher.position;
         let cursor = publisher.cursor(process_id, position);
         publisher.ring.push_back(Published {
             position,
-            at: Instant::now(),
+            at: now,
             record: record.clone(),
         });
-        publisher.trim(Instant::now(), self.config);
-        let _ = publisher
-            .sender
-            .send(PublishedNotification::Event(cursor, record.clone()));
+        publisher.trim(now, self.config);
+        let _ = publisher.sender.send(PublishedNotification::Event(
+            cursor,
+            Box::new(record.clone()),
+        ));
         let terminal = publisher.terminal;
         drop(publisher);
         if terminal {
             self.evict_if_terminal(process_id, &state);
         }
+        drop(state);
+        self.sweep_idle(now);
         Ok(())
     }
 }
@@ -613,10 +649,7 @@ impl ProcessObservationSubscription {
                         ));
                     }
                     self.last_position = position;
-                    return Some(ProcessObservationItem::Event {
-                        cursor,
-                        record: Box::new(record),
-                    });
+                    return Some(ProcessObservationItem::Event { cursor, record });
                 }
                 Ok(PublishedNotification::Replaced(reason)) => {
                     self.receiver = None;
@@ -734,6 +767,18 @@ mod tests {
                 },
             },
         )
+    }
+
+    fn finished_record(process_id: &str) -> TraceRecord {
+        let mut finished = record(process_id, 1, 1, 1);
+        let TraceEvent::LanguageExecution { event, .. } = &mut finished.event else {
+            unreachable!()
+        };
+        event.payload = TraceLanguageExecutionPayload::ExecutionFinished {
+            status: lash_trace::TraceLanguageExecutionStatus::Completed,
+            error: None,
+        };
+        finished
     }
 
     fn append(hub: &ProcessObservationHub, process_id: &str, incarnation: u64, occurrence: u64) {
@@ -1112,17 +1157,59 @@ mod tests {
         for index in 0..64 {
             let id = format!("process:finished:{index}");
             append(&hub, &id, 1, 0);
-            let mut finished = record(&id, 1, 1, 1);
-            let TraceEvent::LanguageExecution { event, .. } = &mut finished.event else {
-                unreachable!()
-            };
-            event.payload = TraceLanguageExecutionPayload::ExecutionFinished {
-                status: lash_trace::TraceLanguageExecutionStatus::Completed,
-                error: None,
-            };
-            hub.append(&finished).expect("terminal observation");
+            hub.append(&finished_record(&id))
+                .expect("terminal observation");
         }
         assert_eq!(hub.states.lock_recover().len(), 0);
+
+        let watched = ProcessId::from("process:finished:watched");
+        append(&hub, watched.as_str(), 1, 0);
+        let mut subscriber = hub.subscribe(&watched, 1, None);
+        assert!(matches!(
+            subscriber.recv().await,
+            Some(ProcessObservationItem::Snapshot { .. })
+        ));
+        hub.append(&finished_record(watched.as_str()))
+            .expect("terminal observation");
+        assert_eq!(
+            hub.states.lock_recover().len(),
+            1,
+            "a live subscriber keeps its finished process"
+        );
+        assert!(matches!(
+            subscriber.recv().await,
+            Some(ProcessObservationItem::Event { .. })
+        ));
+        drop(subscriber);
+        assert_eq!(hub.states.lock_recover().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn idle_unfinished_processes_are_released_after_the_ttl() {
+        let hub = Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
+            capacity: 8,
+            ttl: Duration::from_millis(1),
+        }));
+        for index in 0..16 {
+            append(&hub, &format!("process:suspended:{index}"), 1, 0);
+        }
+        let watched = ProcessId::from("process:suspended:watched");
+        append(&hub, watched.as_str(), 1, 0);
+        let _subscriber = hub.subscribe(&watched, 1, None);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        append(&hub, "process:live", 1, 0);
+        let mut remaining = hub
+            .states
+            .lock_recover()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        remaining.sort();
+        assert_eq!(
+            remaining,
+            [ProcessId::from("process:live"), watched],
+            "idle states without subscribers are released; a held one stays"
+        );
     }
 
     async fn through_remote_facade(
@@ -1170,7 +1257,10 @@ mod tests {
     }
 
     fn assert_remote_gap(item: RemoteItem, expected: RemoteGap) {
-        assert!(matches!(item, RemoteItem::Gap { reason, .. } if reason == expected));
+        assert!(
+            matches!(&item, RemoteItem::Gap { reason, .. } if reason == &expected),
+            "expected {expected:?}, received {item:?}"
+        );
     }
 
     #[tokio::test]
@@ -1250,6 +1340,8 @@ mod tests {
         };
         tokio::time::sleep(Duration::from_millis(3)).await;
         append(&expiring, id, 1, 1);
+        tokio::time::sleep(Duration::from_millis(3)).await;
+        append(&expiring, id, 1, 2);
         assert_remote_gap(
             through_remote_facade(&core, id, 1, Some(cursor.clone())).await,
             RemoteGap::Expired,

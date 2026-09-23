@@ -242,7 +242,13 @@ pub use usage_activity::*;
 // carrying `more` — including the no-longer-retained verdicts — instead of a
 // flat unbounded event list. A window-88 peer's request lacks `limit` and
 // `mode` and is refused rather than defaulted, so peers must adopt 89.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 89;
+// Window 90: FIG-3462 adds the process-scoped observation request and item
+// (snapshot, identified node event, typed gap with a completeness-marked
+// projection) and turns `RemoteSessionProcessEventKind` from a two-value
+// string into a tagged ten-kind journaled lifecycle carrying the durable
+// `sequence`. A window-89 peer writes `"started"`/`"cancelled"` strings this
+// decoder refuses and cannot decode the tagged kinds, so peers must adopt 90.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 90;
 
 /// One versioned remote-protocol message.
 ///

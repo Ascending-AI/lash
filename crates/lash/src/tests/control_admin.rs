@@ -772,17 +772,21 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         ),
         "cancel must publish the exact ordered durable lifecycle: {lifecycle:?}"
     );
-    for expected in lifecycle {
-        assert!(
-            events.iter().any(|event| matches!(
-                &event.payload,
-                lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
-                    if *kind == expected
-                        && process_ids.as_slice() == [ProcessId::from(process_id)]
-            )),
-            "missing journaled lifecycle {expected:?}"
-        );
-    }
+    let observed = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
+                if process_ids.as_slice() == [ProcessId::from(process_id)] =>
+            {
+                Some(*kind)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        observed, lifecycle,
+        "the session stream carries exactly the durable lifecycle, in order, with its sequences"
+    );
     let terminal_cursor = session.observe().current_observation().cursor;
     let external_registration = |id: &ProcessId| {
         lash_core::ProcessRegistration::new(

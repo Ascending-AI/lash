@@ -49,9 +49,7 @@ impl ExecutedCallOutcome {
     }
 }
 
-#[derive(
-    Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema,
-)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TextProjectionMetadata {
     pub truncated: bool,
     pub original_chars: usize,
@@ -70,9 +68,7 @@ pub struct DegradedBinding {
 }
 
 /// Why an executed code cell failed.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CellFailureKind {
     /// The runtime refused the program because it violates a dialect or policy bound.
@@ -84,9 +80,7 @@ pub enum CellFailureKind {
 }
 
 /// Structured failure returned by a code executor.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CellFailure {
     pub kind: CellFailureKind,
     pub message: String,
@@ -106,9 +100,7 @@ impl CellFailure {
 /// This is the closed classification offline trace analysis keys on; the human
 /// detail lives in [`ExecCodeFailure::message`]. Serialized snake_case on the
 /// durable journal and trace surfaces.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecCodeFailureReason {
     /// No code executor is installed on the session.

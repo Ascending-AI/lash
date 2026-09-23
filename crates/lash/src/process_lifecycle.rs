@@ -22,11 +22,11 @@ impl Drop for ProcessLifecycleRoute {
     fn drop(&mut self) {
         if let Some(feed) = self.feed.upgrade() {
             let mut routes = feed.routes.lock_recover();
-            if routes
-                .get(&self.session_id)
-                .is_some_and(|route| Arc::ptr_eq(route, &self.publisher))
-            {
-                routes.remove(&self.session_id);
+            if let Some(publishers) = routes.get_mut(&self.session_id) {
+                publishers.retain(|publisher| !Arc::ptr_eq(publisher, &self.publisher));
+                if publishers.is_empty() {
+                    routes.remove(&self.session_id);
+                }
             }
         }
     }
@@ -34,7 +34,9 @@ impl Drop for ProcessLifecycleRoute {
 
 pub(crate) struct ProcessLifecycleFeed {
     registry: OnceLock<Arc<dyn ProcessRegistry>>,
-    routes: Mutex<HashMap<SessionId, Arc<SessionPublisher>>>,
+    /// Every open handle of a session registers a publisher; one live
+    /// publisher per session publishes each transition exactly once.
+    routes: Mutex<HashMap<SessionId, Vec<Arc<SessionPublisher>>>>,
     store: Arc<dyn LiveReplayStore>,
     host_sink: Option<Arc<dyn ProcessEventSink>>,
     forward_host_events: bool,
@@ -61,7 +63,17 @@ impl ProcessLifecycleFeed {
 
     #[cfg(test)]
     pub(crate) fn route_count(&self) -> usize {
-        self.routes.lock_recover().len()
+        self.routes.lock_recover().values().map(Vec::len).sum()
+    }
+
+    fn release_dead_publisher(&self, session_id: &SessionId, dead: &Arc<SessionPublisher>) {
+        let mut routes = self.routes.lock_recover();
+        if let Some(publishers) = routes.get_mut(session_id) {
+            publishers.retain(|publisher| !Arc::ptr_eq(publisher, dead));
+            if publishers.is_empty() {
+                routes.remove(session_id);
+            }
+        }
     }
 
     pub(crate) fn register(self: &Arc<Self>, handle: &RuntimeHandle) -> Arc<ProcessLifecycleRoute> {
@@ -96,7 +108,9 @@ impl ProcessLifecycleFeed {
         });
         self.routes
             .lock_recover()
-            .insert(session_id.clone(), Arc::clone(&publisher));
+            .entry(session_id.clone())
+            .or_default()
+            .push(Arc::clone(&publisher));
         Arc::new(ProcessLifecycleRoute {
             feed: Arc::downgrade(self),
             session_id,
@@ -122,9 +136,12 @@ impl ProcessEventSink for ProcessLifecycleFeed {
                             .filter_map(|id| routes.get(&id).cloned().map(|route| (id, route)))
                             .collect::<Vec<_>>()
                     };
-                    for (session_id, route) in routes {
-                        if !route(kind, event.process_id.clone()) {
-                            self.routes.lock_recover().remove(&session_id);
+                    for (session_id, publishers) in routes {
+                        for publisher in publishers {
+                            if publisher(kind, event.process_id.clone()) {
+                                break;
+                            }
+                            self.release_dead_publisher(&session_id, &publisher);
                         }
                     }
                 }
